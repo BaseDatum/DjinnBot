@@ -1,717 +1,339 @@
-# 🧞 DjinnBot
+# DjinnBot
 
-Event-driven agent orchestration framework for autonomous software development.
+**Autonomous AI teams that build software while you sleep.**
 
-DjinnBot is a multi-agent pipeline orchestration system that coordinates specialized AI agents to collaboratively execute complex software development workflows. Built on Redis Streams for reliable event delivery and ClawVault for persistent agent memory, DjinnBot enables teams of AI agents to work together on product development, architecture, implementation, testing, and deployment—with real-time visibility through an integrated dashboard and Slack bridge.
+DjinnBot is an open-core agent orchestration platform that deploys a full team of AI agents — product owner, architect, engineers, QA, SRE, and more — to collaboratively execute software development workflows. Each agent has a distinct persona, persistent memory, and its own Slack presence. Define a task, kick off a pipeline, and watch your AI team spec, design, implement, review, test, and deploy — autonomously.
 
-## Features
+Self-hosted is free. `docker compose up` and you're running.
 
-- **Multi-agent pipelines with YAML definitions** — Define workflows where each step is handled by a specialized agent persona
-- **Each agent has its own persona, memory vault, and Slack presence** — Agents maintain context across runs and communicate naturally in Slack
-- **Real-time dashboard with live streaming output** — Watch agents work in real-time with streaming text and expandable thinking blocks
-- **Redis Streams event bus for reliable event delivery** — Event-driven architecture ensures no messages are lost during pipeline execution
-- **Persistent agent memory across runs (ClawVault)** — Agents remember decisions, lessons, and context between sessions
-- **CLI for full API access** — Control pipelines, inspect runs, manage agent memory, and more from the command line
-- **Docker Compose for one-command deployment** — Get the full stack running with a single command
+**Docs:** [docs.djinn.bot](https://docs.djinn.bot) | **License:** [FSL-1.1-ALv2](LICENSE) (free to use, converts to Apache 2.0 after 2 years)
 
-## Architecture Overview
+---
 
-```
-┌─────────────┐      ┌──────────────┐      ┌─────────────┐
-│   Dashboard │◄─────│  API Server  │◄─────│    Redis    │
-│  (React)    │ SSE  │  (FastAPI)   │      │  (Streams)  │
-└─────────────┘      └──────────────┘      └─────────────┘
-                             │                      ▲
-                             │                      │
-                             ▼                      │
-                      ┌──────────────┐              │
-                      │   SQLite     │              │
-                      │  (State DB)  │              │
-                      └──────────────┘              │
-                                                    │
-                     ┌──────────────────────────────┘
-                     │
-                     ▼
-          ┌──────────────────┐           ┌─────────────────┐
-          │  Pipeline Engine │◄──────────│ Agent Executor  │
-          │  (State Machine) │           │ (Pi-Agent Core) │
-          └──────────────────┘           └─────────────────┘
-                     │                            │
-                     │                            │
-                     ▼                            ▼
-          ┌──────────────────┐           ┌─────────────────┐
-          │  Slack Bridge    │           │   ClawVault     │
-          │  (Per-Agent Apps)│           │ (Agent Memory)  │
-          └──────────────────┘           └─────────────────┘
-```
+## Why DjinnBot
 
-**Event Flow:**
-- API creates run → Redis `new_runs` stream
-- Engine starts pipeline → publishes `RUN_CREATED`, `STEP_QUEUED` events
-- Agent Executor subscribes to run channel → executes agent sessions
-- Agents call tools (complete/fail) → Engine advances state machine
-- Slack Bridge relays events to Slack threads → agents respond autonomously
+- **Plug and play.** Clone, add an API key, `docker compose up`. No Kubernetes, no cloud accounts, no 45-minute setup guides.
+- **Fully containerized.** Every agent runs in its own isolated Docker container with a full engineering toolbox (Node, Python, Go, Rust, git, ripgrep, GitHub CLI, and dozens more). No host access, no security concerns.
+- **Real team, not a chatbot.** Agents have personas, opinions, and memory. Eric (Product Owner) pushes back on vague specs. Finn (Architect) rejects PRs that violate architecture. Chieko (QA) finds the edge cases you forgot.
+- **Persistent memory.** Agents remember decisions, lessons, and patterns across runs using ClawVault with semantic search. They learn and improve over time.
+- **Beautiful dashboard.** Real-time streaming output, live agent sessions, project management with kanban boards, chat interface, and pipeline visualization — not a terminal dump.
+- **Slack-native.** Each agent gets its own Slack bot. Watch your team discuss in threads. Mention an agent to get their perspective. Or skip Slack entirely and use the built-in chat.
+- **YAML pipelines.** Define workflows as simple YAML — steps, agents, branching, loops, retries. No code required for orchestration.
+- **MCP tools.** Agents can use any MCP-compatible tool server via the built-in mcpo proxy. Add GitHub, web search, or any custom tool with a single config entry.
+- **Open core.** Self-hosted is completely free. Use it, modify it, run it on your own infra. SaaS option coming for teams that don't want to manage infrastructure.
+
+---
 
 ## Quick Start
 
 ### Prerequisites
 
-- **Docker + Docker Compose** — For containerized deployment
-- **Node.js 20+** — For local development
-- **Python 3.12+** — For API server and CLI
-- **OpenRouter API key** — Or compatible LLM provider (Anthropic, OpenAI, etc.)
+- **Docker + Docker Compose** (that's it for running)
+- **An LLM API key** — OpenRouter (recommended, access to all models), Anthropic, OpenAI, xAI, Google, or any supported provider
 
 ### 1. Clone & Configure
 
 ```bash
-git clone https://github.com/skymoore/djinnbot.git
+git clone https://github.com/BaseDatum/djinnbot.git
 cd djinnbot
-
-# Copy environment template
 cp .env.example .env
-
-# Edit .env and add your API keys
-# Required:
-#   OPENROUTER_API_KEY=sk-or-v1-...
-# Optional for Slack integration:
-#   SLACK_CHANNEL_ID=C...
-#   SLACK_<AGENT>_BOT_TOKEN=xoxb-...
-#   SLACK_<AGENT>_APP_TOKEN=xapp-...
 ```
 
-**Minimum required environment variables:**
+Edit `.env` and add your API key:
+
 ```bash
 OPENROUTER_API_KEY=sk-or-v1-your-key-here
-REDIS_URL=redis://redis:6379
-DATABASE_PATH=/data/djinnbot.db
-PIPELINES_DIR=/pipelines
-AGENTS_DIR=/agents
-VAULTS_DIR=/data/vaults
 ```
 
-### 2. Start with Docker Compose
+That's the minimum. Everything else has sensible defaults.
+
+### 2. Start
 
 ```bash
-# Build and start all services
 docker compose up -d
-
-# View logs
-docker compose logs -f
-
-# Check service health
-docker compose ps
 ```
 
-Services will start on:
-- **Dashboard**: http://localhost:3000
-- **API**: http://localhost:8000
-- **Redis**: localhost:6379
+This starts 5 services: PostgreSQL, Redis, API server, pipeline engine, dashboard, and the mcpo tool proxy.
 
-> **Note**: DjinnBot uses 4 services (redis, api, engine, dashboard). Agent memory embeddings are handled locally via [qmd](https://github.com/tobi/qmd) with GGUF models—no external embedding service required.
+### 3. Use It
 
-### 3. Access
+| Service | URL |
+|---------|-----|
+| Dashboard | http://localhost:3000 |
+| API | http://localhost:8000 |
+| MCP Tools | http://localhost:8001 |
 
-**Dashboard**  
-Open http://localhost:3000 to see the real-time pipeline dashboard.
+Open the dashboard, start a new run with the engineering pipeline, describe what you want built, and watch the agents work.
 
-**API**  
-Check API status at http://localhost:8000/api/status
+---
 
-**CLI**  
-Install the CLI tool:
-```bash
-cd cli
-pip install -e .
-djinnbot --help
+## Architecture
+
+```
+┌──────────────────┐      ┌──────────────────┐      ┌──────────────┐
+│    Dashboard     │◄─SSE─│   API Server     │◄─────│  PostgreSQL  │
+│  (React + Vite)  │      │   (FastAPI)      │      │              │
+└──────────────────┘      └──────────────────┘      └──────────────┘
+                                  │                        ▲
+                                  ▼                        │
+                          ┌──────────────────┐      ┌──────────────┐
+                          │  Pipeline Engine │─────►│    Redis     │
+                          │  (State Machine) │      │  (Streams)   │
+                          └──────────────────┘      └──────────────┘
+                                  │
+                    ┌─────────────┼─────────────┐
+                    ▼             ▼              ▼
+            ┌──────────┐  ┌──────────┐  ┌──────────────┐
+            │  Agent   │  │  Agent   │  │  Slack       │
+            │Container │  │Container │  │  Bridge      │
+            │(Isolated)│  │(Isolated)│  │(Per-Agent)   │
+            └──────────┘  └──────────┘  └──────────────┘
+                    │             │
+                    ▼             ▼
+            ┌──────────────────────────┐
+            │      ClawVault           │
+            │  (Persistent Memory +    │
+            │   Semantic Search)       │
+            └──────────────────────────┘
 ```
 
-### 4. Run Your First Pipeline
+**How it works:**
 
-**Via CLI:**
-```bash
-# List available pipelines
-djinnbot pipeline list
+1. You describe a task (via dashboard, API, CLI, or Slack)
+2. The pipeline engine assigns the first step to the right agent
+3. A fresh Docker container spins up for that agent with a full engineering toolbox
+4. The agent reads its persona files, loads memories, and executes the step
+5. Output flows to the next agent in the pipeline (or branches based on results)
+6. Agents review each other's work, request changes, fix bugs, and re-test
+7. The pipeline completes when all steps succeed
 
-# Start a new run
-djinnbot pipeline start engineering \
-  --task "Build a task management CLI tool in Python"
+Each agent container is fully isolated — its own filesystem, git workspace, installed tools, and network. No host access.
 
-# Watch run progress
-djinnbot run show <run-id>
+---
 
-# Stream output in real-time
-djinnbot run stream <run-id>
+## The Team
+
+DjinnBot ships with a default software engineering team. Each agent has a rich persona with backstory, opinions, communication style, and domain expertise:
+
+| Agent | Role | Pipeline Stage |
+|-------|------|---------------|
+| **Eric** | Product Owner | SPEC — Requirements, user stories, acceptance criteria |
+| **Finn** | Solutions Architect | DESIGN, REVIEW — Architecture, tech decisions, code review |
+| **Shigeo** | UX Specialist | UX — User flows, design systems, accessibility |
+| **Yukihiro** | Senior Software Engineer | IMPLEMENT, FIX — Writing code, fixing bugs |
+| **Chieko** | Senior Test Engineer | TEST — QA, testing, regression detection |
+| **Stas** | Site Reliability Engineer | DEPLOY — Infrastructure, monitoring, deployment |
+| **Yang** | DevEx Specialist | DX — CI/CD, tooling, developer workflow |
+| **Holt** | Marketing & Sales Lead | On-demand — Sales, outreach, positioning |
+| **Luke** | SEO Specialist | On-demand — Content strategy, keyword research |
+| **Jim** | Business & Finance Lead | On-demand — Budget, pricing, runway |
+
+> The engineering pipeline (Eric → Finn → Shigeo → Yukihiro ↔ Finn ↔ Chieko → Stas) is fully functional today. Marketing, sales, and finance agents work in chat and pulse modes. More pipeline templates are coming.
+
+---
+
+## Pipelines
+
+Pipelines are YAML files that define multi-agent workflows:
+
+| Pipeline | Description |
+|----------|------------|
+| `engineering` | Full SDLC: spec → design → UX → implement → review → test → deploy |
+| `feature` | Lightweight: design → implement → review → test |
+| `bugfix` | Focused: diagnose → fix → validate |
+| `planning` | Project decomposition into tasks with dependency chains |
+| `execute` | Run a single task from a project board |
+
+### Example: Engineering Pipeline Flow
+
+```
+SPEC (Eric) → DESIGN (Finn) → UX (Shigeo) → IMPLEMENT (Yukihiro)
+                                                    ↕
+                                              REVIEW (Finn)
+                                                    ↕
+                                               TEST (Chieko)
+                                                    ↓
+                                              DEPLOY (Stas)
 ```
 
-**Via API:**
-```bash
-# Start a pipeline run
-curl -X POST http://localhost:8000/api/runs \
-  -H "Content-Type: application/json" \
-  -d '{
-    "pipeline_id": "engineering",
-    "task_description": "Build a task management CLI tool in Python"
-  }'
+Steps support **loops** (implement each task in a breakdown), **branching** (approved vs. changes requested), **retries**, and **template variables** that pass outputs between agents.
 
-# Get run status
-curl http://localhost:8000/api/runs/<run-id>
+---
+
+## Agent Anatomy
+
+Each agent is defined by a directory under `agents/`:
+
+```
+agents/eric/
+├── IDENTITY.md      # Name, origin, role, emoji
+├── SOUL.md          # Personality, beliefs, anti-patterns, communication style
+├── AGENTS.md        # Workflow procedures, collaboration triggers, tools
+├── DECISION.md      # Memory-first decision framework
+├── PULSE.md         # Autonomous wake-up routine (check inbox, find tasks, work)
+├── config.yml       # Model, pulse schedule, thinking settings
+└── slack.yml        # Slack bot credentials (optional)
 ```
 
-**Via Dashboard:**
-1. Navigate to http://localhost:3000
-2. Click "New Run"
-3. Select "engineering" pipeline
-4. Enter your task description
-5. Watch agents collaborate in real-time!
+Agents also have access to **skills** — on-demand instruction sets loaded via `load_skill("name")` — and **MCP tools** — external tool servers accessed through the mcpo proxy.
+
+---
+
+## Memory System
+
+DjinnBot uses [ClawVault](https://github.com/koi-labs-org/clawvault) for persistent agent memory with semantic search powered by QMDR:
+
+- **Personal vaults** — Each agent has private memory for lessons, decisions, patterns, and preferences
+- **Shared vault** — Team-wide knowledge that all agents can access
+- **Wiki-link graph** — Memories are connected via `[[Topic]]` links for graph traversal
+- **Semantic search** — `recall("query")` finds relevant memories by meaning, not just keywords
+- **Automatic lifecycle** — Memory is loaded on wake, checkpointed during work, and saved on sleep
+
+Embeddings and reranking run through OpenRouter (using `text-embedding-3-small` and `gpt-4o-mini`) — no local GPU required.
+
+---
+
+## Slack Integration
+
+Each agent can have its own Slack bot, appearing as a distinct team member in your workspace. Agents post updates to threads, respond to mentions, and collaborate in channels.
+
+Slack is **optional**. The built-in dashboard chat works without any Slack configuration. See the [docs](https://docs.djinn.bot) for setup instructions.
+
+---
+
+## MCP Tools
+
+DjinnBot includes an [mcpo](https://github.com/skymoore/mcpo) proxy that exposes MCP tool servers as OpenAPI endpoints. Agents call tools like `github`, `fetch`, `time`, and any custom MCP server you add.
+
+Tools are configured in `mcp/config.json` and can be managed through the dashboard UI. The proxy supports hot-reload — add a tool server and agents can use it immediately, no restart needed.
+
+---
+
+## LLM Providers
+
+DjinnBot supports all major providers through [pi-mono](https://github.com/badlogic/pi-mono):
+
+| Provider | Env Variable |
+|----------|-------------|
+| OpenRouter (recommended) | `OPENROUTER_API_KEY` |
+| Anthropic | `ANTHROPIC_API_KEY` |
+| OpenAI | `OPENAI_API_KEY` |
+| Google (Gemini) | `GEMINI_API_KEY` |
+| xAI (Grok) | `XAI_API_KEY` |
+| Groq | `GROQ_API_KEY` |
+| Mistral | `MISTRAL_API_KEY` |
+| Azure OpenAI | `AZURE_OPENAI_API_KEY` |
+| Amazon Bedrock | AWS credentials |
+| Google Vertex | GCP ADC |
+| Custom (OpenAI-compatible) | Via settings UI |
+
+Configure providers in `.env` or through the dashboard settings page. Each agent can use a different model — put your architect on Claude Opus and your engineer on Kimi K2.5.
+
+---
+
+## Tech Stack
+
+| Component | Technology |
+|-----------|-----------|
+| Pipeline Engine | TypeScript, Redis Streams |
+| API Server | Python, FastAPI, PostgreSQL, SQLAlchemy |
+| Dashboard | React, Vite, TanStack Router, Tailwind CSS |
+| Agent Runtime | Node.js 22, Debian (full toolbox) |
+| Memory | ClawVault + QMDR (semantic search) |
+| Agent Framework | pi-mono (pi-agent-core) |
+| Slack | Bolt.js, Socket Mode |
+| MCP Proxy | mcpo (hot-reload) |
+| Build | Turborepo monorepo |
+| Orchestration | Docker Compose |
+
+---
 
 ## Project Structure
 
 ```
 djinnbot/
-├── agents/                    # Agent persona definitions
-│   ├── eric/                  # Product Owner
-│   │   ├── IDENTITY.md        # Agent bio and role
-│   │   ├── SOUL.md            # Personality and traits
-│   │   ├── AGENTS.md          # Workflow guidance
-│   │   └── slack.yml          # Slack credentials
-│   ├── finn/                  # Solutions Architect
-│   ├── shigeo/                # UX Specialist
-│   ├── yukihiro/              # Senior SWE
-│   ├── chieko/                # Senior Test Engineer
-│   ├── stas/                  # SRE
-│   └── yang/                  # DevEx Engineer
-│
-├── pipelines/                 # Pipeline definitions
-│   └── engineering.yml        # Full software development workflow
-│
-├── packages/                  # TypeScript monorepo
-│   ├── core/                  # Pipeline engine, event bus, runtime
-│   │   ├── src/
-│   │   │   ├── engine/        # Pipeline state machine
-│   │   │   ├── events/        # Redis Streams event bus
-│   │   │   ├── runtime/       # Agent executor, Pi-Agent integration
-│   │   │   ├── memory/        # ClawVault memory system
-│   │   │   └── db/            # SQLite state store
-│   │   └── package.json
-│   │
-│   ├── server/                # FastAPI backend
-│   │   ├── app/
-│   │   │   ├── main.py        # Server entry point
-│   │   │   ├── routers/       # REST endpoints
-│   │   │   └── db.py          # Database connection
-│   │   └── requirements.txt
-│   │
-│   ├── dashboard/             # React frontend
-│   │   ├── src/
-│   │   │   ├── routes/        # TanStack Router pages
-│   │   │   ├── components/    # React components
-│   │   │   └── lib/           # API client, SSE
-│   │   └── package.json
-│   │
-│   └── slack/                 # Slack integration
-│       ├── src/
-│       │   ├── slack-bridge.ts      # Event → Slack routing
-│       │   ├── agent-slack-runtime.ts  # Per-agent Socket Mode
-│       │   └── thread-manager.ts    # Run ↔ thread mapping
-│       └── package.json
-│
-├── cli/                       # Python CLI tool
-│   ├── djinnbot/
-│   │   ├── main.py            # Typer CLI entry point
-│   │   ├── commands/          # Command groups
-│   │   │   ├── pipeline.py
-│   │   │   ├── run.py
-│   │   │   ├── step.py
-│   │   │   ├── agent.py
-│   │   │   └── memory.py
-│   │   ├── client.py          # HTTP client
-│   │   └── formatting.py      # Rich terminal output
-│   └── pyproject.toml
-│
-├── data/                      # Runtime state (generated)
-│   ├── djinnbot.db            # SQLite database
-│   ├── vaults/                # ClawVault agent memory
-│   │   ├── shared/            # Shared knowledge
-│   │   ├── eric/              # Per-agent vaults
-│   │   ├── finn/
-│   │   └── ...
-│   └── progress/              # Loop progress tracking
-│
-├── docs/                      # Documentation
-│   └── ARCHITECTURE.md        # Technical deep-dive
-│
-├── docker-compose.yml         # Multi-service orchestration
-├── Dockerfile.engine          # Pipeline engine worker
-├── Dockerfile.server          # API server
-├── Dockerfile.dashboard       # React dashboard
-├── package.json               # Root package (turborepo)
-├── turbo.json                 # Build configuration
-└── .env                       # Environment variables
+├── agents/                     # Agent persona definitions
+│   ├── _templates/             # Shared templates (AGENTS.md, PULSE.md, etc.)
+│   ├── _skills/                # Global skills (available to all agents)
+│   ├── eric/                   # Product Owner
+│   ├── finn/                   # Solutions Architect
+│   ├── shigeo/                 # UX Specialist
+│   ├── yukihiro/               # Senior SWE
+│   ├── chieko/                 # Test Engineer
+│   ├── stas/                   # SRE
+│   ├── yang/                   # DevEx
+│   ├── holt/                   # Marketing & Sales
+│   ├── luke/                   # SEO
+│   └── jim/                    # Finance
+├── pipelines/                  # YAML pipeline definitions
+├── packages/
+│   ├── core/                   # Engine, events, memory, container management
+│   ├── server/                 # FastAPI API server (Python)
+│   ├── dashboard/              # React dashboard (TypeScript)
+│   ├── slack/                  # Slack bridge and per-agent bots
+│   └── agent-runtime/          # Agent container entrypoint + tools
+├── mcp/                        # MCP tool server config
+├── cli/                        # Python CLI (djinnbot command)
+├── docker-compose.yml
+├── Dockerfile.engine
+├── Dockerfile.server
+├── Dockerfile.dashboard
+└── Dockerfile.agent-runtime
 ```
 
-## Pipelines
-
-Pipelines are defined in YAML and describe a workflow as a series of steps, each executed by a specialized agent.
-
-### Pipeline Structure
-
-```yaml
-id: engineering
-name: Engineering Pipeline
-version: 1.0.0
-description: Full software development workflow from spec to deployment
-
-defaults:
-  model: openrouter/moonshotai/kimi-k2.5
-  tools:
-    - read
-    - write
-    - bash
-  maxRetries: 3
-  timeout: 3600
-
-agents:
-  - id: eric
-    name: Eric (Product Owner)
-    persona: docs/personas/eric.md
-    model: anthropic/claude-opus-4
-    tools:
-      - web_search
-      - read
-      - write
-
-steps:
-  - id: SPEC
-    agent: eric
-    input: |
-      You are the Product Owner for this project.
-      Task: {{task_description}}
-      
-      Create comprehensive product requirements...
-    outputs:
-      - product_brief
-      - requirements_doc
-    onComplete: DESIGN
-
-  - id: DESIGN
-    agent: finn
-    input: |
-      You are the Solutions Architect.
-      Requirements: {{requirements_doc}}
-      
-      Design the technical solution...
-    outputs:
-      - architecture_doc
-      - api_design
-    onComplete: IMPLEMENT
-
-  # More steps...
-```
-
-### Key Pipeline Features
-
-**Template Variables**: Reference previous step outputs with `{{output_name}}`
-
-**Loop Steps**: Execute the same step multiple times over a list
-```yaml
-- id: IMPLEMENT
-  agent: yukihiro
-  input: "Current Task: {{current_item}}"
-  loop:
-    over: task_breakdown_json
-    onEachComplete: REVIEW
-    onAllComplete: DEPLOY
-```
-
-**Result Routing**: Branch based on agent tool calls
-```yaml
-- id: REVIEW
-  agent: finn
-  outputs:
-    - review_result
-  onResult:
-    APPROVED:
-      goto: TEST
-    CHANGES_REQUESTED:
-      goto: IMPLEMENT
-```
-
-**Retry Logic**: Automatically retry failed steps with feedback
-```yaml
-defaults:
-  maxRetries: 3
-```
-
-See `pipelines/engineering.yml` for a complete example.
-
-## Agents
-
-Each agent has its own persona, memory vault, and can integrate with Slack.
-
-### Agent Persona Files
-
-Agents are defined by three markdown files in `agents/<agent-id>/`:
-
-**IDENTITY.md** — Agent bio, role, and core responsibilities
-```markdown
-# Identity: Eric - Product Owner
-
-## Who I Am
-I'm Eric, the Product Owner for DjinnBot...
-
-## My Role
-I translate business needs into clear requirements...
-```
-
-**SOUL.md** — Personality, communication style, and values
-```markdown
-# Soul: Eric's Character
-
-## Personality
-- Enthusiastic but realistic
-- User-focused...
-```
-
-**AGENTS.md** — Workflow guidance and tool usage
-```markdown
-# Agent Workflow: Eric
-
-## Tools I Use
-- web_search — Market research
-- write — Product documents...
-```
-
-**slack.yml** (optional) — Slack credentials for agent presence
-```yaml
-bot_token: ${SLACK_ERIC_BOT_TOKEN}
-app_token: ${SLACK_ERIC_APP_TOKEN}
-```
-
-### Available Agents
-
-- **eric** — Product Owner (requirements, market analysis)
-- **finn** — Solutions Architect (architecture, tech stack, planning)
-- **shigeo** — UX Specialist (user experience, design systems)
-- **yukihiro** — Senior Software Engineer (implementation)
-- **chieko** — Senior Test Engineer (QA, testing)
-- **stas** — SRE (deployment, infrastructure)
-- **yang** — DevEx Engineer (CI/CD, tooling)
-
-### Agent Memory
-
-Agents use ClawVault to maintain persistent memory across runs:
-
-**Personal Vault**: `data/vaults/<agent-id>/`
-- Lessons learned
-- Decision patterns
-- Preferences
-
-**Shared Vault**: `data/vaults/shared/`
-- Cross-agent knowledge
-- High-importance facts
-
-Memory is automatically injected into agent context during `wake()` and stored during `sleep()`.
-
-## CLI Reference
-
-The DjinnBot CLI provides full control over the system.
-
-### Installation
-
-```bash
-cd cli
-pip install -e .
-djinnbot --help
-```
-
-### Command Groups
-
-#### `djinnbot status`
-Show server health and statistics
-
-#### `djinnbot pipeline`
-Manage pipeline definitions
-
-```bash
-# List all pipelines
-djinnbot pipeline list
-
-# Show pipeline details
-djinnbot pipeline show engineering
-
-# Start a new run
-djinnbot pipeline start engineering --task "Your task description"
-```
-
-#### `djinnbot run`
-Manage and monitor pipeline runs
-
-```bash
-# List recent runs
-djinnbot run list
-
-# Show run details
-djinnbot run show <run-id>
-
-# Stream run output in real-time
-djinnbot run stream <run-id>
-
-# Cancel a running pipeline
-djinnbot run cancel <run-id>
-
-# Restart a failed run
-djinnbot run restart <run-id>
-```
-
-#### `djinnbot step`
-Inspect individual step executions
-
-```bash
-# List steps for a run
-djinnbot step list <run-id>
-
-# Show step details
-djinnbot step show <run-id> <step-id>
-
-# View step output
-djinnbot step output <run-id> <step-id>
-```
-
-#### `djinnbot agent`
-View agent status and runtime info
-
-```bash
-# List all agents
-djinnbot agent list
-
-# Show agent details
-djinnbot agent show eric
-
-# View agent run history
-djinnbot agent runs eric
-```
-
-#### `djinnbot memory`
-Search and manage agent memory vaults
-
-```bash
-# List vaults
-djinnbot memory list-vaults
-
-# Search agent memory
-djinnbot memory search eric "architecture decisions"
-
-# View vault contents
-djinnbot memory vault eric
-
-# Search shared knowledge
-djinnbot memory shared "deployment patterns"
-```
-
-## API Reference
-
-The FastAPI server exposes a REST API for all operations.
-
-### Base URL
-`http://localhost:8000`
-
-### Endpoints
-
-#### Status
-- `GET /api/status` — Server health and statistics
-
-#### Pipelines
-- `GET /api/pipelines` — List all pipelines
-- `GET /api/pipelines/{id}` — Get pipeline definition
-
-#### Runs
-- `GET /api/runs` — List runs (optional `?pipeline_id=` filter)
-- `GET /api/runs/{id}` — Get run details
-- `POST /api/runs` — Create new run
-  ```json
-  {
-    "pipeline_id": "engineering",
-    "task_description": "Build a CLI tool",
-    "human_context": "Optional guidance"
-  }
-  ```
-- `POST /api/runs/{id}/cancel` — Cancel running pipeline
-- `POST /api/runs/{id}/restart` — Restart failed run
-
-#### Steps
-- `GET /api/steps/{run_id}` — List steps for run
-- `GET /api/steps/{run_id}/{step_id}` — Get step details
-- `GET /api/steps/{run_id}/{step_id}/output` — Get step output
-
-#### Agents
-- `GET /api/agents` — List all agents
-- `GET /api/agents/{id}` — Get agent details
-- `GET /api/agents/{id}/runs` — Get agent run history
-
-#### Memory
-- `GET /api/memory/vaults` — List all vaults
-- `GET /api/memory/vaults/{agent_id}` — Get vault contents
-- `GET /api/memory/search` — Search agent memory
-  ```
-  ?agent_id=eric&query=architecture&limit=5
-  ```
-- `GET /api/memory/shared` — Search shared knowledge
-
-#### Events (SSE)
-- `GET /api/events/stream` — Server-Sent Events stream for real-time updates
-  ```
-  ?run_id=run_123
-  ```
-
-### Example: Starting a Run
-
-```bash
-curl -X POST http://localhost:8000/api/runs \
-  -H "Content-Type: application/json" \
-  -d '{
-    "pipeline_id": "engineering",
-    "task_description": "Create a REST API for a todo app using FastAPI"
-  }'
-```
-
-Response:
-```json
-{
-  "id": "run_1708000000_abc123",
-  "pipeline_id": "engineering",
-  "status": "running",
-  "task_description": "Create a REST API for a todo app using FastAPI",
-  "created_at": 1708000000000
-}
-```
+---
 
 ## Development
 
-### Local Development Setup
+For local development (not Docker):
 
-**Requirements:**
-- Node.js 20+
-- Python 3.12+
-- Redis (or use Docker)
-
-**Setup:**
+**Requirements:** Node.js 20+, Python 3.12+, PostgreSQL, Redis
 
 ```bash
 # Install dependencies
 npm install
+cd packages/server && pip install -e ".[dev]" && cd ../..
 cd cli && pip install -e . && cd ..
 
-# Start Redis (if not using Docker)
-redis-server
+# Start services
+redis-server &
+# Start PostgreSQL
 
-# Start API server
-cd packages/server
-pip install -r requirements.txt
-uvicorn app.main:app --reload --port 8000
+# Run API server
+cd packages/server && uvicorn app.main:app --reload --port 8000
 
-# Start engine worker (separate terminal)
-cd packages/core
-npm run build
-node dist/main.js
+# Run engine (separate terminal)
+cd packages/core && npm run build && node dist/main.js
 
-# Start dashboard (separate terminal)
-cd packages/dashboard
-npm run dev
+# Run dashboard (separate terminal)
+cd packages/dashboard && npm run dev
 ```
-
-### Building
-
-```bash
-# Build all packages
-npm run build
-
-# Build specific package
-npm run build --filter=@djinnbot/core
-```
-
-### Type Checking
-
-```bash
-npm run typecheck
-```
-
-### Linting
-
-```bash
-npm run lint
-```
-
-## Configuration
-
-### Environment Variables
-
-#### Required
-- `OPENROUTER_API_KEY` — OpenRouter API key for LLM access
-- `REDIS_URL` — Redis connection string (default: `redis://localhost:6379`)
-- `DATABASE_PATH` — SQLite database path (default: `./data/djinnbot.db`)
-
-#### Optional
-- `PIPELINES_DIR` — Pipeline YAML directory (default: `./pipelines`)
-- `AGENTS_DIR` — Agent persona directory (default: `./agents`)
-- `VAULTS_DIR` — ClawVault storage directory (default: `./data/vaults`)
-- `DATA_DIR` — General data directory (default: `./data`)
-- `API_PORT` — API server port (default: `8000`)
-- `DASHBOARD_PORT` — Dashboard port (default: `3000`)
-- `REDIS_PORT` — Redis port (default: `6379`)
-- `MOCK_RUNNER` — Use mock agent runner for testing (default: `false`)
-
-#### Slack Integration (Optional)
-- `SLACK_CHANNEL_ID` — Default Slack channel for run threads
-- `SLACK_<AGENT>_BOT_TOKEN` — Per-agent bot token (e.g., `SLACK_ERIC_BOT_TOKEN`)
-- `SLACK_<AGENT>_APP_TOKEN` — Per-agent app token (e.g., `SLACK_ERIC_APP_TOKEN`)
-
-### Agent Configuration
-
-Each agent can override defaults in their persona definition or `slack.yml`:
-
-**agents/eric/slack.yml:**
-```yaml
-bot_token: ${SLACK_ERIC_BOT_TOKEN}
-app_token: ${SLACK_ERIC_APP_TOKEN}
-```
-
-### Pipeline Configuration
-
-Pipeline defaults can be set at the root level:
-
-```yaml
-defaults:
-  model: openrouter/moonshotai/kimi-k2.5
-  tools:
-    - read
-    - write
-    - bash
-  maxRetries: 3
-  timeout: 3600
-```
-
-Individual steps can override any default:
-
-```yaml
-steps:
-  - id: SPEC
-    agent: eric
-    model: anthropic/claude-opus-4  # Override default
-    timeout: 7200                   # Override default
-```
-
-## License
-
-MIT License - see LICENSE file for details.
 
 ---
 
-**Built with:**
-- [Pi-Agent-Core](https://github.com/mariozechner/pi-agent-core) — Agent runtime
-- [ClawVault](https://github.com/koi-labs-org/clawvault) — Persistent memory
-- [FastAPI](https://fastapi.tiangolo.com/) — API server
-- [React](https://react.dev/) — Dashboard UI
-- [Redis Streams](https://redis.io/docs/data-types/streams/) — Event bus
-- [Better-SQLite3](https://github.com/WiseLibs/better-sqlite3) — State storage
+## Roadmap
 
-**Domain:** [djinn.bot](https://djinn.bot) (coming soon)
+- **Marketing & sales pipelines** — Structured workflows for content, outreach, and deal management
+- **More bot interfaces** — Discord, Microsoft Teams, and other platforms beyond Slack
+- **SaaS offering** — Managed hosting at djinn.bot for teams that don't want to self-host
+- **Pipeline marketplace** — Share and discover community pipeline templates
+- **Custom agent builder** — Create new agents with custom personas through the UI
+- **GitHub App integration** — Trigger pipelines from issues, PRs, and webhooks
+
+---
+
+## License
+
+[FSL-1.1-ALv2](LICENSE) — Functional Source License with Apache 2.0 future grant.
+
+**What this means:** You can use, modify, and self-host DjinnBot for free. The only restriction is you can't use it to build a competing commercial product. After 2 years, every release automatically converts to Apache 2.0 with no restrictions.
+
+---
+
+## Links
+
+- **Documentation:** [docs.djinn.bot](https://docs.djinn.bot)
+- **Website:** [djinn.bot](https://djinn.bot)
+- **GitHub:** [github.com/BaseDatum/djinnbot](https://github.com/BaseDatum/djinnbot)
+
+Built by [Sky Moore](https://github.com/skymoore) and the DjinnBot team.

@@ -1,0 +1,610 @@
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>DjinnBot – Advanced</title><link>https://docs.djinn.bot/docs/advanced/</link><description>Recent content in Advanced on DjinnBot</description><generator>Hugo -- gohugo.io</generator><language>en-us</language><atom:link href="https://docs.djinn.bot/docs/advanced/index.xml" rel="self" type="application/rss+xml"/><item><title>LLM Providers</title><link>https://docs.djinn.bot/docs/advanced/llm-providers/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://docs.djinn.bot/docs/advanced/llm-providers/</guid><description>
+&lt;p&gt;DjinnBot supports a wide range of LLM providers through &lt;a href="https://github.com/badlogic/pi-mono"target="_blank" rel="noopener"&gt;pi-mono&lt;/a&gt;. You can use cloud APIs, local models, or any OpenAI-compatible endpoint.&lt;/p&gt;
+&lt;h2&gt;Supported Providers&lt;span class="hx:absolute hx:-mt-20" id="supported-providers"&gt;&lt;/span&gt;
+&lt;a href="#supported-providers" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;h3&gt;Cloud Providers&lt;span class="hx:absolute hx:-mt-20" id="cloud-providers"&gt;&lt;/span&gt;
+&lt;a href="#cloud-providers" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h3&gt;&lt;table&gt;
+&lt;thead&gt;
+&lt;tr&gt;
+&lt;th&gt;Provider&lt;/th&gt;
+&lt;th&gt;Env Variable&lt;/th&gt;
+&lt;th&gt;Models&lt;/th&gt;
+&lt;/tr&gt;
+&lt;/thead&gt;
+&lt;tbody&gt;
+&lt;tr&gt;
+&lt;td&gt;&lt;strong&gt;OpenRouter&lt;/strong&gt;&lt;/td&gt;
+&lt;td&gt;&lt;code&gt;OPENROUTER_API_KEY&lt;/code&gt;&lt;/td&gt;
+&lt;td&gt;All models (Claude, GPT, Gemini, Kimi, Llama, etc.)&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;
+&lt;td&gt;&lt;strong&gt;Anthropic&lt;/strong&gt;&lt;/td&gt;
+&lt;td&gt;&lt;code&gt;ANTHROPIC_API_KEY&lt;/code&gt;&lt;/td&gt;
+&lt;td&gt;Claude Sonnet, Opus, Haiku&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;
+&lt;td&gt;&lt;strong&gt;OpenAI&lt;/strong&gt;&lt;/td&gt;
+&lt;td&gt;&lt;code&gt;OPENAI_API_KEY&lt;/code&gt;&lt;/td&gt;
+&lt;td&gt;GPT-4o, GPT-4, o1, o3&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;
+&lt;td&gt;&lt;strong&gt;Google&lt;/strong&gt;&lt;/td&gt;
+&lt;td&gt;&lt;code&gt;GEMINI_API_KEY&lt;/code&gt;&lt;/td&gt;
+&lt;td&gt;Gemini 2.5 Pro, Flash&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;
+&lt;td&gt;&lt;strong&gt;xAI&lt;/strong&gt;&lt;/td&gt;
+&lt;td&gt;&lt;code&gt;XAI_API_KEY&lt;/code&gt;&lt;/td&gt;
+&lt;td&gt;Grok 4&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;
+&lt;td&gt;&lt;strong&gt;Groq&lt;/strong&gt;&lt;/td&gt;
+&lt;td&gt;&lt;code&gt;GROQ_API_KEY&lt;/code&gt;&lt;/td&gt;
+&lt;td&gt;Llama, Mixtral (fast inference)&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;
+&lt;td&gt;&lt;strong&gt;Mistral&lt;/strong&gt;&lt;/td&gt;
+&lt;td&gt;&lt;code&gt;MISTRAL_API_KEY&lt;/code&gt;&lt;/td&gt;
+&lt;td&gt;Mistral Large, Codestral&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;
+&lt;td&gt;&lt;strong&gt;Cerebras&lt;/strong&gt;&lt;/td&gt;
+&lt;td&gt;&lt;code&gt;CEREBRAS_API_KEY&lt;/code&gt;&lt;/td&gt;
+&lt;td&gt;Llama (fast inference)&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;
+&lt;td&gt;&lt;strong&gt;Azure OpenAI&lt;/strong&gt;&lt;/td&gt;
+&lt;td&gt;&lt;code&gt;AZURE_OPENAI_API_KEY&lt;/code&gt;&lt;/td&gt;
+&lt;td&gt;GPT models via Azure&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;
+&lt;td&gt;&lt;strong&gt;Amazon Bedrock&lt;/strong&gt;&lt;/td&gt;
+&lt;td&gt;AWS credentials&lt;/td&gt;
+&lt;td&gt;Claude, Llama, Titan&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;
+&lt;td&gt;&lt;strong&gt;Google Vertex&lt;/strong&gt;&lt;/td&gt;
+&lt;td&gt;GCP ADC&lt;/td&gt;
+&lt;td&gt;Gemini, PaLM&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;
+&lt;td&gt;&lt;strong&gt;Hugging Face&lt;/strong&gt;&lt;/td&gt;
+&lt;td&gt;&lt;code&gt;HF_TOKEN&lt;/code&gt;&lt;/td&gt;
+&lt;td&gt;Open models via Inference API&lt;/td&gt;
+&lt;/tr&gt;
+&lt;/tbody&gt;
+&lt;/table&gt;
+&lt;h3&gt;Why OpenRouter is Recommended&lt;span class="hx:absolute hx:-mt-20" id="why-openrouter-is-recommended"&gt;&lt;/span&gt;
+&lt;a href="#why-openrouter-is-recommended" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h3&gt;&lt;p&gt;OpenRouter acts as a unified gateway — one API key gives you access to every major model. This means:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;Test different models per agent without managing multiple keys&lt;/li&gt;
+&lt;li&gt;Fall back to alternative models if one is down&lt;/li&gt;
+&lt;li&gt;Access the latest models as they launch&lt;/li&gt;
+&lt;li&gt;Single billing for everything&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h2&gt;Configuring Providers&lt;span class="hx:absolute hx:-mt-20" id="configuring-providers"&gt;&lt;/span&gt;
+&lt;a href="#configuring-providers" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;h3&gt;Via .env File&lt;span class="hx:absolute hx:-mt-20" id="via-env-file"&gt;&lt;/span&gt;
+&lt;a href="#via-env-file" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h3&gt;&lt;p&gt;Add API keys to your &lt;code&gt;.env&lt;/code&gt;:&lt;/p&gt;
+&lt;div class="hextra-code-block hx:relative hx:mt-6 hx:first:mt-0 hx:group/code"&gt;
+&lt;div&gt;&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-bash" data-lang="bash"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nv"&gt;OPENROUTER_API_KEY&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;sk-or-v1-your-key
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nv"&gt;ANTHROPIC_API_KEY&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;sk-ant-your-key
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nv"&gt;OPENAI_API_KEY&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;sk-your-key&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;&lt;div class="hextra-code-copy-btn-container hx:opacity-0 hx:transition hx:group-hover/code:opacity-100 hx:flex hx:gap-1 hx:absolute hx:m-[11px] hx:right-0 hx:top-0"&gt;
+&lt;button
+class="hextra-code-copy-btn hx:group/copybtn hx:cursor-pointer hx:transition-all hx:active:opacity-50 hx:bg-primary-700/5 hx:border hx:border-black/5 hx:text-gray-600 hx:hover:text-gray-900 hx:rounded-md hx:p-1.5 hx:dark:bg-primary-300/10 hx:dark:border-white/10 hx:dark:text-gray-400 hx:dark:hover:text-gray-50"
+title="Copy code"
+aria-label="Copy code"
+data-copied-label="Copied!"
+&gt;
+&lt;div class="hextra-copy-icon hx:group-[.copied]/copybtn:hidden hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;div class="hextra-success-icon hx:hidden hx:group-[.copied]/copybtn:block hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;/button&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;h3&gt;Via Dashboard&lt;span class="hx:absolute hx:-mt-20" id="via-dashboard"&gt;&lt;/span&gt;
+&lt;a href="#via-dashboard" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h3&gt;&lt;ol&gt;
+&lt;li&gt;Go to &lt;strong&gt;Settings&lt;/strong&gt; → &lt;strong&gt;Providers&lt;/strong&gt;&lt;/li&gt;
+&lt;li&gt;Enter API keys for each provider&lt;/li&gt;
+&lt;li&gt;Keys are encrypted at rest using &lt;code&gt;SECRET_ENCRYPTION_KEY&lt;/code&gt;&lt;/li&gt;
+&lt;/ol&gt;
+&lt;p&gt;Dashboard-configured keys take precedence over &lt;code&gt;.env&lt;/code&gt; keys.&lt;/p&gt;
+&lt;h2&gt;Model Selection&lt;span class="hx:absolute hx:-mt-20" id="model-selection"&gt;&lt;/span&gt;
+&lt;a href="#model-selection" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;h3&gt;Per-Agent&lt;span class="hx:absolute hx:-mt-20" id="per-agent"&gt;&lt;/span&gt;
+&lt;a href="#per-agent" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h3&gt;&lt;p&gt;Set the default model in &lt;code&gt;agents/&amp;lt;id&amp;gt;/config.yml&lt;/code&gt;:&lt;/p&gt;
+&lt;div class="hextra-code-block hx:relative hx:mt-6 hx:first:mt-0 hx:group/code"&gt;
+&lt;div&gt;&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-yaml" data-lang="yaml"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nt"&gt;model&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;anthropic/claude-sonnet-4&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nt"&gt;thinking_model&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;anthropic/claude-opus-4&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nt"&gt;thinking_level&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;medium&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;&lt;div class="hextra-code-copy-btn-container hx:opacity-0 hx:transition hx:group-hover/code:opacity-100 hx:flex hx:gap-1 hx:absolute hx:m-[11px] hx:right-0 hx:top-0"&gt;
+&lt;button
+class="hextra-code-copy-btn hx:group/copybtn hx:cursor-pointer hx:transition-all hx:active:opacity-50 hx:bg-primary-700/5 hx:border hx:border-black/5 hx:text-gray-600 hx:hover:text-gray-900 hx:rounded-md hx:p-1.5 hx:dark:bg-primary-300/10 hx:dark:border-white/10 hx:dark:text-gray-400 hx:dark:hover:text-gray-50"
+title="Copy code"
+aria-label="Copy code"
+data-copied-label="Copied!"
+&gt;
+&lt;div class="hextra-copy-icon hx:group-[.copied]/copybtn:hidden hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;div class="hextra-success-icon hx:hidden hx:group-[.copied]/copybtn:block hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;/button&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;h3&gt;Per-Pipeline Step&lt;span class="hx:absolute hx:-mt-20" id="per-pipeline-step"&gt;&lt;/span&gt;
+&lt;a href="#per-pipeline-step" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h3&gt;&lt;p&gt;Override in pipeline YAML:&lt;/p&gt;
+&lt;div class="hextra-code-block hx:relative hx:mt-6 hx:first:mt-0 hx:group/code"&gt;
+&lt;div&gt;&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-yaml" data-lang="yaml"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nt"&gt;steps&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;- &lt;span class="nt"&gt;id&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;SPEC&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;agent&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;eric&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;model&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;anthropic/claude-opus-4 &lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="c"&gt;# Use Opus for requirements&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;- &lt;span class="nt"&gt;id&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;IMPLEMENT&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;agent&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;yukihiro&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;model&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;openrouter/moonshotai/kimi-k2.5 &lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="c"&gt;# Use Kimi for coding&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;&lt;div class="hextra-code-copy-btn-container hx:opacity-0 hx:transition hx:group-hover/code:opacity-100 hx:flex hx:gap-1 hx:absolute hx:m-[11px] hx:right-0 hx:top-0"&gt;
+&lt;button
+class="hextra-code-copy-btn hx:group/copybtn hx:cursor-pointer hx:transition-all hx:active:opacity-50 hx:bg-primary-700/5 hx:border hx:border-black/5 hx:text-gray-600 hx:hover:text-gray-900 hx:rounded-md hx:p-1.5 hx:dark:bg-primary-300/10 hx:dark:border-white/10 hx:dark:text-gray-400 hx:dark:hover:text-gray-50"
+title="Copy code"
+aria-label="Copy code"
+data-copied-label="Copied!"
+&gt;
+&lt;div class="hextra-copy-icon hx:group-[.copied]/copybtn:hidden hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;div class="hextra-success-icon hx:hidden hx:group-[.copied]/copybtn:block hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;/button&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;h3&gt;Global Defaults&lt;span class="hx:absolute hx:-mt-20" id="global-defaults"&gt;&lt;/span&gt;
+&lt;a href="#global-defaults" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h3&gt;&lt;p&gt;Set in the dashboard Settings page:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;Default working model&lt;/strong&gt; — used when no model is specified&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Default thinking model&lt;/strong&gt; — used for extended reasoning&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h2&gt;Extended Thinking&lt;span class="hx:absolute hx:-mt-20" id="extended-thinking"&gt;&lt;/span&gt;
+&lt;a href="#extended-thinking" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;p&gt;Some models support extended thinking (reasoning tokens). Configure per-agent:&lt;/p&gt;
+&lt;div class="hextra-code-block hx:relative hx:mt-6 hx:first:mt-0 hx:group/code"&gt;
+&lt;div&gt;&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-yaml" data-lang="yaml"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nt"&gt;thinking_level&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;medium &lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="c"&gt;# off, low, medium, high&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;&lt;div class="hextra-code-copy-btn-container hx:opacity-0 hx:transition hx:group-hover/code:opacity-100 hx:flex hx:gap-1 hx:absolute hx:m-[11px] hx:right-0 hx:top-0"&gt;
+&lt;button
+class="hextra-code-copy-btn hx:group/copybtn hx:cursor-pointer hx:transition-all hx:active:opacity-50 hx:bg-primary-700/5 hx:border hx:border-black/5 hx:text-gray-600 hx:hover:text-gray-900 hx:rounded-md hx:p-1.5 hx:dark:bg-primary-300/10 hx:dark:border-white/10 hx:dark:text-gray-400 hx:dark:hover:text-gray-50"
+title="Copy code"
+aria-label="Copy code"
+data-copied-label="Copied!"
+&gt;
+&lt;div class="hextra-copy-icon hx:group-[.copied]/copybtn:hidden hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;div class="hextra-success-icon hx:hidden hx:group-[.copied]/copybtn:block hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;/button&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;p&gt;Supported models include Claude Sonnet 4+, Claude Opus 4+, and other reasoning-capable models. The system automatically detects which models support thinking.&lt;/p&gt;
+&lt;h2&gt;Custom Providers (OpenAI-Compatible)&lt;span class="hx:absolute hx:-mt-20" id="custom-providers-openai-compatible"&gt;&lt;/span&gt;
+&lt;a href="#custom-providers-openai-compatible" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;p&gt;You can add any OpenAI-compatible endpoint as a custom provider through the dashboard:&lt;/p&gt;
+&lt;ol&gt;
+&lt;li&gt;Go to &lt;strong&gt;Settings&lt;/strong&gt; → &lt;strong&gt;Providers&lt;/strong&gt;&lt;/li&gt;
+&lt;li&gt;Click &lt;strong&gt;Add Custom Provider&lt;/strong&gt;&lt;/li&gt;
+&lt;li&gt;Enter:
+&lt;ul&gt;
+&lt;li&gt;Provider name/slug&lt;/li&gt;
+&lt;li&gt;Base URL (e.g., &lt;code&gt;http://localhost:11434/v1&lt;/code&gt; for Ollama)&lt;/li&gt;
+&lt;li&gt;API key (if required)&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/li&gt;
+&lt;li&gt;Use the model in agent config: &lt;code&gt;custom-myollama/llama3.3&lt;/code&gt;&lt;/li&gt;
+&lt;/ol&gt;
+&lt;p&gt;This works with:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;Ollama&lt;/strong&gt; — local models with OpenAI-compatible API&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;LM Studio&lt;/strong&gt; — local model runner&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;vLLM&lt;/strong&gt; — production inference server&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;text-generation-webui&lt;/strong&gt; — with OpenAI extension&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;LocalAI&lt;/strong&gt; — drop-in OpenAI replacement&lt;/li&gt;
+&lt;li&gt;Any OpenAI-compatible API endpoint&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h2&gt;Local Models via Ollama&lt;span class="hx:absolute hx:-mt-20" id="local-models-via-ollama"&gt;&lt;/span&gt;
+&lt;a href="#local-models-via-ollama" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;p&gt;To use local models:&lt;/p&gt;
+&lt;ol&gt;
+&lt;li&gt;Install &lt;a href="https://ollama.com"target="_blank" rel="noopener"&gt;Ollama&lt;/a&gt; on your host&lt;/li&gt;
+&lt;li&gt;Pull a model: &lt;code&gt;ollama pull llama3.3&lt;/code&gt;&lt;/li&gt;
+&lt;li&gt;Ollama serves at &lt;code&gt;http://localhost:11434/v1&lt;/code&gt; by default&lt;/li&gt;
+&lt;li&gt;Add as a custom provider in DjinnBot settings:
+&lt;ul&gt;
+&lt;li&gt;Base URL: &lt;code&gt;http://host.docker.internal:11434/v1&lt;/code&gt; (use &lt;code&gt;host.docker.internal&lt;/code&gt; from inside Docker)&lt;/li&gt;
+&lt;li&gt;No API key needed&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/li&gt;
+&lt;li&gt;Set agent model: &lt;code&gt;custom-ollama/llama3.3&lt;/code&gt;&lt;/li&gt;
+&lt;/ol&gt;
+&lt;div class="hx:overflow-x-auto hx:mt-6 hx:flex hx:rounded-lg hx:border hx:py-2 hx:ltr:pr-4 hx:rtl:pl-4 hx:contrast-more:border-current hx:contrast-more:dark:border-current hx:border-amber-200 hx:bg-amber-100 hx:text-amber-900 hx:dark:border-amber-200/30 hx:dark:bg-amber-900/30 hx:dark:text-amber-200"&gt;
+&lt;div class="hx:ltr:pl-3 hx:ltr:pr-2 hx:rtl:pr-3 hx:rtl:pl-2"&gt;&lt;svg height=1.2em class="hx:inline-block hx:align-middle" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" aria-hidden="true"&gt;&lt;path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/&gt;&lt;/svg&gt;&lt;/div&gt;
+&lt;div class="hx:w-full hx:min-w-0 hx:leading-7"&gt;
+&lt;div class="hx:mt-6 hx:leading-7 hx:first:mt-0"&gt;Local models work for chat and simple tasks but may not reliably produce structured output or use tools. For production pipeline execution, cloud models (Claude, GPT-4, Kimi) are recommended.&lt;/div&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;h2&gt;Memory Search Provider&lt;span class="hx:absolute hx:-mt-20" id="memory-search-provider"&gt;&lt;/span&gt;
+&lt;a href="#memory-search-provider" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;p&gt;ClawVault&amp;rsquo;s semantic search (QMDR) uses a separate provider for embeddings and reranking. By default, this uses OpenRouter with:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;Embeddings:&lt;/strong&gt; &lt;code&gt;openai/text-embedding-3-small&lt;/code&gt;&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Reranking:&lt;/strong&gt; &lt;code&gt;openai/gpt-4o-mini&lt;/code&gt; (LLM-based reranking)&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;Configure via environment variables:&lt;/p&gt;
+&lt;div class="hextra-code-block hx:relative hx:mt-6 hx:first:mt-0 hx:group/code"&gt;
+&lt;div&gt;&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-bash" data-lang="bash"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nv"&gt;QMD_OPENAI_API_KEY&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;&lt;span class="si"&gt;${&lt;/span&gt;&lt;span class="nv"&gt;OPENROUTER_API_KEY&lt;/span&gt;&lt;span class="si"&gt;}&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nv"&gt;QMD_OPENAI_BASE_URL&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;https://openrouter.ai/api/v1
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nv"&gt;QMD_EMBED_PROVIDER&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;openai
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nv"&gt;QMD_OPENAI_EMBED_MODEL&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;openai/text-embedding-3-small
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nv"&gt;QMD_RERANK_PROVIDER&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;openai
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nv"&gt;QMD_RERANK_MODE&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;llm
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nv"&gt;QMD_OPENAI_MODEL&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;openai/gpt-4o-mini&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;&lt;div class="hextra-code-copy-btn-container hx:opacity-0 hx:transition hx:group-hover/code:opacity-100 hx:flex hx:gap-1 hx:absolute hx:m-[11px] hx:right-0 hx:top-0"&gt;
+&lt;button
+class="hextra-code-copy-btn hx:group/copybtn hx:cursor-pointer hx:transition-all hx:active:opacity-50 hx:bg-primary-700/5 hx:border hx:border-black/5 hx:text-gray-600 hx:hover:text-gray-900 hx:rounded-md hx:p-1.5 hx:dark:bg-primary-300/10 hx:dark:border-white/10 hx:dark:text-gray-400 hx:dark:hover:text-gray-50"
+title="Copy code"
+aria-label="Copy code"
+data-copied-label="Copied!"
+&gt;
+&lt;div class="hextra-copy-icon hx:group-[.copied]/copybtn:hidden hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;div class="hextra-success-icon hx:hidden hx:group-[.copied]/copybtn:block hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;/button&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;p&gt;These are set in &lt;code&gt;docker-compose.yml&lt;/code&gt; for the engine service. Adjust if you want to use a different embedding provider.&lt;/p&gt;</description></item><item><title>Bot Interfaces</title><link>https://docs.djinn.bot/docs/advanced/bot-interfaces/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://docs.djinn.bot/docs/advanced/bot-interfaces/</guid><description>
+&lt;p&gt;DjinnBot agents can interact through multiple interfaces. Currently Slack and the built-in dashboard chat are supported, with more platforms planned.&lt;/p&gt;
+&lt;h2&gt;Current Interfaces&lt;span class="hx:absolute hx:-mt-20" id="current-interfaces"&gt;&lt;/span&gt;
+&lt;a href="#current-interfaces" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;h3&gt;Dashboard Chat&lt;span class="hx:absolute hx:-mt-20" id="dashboard-chat"&gt;&lt;/span&gt;
+&lt;a href="#dashboard-chat" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h3&gt;&lt;p&gt;The built-in chat interface at &lt;code&gt;http://localhost:3000/chat&lt;/code&gt; requires no additional setup. Features:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;Select any agent and model&lt;/li&gt;
+&lt;li&gt;Full tool access (code execution, file operations, web research)&lt;/li&gt;
+&lt;li&gt;Persistent chat history&lt;/li&gt;
+&lt;li&gt;Real-time streaming responses&lt;/li&gt;
+&lt;li&gt;Supports onboarding and project-context sessions&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;This is the primary interface for users who don&amp;rsquo;t use Slack.&lt;/p&gt;
+&lt;h3&gt;Slack&lt;span class="hx:absolute hx:-mt-20" id="slack"&gt;&lt;/span&gt;
+&lt;a href="#slack" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h3&gt;&lt;p&gt;Each agent gets its own Slack bot via Socket Mode. See &lt;a href="https://docs.djinn.bot/docs/guides/slack-setup/"&gt;Slack Bot Setup&lt;/a&gt; for configuration.&lt;/p&gt;
+&lt;p&gt;Features:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;Per-agent bot identity (name, avatar)&lt;/li&gt;
+&lt;li&gt;Pipeline threads (watch agents collaborate)&lt;/li&gt;
+&lt;li&gt;Direct mentions and DMs&lt;/li&gt;
+&lt;li&gt;Active/passive thread participation&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h2&gt;Planned Interfaces&lt;span class="hx:absolute hx:-mt-20" id="planned-interfaces"&gt;&lt;/span&gt;
+&lt;a href="#planned-interfaces" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;h3&gt;Discord&lt;span class="hx:absolute hx:-mt-20" id="discord"&gt;&lt;/span&gt;
+&lt;a href="#discord" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h3&gt;&lt;p&gt;Discord bot support is on the roadmap. The architecture mirrors Slack — each agent gets its own bot account, pipeline runs create threads, and agents respond to mentions.&lt;/p&gt;
+&lt;h3&gt;Microsoft Teams&lt;span class="hx:absolute hx:-mt-20" id="microsoft-teams"&gt;&lt;/span&gt;
+&lt;a href="#microsoft-teams" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h3&gt;&lt;p&gt;Teams integration is planned for enterprise environments that standardize on the Microsoft ecosystem.&lt;/p&gt;
+&lt;h3&gt;Custom Webhooks&lt;span class="hx:absolute hx:-mt-20" id="custom-webhooks"&gt;&lt;/span&gt;
+&lt;a href="#custom-webhooks" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h3&gt;&lt;p&gt;A generic webhook interface will allow integration with any chat platform or custom application. Send messages in, receive agent responses out, via simple HTTP.&lt;/p&gt;
+&lt;h3&gt;API-Only&lt;span class="hx:absolute hx:-mt-20" id="api-only"&gt;&lt;/span&gt;
+&lt;a href="#api-only" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h3&gt;&lt;p&gt;The REST API and SSE streaming already allow building custom frontends. Any application that can make HTTP requests can interact with DjinnBot agents.&lt;/p&gt;
+&lt;h2&gt;Architecture for New Interfaces&lt;span class="hx:absolute hx:-mt-20" id="architecture-for-new-interfaces"&gt;&lt;/span&gt;
+&lt;a href="#architecture-for-new-interfaces" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;p&gt;Adding a new chat interface involves:&lt;/p&gt;
+&lt;ol&gt;
+&lt;li&gt;&lt;strong&gt;Bridge service&lt;/strong&gt; — connects to the external platform&amp;rsquo;s API (similar to &lt;code&gt;packages/slack/&lt;/code&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Event routing&lt;/strong&gt; — maps platform events to DjinnBot&amp;rsquo;s event bus&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Per-agent identity&lt;/strong&gt; — manages bot accounts/tokens for each agent&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Thread mapping&lt;/strong&gt; — links platform threads to pipeline runs&lt;/li&gt;
+&lt;/ol&gt;
+&lt;p&gt;The engine&amp;rsquo;s event-driven architecture makes this straightforward — new interfaces subscribe to Redis events and publish commands back.&lt;/p&gt;
+&lt;h2&gt;Contributing an Interface&lt;span class="hx:absolute hx:-mt-20" id="contributing-an-interface"&gt;&lt;/span&gt;
+&lt;a href="#contributing-an-interface" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;p&gt;If you want to add support for a new platform, the Slack package (&lt;code&gt;packages/slack/&lt;/code&gt;) is the reference implementation. The key files:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;code&gt;slack-bridge.ts&lt;/code&gt; — routes events between Slack and the engine&lt;/li&gt;
+&lt;li&gt;&lt;code&gt;agent-slack-runtime.ts&lt;/code&gt; — manages per-agent Socket Mode connections&lt;/li&gt;
+&lt;li&gt;&lt;code&gt;thread-manager.ts&lt;/code&gt; — maps runs to Slack threads&lt;/li&gt;
+&lt;li&gt;&lt;code&gt;slack-streamer.ts&lt;/code&gt; — streams agent output to Slack messages&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;A new interface would implement the same patterns for a different platform.&lt;/p&gt;</description></item><item><title>Local Development</title><link>https://docs.djinn.bot/docs/advanced/local-development/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://docs.djinn.bot/docs/advanced/local-development/</guid><description>
+&lt;p&gt;For contributing to DjinnBot or running without Docker.&lt;/p&gt;
+&lt;h2&gt;Prerequisites&lt;span class="hx:absolute hx:-mt-20" id="prerequisites"&gt;&lt;/span&gt;
+&lt;a href="#prerequisites" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;Node.js 20+&lt;/strong&gt;&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Python 3.12+&lt;/strong&gt; with pip&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;PostgreSQL 16&lt;/strong&gt;&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Redis 7+&lt;/strong&gt;&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Go&lt;/strong&gt; (for Hugo module support, if building docs)&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Docker&lt;/strong&gt; (still needed for agent containers and mcpo)&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h2&gt;Setup&lt;span class="hx:absolute hx:-mt-20" id="setup"&gt;&lt;/span&gt;
+&lt;a href="#setup" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;h3&gt;Install Dependencies&lt;span class="hx:absolute hx:-mt-20" id="install-dependencies"&gt;&lt;/span&gt;
+&lt;a href="#install-dependencies" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h3&gt;&lt;div class="hextra-code-block hx:relative hx:mt-6 hx:first:mt-0 hx:group/code"&gt;
+&lt;div&gt;&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-bash" data-lang="bash"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="c1"&gt;# TypeScript packages (monorepo root)&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;npm install
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="c1"&gt;# Python API server&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nb"&gt;cd&lt;/span&gt; packages/server
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;pip install -e &lt;span class="s2"&gt;&amp;#34;.[dev]&amp;#34;&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nb"&gt;cd&lt;/span&gt; ../..
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="c1"&gt;# Python CLI&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nb"&gt;cd&lt;/span&gt; cli
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;pip install -e .
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nb"&gt;cd&lt;/span&gt; ..&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;&lt;div class="hextra-code-copy-btn-container hx:opacity-0 hx:transition hx:group-hover/code:opacity-100 hx:flex hx:gap-1 hx:absolute hx:m-[11px] hx:right-0 hx:top-0"&gt;
+&lt;button
+class="hextra-code-copy-btn hx:group/copybtn hx:cursor-pointer hx:transition-all hx:active:opacity-50 hx:bg-primary-700/5 hx:border hx:border-black/5 hx:text-gray-600 hx:hover:text-gray-900 hx:rounded-md hx:p-1.5 hx:dark:bg-primary-300/10 hx:dark:border-white/10 hx:dark:text-gray-400 hx:dark:hover:text-gray-50"
+title="Copy code"
+aria-label="Copy code"
+data-copied-label="Copied!"
+&gt;
+&lt;div class="hextra-copy-icon hx:group-[.copied]/copybtn:hidden hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;div class="hextra-success-icon hx:hidden hx:group-[.copied]/copybtn:block hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;/button&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;h3&gt;Start Infrastructure&lt;span class="hx:absolute hx:-mt-20" id="start-infrastructure"&gt;&lt;/span&gt;
+&lt;a href="#start-infrastructure" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h3&gt;&lt;p&gt;You need PostgreSQL and Redis running. The simplest way is Docker for just those services:&lt;/p&gt;
+&lt;div class="hextra-code-block hx:relative hx:mt-6 hx:first:mt-0 hx:group/code"&gt;
+&lt;div&gt;&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-bash" data-lang="bash"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;docker compose up -d postgres redis&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;&lt;div class="hextra-code-copy-btn-container hx:opacity-0 hx:transition hx:group-hover/code:opacity-100 hx:flex hx:gap-1 hx:absolute hx:m-[11px] hx:right-0 hx:top-0"&gt;
+&lt;button
+class="hextra-code-copy-btn hx:group/copybtn hx:cursor-pointer hx:transition-all hx:active:opacity-50 hx:bg-primary-700/5 hx:border hx:border-black/5 hx:text-gray-600 hx:hover:text-gray-900 hx:rounded-md hx:p-1.5 hx:dark:bg-primary-300/10 hx:dark:border-white/10 hx:dark:text-gray-400 hx:dark:hover:text-gray-50"
+title="Copy code"
+aria-label="Copy code"
+data-copied-label="Copied!"
+&gt;
+&lt;div class="hextra-copy-icon hx:group-[.copied]/copybtn:hidden hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;div class="hextra-success-icon hx:hidden hx:group-[.copied]/copybtn:block hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;/button&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;p&gt;Or run them locally:&lt;/p&gt;
+&lt;div class="hextra-code-block hx:relative hx:mt-6 hx:first:mt-0 hx:group/code"&gt;
+&lt;div&gt;&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-bash" data-lang="bash"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="c1"&gt;# macOS&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;brew services start postgresql@16
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;brew services start redis&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;&lt;div class="hextra-code-copy-btn-container hx:opacity-0 hx:transition hx:group-hover/code:opacity-100 hx:flex hx:gap-1 hx:absolute hx:m-[11px] hx:right-0 hx:top-0"&gt;
+&lt;button
+class="hextra-code-copy-btn hx:group/copybtn hx:cursor-pointer hx:transition-all hx:active:opacity-50 hx:bg-primary-700/5 hx:border hx:border-black/5 hx:text-gray-600 hx:hover:text-gray-900 hx:rounded-md hx:p-1.5 hx:dark:bg-primary-300/10 hx:dark:border-white/10 hx:dark:text-gray-400 hx:dark:hover:text-gray-50"
+title="Copy code"
+aria-label="Copy code"
+data-copied-label="Copied!"
+&gt;
+&lt;div class="hextra-copy-icon hx:group-[.copied]/copybtn:hidden hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;div class="hextra-success-icon hx:hidden hx:group-[.copied]/copybtn:block hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;/button&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;h3&gt;Start Services&lt;span class="hx:absolute hx:-mt-20" id="start-services"&gt;&lt;/span&gt;
+&lt;a href="#start-services" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h3&gt;&lt;p&gt;Run each service in a separate terminal:&lt;/p&gt;
+&lt;div class="hextra-code-block hx:relative hx:mt-6 hx:first:mt-0 hx:group/code"&gt;
+&lt;div&gt;&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-bash" data-lang="bash"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="c1"&gt;# 1. API Server&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nb"&gt;cd&lt;/span&gt; packages/server
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;uvicorn app.main:app --reload --port &lt;span class="m"&gt;8000&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="c1"&gt;# 2. Pipeline Engine&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nb"&gt;cd&lt;/span&gt; packages/core
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;npm run build
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;node dist/main.js
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="c1"&gt;# 3. Dashboard (dev server with hot reload)&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nb"&gt;cd&lt;/span&gt; packages/dashboard
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;npm run dev&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;&lt;div class="hextra-code-copy-btn-container hx:opacity-0 hx:transition hx:group-hover/code:opacity-100 hx:flex hx:gap-1 hx:absolute hx:m-[11px] hx:right-0 hx:top-0"&gt;
+&lt;button
+class="hextra-code-copy-btn hx:group/copybtn hx:cursor-pointer hx:transition-all hx:active:opacity-50 hx:bg-primary-700/5 hx:border hx:border-black/5 hx:text-gray-600 hx:hover:text-gray-900 hx:rounded-md hx:p-1.5 hx:dark:bg-primary-300/10 hx:dark:border-white/10 hx:dark:text-gray-400 hx:dark:hover:text-gray-50"
+title="Copy code"
+aria-label="Copy code"
+data-copied-label="Copied!"
+&gt;
+&lt;div class="hextra-copy-icon hx:group-[.copied]/copybtn:hidden hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;div class="hextra-success-icon hx:hidden hx:group-[.copied]/copybtn:block hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;/button&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;h3&gt;Environment Variables&lt;span class="hx:absolute hx:-mt-20" id="environment-variables"&gt;&lt;/span&gt;
+&lt;a href="#environment-variables" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h3&gt;&lt;p&gt;Create a &lt;code&gt;.env&lt;/code&gt; file at the repo root:&lt;/p&gt;
+&lt;div class="hextra-code-block hx:relative hx:mt-6 hx:first:mt-0 hx:group/code"&gt;
+&lt;div&gt;&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-bash" data-lang="bash"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nv"&gt;OPENROUTER_API_KEY&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;sk-or-v1-your-key
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nv"&gt;DATABASE_URL&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;postgresql+asyncpg://djinnbot:djinnbot@localhost:5432/djinnbot
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nv"&gt;REDIS_URL&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;redis://localhost:6379
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nv"&gt;PIPELINES_DIR&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;./pipelines
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nv"&gt;AGENTS_DIR&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;./agents
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nv"&gt;LOG_LEVEL&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;DEBUG&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;&lt;div class="hextra-code-copy-btn-container hx:opacity-0 hx:transition hx:group-hover/code:opacity-100 hx:flex hx:gap-1 hx:absolute hx:m-[11px] hx:right-0 hx:top-0"&gt;
+&lt;button
+class="hextra-code-copy-btn hx:group/copybtn hx:cursor-pointer hx:transition-all hx:active:opacity-50 hx:bg-primary-700/5 hx:border hx:border-black/5 hx:text-gray-600 hx:hover:text-gray-900 hx:rounded-md hx:p-1.5 hx:dark:bg-primary-300/10 hx:dark:border-white/10 hx:dark:text-gray-400 hx:dark:hover:text-gray-50"
+title="Copy code"
+aria-label="Copy code"
+data-copied-label="Copied!"
+&gt;
+&lt;div class="hextra-copy-icon hx:group-[.copied]/copybtn:hidden hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;div class="hextra-success-icon hx:hidden hx:group-[.copied]/copybtn:block hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;/button&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;h2&gt;Build&lt;span class="hx:absolute hx:-mt-20" id="build"&gt;&lt;/span&gt;
+&lt;a href="#build" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;div class="hextra-code-block hx:relative hx:mt-6 hx:first:mt-0 hx:group/code"&gt;
+&lt;div&gt;&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-bash" data-lang="bash"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="c1"&gt;# Build all TypeScript packages&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;npm run build
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="c1"&gt;# Build specific package&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;npm run build --filter&lt;span class="o"&gt;=&lt;/span&gt;@djinnbot/core
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="c1"&gt;# Type checking&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;npm run typecheck
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="c1"&gt;# Linting&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;npm run lint&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;&lt;div class="hextra-code-copy-btn-container hx:opacity-0 hx:transition hx:group-hover/code:opacity-100 hx:flex hx:gap-1 hx:absolute hx:m-[11px] hx:right-0 hx:top-0"&gt;
+&lt;button
+class="hextra-code-copy-btn hx:group/copybtn hx:cursor-pointer hx:transition-all hx:active:opacity-50 hx:bg-primary-700/5 hx:border hx:border-black/5 hx:text-gray-600 hx:hover:text-gray-900 hx:rounded-md hx:p-1.5 hx:dark:bg-primary-300/10 hx:dark:border-white/10 hx:dark:text-gray-400 hx:dark:hover:text-gray-50"
+title="Copy code"
+aria-label="Copy code"
+data-copied-label="Copied!"
+&gt;
+&lt;div class="hextra-copy-icon hx:group-[.copied]/copybtn:hidden hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;div class="hextra-success-icon hx:hidden hx:group-[.copied]/copybtn:block hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;/button&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;h2&gt;Project Structure&lt;span class="hx:absolute hx:-mt-20" id="project-structure"&gt;&lt;/span&gt;
+&lt;a href="#project-structure" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;p&gt;The monorepo uses &lt;a href="https://turbo.build/"target="_blank" rel="noopener"&gt;Turborepo&lt;/a&gt; for build orchestration:&lt;/p&gt;
+&lt;div class="hextra-code-block hx:relative hx:mt-6 hx:first:mt-0 hx:group/code"&gt;
+&lt;div&gt;&lt;pre&gt;&lt;code&gt;package.json # Root workspace config
+turbo.json # Build pipeline config
+packages/
+├── core/ # Pipeline engine (TypeScript)
+│ └── src/
+│ ├── engine/ # Pipeline state machine
+│ ├── events/ # Redis Streams event bus
+│ ├── runtime/ # Agent executor
+│ ├── container/ # Docker container management
+│ ├── memory/ # ClawVault integration
+│ ├── mcp/ # MCP/mcpo manager
+│ ├── skills/ # Skill registry
+│ ├── chat/ # Chat session manager
+│ ├── projects/ # Project/task management
+│ ├── lifecycle/ # Agent activity tracking
+│ └── sessions/ # Session management
+├── server/ # API server (Python/FastAPI)
+│ └── app/
+│ ├── routers/ # REST endpoints (30&amp;#43; routers)
+│ ├── models/ # SQLAlchemy models
+│ ├── services/ # Business logic
+│ └── alembic/ # Database migrations
+├── dashboard/ # Web UI (React/TypeScript)
+│ └── src/
+│ ├── routes/ # TanStack Router pages
+│ ├── components/ # React components
+│ ├── hooks/ # Custom React hooks
+│ └── lib/ # API client, SSE, formatters
+├── slack/ # Slack integration (TypeScript)
+│ └── src/
+│ ├── slack-bridge.ts
+│ ├── agent-slack-runtime.ts
+│ └── thread-manager.ts
+└── agent-runtime/ # Container entrypoint (TypeScript)
+└── src/
+├── entrypoint.ts
+├── agent/ # Agent initialization
+└── tools/ # Container-side tools (bash, read, write, edit)&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;div class="hextra-code-copy-btn-container hx:opacity-0 hx:transition hx:group-hover/code:opacity-100 hx:flex hx:gap-1 hx:absolute hx:m-[11px] hx:right-0 hx:top-0"&gt;
+&lt;button
+class="hextra-code-copy-btn hx:group/copybtn hx:cursor-pointer hx:transition-all hx:active:opacity-50 hx:bg-primary-700/5 hx:border hx:border-black/5 hx:text-gray-600 hx:hover:text-gray-900 hx:rounded-md hx:p-1.5 hx:dark:bg-primary-300/10 hx:dark:border-white/10 hx:dark:text-gray-400 hx:dark:hover:text-gray-50"
+title="Copy code"
+aria-label="Copy code"
+data-copied-label="Copied!"
+&gt;
+&lt;div class="hextra-copy-icon hx:group-[.copied]/copybtn:hidden hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;div class="hextra-success-icon hx:hidden hx:group-[.copied]/copybtn:block hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;/button&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;h2&gt;Database Migrations&lt;span class="hx:absolute hx:-mt-20" id="database-migrations"&gt;&lt;/span&gt;
+&lt;a href="#database-migrations" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;p&gt;The API server uses Alembic for PostgreSQL migrations:&lt;/p&gt;
+&lt;div class="hextra-code-block hx:relative hx:mt-6 hx:first:mt-0 hx:group/code"&gt;
+&lt;div&gt;&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-bash" data-lang="bash"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nb"&gt;cd&lt;/span&gt; packages/server
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="c1"&gt;# Check migration status&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;alembic current
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="c1"&gt;# Create a new migration&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;alembic revision --autogenerate -m &lt;span class="s2"&gt;&amp;#34;add_new_field&amp;#34;&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="c1"&gt;# Run migrations&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;alembic upgrade head&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;&lt;div class="hextra-code-copy-btn-container hx:opacity-0 hx:transition hx:group-hover/code:opacity-100 hx:flex hx:gap-1 hx:absolute hx:m-[11px] hx:right-0 hx:top-0"&gt;
+&lt;button
+class="hextra-code-copy-btn hx:group/copybtn hx:cursor-pointer hx:transition-all hx:active:opacity-50 hx:bg-primary-700/5 hx:border hx:border-black/5 hx:text-gray-600 hx:hover:text-gray-900 hx:rounded-md hx:p-1.5 hx:dark:bg-primary-300/10 hx:dark:border-white/10 hx:dark:text-gray-400 hx:dark:hover:text-gray-50"
+title="Copy code"
+aria-label="Copy code"
+data-copied-label="Copied!"
+&gt;
+&lt;div class="hextra-copy-icon hx:group-[.copied]/copybtn:hidden hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;div class="hextra-success-icon hx:hidden hx:group-[.copied]/copybtn:block hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;/button&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;p&gt;Migrations run automatically on API server startup via &lt;code&gt;ensure_migrations()&lt;/code&gt;.&lt;/p&gt;</description></item><item><title>Security Model</title><link>https://docs.djinn.bot/docs/advanced/security/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://docs.djinn.bot/docs/advanced/security/</guid><description>
+&lt;p&gt;DjinnBot takes security seriously with container isolation, encrypted secrets, and minimal attack surface.&lt;/p&gt;
+&lt;h2&gt;Container Isolation&lt;span class="hx:absolute hx:-mt-20" id="container-isolation"&gt;&lt;/span&gt;
+&lt;a href="#container-isolation" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;p&gt;Every agent runs in its own Docker container. This provides:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;Filesystem isolation&lt;/strong&gt; — agents cannot access the host filesystem&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Process isolation&lt;/strong&gt; — agents cannot see or interact with host processes&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Network isolation&lt;/strong&gt; — containers are on a private bridge network&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;No Docker socket&lt;/strong&gt; — agent containers cannot spawn other containers&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Ephemeral execution&lt;/strong&gt; — containers are destroyed after each step, leaving no persistent state outside the data volume&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;The engine container has Docker socket access (required to spawn agent containers), but this is limited to the engine service only. Agent containers receive no Docker socket access.&lt;/p&gt;
+&lt;h2&gt;Secrets Management&lt;span class="hx:absolute hx:-mt-20" id="secrets-management"&gt;&lt;/span&gt;
+&lt;a href="#secrets-management" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;h3&gt;Encryption at Rest&lt;span class="hx:absolute hx:-mt-20" id="encryption-at-rest"&gt;&lt;/span&gt;
+&lt;a href="#encryption-at-rest" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h3&gt;&lt;p&gt;User-defined secrets (API keys, SSH keys, tokens) are encrypted with AES-256-GCM before storage in PostgreSQL. The encryption key is configured via &lt;code&gt;SECRET_ENCRYPTION_KEY&lt;/code&gt; in &lt;code&gt;.env&lt;/code&gt;.&lt;/p&gt;
+&lt;div class="hextra-code-block hx:relative hx:mt-6 hx:first:mt-0 hx:group/code"&gt;
+&lt;div&gt;&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-bash" data-lang="bash"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="c1"&gt;# Generate a strong encryption key&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;python3 -c &lt;span class="s2"&gt;&amp;#34;import secrets; print(secrets.token_hex(32))&amp;#34;&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;&lt;div class="hextra-code-copy-btn-container hx:opacity-0 hx:transition hx:group-hover/code:opacity-100 hx:flex hx:gap-1 hx:absolute hx:m-[11px] hx:right-0 hx:top-0"&gt;
+&lt;button
+class="hextra-code-copy-btn hx:group/copybtn hx:cursor-pointer hx:transition-all hx:active:opacity-50 hx:bg-primary-700/5 hx:border hx:border-black/5 hx:text-gray-600 hx:hover:text-gray-900 hx:rounded-md hx:p-1.5 hx:dark:bg-primary-300/10 hx:dark:border-white/10 hx:dark:text-gray-400 hx:dark:hover:text-gray-50"
+title="Copy code"
+aria-label="Copy code"
+data-copied-label="Copied!"
+&gt;
+&lt;div class="hextra-copy-icon hx:group-[.copied]/copybtn:hidden hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;div class="hextra-success-icon hx:hidden hx:group-[.copied]/copybtn:block hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;/button&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class="hx:overflow-x-auto hx:mt-6 hx:flex hx:rounded-lg hx:border hx:py-2 hx:ltr:pr-4 hx:rtl:pl-4 hx:contrast-more:border-current hx:contrast-more:dark:border-current hx:border-amber-200 hx:bg-amber-100 hx:text-amber-900 hx:dark:border-amber-200/30 hx:dark:bg-amber-900/30 hx:dark:text-amber-200"&gt;
+&lt;div class="hx:ltr:pl-3 hx:ltr:pr-2 hx:rtl:pr-3 hx:rtl:pl-2"&gt;&lt;svg height=1.2em class="hx:inline-block hx:align-middle" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" aria-hidden="true"&gt;&lt;path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/&gt;&lt;/svg&gt;&lt;/div&gt;
+&lt;div class="hx:w-full hx:min-w-0 hx:leading-7"&gt;
+&lt;div class="hx:mt-6 hx:leading-7 hx:first:mt-0"&gt;Without &lt;code&gt;SECRET_ENCRYPTION_KEY&lt;/code&gt;, secrets are encrypted with an ephemeral key that changes on restart — making stored secrets permanently unrecoverable. Always set this in production.&lt;/div&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;h3&gt;MCP Proxy Authentication&lt;span class="hx:absolute hx:-mt-20" id="mcp-proxy-authentication"&gt;&lt;/span&gt;
+&lt;a href="#mcp-proxy-authentication" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h3&gt;&lt;p&gt;The mcpo proxy is protected by &lt;code&gt;MCPO_API_KEY&lt;/code&gt;. Agent containers receive this key to authenticate tool calls. Generate a strong key:&lt;/p&gt;
+&lt;div class="hextra-code-block hx:relative hx:mt-6 hx:first:mt-0 hx:group/code"&gt;
+&lt;div&gt;&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-bash" data-lang="bash"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;python3 -c &lt;span class="s2"&gt;&amp;#34;import secrets; print(secrets.token_urlsafe(32))&amp;#34;&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;&lt;div class="hextra-code-copy-btn-container hx:opacity-0 hx:transition hx:group-hover/code:opacity-100 hx:flex hx:gap-1 hx:absolute hx:m-[11px] hx:right-0 hx:top-0"&gt;
+&lt;button
+class="hextra-code-copy-btn hx:group/copybtn hx:cursor-pointer hx:transition-all hx:active:opacity-50 hx:bg-primary-700/5 hx:border hx:border-black/5 hx:text-gray-600 hx:hover:text-gray-900 hx:rounded-md hx:p-1.5 hx:dark:bg-primary-300/10 hx:dark:border-white/10 hx:dark:text-gray-400 hx:dark:hover:text-gray-50"
+title="Copy code"
+aria-label="Copy code"
+data-copied-label="Copied!"
+&gt;
+&lt;div class="hextra-copy-icon hx:group-[.copied]/copybtn:hidden hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;div class="hextra-success-icon hx:hidden hx:group-[.copied]/copybtn:block hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;/button&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;h3&gt;Credential Injection&lt;span class="hx:absolute hx:-mt-20" id="credential-injection"&gt;&lt;/span&gt;
+&lt;a href="#credential-injection" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h3&gt;&lt;p&gt;Provider API keys are injected into agent containers as environment variables — they&amp;rsquo;re never baked into images or written to disk. The engine fetches keys from the database and passes them to containers at runtime.&lt;/p&gt;
+&lt;h2&gt;Network Security&lt;span class="hx:absolute hx:-mt-20" id="network-security"&gt;&lt;/span&gt;
+&lt;a href="#network-security" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;h3&gt;Default Configuration&lt;span class="hx:absolute hx:-mt-20" id="default-configuration"&gt;&lt;/span&gt;
+&lt;a href="#default-configuration" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h3&gt;&lt;p&gt;The default Docker Compose setup exposes services on localhost:&lt;/p&gt;
+&lt;table&gt;
+&lt;thead&gt;
+&lt;tr&gt;
+&lt;th&gt;Service&lt;/th&gt;
+&lt;th&gt;Bound To&lt;/th&gt;
+&lt;th&gt;Port&lt;/th&gt;
+&lt;/tr&gt;
+&lt;/thead&gt;
+&lt;tbody&gt;
+&lt;tr&gt;
+&lt;td&gt;Dashboard&lt;/td&gt;
+&lt;td&gt;&lt;code&gt;0.0.0.0:3000&lt;/code&gt;&lt;/td&gt;
+&lt;td&gt;3000&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;
+&lt;td&gt;API&lt;/td&gt;
+&lt;td&gt;&lt;code&gt;0.0.0.0:8000&lt;/code&gt;&lt;/td&gt;
+&lt;td&gt;8000&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;
+&lt;td&gt;mcpo&lt;/td&gt;
+&lt;td&gt;&lt;code&gt;0.0.0.0:8001&lt;/code&gt;&lt;/td&gt;
+&lt;td&gt;8001&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;
+&lt;td&gt;PostgreSQL&lt;/td&gt;
+&lt;td&gt;&lt;code&gt;0.0.0.0:5432&lt;/code&gt;&lt;/td&gt;
+&lt;td&gt;5432&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;
+&lt;td&gt;Redis&lt;/td&gt;
+&lt;td&gt;&lt;code&gt;0.0.0.0:6379&lt;/code&gt;&lt;/td&gt;
+&lt;td&gt;6379&lt;/td&gt;
+&lt;/tr&gt;
+&lt;/tbody&gt;
+&lt;/table&gt;
+&lt;h3&gt;Production Hardening&lt;span class="hx:absolute hx:-mt-20" id="production-hardening"&gt;&lt;/span&gt;
+&lt;a href="#production-hardening" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h3&gt;&lt;p&gt;For production deployments:&lt;/p&gt;
+&lt;ol&gt;
+&lt;li&gt;&lt;strong&gt;Bind to localhost&lt;/strong&gt; — change port bindings to &lt;code&gt;127.0.0.1:PORT:PORT&lt;/code&gt;&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Reverse proxy&lt;/strong&gt; — put nginx or Caddy in front of the API and dashboard with TLS&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Firewall&lt;/strong&gt; — block external access to PostgreSQL, Redis, and mcpo ports&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Change defaults&lt;/strong&gt; — update PostgreSQL password, mcpo API key, and encryption key&lt;/li&gt;
+&lt;/ol&gt;
+&lt;h3&gt;Internal Network&lt;span class="hx:absolute hx:-mt-20" id="internal-network"&gt;&lt;/span&gt;
+&lt;a href="#internal-network" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h3&gt;&lt;p&gt;All DjinnBot services communicate on the &lt;code&gt;djinnbot_default&lt;/code&gt; Docker bridge network. Agent containers are attached to this network for Redis and API access, but cannot reach the host network.&lt;/p&gt;
+&lt;h2&gt;Comparison with Other Tools&lt;span class="hx:absolute hx:-mt-20" id="comparison-with-other-tools"&gt;&lt;/span&gt;
+&lt;a href="#comparison-with-other-tools" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;p&gt;Unlike tools that execute agent code directly on the host:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;DjinnBot agents &lt;strong&gt;cannot access your files&lt;/strong&gt; outside their workspace&lt;/li&gt;
+&lt;li&gt;DjinnBot agents &lt;strong&gt;cannot read your SSH keys, browser cookies, or environment&lt;/strong&gt;&lt;/li&gt;
+&lt;li&gt;DjinnBot agents &lt;strong&gt;cannot install packages on your system&lt;/strong&gt;&lt;/li&gt;
+&lt;li&gt;DjinnBot agents &lt;strong&gt;cannot run as root on your machine&lt;/strong&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;The container boundary is a hard security line. The worst case scenario is an agent doing damage inside its own ephemeral container, which is destroyed after the step completes.&lt;/p&gt;</description></item></channel></rss>

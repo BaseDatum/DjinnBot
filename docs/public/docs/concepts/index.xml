@@ -1,0 +1,1400 @@
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>DjinnBot – Core Concepts</title><link>https://docs.djinn.bot/docs/concepts/</link><description>Recent content in Core Concepts on DjinnBot</description><generator>Hugo -- gohugo.io</generator><language>en-us</language><atom:link href="https://docs.djinn.bot/docs/concepts/index.xml" rel="self" type="application/rss+xml"/><item><title>Architecture</title><link>https://docs.djinn.bot/docs/concepts/architecture/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://docs.djinn.bot/docs/concepts/architecture/</guid><description>
+&lt;p&gt;DjinnBot is a distributed system built around an event-driven architecture. Here&amp;rsquo;s how the pieces fit together.&lt;/p&gt;
+&lt;h2&gt;System Overview&lt;span class="hx:absolute hx:-mt-20" id="system-overview"&gt;&lt;/span&gt;
+&lt;a href="#system-overview" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;div class="hextra-code-block hx:relative hx:mt-6 hx:first:mt-0 hx:group/code"&gt;
+&lt;div&gt;&lt;pre&gt;&lt;code&gt;┌──────────────────┐ ┌──────────────────┐ ┌──────────────┐
+│ Dashboard │◄─SSE─│ API Server │◄─────│ PostgreSQL │
+│ (React &amp;#43; Vite) │ │ (FastAPI) │ │ │
+└──────────────────┘ └──────────────────┘ └──────────────┘
+│ ▲
+▼ │
+┌──────────────────┐ ┌──────────────┐
+│ Pipeline Engine │─────►│ Redis │
+│ (State Machine) │ │ (Streams) │
+└──────────────────┘ └──────────────┘
+│
+┌─────────────┼─────────────┐
+▼ ▼ ▼
+┌──────────┐ ┌──────────┐ ┌──────────────┐
+│ Agent │ │ Agent │ │ mcpo Proxy │
+│Container │ │Container │ │ (MCP Tools) │
+└──────────┘ └──────────┘ └──────────────┘&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;div class="hextra-code-copy-btn-container hx:opacity-0 hx:transition hx:group-hover/code:opacity-100 hx:flex hx:gap-1 hx:absolute hx:m-[11px] hx:right-0 hx:top-0"&gt;
+&lt;button
+class="hextra-code-copy-btn hx:group/copybtn hx:cursor-pointer hx:transition-all hx:active:opacity-50 hx:bg-primary-700/5 hx:border hx:border-black/5 hx:text-gray-600 hx:hover:text-gray-900 hx:rounded-md hx:p-1.5 hx:dark:bg-primary-300/10 hx:dark:border-white/10 hx:dark:text-gray-400 hx:dark:hover:text-gray-50"
+title="Copy code"
+aria-label="Copy code"
+data-copied-label="Copied!"
+&gt;
+&lt;div class="hextra-copy-icon hx:group-[.copied]/copybtn:hidden hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;div class="hextra-success-icon hx:hidden hx:group-[.copied]/copybtn:block hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;/button&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;h2&gt;Services&lt;span class="hx:absolute hx:-mt-20" id="services"&gt;&lt;/span&gt;
+&lt;a href="#services" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;h3&gt;API Server (Python / FastAPI)&lt;span class="hx:absolute hx:-mt-20" id="api-server-python--fastapi"&gt;&lt;/span&gt;
+&lt;a href="#api-server-python--fastapi" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h3&gt;&lt;p&gt;The API server is the central coordination point. It provides:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;REST API&lt;/strong&gt; — all CRUD operations for runs, pipelines, agents, projects, settings, memory, etc.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;SSE streaming&lt;/strong&gt; — Server-Sent Events for real-time dashboard updates&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Database access&lt;/strong&gt; — PostgreSQL via SQLAlchemy with Alembic migrations&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;GitHub webhooks&lt;/strong&gt; — receive events from GitHub for issue/PR integration&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Chat management&lt;/strong&gt; — session lifecycle for interactive agent conversations&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;The API server does &lt;strong&gt;not&lt;/strong&gt; execute agents. It stores state and serves the frontend.&lt;/p&gt;
+&lt;h3&gt;Pipeline Engine (TypeScript / Node.js)&lt;span class="hx:absolute hx:-mt-20" id="pipeline-engine-typescript--nodejs"&gt;&lt;/span&gt;
+&lt;a href="#pipeline-engine-typescript--nodejs" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h3&gt;&lt;p&gt;The engine is the brain of the system. It:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;Runs the state machine&lt;/strong&gt; — advances pipeline steps based on events&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Spawns agent containers&lt;/strong&gt; — creates isolated Docker containers for each agent step&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Manages memory&lt;/strong&gt; — loads/saves ClawVault memories for each agent session&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Bridges Slack&lt;/strong&gt; — routes events to Slack threads and processes agent mentions&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Manages MCP&lt;/strong&gt; — writes tool server config and monitors health via the McpoManager&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Processes events&lt;/strong&gt; — subscribes to Redis Streams for reliable, ordered event delivery&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;The engine communicates with agent containers via Redis pub/sub — sending commands (run step, send message) and receiving events (output chunks, tool calls, completion).&lt;/p&gt;
+&lt;h3&gt;Dashboard (React / Vite / TanStack Router)&lt;span class="hx:absolute hx:-mt-20" id="dashboard-react--vite--tanstack-router"&gt;&lt;/span&gt;
+&lt;a href="#dashboard-react--vite--tanstack-router" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h3&gt;&lt;p&gt;A single-page application built with:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;React&lt;/strong&gt; with TypeScript&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;TanStack Router&lt;/strong&gt; for file-based routing&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Tailwind CSS&lt;/strong&gt; for styling&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;SSE&lt;/strong&gt; for real-time streaming updates&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;The dashboard talks directly to the API server — there&amp;rsquo;s no backend-for-frontend. It&amp;rsquo;s served as static files by nginx in the Docker container.&lt;/p&gt;
+&lt;h3&gt;Redis (Event Bus)&lt;span class="hx:absolute hx:-mt-20" id="redis-event-bus"&gt;&lt;/span&gt;
+&lt;a href="#redis-event-bus" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h3&gt;&lt;p&gt;Redis serves two roles:&lt;/p&gt;
+&lt;ol&gt;
+&lt;li&gt;&lt;strong&gt;Streams&lt;/strong&gt; — reliable, ordered event delivery between the API server and engine. Events like &lt;code&gt;RUN_CREATED&lt;/code&gt;, &lt;code&gt;STEP_QUEUED&lt;/code&gt;, &lt;code&gt;STEP_COMPLETE&lt;/code&gt; flow through Redis Streams.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Pub/Sub&lt;/strong&gt; — real-time communication between the engine and agent containers. The engine sends commands, agents publish output chunks and events.&lt;/li&gt;
+&lt;/ol&gt;
+&lt;h3&gt;PostgreSQL (State Store)&lt;span class="hx:absolute hx:-mt-20" id="postgresql-state-store"&gt;&lt;/span&gt;
+&lt;a href="#postgresql-state-store" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h3&gt;&lt;p&gt;All persistent state lives in PostgreSQL:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;Pipeline run state and history&lt;/li&gt;
+&lt;li&gt;Step outputs and timing&lt;/li&gt;
+&lt;li&gt;Agent configuration&lt;/li&gt;
+&lt;li&gt;Project boards and tasks&lt;/li&gt;
+&lt;li&gt;Settings and provider configuration&lt;/li&gt;
+&lt;li&gt;MCP server registry&lt;/li&gt;
+&lt;li&gt;Chat session messages&lt;/li&gt;
+&lt;li&gt;Secrets (encrypted at rest)&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h3&gt;Agent Containers&lt;span class="hx:absolute hx:-mt-20" id="agent-containers"&gt;&lt;/span&gt;
+&lt;a href="#agent-containers" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h3&gt;&lt;p&gt;Each agent step spawns a fresh Docker container built from &lt;code&gt;Dockerfile.agent-runtime&lt;/code&gt;. See &lt;a href="https://docs.djinn.bot/docs/concepts/containers/"&gt;Agent Containers&lt;/a&gt; for details.&lt;/p&gt;
+&lt;h3&gt;mcpo Proxy&lt;span class="hx:absolute hx:-mt-20" id="mcpo-proxy"&gt;&lt;/span&gt;
+&lt;a href="#mcpo-proxy" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h3&gt;&lt;p&gt;The &lt;a href="https://github.com/skymoore/mcpo"target="_blank" rel="noopener"&gt;mcpo&lt;/a&gt; proxy exposes MCP tool servers as REST/OpenAPI endpoints. See &lt;a href="https://docs.djinn.bot/docs/concepts/mcp-tools/"&gt;MCP Tools&lt;/a&gt; for details.&lt;/p&gt;
+&lt;h2&gt;Event Flow&lt;span class="hx:absolute hx:-mt-20" id="event-flow"&gt;&lt;/span&gt;
+&lt;a href="#event-flow" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;p&gt;Here&amp;rsquo;s what happens when you start a pipeline run:&lt;/p&gt;
+&lt;ol&gt;
+&lt;li&gt;&lt;strong&gt;Dashboard&lt;/strong&gt; → &lt;code&gt;POST /v1/runs&lt;/code&gt; → &lt;strong&gt;API Server&lt;/strong&gt; creates run in PostgreSQL&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;API Server&lt;/strong&gt; → publishes &lt;code&gt;RUN_CREATED&lt;/code&gt; event → &lt;strong&gt;Redis Streams&lt;/strong&gt;&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Engine&lt;/strong&gt; picks up event → creates run state machine → publishes &lt;code&gt;STEP_QUEUED&lt;/code&gt; for first step&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Engine&lt;/strong&gt; → spawns &lt;strong&gt;Agent Container&lt;/strong&gt; with persona, memories, and workspace&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Agent&lt;/strong&gt; executes step → streams output chunks via &lt;strong&gt;Redis Pub/Sub&lt;/strong&gt; → &lt;strong&gt;Engine&lt;/strong&gt; relays to &lt;strong&gt;API Server&lt;/strong&gt; → &lt;strong&gt;Dashboard&lt;/strong&gt; displays via SSE&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Agent&lt;/strong&gt; completes → &lt;strong&gt;Engine&lt;/strong&gt; evaluates result → routes to next step (or branches, retries, loops)&lt;/li&gt;
+&lt;li&gt;Steps continue until pipeline completes or fails&lt;/li&gt;
+&lt;/ol&gt;
+&lt;h2&gt;Tech Stack Summary&lt;span class="hx:absolute hx:-mt-20" id="tech-stack-summary"&gt;&lt;/span&gt;
+&lt;a href="#tech-stack-summary" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;table&gt;
+&lt;thead&gt;
+&lt;tr&gt;
+&lt;th&gt;Component&lt;/th&gt;
+&lt;th&gt;Technology&lt;/th&gt;
+&lt;th&gt;Language&lt;/th&gt;
+&lt;/tr&gt;
+&lt;/thead&gt;
+&lt;tbody&gt;
+&lt;tr&gt;
+&lt;td&gt;API Server&lt;/td&gt;
+&lt;td&gt;FastAPI, SQLAlchemy, Alembic&lt;/td&gt;
+&lt;td&gt;Python&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;
+&lt;td&gt;Pipeline Engine&lt;/td&gt;
+&lt;td&gt;Custom state machine, Redis Streams&lt;/td&gt;
+&lt;td&gt;TypeScript&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;
+&lt;td&gt;Dashboard&lt;/td&gt;
+&lt;td&gt;React, TanStack Router, Tailwind&lt;/td&gt;
+&lt;td&gt;TypeScript&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;
+&lt;td&gt;Agent Runtime&lt;/td&gt;
+&lt;td&gt;pi-mono (pi-agent-core)&lt;/td&gt;
+&lt;td&gt;TypeScript&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;
+&lt;td&gt;Agent Containers&lt;/td&gt;
+&lt;td&gt;Debian bookworm, full toolbox&lt;/td&gt;
+&lt;td&gt;Multi-language&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;
+&lt;td&gt;Memory&lt;/td&gt;
+&lt;td&gt;ClawVault + QMDR&lt;/td&gt;
+&lt;td&gt;TypeScript&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;
+&lt;td&gt;Event Bus&lt;/td&gt;
+&lt;td&gt;Redis Streams + Pub/Sub&lt;/td&gt;
+&lt;td&gt;—&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;
+&lt;td&gt;Database&lt;/td&gt;
+&lt;td&gt;PostgreSQL 16&lt;/td&gt;
+&lt;td&gt;—&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;
+&lt;td&gt;MCP Proxy&lt;/td&gt;
+&lt;td&gt;mcpo&lt;/td&gt;
+&lt;td&gt;Python&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;
+&lt;td&gt;Build System&lt;/td&gt;
+&lt;td&gt;Turborepo&lt;/td&gt;
+&lt;td&gt;—&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;
+&lt;td&gt;Orchestration&lt;/td&gt;
+&lt;td&gt;Docker Compose&lt;/td&gt;
+&lt;td&gt;—&lt;/td&gt;
+&lt;/tr&gt;
+&lt;/tbody&gt;
+&lt;/table&gt;
+&lt;h2&gt;Monorepo Structure&lt;span class="hx:absolute hx:-mt-20" id="monorepo-structure"&gt;&lt;/span&gt;
+&lt;a href="#monorepo-structure" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;p&gt;DjinnBot is a Turborepo monorepo with npm workspaces:&lt;/p&gt;
+&lt;div class="hextra-code-block hx:relative hx:mt-6 hx:first:mt-0 hx:group/code"&gt;
+&lt;div&gt;&lt;pre&gt;&lt;code&gt;packages/
+├── core/ # Engine, events, memory, container management (TypeScript)
+├── server/ # API server (Python/FastAPI)
+├── dashboard/ # Web UI (React/TypeScript)
+├── slack/ # Slack bridge and per-agent bots (TypeScript)
+└── agent-runtime/ # Container entrypoint and tools (TypeScript)&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;div class="hextra-code-copy-btn-container hx:opacity-0 hx:transition hx:group-hover/code:opacity-100 hx:flex hx:gap-1 hx:absolute hx:m-[11px] hx:right-0 hx:top-0"&gt;
+&lt;button
+class="hextra-code-copy-btn hx:group/copybtn hx:cursor-pointer hx:transition-all hx:active:opacity-50 hx:bg-primary-700/5 hx:border hx:border-black/5 hx:text-gray-600 hx:hover:text-gray-900 hx:rounded-md hx:p-1.5 hx:dark:bg-primary-300/10 hx:dark:border-white/10 hx:dark:text-gray-400 hx:dark:hover:text-gray-50"
+title="Copy code"
+aria-label="Copy code"
+data-copied-label="Copied!"
+&gt;
+&lt;div class="hextra-copy-icon hx:group-[.copied]/copybtn:hidden hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;div class="hextra-success-icon hx:hidden hx:group-[.copied]/copybtn:block hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;/button&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;p&gt;The &lt;code&gt;core&lt;/code&gt; package contains the bulk of the orchestration logic — the pipeline engine, Redis event bus, container runner, ClawVault memory integration, skill registry, MCP manager, chat session manager, and more.&lt;/p&gt;</description></item><item><title>Agents</title><link>https://docs.djinn.bot/docs/concepts/agents/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://docs.djinn.bot/docs/concepts/agents/</guid><description>
+&lt;p&gt;Agents are the core of DjinnBot. Each agent is a specialized AI persona with its own identity, expertise, memory, and tools. They&amp;rsquo;re not generic LLM wrappers — they&amp;rsquo;re characters with opinions and domain knowledge.&lt;/p&gt;
+&lt;h2&gt;Agent Files&lt;span class="hx:absolute hx:-mt-20" id="agent-files"&gt;&lt;/span&gt;
+&lt;a href="#agent-files" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;p&gt;Every agent is defined by a directory under &lt;code&gt;agents/&lt;/code&gt;:&lt;/p&gt;
+&lt;div class="hextra-code-block hx:relative hx:mt-6 hx:first:mt-0 hx:group/code"&gt;
+&lt;div&gt;&lt;pre&gt;&lt;code&gt;agents/eric/
+├── IDENTITY.md # Name, origin, role, emoji
+├── SOUL.md # Deep personality, beliefs, anti-patterns, voice
+├── AGENTS.md # Workflow procedures, collaboration triggers, tool usage
+├── DECISION.md # Memory-first decision framework
+├── PULSE.md # Autonomous wake-up routine
+├── config.yml # Model, pulse schedule, thinking settings
+└── slack.yml # Slack bot credentials (optional)&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;div class="hextra-code-copy-btn-container hx:opacity-0 hx:transition hx:group-hover/code:opacity-100 hx:flex hx:gap-1 hx:absolute hx:m-[11px] hx:right-0 hx:top-0"&gt;
+&lt;button
+class="hextra-code-copy-btn hx:group/copybtn hx:cursor-pointer hx:transition-all hx:active:opacity-50 hx:bg-primary-700/5 hx:border hx:border-black/5 hx:text-gray-600 hx:hover:text-gray-900 hx:rounded-md hx:p-1.5 hx:dark:bg-primary-300/10 hx:dark:border-white/10 hx:dark:text-gray-400 hx:dark:hover:text-gray-50"
+title="Copy code"
+aria-label="Copy code"
+data-copied-label="Copied!"
+&gt;
+&lt;div class="hextra-copy-icon hx:group-[.copied]/copybtn:hidden hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;div class="hextra-success-icon hx:hidden hx:group-[.copied]/copybtn:block hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;/button&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;h3&gt;IDENTITY.md&lt;span class="hx:absolute hx:-mt-20" id="identitymd"&gt;&lt;/span&gt;
+&lt;a href="#identitymd" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h3&gt;&lt;p&gt;The basics — name, origin country, role title, emoji, and which pipeline stage(s) this agent handles.&lt;/p&gt;
+&lt;div class="hextra-code-block hx:relative hx:mt-6 hx:first:mt-0 hx:group/code"&gt;
+&lt;div&gt;&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-markdown" data-lang="markdown"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="gh"&gt;# Eric — Product Owner
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="k"&gt;-&lt;/span&gt; **Name:** Eric
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="k"&gt;-&lt;/span&gt; **Origin:** Denmark
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="k"&gt;-&lt;/span&gt; **Role:** Product Owner
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="k"&gt;-&lt;/span&gt; **Abbreviation:** PO
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="k"&gt;-&lt;/span&gt; **Emoji:** 📋
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;- &lt;span class="gs"&gt;**Pipeline Stage:**&lt;/span&gt; SPEC&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;&lt;div class="hextra-code-copy-btn-container hx:opacity-0 hx:transition hx:group-hover/code:opacity-100 hx:flex hx:gap-1 hx:absolute hx:m-[11px] hx:right-0 hx:top-0"&gt;
+&lt;button
+class="hextra-code-copy-btn hx:group/copybtn hx:cursor-pointer hx:transition-all hx:active:opacity-50 hx:bg-primary-700/5 hx:border hx:border-black/5 hx:text-gray-600 hx:hover:text-gray-900 hx:rounded-md hx:p-1.5 hx:dark:bg-primary-300/10 hx:dark:border-white/10 hx:dark:text-gray-400 hx:dark:hover:text-gray-50"
+title="Copy code"
+aria-label="Copy code"
+data-copied-label="Copied!"
+&gt;
+&lt;div class="hextra-copy-icon hx:group-[.copied]/copybtn:hidden hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;div class="hextra-success-icon hx:hidden hx:group-[.copied]/copybtn:block hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;/button&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;h3&gt;SOUL.md&lt;span class="hx:absolute hx:-mt-20" id="soulmd"&gt;&lt;/span&gt;
+&lt;a href="#soulmd" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h3&gt;&lt;p&gt;The personality file. This is what makes agents feel real. It includes:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;Who they are&lt;/strong&gt; — backstory, experience, what shaped their approach&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Core beliefs&lt;/strong&gt; — principles forged through experience (e.g., &amp;ldquo;vague specs produce vague results&amp;rdquo;)&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Anti-patterns&lt;/strong&gt; — things they refuse to do, with reasoning&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Productive flaws&lt;/strong&gt; — intentional trade-offs (e.g., Eric is ruthlessly aggressive about cutting scope)&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;How they work&lt;/strong&gt; — their process for their domain&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Collaboration style&lt;/strong&gt; — how they interact with other agents&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Key phrases&lt;/strong&gt; — characteristic things they say&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;The SOUL file is typically 100-200 lines of rich, specific character definition. This is injected into the agent&amp;rsquo;s system prompt.&lt;/p&gt;
+&lt;h3&gt;AGENTS.md&lt;span class="hx:absolute hx:-mt-20" id="agentsmd"&gt;&lt;/span&gt;
+&lt;a href="#agentsmd" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h3&gt;&lt;p&gt;The workflow file. This tells the agent exactly how to do their job:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;Session startup&lt;/strong&gt; — what to do every time they wake up (read SOUL, search memories)&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Step-by-step procedures&lt;/strong&gt; — detailed workflows for their role&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Collaboration triggers&lt;/strong&gt; — when to loop in other agents&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Tool usage&lt;/strong&gt; — how to use memory, research, messaging, and domain tools&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Templates&lt;/strong&gt; — output formats and document structures&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h3&gt;DECISION.md&lt;span class="hx:absolute hx:-mt-20" id="decisionmd"&gt;&lt;/span&gt;
+&lt;a href="#decisionmd" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h3&gt;&lt;p&gt;A memory-first decision framework shared across agents:&lt;/p&gt;
+&lt;ol&gt;
+&lt;li&gt;Search memories before every response&lt;/li&gt;
+&lt;li&gt;Create memories when learning something new&lt;/li&gt;
+&lt;li&gt;Reflect on interactions for self-improvement&lt;/li&gt;
+&lt;li&gt;Stay in character and add value&lt;/li&gt;
+&lt;/ol&gt;
+&lt;h3&gt;PULSE.md&lt;span class="hx:absolute hx:-mt-20" id="pulsemd"&gt;&lt;/span&gt;
+&lt;a href="#pulsemd" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h3&gt;&lt;p&gt;The autonomous wake-up routine for pulse mode. See &lt;a href="https://docs.djinn.bot/docs/concepts/pulse/"&gt;Pulse Mode&lt;/a&gt; for details.&lt;/p&gt;
+&lt;h3&gt;config.yml&lt;span class="hx:absolute hx:-mt-20" id="configyml"&gt;&lt;/span&gt;
+&lt;a href="#configyml" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h3&gt;&lt;p&gt;Runtime configuration for the agent:&lt;/p&gt;
+&lt;div class="hextra-code-block hx:relative hx:mt-6 hx:first:mt-0 hx:group/code"&gt;
+&lt;div&gt;&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-yaml" data-lang="yaml"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nt"&gt;model&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;xai/grok-4-1-fast-reasoning &lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="c"&gt;# Default LLM model&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nt"&gt;thinking_model&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;xai/grok-4-1-fast-reasoning &lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="c"&gt;# Model for thinking/reasoning&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nt"&gt;thinking_level&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;off&amp;#39;&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="c"&gt;# off, low, medium, high&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nt"&gt;thread_mode&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;passive &lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="c"&gt;# passive or active Slack mode&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nt"&gt;pulse_enabled&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="kc"&gt;false&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="c"&gt;# Autonomous pulse mode&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nt"&gt;pulse_interval_minutes&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;30&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="c"&gt;# How often to wake up&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nt"&gt;pulse_columns&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="c"&gt;# Which kanban columns to check&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;- &lt;span class="l"&gt;Backlog&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;- &lt;span class="l"&gt;Ready&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nt"&gt;pulse_container_timeout_ms&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;120000&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="c"&gt;# Max container runtime&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nt"&gt;pulse_blackouts&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="c"&gt;# Don&amp;#39;t pulse during these times&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;- &lt;span class="nt"&gt;label&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;Nighttime&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;start_time&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;23:00&amp;#39;&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;end_time&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;07:00&amp;#39;&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;type&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;recurring&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;&lt;div class="hextra-code-copy-btn-container hx:opacity-0 hx:transition hx:group-hover/code:opacity-100 hx:flex hx:gap-1 hx:absolute hx:m-[11px] hx:right-0 hx:top-0"&gt;
+&lt;button
+class="hextra-code-copy-btn hx:group/copybtn hx:cursor-pointer hx:transition-all hx:active:opacity-50 hx:bg-primary-700/5 hx:border hx:border-black/5 hx:text-gray-600 hx:hover:text-gray-900 hx:rounded-md hx:p-1.5 hx:dark:bg-primary-300/10 hx:dark:border-white/10 hx:dark:text-gray-400 hx:dark:hover:text-gray-50"
+title="Copy code"
+aria-label="Copy code"
+data-copied-label="Copied!"
+&gt;
+&lt;div class="hextra-copy-icon hx:group-[.copied]/copybtn:hidden hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;div class="hextra-success-icon hx:hidden hx:group-[.copied]/copybtn:block hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;/button&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;p&gt;All configuration can be edited through the dashboard Settings page.&lt;/p&gt;
+&lt;h3&gt;slack.yml&lt;span class="hx:absolute hx:-mt-20" id="slackyml"&gt;&lt;/span&gt;
+&lt;a href="#slackyml" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h3&gt;&lt;p&gt;Slack bot credentials for this agent (see &lt;a href="https://docs.djinn.bot/docs/guides/slack-setup/"&gt;Slack Setup&lt;/a&gt;):&lt;/p&gt;
+&lt;div class="hextra-code-block hx:relative hx:mt-6 hx:first:mt-0 hx:group/code"&gt;
+&lt;div&gt;&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-yaml" data-lang="yaml"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nt"&gt;bot_token&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;${SLACK_ERIC_BOT_TOKEN}&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nt"&gt;app_token&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;${SLACK_ERIC_APP_TOKEN}&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;&lt;div class="hextra-code-copy-btn-container hx:opacity-0 hx:transition hx:group-hover/code:opacity-100 hx:flex hx:gap-1 hx:absolute hx:m-[11px] hx:right-0 hx:top-0"&gt;
+&lt;button
+class="hextra-code-copy-btn hx:group/copybtn hx:cursor-pointer hx:transition-all hx:active:opacity-50 hx:bg-primary-700/5 hx:border hx:border-black/5 hx:text-gray-600 hx:hover:text-gray-900 hx:rounded-md hx:p-1.5 hx:dark:bg-primary-300/10 hx:dark:border-white/10 hx:dark:text-gray-400 hx:dark:hover:text-gray-50"
+title="Copy code"
+aria-label="Copy code"
+data-copied-label="Copied!"
+&gt;
+&lt;div class="hextra-copy-icon hx:group-[.copied]/copybtn:hidden hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;div class="hextra-success-icon hx:hidden hx:group-[.copied]/copybtn:block hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;/button&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;h2&gt;The Default Team&lt;span class="hx:absolute hx:-mt-20" id="the-default-team"&gt;&lt;/span&gt;
+&lt;a href="#the-default-team" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;p&gt;DjinnBot ships with 10 agents covering a full product organization:&lt;/p&gt;
+&lt;h3&gt;Engineering Pipeline Agents&lt;span class="hx:absolute hx:-mt-20" id="engineering-pipeline-agents"&gt;&lt;/span&gt;
+&lt;a href="#engineering-pipeline-agents" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h3&gt;&lt;table&gt;
+&lt;thead&gt;
+&lt;tr&gt;
+&lt;th&gt;Agent&lt;/th&gt;
+&lt;th&gt;Role&lt;/th&gt;
+&lt;th&gt;Pipeline Stages&lt;/th&gt;
+&lt;th&gt;Expertise&lt;/th&gt;
+&lt;/tr&gt;
+&lt;/thead&gt;
+&lt;tbody&gt;
+&lt;tr&gt;
+&lt;td&gt;&lt;strong&gt;Eric&lt;/strong&gt;&lt;/td&gt;
+&lt;td&gt;Product Owner&lt;/td&gt;
+&lt;td&gt;SPEC&lt;/td&gt;
+&lt;td&gt;Requirements, user stories, scope, prioritization&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;
+&lt;td&gt;&lt;strong&gt;Finn&lt;/strong&gt;&lt;/td&gt;
+&lt;td&gt;Solutions Architect&lt;/td&gt;
+&lt;td&gt;DESIGN, REVIEW&lt;/td&gt;
+&lt;td&gt;Architecture, tech decisions, code review&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;
+&lt;td&gt;&lt;strong&gt;Shigeo&lt;/strong&gt;&lt;/td&gt;
+&lt;td&gt;UX Specialist&lt;/td&gt;
+&lt;td&gt;UX&lt;/td&gt;
+&lt;td&gt;User flows, design systems, accessibility&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;
+&lt;td&gt;&lt;strong&gt;Yukihiro&lt;/strong&gt;&lt;/td&gt;
+&lt;td&gt;Senior SWE&lt;/td&gt;
+&lt;td&gt;IMPLEMENT, FIX&lt;/td&gt;
+&lt;td&gt;Writing code, debugging, implementation&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;
+&lt;td&gt;&lt;strong&gt;Chieko&lt;/strong&gt;&lt;/td&gt;
+&lt;td&gt;Test Engineer&lt;/td&gt;
+&lt;td&gt;TEST&lt;/td&gt;
+&lt;td&gt;QA, test strategy, regression detection&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;
+&lt;td&gt;&lt;strong&gt;Stas&lt;/strong&gt;&lt;/td&gt;
+&lt;td&gt;SRE&lt;/td&gt;
+&lt;td&gt;DEPLOY&lt;/td&gt;
+&lt;td&gt;Infrastructure, deployment, monitoring&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;
+&lt;td&gt;&lt;strong&gt;Yang&lt;/strong&gt;&lt;/td&gt;
+&lt;td&gt;DevEx Specialist&lt;/td&gt;
+&lt;td&gt;DX (on-demand)&lt;/td&gt;
+&lt;td&gt;CI/CD, tooling, developer workflow&lt;/td&gt;
+&lt;/tr&gt;
+&lt;/tbody&gt;
+&lt;/table&gt;
+&lt;h3&gt;Business Agents&lt;span class="hx:absolute hx:-mt-20" id="business-agents"&gt;&lt;/span&gt;
+&lt;a href="#business-agents" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h3&gt;&lt;table&gt;
+&lt;thead&gt;
+&lt;tr&gt;
+&lt;th&gt;Agent&lt;/th&gt;
+&lt;th&gt;Role&lt;/th&gt;
+&lt;th&gt;Expertise&lt;/th&gt;
+&lt;/tr&gt;
+&lt;/thead&gt;
+&lt;tbody&gt;
+&lt;tr&gt;
+&lt;td&gt;&lt;strong&gt;Holt&lt;/strong&gt;&lt;/td&gt;
+&lt;td&gt;Marketing &amp;amp; Sales&lt;/td&gt;
+&lt;td&gt;Sales strategy, outreach, deal management&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;
+&lt;td&gt;&lt;strong&gt;Luke&lt;/strong&gt;&lt;/td&gt;
+&lt;td&gt;SEO Specialist&lt;/td&gt;
+&lt;td&gt;Content strategy, keyword research, technical SEO&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;
+&lt;td&gt;&lt;strong&gt;Jim&lt;/strong&gt;&lt;/td&gt;
+&lt;td&gt;Finance Lead&lt;/td&gt;
+&lt;td&gt;Budget, pricing, runway, financial modeling&lt;/td&gt;
+&lt;/tr&gt;
+&lt;/tbody&gt;
+&lt;/table&gt;
+&lt;p&gt;Business agents currently work in chat and pulse modes. Structured marketing/sales pipeline support is on the roadmap.&lt;/p&gt;
+&lt;h2&gt;Agent Templates&lt;span class="hx:absolute hx:-mt-20" id="agent-templates"&gt;&lt;/span&gt;
+&lt;a href="#agent-templates" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;p&gt;Shared templates in &lt;code&gt;agents/_templates/&lt;/code&gt; provide common workflow and memory instructions that all agents inherit:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;AGENTS.md&lt;/strong&gt; — environment description, git workflow, memory tools, communication tools&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;DECISION.md&lt;/strong&gt; — memory-first decision framework&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;PULSE.md&lt;/strong&gt; — autonomous wake-up routine with project tools&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;MEMORY_TOOLS.md&lt;/strong&gt; — detailed memory tool reference with examples&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;When creating a new agent, these templates provide the baseline behavior. Agent-specific files add role-specific expertise on top.&lt;/p&gt;
+&lt;h2&gt;Creating Custom Agents&lt;span class="hx:absolute hx:-mt-20" id="creating-custom-agents"&gt;&lt;/span&gt;
+&lt;a href="#creating-custom-agents" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;p&gt;To create a new agent:&lt;/p&gt;
+&lt;ol&gt;
+&lt;li&gt;Create a directory under &lt;code&gt;agents/&lt;/code&gt; with the agent&amp;rsquo;s ID&lt;/li&gt;
+&lt;li&gt;Add at minimum &lt;code&gt;IDENTITY.md&lt;/code&gt;, &lt;code&gt;SOUL.md&lt;/code&gt;, and &lt;code&gt;config.yml&lt;/code&gt;&lt;/li&gt;
+&lt;li&gt;Copy &lt;code&gt;AGENTS.md&lt;/code&gt;, &lt;code&gt;DECISION.md&lt;/code&gt;, and &lt;code&gt;PULSE.md&lt;/code&gt; from &lt;code&gt;agents/_templates/&lt;/code&gt; and customize&lt;/li&gt;
+&lt;li&gt;Restart the engine to pick up the new agent&lt;/li&gt;
+&lt;/ol&gt;
+&lt;p&gt;The agent will immediately be available in the dashboard for chat sessions and can be referenced in pipeline YAML files.&lt;/p&gt;
+&lt;h2&gt;How Agents Execute&lt;span class="hx:absolute hx:-mt-20" id="how-agents-execute"&gt;&lt;/span&gt;
+&lt;a href="#how-agents-execute" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;p&gt;When an agent is assigned a pipeline step or chat message:&lt;/p&gt;
+&lt;ol&gt;
+&lt;li&gt;The engine spawns a Docker container from &lt;code&gt;Dockerfile.agent-runtime&lt;/code&gt;&lt;/li&gt;
+&lt;li&gt;The container loads the agent&amp;rsquo;s persona files (IDENTITY + SOUL + AGENTS + DECISION)&lt;/li&gt;
+&lt;li&gt;ClawVault memories are loaded and injected as context&lt;/li&gt;
+&lt;li&gt;Skills matching the task keywords are auto-injected&lt;/li&gt;
+&lt;li&gt;The agent receives the step input (with template variables resolved)&lt;/li&gt;
+&lt;li&gt;The agent works — calling tools, writing files, running commands&lt;/li&gt;
+&lt;li&gt;Output streams back to the engine via Redis pub/sub&lt;/li&gt;
+&lt;li&gt;Memories are saved on session end&lt;/li&gt;
+&lt;li&gt;The container is destroyed&lt;/li&gt;
+&lt;/ol&gt;
+&lt;p&gt;Each execution is stateless at the container level — all persistence comes from the database, memory vaults, and git workspaces.&lt;/p&gt;</description></item><item><title>Pipelines</title><link>https://docs.djinn.bot/docs/concepts/pipelines/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://docs.djinn.bot/docs/concepts/pipelines/</guid><description>
+&lt;p&gt;Pipelines are YAML files that define multi-agent workflows. Each pipeline describes a series of steps, which agents handle them, and how results flow between steps.&lt;/p&gt;
+&lt;h2&gt;Pipeline Structure&lt;span class="hx:absolute hx:-mt-20" id="pipeline-structure"&gt;&lt;/span&gt;
+&lt;a href="#pipeline-structure" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;p&gt;Every pipeline YAML has four sections:&lt;/p&gt;
+&lt;div class="hextra-code-block hx:relative hx:mt-6 hx:first:mt-0 hx:group/code"&gt;
+&lt;div&gt;&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-yaml" data-lang="yaml"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="c"&gt;# Metadata&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nt"&gt;id&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;engineering&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nt"&gt;name&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;Engineering Pipeline&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nt"&gt;version&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;1.0.0&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nt"&gt;description&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;Full software development workflow&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="c"&gt;# Defaults applied to all steps&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nt"&gt;defaults&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;model&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;openrouter/moonshotai/kimi-k2.5&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;tools&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="l"&gt;read, write, bash]&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;maxRetries&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;3&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;timeout&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;4800&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="c"&gt;# Agent declarations&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nt"&gt;agents&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;- &lt;span class="nt"&gt;id&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;eric&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;name&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;Eric (Product Owner)&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;persona&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;docs/personas/eric.md&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;tools&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="l"&gt;web_search, read, write]&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="c"&gt;# Step definitions&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nt"&gt;steps&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;- &lt;span class="nt"&gt;id&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;SPEC&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;agent&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;eric&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;input&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="p"&gt;|&lt;/span&gt;&lt;span class="sd"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="sd"&gt; You are the Product Owner.
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="sd"&gt; Task: {{task_description}}
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="sd"&gt; ...&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;outputs&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="l"&gt;product_brief, requirements_doc]&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;onComplete&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;DESIGN&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;&lt;div class="hextra-code-copy-btn-container hx:opacity-0 hx:transition hx:group-hover/code:opacity-100 hx:flex hx:gap-1 hx:absolute hx:m-[11px] hx:right-0 hx:top-0"&gt;
+&lt;button
+class="hextra-code-copy-btn hx:group/copybtn hx:cursor-pointer hx:transition-all hx:active:opacity-50 hx:bg-primary-700/5 hx:border hx:border-black/5 hx:text-gray-600 hx:hover:text-gray-900 hx:rounded-md hx:p-1.5 hx:dark:bg-primary-300/10 hx:dark:border-white/10 hx:dark:text-gray-400 hx:dark:hover:text-gray-50"
+title="Copy code"
+aria-label="Copy code"
+data-copied-label="Copied!"
+&gt;
+&lt;div class="hextra-copy-icon hx:group-[.copied]/copybtn:hidden hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;div class="hextra-success-icon hx:hidden hx:group-[.copied]/copybtn:block hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;/button&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;h2&gt;Steps&lt;span class="hx:absolute hx:-mt-20" id="steps"&gt;&lt;/span&gt;
+&lt;a href="#steps" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;p&gt;Each step defines:&lt;/p&gt;
+&lt;table&gt;
+&lt;thead&gt;
+&lt;tr&gt;
+&lt;th&gt;Field&lt;/th&gt;
+&lt;th&gt;Description&lt;/th&gt;
+&lt;/tr&gt;
+&lt;/thead&gt;
+&lt;tbody&gt;
+&lt;tr&gt;
+&lt;td&gt;&lt;code&gt;id&lt;/code&gt;&lt;/td&gt;
+&lt;td&gt;Unique identifier (e.g., &lt;code&gt;SPEC&lt;/code&gt;, &lt;code&gt;DESIGN&lt;/code&gt;, &lt;code&gt;IMPLEMENT&lt;/code&gt;)&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;
+&lt;td&gt;&lt;code&gt;agent&lt;/code&gt;&lt;/td&gt;
+&lt;td&gt;Which agent handles this step&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;
+&lt;td&gt;&lt;code&gt;input&lt;/code&gt;&lt;/td&gt;
+&lt;td&gt;The prompt template sent to the agent&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;
+&lt;td&gt;&lt;code&gt;outputs&lt;/code&gt;&lt;/td&gt;
+&lt;td&gt;Named outputs the agent produces&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;
+&lt;td&gt;&lt;code&gt;onComplete&lt;/code&gt;&lt;/td&gt;
+&lt;td&gt;Next step when this one succeeds&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;
+&lt;td&gt;&lt;code&gt;onResult&lt;/code&gt;&lt;/td&gt;
+&lt;td&gt;Conditional routing based on agent output&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;
+&lt;td&gt;&lt;code&gt;loop&lt;/code&gt;&lt;/td&gt;
+&lt;td&gt;Execute over a list of items&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;
+&lt;td&gt;&lt;code&gt;model&lt;/code&gt;&lt;/td&gt;
+&lt;td&gt;Override the default model for this step&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;
+&lt;td&gt;&lt;code&gt;timeout&lt;/code&gt;&lt;/td&gt;
+&lt;td&gt;Override the default timeout&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;
+&lt;td&gt;&lt;code&gt;outputSchema&lt;/code&gt;&lt;/td&gt;
+&lt;td&gt;JSON schema for structured output (no tools mode)&lt;/td&gt;
+&lt;/tr&gt;
+&lt;/tbody&gt;
+&lt;/table&gt;
+&lt;h3&gt;Template Variables&lt;span class="hx:absolute hx:-mt-20" id="template-variables"&gt;&lt;/span&gt;
+&lt;a href="#template-variables" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h3&gt;&lt;p&gt;Step inputs can reference outputs from previous steps using &lt;code&gt;{{variable_name}}&lt;/code&gt;:&lt;/p&gt;
+&lt;div class="hextra-code-block hx:relative hx:mt-6 hx:first:mt-0 hx:group/code"&gt;
+&lt;div&gt;&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-yaml" data-lang="yaml"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;- &lt;span class="nt"&gt;id&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;DESIGN&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;agent&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;finn&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;input&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="p"&gt;|&lt;/span&gt;&lt;span class="sd"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="sd"&gt; Requirements: {{requirements_doc}}
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="sd"&gt; User Stories: {{user_stories_json}}&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;&lt;div class="hextra-code-copy-btn-container hx:opacity-0 hx:transition hx:group-hover/code:opacity-100 hx:flex hx:gap-1 hx:absolute hx:m-[11px] hx:right-0 hx:top-0"&gt;
+&lt;button
+class="hextra-code-copy-btn hx:group/copybtn hx:cursor-pointer hx:transition-all hx:active:opacity-50 hx:bg-primary-700/5 hx:border hx:border-black/5 hx:text-gray-600 hx:hover:text-gray-900 hx:rounded-md hx:p-1.5 hx:dark:bg-primary-300/10 hx:dark:border-white/10 hx:dark:text-gray-400 hx:dark:hover:text-gray-50"
+title="Copy code"
+aria-label="Copy code"
+data-copied-label="Copied!"
+&gt;
+&lt;div class="hextra-copy-icon hx:group-[.copied]/copybtn:hidden hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;div class="hextra-success-icon hx:hidden hx:group-[.copied]/copybtn:block hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;/button&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;p&gt;Jinja2 conditionals are also supported:&lt;/p&gt;
+&lt;div class="hextra-code-block hx:relative hx:mt-6 hx:first:mt-0 hx:group/code"&gt;
+&lt;div&gt;&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-yaml" data-lang="yaml"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nt"&gt;input&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="p"&gt;|&lt;/span&gt;&lt;span class="sd"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="sd"&gt; {% if review_feedback %}
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="sd"&gt; Review Feedback: {{review_feedback}}
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="sd"&gt; {% endif %}&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;&lt;div class="hextra-code-copy-btn-container hx:opacity-0 hx:transition hx:group-hover/code:opacity-100 hx:flex hx:gap-1 hx:absolute hx:m-[11px] hx:right-0 hx:top-0"&gt;
+&lt;button
+class="hextra-code-copy-btn hx:group/copybtn hx:cursor-pointer hx:transition-all hx:active:opacity-50 hx:bg-primary-700/5 hx:border hx:border-black/5 hx:text-gray-600 hx:hover:text-gray-900 hx:rounded-md hx:p-1.5 hx:dark:bg-primary-300/10 hx:dark:border-white/10 hx:dark:text-gray-400 hx:dark:hover:text-gray-50"
+title="Copy code"
+aria-label="Copy code"
+data-copied-label="Copied!"
+&gt;
+&lt;div class="hextra-copy-icon hx:group-[.copied]/copybtn:hidden hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;div class="hextra-success-icon hx:hidden hx:group-[.copied]/copybtn:block hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;/button&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;h3&gt;Result Routing&lt;span class="hx:absolute hx:-mt-20" id="result-routing"&gt;&lt;/span&gt;
+&lt;a href="#result-routing" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h3&gt;&lt;p&gt;Steps can branch based on agent output using &lt;code&gt;onResult&lt;/code&gt;:&lt;/p&gt;
+&lt;div class="hextra-code-block hx:relative hx:mt-6 hx:first:mt-0 hx:group/code"&gt;
+&lt;div&gt;&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-yaml" data-lang="yaml"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;- &lt;span class="nt"&gt;id&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;REVIEW&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;agent&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;finn&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;outputs&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="l"&gt;review_result, review_feedback]&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;onResult&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;APPROVED&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;goto&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;TEST&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;CHANGES_REQUESTED&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;goto&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;IMPLEMENT&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;&lt;div class="hextra-code-copy-btn-container hx:opacity-0 hx:transition hx:group-hover/code:opacity-100 hx:flex hx:gap-1 hx:absolute hx:m-[11px] hx:right-0 hx:top-0"&gt;
+&lt;button
+class="hextra-code-copy-btn hx:group/copybtn hx:cursor-pointer hx:transition-all hx:active:opacity-50 hx:bg-primary-700/5 hx:border hx:border-black/5 hx:text-gray-600 hx:hover:text-gray-900 hx:rounded-md hx:p-1.5 hx:dark:bg-primary-300/10 hx:dark:border-white/10 hx:dark:text-gray-400 hx:dark:hover:text-gray-50"
+title="Copy code"
+aria-label="Copy code"
+data-copied-label="Copied!"
+&gt;
+&lt;div class="hextra-copy-icon hx:group-[.copied]/copybtn:hidden hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;div class="hextra-success-icon hx:hidden hx:group-[.copied]/copybtn:block hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;/button&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;p&gt;The agent writes a result value (e.g., &lt;code&gt;APPROVED&lt;/code&gt; to &lt;code&gt;REVIEW_RESULT.txt&lt;/code&gt;), and the engine routes to the matching branch.&lt;/p&gt;
+&lt;h3&gt;Loop Steps&lt;span class="hx:absolute hx:-mt-20" id="loop-steps"&gt;&lt;/span&gt;
+&lt;a href="#loop-steps" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h3&gt;&lt;p&gt;Steps can iterate over a list produced by a previous step:&lt;/p&gt;
+&lt;div class="hextra-code-block hx:relative hx:mt-6 hx:first:mt-0 hx:group/code"&gt;
+&lt;div&gt;&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-yaml" data-lang="yaml"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;- &lt;span class="nt"&gt;id&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;IMPLEMENT&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;agent&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;yukihiro&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;input&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="p"&gt;|&lt;/span&gt;&lt;span class="sd"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="sd"&gt; Current Task: {{current_item}}
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="sd"&gt; Completed Tasks: {{completed_items}}&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;loop&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;over&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;task_breakdown_json &lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="c"&gt;# Iterate over this output&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;onEachComplete&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;REVIEW &lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="c"&gt;# After each item, go here&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;onAllComplete&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;DEPLOY &lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="c"&gt;# After all items, go here&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;&lt;div class="hextra-code-copy-btn-container hx:opacity-0 hx:transition hx:group-hover/code:opacity-100 hx:flex hx:gap-1 hx:absolute hx:m-[11px] hx:right-0 hx:top-0"&gt;
+&lt;button
+class="hextra-code-copy-btn hx:group/copybtn hx:cursor-pointer hx:transition-all hx:active:opacity-50 hx:bg-primary-700/5 hx:border hx:border-black/5 hx:text-gray-600 hx:hover:text-gray-900 hx:rounded-md hx:p-1.5 hx:dark:bg-primary-300/10 hx:dark:border-white/10 hx:dark:text-gray-400 hx:dark:hover:text-gray-50"
+title="Copy code"
+aria-label="Copy code"
+data-copied-label="Copied!"
+&gt;
+&lt;div class="hextra-copy-icon hx:group-[.copied]/copybtn:hidden hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;div class="hextra-success-icon hx:hidden hx:group-[.copied]/copybtn:block hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;/button&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;p&gt;The engine parses the JSON array and executes the step once per item, injecting &lt;code&gt;{{current_item}}&lt;/code&gt;, &lt;code&gt;{{completed_items}}&lt;/code&gt;, and &lt;code&gt;{{progress_file}}&lt;/code&gt; template variables.&lt;/p&gt;
+&lt;h3&gt;Structured Output&lt;span class="hx:absolute hx:-mt-20" id="structured-output"&gt;&lt;/span&gt;
+&lt;a href="#structured-output" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h3&gt;&lt;p&gt;Steps can enforce structured JSON output using &lt;code&gt;outputSchema&lt;/code&gt;:&lt;/p&gt;
+&lt;div class="hextra-code-block hx:relative hx:mt-6 hx:first:mt-0 hx:group/code"&gt;
+&lt;div&gt;&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-yaml" data-lang="yaml"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;- &lt;span class="nt"&gt;id&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;DECOMPOSE&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;agent&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;eric&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;outputSchema&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;name&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;task_breakdown&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;strict&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="kc"&gt;true&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;schema&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;type&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;object&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;properties&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;tasks&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;type&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;array&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;items&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;type&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;object&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;properties&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;title&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;{&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;type&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;string }&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;priority&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;{&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;type: string, enum&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="l"&gt;P0, P1, P2, P3] }&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;estimatedHours&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;{&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;type&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;number }&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;required&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="l"&gt;title, priority, estimatedHours]&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;required&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="l"&gt;tasks]&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;&lt;div class="hextra-code-copy-btn-container hx:opacity-0 hx:transition hx:group-hover/code:opacity-100 hx:flex hx:gap-1 hx:absolute hx:m-[11px] hx:right-0 hx:top-0"&gt;
+&lt;button
+class="hextra-code-copy-btn hx:group/copybtn hx:cursor-pointer hx:transition-all hx:active:opacity-50 hx:bg-primary-700/5 hx:border hx:border-black/5 hx:text-gray-600 hx:hover:text-gray-900 hx:rounded-md hx:p-1.5 hx:dark:bg-primary-300/10 hx:dark:border-white/10 hx:dark:text-gray-400 hx:dark:hover:text-gray-50"
+title="Copy code"
+aria-label="Copy code"
+data-copied-label="Copied!"
+&gt;
+&lt;div class="hextra-copy-icon hx:group-[.copied]/copybtn:hidden hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;div class="hextra-success-icon hx:hidden hx:group-[.copied]/copybtn:block hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;/button&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;p&gt;When &lt;code&gt;outputSchema&lt;/code&gt; is specified, the step uses direct API calls with constrained JSON output instead of tool-based execution. This guarantees valid, parseable output.&lt;/p&gt;
+&lt;h2&gt;Built-in Pipelines&lt;span class="hx:absolute hx:-mt-20" id="built-in-pipelines"&gt;&lt;/span&gt;
+&lt;a href="#built-in-pipelines" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;h3&gt;engineering&lt;span class="hx:absolute hx:-mt-20" id="engineering"&gt;&lt;/span&gt;
+&lt;a href="#engineering" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h3&gt;&lt;p&gt;The full software development lifecycle:&lt;/p&gt;
+&lt;div class="hextra-code-block hx:relative hx:mt-6 hx:first:mt-0 hx:group/code"&gt;
+&lt;div&gt;&lt;pre&gt;&lt;code&gt;SPEC → DESIGN → UX → IMPLEMENT (loop) ↔ REVIEW ↔ TEST → DEPLOY&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;div class="hextra-code-copy-btn-container hx:opacity-0 hx:transition hx:group-hover/code:opacity-100 hx:flex hx:gap-1 hx:absolute hx:m-[11px] hx:right-0 hx:top-0"&gt;
+&lt;button
+class="hextra-code-copy-btn hx:group/copybtn hx:cursor-pointer hx:transition-all hx:active:opacity-50 hx:bg-primary-700/5 hx:border hx:border-black/5 hx:text-gray-600 hx:hover:text-gray-900 hx:rounded-md hx:p-1.5 hx:dark:bg-primary-300/10 hx:dark:border-white/10 hx:dark:text-gray-400 hx:dark:hover:text-gray-50"
+title="Copy code"
+aria-label="Copy code"
+data-copied-label="Copied!"
+&gt;
+&lt;div class="hextra-copy-icon hx:group-[.copied]/copybtn:hidden hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;div class="hextra-success-icon hx:hidden hx:group-[.copied]/copybtn:block hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;/button&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;p&gt;All 7 engineering agents participate. The IMPLEMENT step loops over a task breakdown, with each implementation reviewed and tested before moving on.&lt;/p&gt;
+&lt;h3&gt;feature&lt;span class="hx:absolute hx:-mt-20" id="feature"&gt;&lt;/span&gt;
+&lt;a href="#feature" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h3&gt;&lt;p&gt;A lighter pipeline for adding features to existing code:&lt;/p&gt;
+&lt;div class="hextra-code-block hx:relative hx:mt-6 hx:first:mt-0 hx:group/code"&gt;
+&lt;div&gt;&lt;pre&gt;&lt;code&gt;DESIGN → IMPLEMENT ↔ REVIEW → TEST&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;div class="hextra-code-copy-btn-container hx:opacity-0 hx:transition hx:group-hover/code:opacity-100 hx:flex hx:gap-1 hx:absolute hx:m-[11px] hx:right-0 hx:top-0"&gt;
+&lt;button
+class="hextra-code-copy-btn hx:group/copybtn hx:cursor-pointer hx:transition-all hx:active:opacity-50 hx:bg-primary-700/5 hx:border hx:border-black/5 hx:text-gray-600 hx:hover:text-gray-900 hx:rounded-md hx:p-1.5 hx:dark:bg-primary-300/10 hx:dark:border-white/10 hx:dark:text-gray-400 hx:dark:hover:text-gray-50"
+title="Copy code"
+aria-label="Copy code"
+data-copied-label="Copied!"
+&gt;
+&lt;div class="hextra-copy-icon hx:group-[.copied]/copybtn:hidden hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;div class="hextra-success-icon hx:hidden hx:group-[.copied]/copybtn:block hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;/button&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;p&gt;3 agents: Finn (design + review), Yukihiro (implement), Chieko (test).&lt;/p&gt;
+&lt;h3&gt;bugfix&lt;span class="hx:absolute hx:-mt-20" id="bugfix"&gt;&lt;/span&gt;
+&lt;a href="#bugfix" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h3&gt;&lt;p&gt;For diagnosing and fixing bugs:&lt;/p&gt;
+&lt;div class="hextra-code-block hx:relative hx:mt-6 hx:first:mt-0 hx:group/code"&gt;
+&lt;div&gt;&lt;pre&gt;&lt;code&gt;FIX → VALIDATE&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;div class="hextra-code-copy-btn-container hx:opacity-0 hx:transition hx:group-hover/code:opacity-100 hx:flex hx:gap-1 hx:absolute hx:m-[11px] hx:right-0 hx:top-0"&gt;
+&lt;button
+class="hextra-code-copy-btn hx:group/copybtn hx:cursor-pointer hx:transition-all hx:active:opacity-50 hx:bg-primary-700/5 hx:border hx:border-black/5 hx:text-gray-600 hx:hover:text-gray-900 hx:rounded-md hx:p-1.5 hx:dark:bg-primary-300/10 hx:dark:border-white/10 hx:dark:text-gray-400 hx:dark:hover:text-gray-50"
+title="Copy code"
+aria-label="Copy code"
+data-copied-label="Copied!"
+&gt;
+&lt;div class="hextra-copy-icon hx:group-[.copied]/copybtn:hidden hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;div class="hextra-success-icon hx:hidden hx:group-[.copied]/copybtn:block hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;/button&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;p&gt;2 agents: Yukihiro (diagnose + fix), Chieko (validate).&lt;/p&gt;
+&lt;h3&gt;planning&lt;span class="hx:absolute hx:-mt-20" id="planning"&gt;&lt;/span&gt;
+&lt;a href="#planning" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h3&gt;&lt;p&gt;Decomposes a project into tasks with dependency chains:&lt;/p&gt;
+&lt;div class="hextra-code-block hx:relative hx:mt-6 hx:first:mt-0 hx:group/code"&gt;
+&lt;div&gt;&lt;pre&gt;&lt;code&gt;DECOMPOSE → VALIDATE → DECOMPOSE_SUBTASKS → VALIDATE_SUBTASKS&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;div class="hextra-code-copy-btn-container hx:opacity-0 hx:transition hx:group-hover/code:opacity-100 hx:flex hx:gap-1 hx:absolute hx:m-[11px] hx:right-0 hx:top-0"&gt;
+&lt;button
+class="hextra-code-copy-btn hx:group/copybtn hx:cursor-pointer hx:transition-all hx:active:opacity-50 hx:bg-primary-700/5 hx:border hx:border-black/5 hx:text-gray-600 hx:hover:text-gray-900 hx:rounded-md hx:p-1.5 hx:dark:bg-primary-300/10 hx:dark:border-white/10 hx:dark:text-gray-400 hx:dark:hover:text-gray-50"
+title="Copy code"
+aria-label="Copy code"
+data-copied-label="Copied!"
+&gt;
+&lt;div class="hextra-copy-icon hx:group-[.copied]/copybtn:hidden hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;div class="hextra-success-icon hx:hidden hx:group-[.copied]/copybtn:block hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;/button&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;p&gt;Uses structured output mode — no tools, just constrained JSON. Eric breaks down the project, Finn validates and enriches. Then Eric creates bite-sized subtasks, and Finn validates those too. The output integrates directly with the project board.&lt;/p&gt;
+&lt;h3&gt;execute&lt;span class="hx:absolute hx:-mt-20" id="execute"&gt;&lt;/span&gt;
+&lt;a href="#execute" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h3&gt;&lt;p&gt;Runs a single task from a project board in an isolated container.&lt;/p&gt;
+&lt;h2&gt;Creating Custom Pipelines&lt;span class="hx:absolute hx:-mt-20" id="creating-custom-pipelines"&gt;&lt;/span&gt;
+&lt;a href="#creating-custom-pipelines" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;p&gt;Create a YAML file in &lt;code&gt;pipelines/&lt;/code&gt; and it will automatically appear in the dashboard. No restart needed — the API reads pipeline definitions from disk.&lt;/p&gt;
+&lt;p&gt;A minimal custom pipeline:&lt;/p&gt;
+&lt;div class="hextra-code-block hx:relative hx:mt-6 hx:first:mt-0 hx:group/code"&gt;
+&lt;div&gt;&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-yaml" data-lang="yaml"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nt"&gt;id&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;my-pipeline&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nt"&gt;name&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;My Custom Pipeline&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nt"&gt;version&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;1.0.0&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nt"&gt;description&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;Does something useful&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nt"&gt;defaults&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;model&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;anthropic/claude-sonnet-4&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;tools&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="l"&gt;read, write, bash]&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;timeout&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;600&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nt"&gt;agents&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;- &lt;span class="nt"&gt;id&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;yukihiro&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;name&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;Yukihiro (SWE)&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nt"&gt;steps&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;- &lt;span class="nt"&gt;id&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;DO_THING&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;agent&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;yukihiro&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;input&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="p"&gt;|&lt;/span&gt;&lt;span class="sd"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="sd"&gt; Task: {{task_description}}
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="sd"&gt; Do the thing.&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;outputs&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="l"&gt;result]&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;&lt;div class="hextra-code-copy-btn-container hx:opacity-0 hx:transition hx:group-hover/code:opacity-100 hx:flex hx:gap-1 hx:absolute hx:m-[11px] hx:right-0 hx:top-0"&gt;
+&lt;button
+class="hextra-code-copy-btn hx:group/copybtn hx:cursor-pointer hx:transition-all hx:active:opacity-50 hx:bg-primary-700/5 hx:border hx:border-black/5 hx:text-gray-600 hx:hover:text-gray-900 hx:rounded-md hx:p-1.5 hx:dark:bg-primary-300/10 hx:dark:border-white/10 hx:dark:text-gray-400 hx:dark:hover:text-gray-50"
+title="Copy code"
+aria-label="Copy code"
+data-copied-label="Copied!"
+&gt;
+&lt;div class="hextra-copy-icon hx:group-[.copied]/copybtn:hidden hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;div class="hextra-success-icon hx:hidden hx:group-[.copied]/copybtn:block hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;/button&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;p&gt;You can reference any agent defined in &lt;code&gt;agents/&lt;/code&gt; and use any combination of steps, branches, and loops.&lt;/p&gt;</description></item><item><title>Memory System</title><link>https://docs.djinn.bot/docs/concepts/memory/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://docs.djinn.bot/docs/concepts/memory/</guid><description>
+&lt;p&gt;DjinnBot agents have persistent memory that survives across sessions. They remember decisions, learn from mistakes, and build knowledge over time. This is powered by &lt;a href="https://github.com/koi-labs-org/clawvault"target="_blank" rel="noopener"&gt;ClawVault&lt;/a&gt; with semantic search via &lt;a href="https://github.com/uf-hy/qmdr"target="_blank" rel="noopener"&gt;QMDR&lt;/a&gt;.&lt;/p&gt;
+&lt;h2&gt;How It Works&lt;span class="hx:absolute hx:-mt-20" id="how-it-works"&gt;&lt;/span&gt;
+&lt;a href="#how-it-works" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;p&gt;Every agent has two memory vaults:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;Personal vault&lt;/strong&gt; (&lt;code&gt;data/vaults/&amp;lt;agent-id&amp;gt;/&lt;/code&gt;) — private memories only this agent can access&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Shared vault&lt;/strong&gt; (&lt;code&gt;data/vaults/shared/&lt;/code&gt;) — team-wide knowledge all agents can read and write&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;Memories are stored as markdown entries with metadata (type, tags, timestamps) and connected via wiki-links for graph traversal.&lt;/p&gt;
+&lt;h2&gt;Memory Lifecycle&lt;span class="hx:absolute hx:-mt-20" id="memory-lifecycle"&gt;&lt;/span&gt;
+&lt;a href="#memory-lifecycle" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;ol&gt;
+&lt;li&gt;&lt;strong&gt;Wake&lt;/strong&gt; — when an agent session starts, ClawVault loads relevant memories into context&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Recall&lt;/strong&gt; — during execution, agents search memories semantically before making decisions&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Remember&lt;/strong&gt; — agents save important findings, decisions, and lessons&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Checkpoint&lt;/strong&gt; — during long sessions, memories are periodically saved&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Sleep&lt;/strong&gt; — on session end, a summary is saved with next steps&lt;/li&gt;
+&lt;/ol&gt;
+&lt;h2&gt;Memory Tools&lt;span class="hx:absolute hx:-mt-20" id="memory-tools"&gt;&lt;/span&gt;
+&lt;a href="#memory-tools" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;h3&gt;recall — Search Memories&lt;span class="hx:absolute hx:-mt-20" id="recall--search-memories"&gt;&lt;/span&gt;
+&lt;a href="#recall--search-memories" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h3&gt;&lt;div class="hextra-code-block hx:relative hx:mt-6 hx:first:mt-0 hx:group/code"&gt;
+&lt;div&gt;&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-javascript" data-lang="javascript"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nx"&gt;recall&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s2"&gt;&amp;#34;search query&amp;#34;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt; &lt;span class="nx"&gt;limit&lt;/span&gt;&lt;span class="o"&gt;:&lt;/span&gt; &lt;span class="mi"&gt;5&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;profile&lt;/span&gt;&lt;span class="o"&gt;:&lt;/span&gt; &lt;span class="s2"&gt;&amp;#34;default&amp;#34;&lt;/span&gt; &lt;span class="p"&gt;})&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;&lt;div class="hextra-code-copy-btn-container hx:opacity-0 hx:transition hx:group-hover/code:opacity-100 hx:flex hx:gap-1 hx:absolute hx:m-[11px] hx:right-0 hx:top-0"&gt;
+&lt;button
+class="hextra-code-copy-btn hx:group/copybtn hx:cursor-pointer hx:transition-all hx:active:opacity-50 hx:bg-primary-700/5 hx:border hx:border-black/5 hx:text-gray-600 hx:hover:text-gray-900 hx:rounded-md hx:p-1.5 hx:dark:bg-primary-300/10 hx:dark:border-white/10 hx:dark:text-gray-400 hx:dark:hover:text-gray-50"
+title="Copy code"
+aria-label="Copy code"
+data-copied-label="Copied!"
+&gt;
+&lt;div class="hextra-copy-icon hx:group-[.copied]/copybtn:hidden hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;div class="hextra-success-icon hx:hidden hx:group-[.copied]/copybtn:block hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;/button&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;p&gt;Profiles optimize retrieval for different contexts:&lt;/p&gt;
+&lt;table&gt;
+&lt;thead&gt;
+&lt;tr&gt;
+&lt;th&gt;Profile&lt;/th&gt;
+&lt;th&gt;Use Case&lt;/th&gt;
+&lt;/tr&gt;
+&lt;/thead&gt;
+&lt;tbody&gt;
+&lt;tr&gt;
+&lt;td&gt;&lt;code&gt;default&lt;/code&gt;&lt;/td&gt;
+&lt;td&gt;General purpose retrieval&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;
+&lt;td&gt;&lt;code&gt;planning&lt;/code&gt;&lt;/td&gt;
+&lt;td&gt;Task planning and project context&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;
+&lt;td&gt;&lt;code&gt;incident&lt;/code&gt;&lt;/td&gt;
+&lt;td&gt;Errors, bugs, and lessons learned&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;
+&lt;td&gt;&lt;code&gt;handoff&lt;/code&gt;&lt;/td&gt;
+&lt;td&gt;Session continuity information&lt;/td&gt;
+&lt;/tr&gt;
+&lt;/tbody&gt;
+&lt;/table&gt;
+&lt;h3&gt;remember — Save to Vault&lt;span class="hx:absolute hx:-mt-20" id="remember--save-to-vault"&gt;&lt;/span&gt;
+&lt;a href="#remember--save-to-vault" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h3&gt;&lt;div class="hextra-code-block hx:relative hx:mt-6 hx:first:mt-0 hx:group/code"&gt;
+&lt;div&gt;&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-javascript" data-lang="javascript"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nx"&gt;remember&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="nx"&gt;type&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="s2"&gt;&amp;#34;Title&amp;#34;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="s2"&gt;&amp;#34;Content with details&amp;#34;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt; &lt;span class="nx"&gt;shared&lt;/span&gt;&lt;span class="o"&gt;:&lt;/span&gt; &lt;span class="kc"&gt;true&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="c1"&gt;// Share with all agents
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt; &lt;span class="nx"&gt;tags&lt;/span&gt;&lt;span class="o"&gt;:&lt;/span&gt; &lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="s2"&gt;&amp;#34;tag1&amp;#34;&lt;/span&gt;&lt;span class="p"&gt;]&lt;/span&gt; &lt;span class="c1"&gt;// For search filtering
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="p"&gt;})&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;&lt;div class="hextra-code-copy-btn-container hx:opacity-0 hx:transition hx:group-hover/code:opacity-100 hx:flex hx:gap-1 hx:absolute hx:m-[11px] hx:right-0 hx:top-0"&gt;
+&lt;button
+class="hextra-code-copy-btn hx:group/copybtn hx:cursor-pointer hx:transition-all hx:active:opacity-50 hx:bg-primary-700/5 hx:border hx:border-black/5 hx:text-gray-600 hx:hover:text-gray-900 hx:rounded-md hx:p-1.5 hx:dark:bg-primary-300/10 hx:dark:border-white/10 hx:dark:text-gray-400 hx:dark:hover:text-gray-50"
+title="Copy code"
+aria-label="Copy code"
+data-copied-label="Copied!"
+&gt;
+&lt;div class="hextra-copy-icon hx:group-[.copied]/copybtn:hidden hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;div class="hextra-success-icon hx:hidden hx:group-[.copied]/copybtn:block hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;/button&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;p&gt;Memory types:&lt;/p&gt;
+&lt;table&gt;
+&lt;thead&gt;
+&lt;tr&gt;
+&lt;th&gt;Type&lt;/th&gt;
+&lt;th&gt;When to Use&lt;/th&gt;
+&lt;/tr&gt;
+&lt;/thead&gt;
+&lt;tbody&gt;
+&lt;tr&gt;
+&lt;td&gt;&lt;code&gt;lesson&lt;/code&gt;&lt;/td&gt;
+&lt;td&gt;Learned from a mistake or success&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;
+&lt;td&gt;&lt;code&gt;decision&lt;/code&gt;&lt;/td&gt;
+&lt;td&gt;Important choice with rationale&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;
+&lt;td&gt;&lt;code&gt;pattern&lt;/code&gt;&lt;/td&gt;
+&lt;td&gt;Recurring approach that works&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;
+&lt;td&gt;&lt;code&gt;fact&lt;/code&gt;&lt;/td&gt;
+&lt;td&gt;Important information about the project/team&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;
+&lt;td&gt;&lt;code&gt;preference&lt;/code&gt;&lt;/td&gt;
+&lt;td&gt;How someone or something prefers to work&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;
+&lt;td&gt;&lt;code&gt;handoff&lt;/code&gt;&lt;/td&gt;
+&lt;td&gt;Context for resuming work later&lt;/td&gt;
+&lt;/tr&gt;
+&lt;/tbody&gt;
+&lt;/table&gt;
+&lt;h2&gt;Wiki-Link Knowledge Graph&lt;span class="hx:absolute hx:-mt-20" id="wiki-link-knowledge-graph"&gt;&lt;/span&gt;
+&lt;a href="#wiki-link-knowledge-graph" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;p&gt;Memories are connected using &lt;code&gt;[[wiki-link]]&lt;/code&gt; syntax:&lt;/p&gt;
+&lt;div class="hextra-code-block hx:relative hx:mt-6 hx:first:mt-0 hx:group/code"&gt;
+&lt;div&gt;&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-javascript" data-lang="javascript"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nx"&gt;remember&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s2"&gt;&amp;#34;decision&amp;#34;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="s2"&gt;&amp;#34;MyApp: Tech Stack&amp;#34;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt; &lt;span class="s2"&gt;&amp;#34;[[Project: MyApp]] will use FastAPI + PostgreSQL. &amp;#34;&lt;/span&gt; &lt;span class="o"&gt;+&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt; &lt;span class="s2"&gt;&amp;#34;Considered Django (rejected: too opinionated) and Express (rejected: need Python). &amp;#34;&lt;/span&gt; &lt;span class="o"&gt;+&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt; &lt;span class="s2"&gt;&amp;#34;See also [[MyApp: Architecture]], [[MyApp: API Design]].&amp;#34;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt; &lt;span class="p"&gt;{&lt;/span&gt; &lt;span class="nx"&gt;shared&lt;/span&gt;&lt;span class="o"&gt;:&lt;/span&gt; &lt;span class="kc"&gt;true&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;tags&lt;/span&gt;&lt;span class="o"&gt;:&lt;/span&gt; &lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="s2"&gt;&amp;#34;project:myapp&amp;#34;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="s2"&gt;&amp;#34;architecture&amp;#34;&lt;/span&gt;&lt;span class="p"&gt;]&lt;/span&gt; &lt;span class="p"&gt;}&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="p"&gt;)&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;&lt;div class="hextra-code-copy-btn-container hx:opacity-0 hx:transition hx:group-hover/code:opacity-100 hx:flex hx:gap-1 hx:absolute hx:m-[11px] hx:right-0 hx:top-0"&gt;
+&lt;button
+class="hextra-code-copy-btn hx:group/copybtn hx:cursor-pointer hx:transition-all hx:active:opacity-50 hx:bg-primary-700/5 hx:border hx:border-black/5 hx:text-gray-600 hx:hover:text-gray-900 hx:rounded-md hx:p-1.5 hx:dark:bg-primary-300/10 hx:dark:border-white/10 hx:dark:text-gray-400 hx:dark:hover:text-gray-50"
+title="Copy code"
+aria-label="Copy code"
+data-copied-label="Copied!"
+&gt;
+&lt;div class="hextra-copy-icon hx:group-[.copied]/copybtn:hidden hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;div class="hextra-success-icon hx:hidden hx:group-[.copied]/copybtn:block hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;/button&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;p&gt;These links create a traversable knowledge graph. When an agent recalls context about a project, they start from &lt;code&gt;[[Project: Name]]&lt;/code&gt; and follow links to discover related information.&lt;/p&gt;
+&lt;h3&gt;The Anchor Pattern&lt;span class="hx:absolute hx:-mt-20" id="the-anchor-pattern"&gt;&lt;/span&gt;
+&lt;a href="#the-anchor-pattern" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h3&gt;&lt;p&gt;Every project should have a root anchor memory that links to all related knowledge:&lt;/p&gt;
+&lt;div class="hextra-code-block hx:relative hx:mt-6 hx:first:mt-0 hx:group/code"&gt;
+&lt;div&gt;&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-javascript" data-lang="javascript"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nx"&gt;remember&lt;/span&gt;&lt;span class="p"&gt;(&lt;/span&gt;&lt;span class="s2"&gt;&amp;#34;fact&amp;#34;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="s2"&gt;&amp;#34;Project: MyApp&amp;#34;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt; &lt;span class="s2"&gt;&amp;#34;Root anchor for project MyApp.\n&amp;#34;&lt;/span&gt; &lt;span class="o"&gt;+&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt; &lt;span class="s2"&gt;&amp;#34;Goal: [[MyApp: Goal]]\n&amp;#34;&lt;/span&gt; &lt;span class="o"&gt;+&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt; &lt;span class="s2"&gt;&amp;#34;Tech: [[MyApp: Tech Stack]]\n&amp;#34;&lt;/span&gt; &lt;span class="o"&gt;+&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt; &lt;span class="s2"&gt;&amp;#34;Scope: [[MyApp: V1 Scope]]&amp;#34;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt; &lt;span class="p"&gt;{&lt;/span&gt; &lt;span class="nx"&gt;shared&lt;/span&gt;&lt;span class="o"&gt;:&lt;/span&gt; &lt;span class="kc"&gt;true&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="nx"&gt;tags&lt;/span&gt;&lt;span class="o"&gt;:&lt;/span&gt; &lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="s2"&gt;&amp;#34;project:myapp&amp;#34;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="s2"&gt;&amp;#34;project-anchor&amp;#34;&lt;/span&gt;&lt;span class="p"&gt;]&lt;/span&gt; &lt;span class="p"&gt;}&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="p"&gt;)&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;&lt;div class="hextra-code-copy-btn-container hx:opacity-0 hx:transition hx:group-hover/code:opacity-100 hx:flex hx:gap-1 hx:absolute hx:m-[11px] hx:right-0 hx:top-0"&gt;
+&lt;button
+class="hextra-code-copy-btn hx:group/copybtn hx:cursor-pointer hx:transition-all hx:active:opacity-50 hx:bg-primary-700/5 hx:border hx:border-black/5 hx:text-gray-600 hx:hover:text-gray-900 hx:rounded-md hx:p-1.5 hx:dark:bg-primary-300/10 hx:dark:border-white/10 hx:dark:text-gray-400 hx:dark:hover:text-gray-50"
+title="Copy code"
+aria-label="Copy code"
+data-copied-label="Copied!"
+&gt;
+&lt;div class="hextra-copy-icon hx:group-[.copied]/copybtn:hidden hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;div class="hextra-success-icon hx:hidden hx:group-[.copied]/copybtn:block hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;/button&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;p&gt;Subsequent memories link back to the anchor, keeping the graph connected.&lt;/p&gt;
+&lt;h2&gt;Semantic Search&lt;span class="hx:absolute hx:-mt-20" id="semantic-search"&gt;&lt;/span&gt;
+&lt;a href="#semantic-search" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;p&gt;Memory search uses embeddings for semantic similarity, not just keyword matching. When an agent calls &lt;code&gt;recall(&amp;quot;how we handle authentication&amp;quot;)&lt;/code&gt;, it finds memories about auth patterns even if they don&amp;rsquo;t contain the exact word &amp;ldquo;authentication.&amp;rdquo;&lt;/p&gt;
+&lt;p&gt;The search pipeline:&lt;/p&gt;
+&lt;ol&gt;
+&lt;li&gt;&lt;strong&gt;Query expansion&lt;/strong&gt; — the query is expanded to capture related concepts&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Embedding&lt;/strong&gt; — query is converted to a vector via &lt;code&gt;text-embedding-3-small&lt;/code&gt;&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Retrieval&lt;/strong&gt; — nearest neighbors found in the SQLite-backed vector store&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Reranking&lt;/strong&gt; — results are reranked using &lt;code&gt;gpt-4o-mini&lt;/code&gt; for relevance&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Injection&lt;/strong&gt; — top results are injected into the agent&amp;rsquo;s context&lt;/li&gt;
+&lt;/ol&gt;
+&lt;p&gt;All embedding and reranking runs through OpenRouter — no local GPU or model downloads required.&lt;/p&gt;
+&lt;h2&gt;Browsing Memory&lt;span class="hx:absolute hx:-mt-20" id="browsing-memory"&gt;&lt;/span&gt;
+&lt;a href="#browsing-memory" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;p&gt;You can browse and search agent memories through:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;Dashboard&lt;/strong&gt; — the Memory page lets you view vaults and search semantically&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;CLI&lt;/strong&gt; — &lt;code&gt;djinnbot memory search eric &amp;quot;architecture decisions&amp;quot;&lt;/code&gt;&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;API&lt;/strong&gt; — &lt;code&gt;GET /v1/memory/search?agent_id=eric&amp;amp;query=architecture&lt;/code&gt;&lt;/li&gt;
+&lt;/ul&gt;</description></item><item><title>Skills</title><link>https://docs.djinn.bot/docs/concepts/skills/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://docs.djinn.bot/docs/concepts/skills/</guid><description>
+&lt;p&gt;Skills are on-demand instruction sets that agents can load when they need specialized knowledge. Instead of stuffing every possible instruction into an agent&amp;rsquo;s system prompt, skills are discovered and loaded contextually.&lt;/p&gt;
+&lt;h2&gt;How Skills Work&lt;span class="hx:absolute hx:-mt-20" id="how-skills-work"&gt;&lt;/span&gt;
+&lt;a href="#how-skills-work" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;ol&gt;
+&lt;li&gt;On session start, the agent receives a &lt;strong&gt;skill manifest&lt;/strong&gt; — a compact list of available skills with descriptions&lt;/li&gt;
+&lt;li&gt;When the agent encounters a task that matches a skill, it calls &lt;code&gt;load_skill(&amp;quot;name&amp;quot;)&lt;/code&gt;&lt;/li&gt;
+&lt;li&gt;The full skill instructions are loaded into context&lt;/li&gt;
+&lt;li&gt;The agent follows the skill&amp;rsquo;s procedures&lt;/li&gt;
+&lt;/ol&gt;
+&lt;p&gt;This keeps system prompts lean while giving agents access to deep, specialized knowledge when needed.&lt;/p&gt;
+&lt;h2&gt;Skill File Format&lt;span class="hx:absolute hx:-mt-20" id="skill-file-format"&gt;&lt;/span&gt;
+&lt;a href="#skill-file-format" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;p&gt;Skills are markdown files with YAML frontmatter:&lt;/p&gt;
+&lt;div class="hextra-code-block hx:relative hx:mt-6 hx:first:mt-0 hx:group/code"&gt;
+&lt;div&gt;&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-markdown" data-lang="markdown"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;---
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;name: github-pr
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;description: Opening and merging GitHub pull requests
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;tags: [github, git, pr, pull-request, merge]
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;enabled: true
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;---
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="gh"&gt;# GitHub PR Skill
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="gu"&gt;## When to Use
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;When you need to open a pull request, review PR changes, or merge branches.
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="gu"&gt;## Steps
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="k"&gt;1.&lt;/span&gt; Ensure all changes are committed and pushed
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="k"&gt;2.&lt;/span&gt; Create PR with descriptive title and body
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="k"&gt;3.&lt;/span&gt; Link to relevant issue or task
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;...&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;&lt;div class="hextra-code-copy-btn-container hx:opacity-0 hx:transition hx:group-hover/code:opacity-100 hx:flex hx:gap-1 hx:absolute hx:m-[11px] hx:right-0 hx:top-0"&gt;
+&lt;button
+class="hextra-code-copy-btn hx:group/copybtn hx:cursor-pointer hx:transition-all hx:active:opacity-50 hx:bg-primary-700/5 hx:border hx:border-black/5 hx:text-gray-600 hx:hover:text-gray-900 hx:rounded-md hx:p-1.5 hx:dark:bg-primary-300/10 hx:dark:border-white/10 hx:dark:text-gray-400 hx:dark:hover:text-gray-50"
+title="Copy code"
+aria-label="Copy code"
+data-copied-label="Copied!"
+&gt;
+&lt;div class="hextra-copy-icon hx:group-[.copied]/copybtn:hidden hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;div class="hextra-success-icon hx:hidden hx:group-[.copied]/copybtn:block hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;/button&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;h2&gt;Skill Locations&lt;span class="hx:absolute hx:-mt-20" id="skill-locations"&gt;&lt;/span&gt;
+&lt;a href="#skill-locations" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;p&gt;Skills can be stored at two levels:&lt;/p&gt;
+&lt;table&gt;
+&lt;thead&gt;
+&lt;tr&gt;
+&lt;th&gt;Location&lt;/th&gt;
+&lt;th&gt;Scope&lt;/th&gt;
+&lt;th&gt;Path&lt;/th&gt;
+&lt;/tr&gt;
+&lt;/thead&gt;
+&lt;tbody&gt;
+&lt;tr&gt;
+&lt;td&gt;Global&lt;/td&gt;
+&lt;td&gt;Available to all agents&lt;/td&gt;
+&lt;td&gt;&lt;code&gt;agents/_skills/*.md&lt;/code&gt;&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;
+&lt;td&gt;Agent-specific&lt;/td&gt;
+&lt;td&gt;Only for one agent&lt;/td&gt;
+&lt;td&gt;&lt;code&gt;agents/&amp;lt;id&amp;gt;/skills/*.md&lt;/code&gt;&lt;/td&gt;
+&lt;/tr&gt;
+&lt;/tbody&gt;
+&lt;/table&gt;
+&lt;p&gt;Agent-specific skills override global skills with the same name.&lt;/p&gt;
+&lt;h2&gt;Automatic Matching&lt;span class="hx:absolute hx:-mt-20" id="automatic-matching"&gt;&lt;/span&gt;
+&lt;a href="#automatic-matching" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;p&gt;The engine automatically matches skills to pipeline steps by comparing skill tags against the step input text. If a step mentions &amp;ldquo;github&amp;rdquo; or &amp;ldquo;pull request,&amp;rdquo; skills tagged with those keywords are auto-injected.&lt;/p&gt;
+&lt;p&gt;This means agents often get the right skills without explicitly calling &lt;code&gt;load_skill()&lt;/code&gt;.&lt;/p&gt;
+&lt;h2&gt;Managing Skills&lt;span class="hx:absolute hx:-mt-20" id="managing-skills"&gt;&lt;/span&gt;
+&lt;a href="#managing-skills" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;h3&gt;Dashboard&lt;span class="hx:absolute hx:-mt-20" id="dashboard"&gt;&lt;/span&gt;
+&lt;a href="#dashboard" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h3&gt;&lt;p&gt;The Skills page in the dashboard lets you:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;View all global and agent-specific skills&lt;/li&gt;
+&lt;li&gt;Enable/disable skills without deleting them&lt;/li&gt;
+&lt;li&gt;Edit skill content&lt;/li&gt;
+&lt;li&gt;Create new skills&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h3&gt;Skill Generator&lt;span class="hx:absolute hx:-mt-20" id="skill-generator"&gt;&lt;/span&gt;
+&lt;a href="#skill-generator" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h3&gt;&lt;p&gt;The dashboard includes a skill generator — an AI-assisted chat session that helps you create new skills through conversation. Describe what the skill should cover and it writes the instructions.&lt;/p&gt;
+&lt;h3&gt;API&lt;span class="hx:absolute hx:-mt-20" id="api"&gt;&lt;/span&gt;
+&lt;a href="#api" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h3&gt;&lt;div class="hextra-code-block hx:relative hx:mt-6 hx:first:mt-0 hx:group/code"&gt;
+&lt;div&gt;&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-bash" data-lang="bash"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="c1"&gt;# List skills&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;GET /v1/skills
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="c1"&gt;# Get a specific skill&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;GET /v1/skills/&lt;span class="o"&gt;{&lt;/span&gt;name&lt;span class="o"&gt;}&lt;/span&gt;?agent_id&lt;span class="o"&gt;=&lt;/span&gt;yukihiro
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="c1"&gt;# Create a skill&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;POST /v1/skills
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="o"&gt;{&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt; &lt;span class="s2"&gt;&amp;#34;name&amp;#34;&lt;/span&gt;: &lt;span class="s2"&gt;&amp;#34;my-skill&amp;#34;&lt;/span&gt;,
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt; &lt;span class="s2"&gt;&amp;#34;description&amp;#34;&lt;/span&gt;: &lt;span class="s2"&gt;&amp;#34;Does something useful&amp;#34;&lt;/span&gt;,
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt; &lt;span class="s2"&gt;&amp;#34;tags&amp;#34;&lt;/span&gt;: &lt;span class="o"&gt;[&lt;/span&gt;&lt;span class="s2"&gt;&amp;#34;relevant&amp;#34;&lt;/span&gt;, &lt;span class="s2"&gt;&amp;#34;tags&amp;#34;&lt;/span&gt;&lt;span class="o"&gt;]&lt;/span&gt;,
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt; &lt;span class="s2"&gt;&amp;#34;content&amp;#34;&lt;/span&gt;: &lt;span class="s2"&gt;&amp;#34;# My Skill\n\n...&amp;#34;&lt;/span&gt;,
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt; &lt;span class="s2"&gt;&amp;#34;scope&amp;#34;&lt;/span&gt;: &lt;span class="s2"&gt;&amp;#34;global&amp;#34;&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="o"&gt;}&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="c1"&gt;# Toggle enabled state&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;PATCH /v1/skills/&lt;span class="o"&gt;{&lt;/span&gt;name&lt;span class="o"&gt;}&lt;/span&gt;/enabled
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="o"&gt;{&lt;/span&gt; &lt;span class="s2"&gt;&amp;#34;enabled&amp;#34;&lt;/span&gt;: &lt;span class="nb"&gt;false&lt;/span&gt; &lt;span class="o"&gt;}&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;&lt;div class="hextra-code-copy-btn-container hx:opacity-0 hx:transition hx:group-hover/code:opacity-100 hx:flex hx:gap-1 hx:absolute hx:m-[11px] hx:right-0 hx:top-0"&gt;
+&lt;button
+class="hextra-code-copy-btn hx:group/copybtn hx:cursor-pointer hx:transition-all hx:active:opacity-50 hx:bg-primary-700/5 hx:border hx:border-black/5 hx:text-gray-600 hx:hover:text-gray-900 hx:rounded-md hx:p-1.5 hx:dark:bg-primary-300/10 hx:dark:border-white/10 hx:dark:text-gray-400 hx:dark:hover:text-gray-50"
+title="Copy code"
+aria-label="Copy code"
+data-copied-label="Copied!"
+&gt;
+&lt;div class="hextra-copy-icon hx:group-[.copied]/copybtn:hidden hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;div class="hextra-success-icon hx:hidden hx:group-[.copied]/copybtn:block hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;/button&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;h2&gt;Creating Effective Skills&lt;span class="hx:absolute hx:-mt-20" id="creating-effective-skills"&gt;&lt;/span&gt;
+&lt;a href="#creating-effective-skills" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;p&gt;Good skills are:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;Specific&lt;/strong&gt; — focused on one domain or task type&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Procedural&lt;/strong&gt; — step-by-step instructions, not vague guidance&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Tagged well&lt;/strong&gt; — keywords that match when agents encounter relevant tasks&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Example-rich&lt;/strong&gt; — show concrete examples of commands, code, and output&lt;/li&gt;
+&lt;/ul&gt;</description></item><item><title>MCP Tools</title><link>https://docs.djinn.bot/docs/concepts/mcp-tools/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://docs.djinn.bot/docs/concepts/mcp-tools/</guid><description>
+&lt;p&gt;DjinnBot agents can use external tools through the &lt;a href="https://modelcontextprotocol.io/"target="_blank" rel="noopener"&gt;Model Context Protocol (MCP)&lt;/a&gt;. An &lt;a href="https://github.com/skymoore/mcpo"target="_blank" rel="noopener"&gt;mcpo&lt;/a&gt; proxy converts MCP tool servers into REST/OpenAPI endpoints that agents call like any other tool.&lt;/p&gt;
+&lt;h2&gt;How It Works&lt;span class="hx:absolute hx:-mt-20" id="how-it-works"&gt;&lt;/span&gt;
+&lt;a href="#how-it-works" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;div class="hextra-code-block hx:relative hx:mt-6 hx:first:mt-0 hx:group/code"&gt;
+&lt;div&gt;&lt;pre&gt;&lt;code&gt;Agent Container → HTTP → mcpo Proxy → stdio → MCP Server&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;div class="hextra-code-copy-btn-container hx:opacity-0 hx:transition hx:group-hover/code:opacity-100 hx:flex hx:gap-1 hx:absolute hx:m-[11px] hx:right-0 hx:top-0"&gt;
+&lt;button
+class="hextra-code-copy-btn hx:group/copybtn hx:cursor-pointer hx:transition-all hx:active:opacity-50 hx:bg-primary-700/5 hx:border hx:border-black/5 hx:text-gray-600 hx:hover:text-gray-900 hx:rounded-md hx:p-1.5 hx:dark:bg-primary-300/10 hx:dark:border-white/10 hx:dark:text-gray-400 hx:dark:hover:text-gray-50"
+title="Copy code"
+aria-label="Copy code"
+data-copied-label="Copied!"
+&gt;
+&lt;div class="hextra-copy-icon hx:group-[.copied]/copybtn:hidden hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;div class="hextra-success-icon hx:hidden hx:group-[.copied]/copybtn:block hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;/button&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;ol&gt;
+&lt;li&gt;The mcpo proxy runs as a Docker service (&lt;code&gt;djinnbot-mcpo&lt;/code&gt;)&lt;/li&gt;
+&lt;li&gt;It reads &lt;code&gt;mcp/config.json&lt;/code&gt; to discover configured tool servers&lt;/li&gt;
+&lt;li&gt;Each MCP server is exposed as a set of REST endpoints&lt;/li&gt;
+&lt;li&gt;Agents call these endpoints like any other HTTP tool&lt;/li&gt;
+&lt;li&gt;The proxy handles stdio communication with the actual MCP server&lt;/li&gt;
+&lt;/ol&gt;
+&lt;h2&gt;Default Tools&lt;span class="hx:absolute hx:-mt-20" id="default-tools"&gt;&lt;/span&gt;
+&lt;a href="#default-tools" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;p&gt;DjinnBot ships with these MCP servers pre-configured:&lt;/p&gt;
+&lt;table&gt;
+&lt;thead&gt;
+&lt;tr&gt;
+&lt;th&gt;Server&lt;/th&gt;
+&lt;th&gt;Tools&lt;/th&gt;
+&lt;th&gt;Description&lt;/th&gt;
+&lt;/tr&gt;
+&lt;/thead&gt;
+&lt;tbody&gt;
+&lt;tr&gt;
+&lt;td&gt;&lt;code&gt;github&lt;/code&gt;&lt;/td&gt;
+&lt;td&gt;Repository browsing, issues, context&lt;/td&gt;
+&lt;td&gt;GitHub API access (read-only by default)&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;
+&lt;td&gt;&lt;code&gt;fetch&lt;/code&gt;&lt;/td&gt;
+&lt;td&gt;Web page fetching&lt;/td&gt;
+&lt;td&gt;Retrieve content from URLs&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;
+&lt;td&gt;&lt;code&gt;time&lt;/code&gt;&lt;/td&gt;
+&lt;td&gt;Current time/timezone&lt;/td&gt;
+&lt;td&gt;Time-aware operations&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;
+&lt;td&gt;&lt;code&gt;grokipedia&lt;/code&gt;&lt;/td&gt;
+&lt;td&gt;Wikipedia search&lt;/td&gt;
+&lt;td&gt;Knowledge lookup&lt;/td&gt;
+&lt;/tr&gt;
+&lt;/tbody&gt;
+&lt;/table&gt;
+&lt;h2&gt;Configuration&lt;span class="hx:absolute hx:-mt-20" id="configuration"&gt;&lt;/span&gt;
+&lt;a href="#configuration" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;p&gt;MCP servers are configured in &lt;code&gt;mcp/config.json&lt;/code&gt;:&lt;/p&gt;
+&lt;div class="hextra-code-block hx:relative hx:mt-6 hx:first:mt-0 hx:group/code"&gt;
+&lt;div&gt;&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-json" data-lang="json"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="p"&gt;{&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt; &lt;span class="nt"&gt;&amp;#34;mcpServers&amp;#34;&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt; &lt;span class="nt"&gt;&amp;#34;github&amp;#34;&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt; &lt;span class="nt"&gt;&amp;#34;command&amp;#34;&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt; &lt;span class="s2"&gt;&amp;#34;/usr/local/bin/github-mcp-server&amp;#34;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt; &lt;span class="nt"&gt;&amp;#34;args&amp;#34;&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt; &lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="s2"&gt;&amp;#34;stdio&amp;#34;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="s2"&gt;&amp;#34;--read-only&amp;#34;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="s2"&gt;&amp;#34;--toolsets&amp;#34;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="s2"&gt;&amp;#34;context,repos,issues&amp;#34;&lt;/span&gt;&lt;span class="p"&gt;],&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt; &lt;span class="nt"&gt;&amp;#34;env&amp;#34;&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt; &lt;span class="nt"&gt;&amp;#34;GITHUB_PERSONAL_ACCESS_TOKEN&amp;#34;&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt; &lt;span class="s2"&gt;&amp;#34;${GITHUB_TOKEN}&amp;#34;&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt; &lt;span class="p"&gt;}&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt; &lt;span class="p"&gt;},&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt; &lt;span class="nt"&gt;&amp;#34;time&amp;#34;&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt; &lt;span class="p"&gt;{&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt; &lt;span class="nt"&gt;&amp;#34;command&amp;#34;&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt; &lt;span class="s2"&gt;&amp;#34;uvx&amp;#34;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt; &lt;span class="nt"&gt;&amp;#34;args&amp;#34;&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt; &lt;span class="p"&gt;[&lt;/span&gt;&lt;span class="s2"&gt;&amp;#34;mcp-server-time&amp;#34;&lt;/span&gt;&lt;span class="p"&gt;,&lt;/span&gt; &lt;span class="s2"&gt;&amp;#34;--local-timezone=Europe/Lisbon&amp;#34;&lt;/span&gt;&lt;span class="p"&gt;]&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt; &lt;span class="p"&gt;}&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt; &lt;span class="p"&gt;}&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="p"&gt;}&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;&lt;div class="hextra-code-copy-btn-container hx:opacity-0 hx:transition hx:group-hover/code:opacity-100 hx:flex hx:gap-1 hx:absolute hx:m-[11px] hx:right-0 hx:top-0"&gt;
+&lt;button
+class="hextra-code-copy-btn hx:group/copybtn hx:cursor-pointer hx:transition-all hx:active:opacity-50 hx:bg-primary-700/5 hx:border hx:border-black/5 hx:text-gray-600 hx:hover:text-gray-900 hx:rounded-md hx:p-1.5 hx:dark:bg-primary-300/10 hx:dark:border-white/10 hx:dark:text-gray-400 hx:dark:hover:text-gray-50"
+title="Copy code"
+aria-label="Copy code"
+data-copied-label="Copied!"
+&gt;
+&lt;div class="hextra-copy-icon hx:group-[.copied]/copybtn:hidden hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;div class="hextra-success-icon hx:hidden hx:group-[.copied]/copybtn:block hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;/button&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;p&gt;Each entry specifies:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;command&lt;/strong&gt; — the executable to run&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;args&lt;/strong&gt; — command-line arguments&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;env&lt;/strong&gt; — environment variables (supports &lt;code&gt;${VAR}&lt;/code&gt; substitution from the host)&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h2&gt;Adding Tools&lt;span class="hx:absolute hx:-mt-20" id="adding-tools"&gt;&lt;/span&gt;
+&lt;a href="#adding-tools" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;h3&gt;Via Dashboard&lt;span class="hx:absolute hx:-mt-20" id="via-dashboard"&gt;&lt;/span&gt;
+&lt;a href="#via-dashboard" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h3&gt;&lt;ol&gt;
+&lt;li&gt;Go to &lt;strong&gt;MCP Tools&lt;/strong&gt; in the dashboard&lt;/li&gt;
+&lt;li&gt;Click &lt;strong&gt;Configure&lt;/strong&gt; or &lt;strong&gt;Add Server&lt;/strong&gt;&lt;/li&gt;
+&lt;li&gt;Enter the server configuration&lt;/li&gt;
+&lt;li&gt;The proxy hot-reloads — no restart needed&lt;/li&gt;
+&lt;/ol&gt;
+&lt;h3&gt;Via Config File&lt;span class="hx:absolute hx:-mt-20" id="via-config-file"&gt;&lt;/span&gt;
+&lt;a href="#via-config-file" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h3&gt;&lt;p&gt;Edit &lt;code&gt;mcp/config.json&lt;/code&gt; directly. The proxy watches the file and reloads automatically.&lt;/p&gt;
+&lt;h3&gt;Via API&lt;span class="hx:absolute hx:-mt-20" id="via-api"&gt;&lt;/span&gt;
+&lt;a href="#via-api" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h3&gt;&lt;div class="hextra-code-block hx:relative hx:mt-6 hx:first:mt-0 hx:group/code"&gt;
+&lt;div&gt;&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-bash" data-lang="bash"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;POST /v1/mcp/
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="o"&gt;{&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt; &lt;span class="s2"&gt;&amp;#34;name&amp;#34;&lt;/span&gt;: &lt;span class="s2"&gt;&amp;#34;My Tool Server&amp;#34;&lt;/span&gt;,
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt; &lt;span class="s2"&gt;&amp;#34;description&amp;#34;&lt;/span&gt;: &lt;span class="s2"&gt;&amp;#34;Does useful things&amp;#34;&lt;/span&gt;,
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt; &lt;span class="s2"&gt;&amp;#34;config&amp;#34;&lt;/span&gt;: &lt;span class="o"&gt;{&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt; &lt;span class="s2"&gt;&amp;#34;command&amp;#34;&lt;/span&gt;: &lt;span class="s2"&gt;&amp;#34;npx&amp;#34;&lt;/span&gt;,
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt; &lt;span class="s2"&gt;&amp;#34;args&amp;#34;&lt;/span&gt;: &lt;span class="o"&gt;[&lt;/span&gt;&lt;span class="s2"&gt;&amp;#34;my-mcp-server&amp;#34;&lt;/span&gt;&lt;span class="o"&gt;]&lt;/span&gt;,
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt; &lt;span class="s2"&gt;&amp;#34;env&amp;#34;&lt;/span&gt;: &lt;span class="o"&gt;{}&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt; &lt;span class="o"&gt;}&lt;/span&gt;,
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt; &lt;span class="s2"&gt;&amp;#34;enabled&amp;#34;&lt;/span&gt;: &lt;span class="nb"&gt;true&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="o"&gt;}&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;&lt;div class="hextra-code-copy-btn-container hx:opacity-0 hx:transition hx:group-hover/code:opacity-100 hx:flex hx:gap-1 hx:absolute hx:m-[11px] hx:right-0 hx:top-0"&gt;
+&lt;button
+class="hextra-code-copy-btn hx:group/copybtn hx:cursor-pointer hx:transition-all hx:active:opacity-50 hx:bg-primary-700/5 hx:border hx:border-black/5 hx:text-gray-600 hx:hover:text-gray-900 hx:rounded-md hx:p-1.5 hx:dark:bg-primary-300/10 hx:dark:border-white/10 hx:dark:text-gray-400 hx:dark:hover:text-gray-50"
+title="Copy code"
+aria-label="Copy code"
+data-copied-label="Copied!"
+&gt;
+&lt;div class="hextra-copy-icon hx:group-[.copied]/copybtn:hidden hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;div class="hextra-success-icon hx:hidden hx:group-[.copied]/copybtn:block hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;/button&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;h2&gt;Health Monitoring&lt;span class="hx:absolute hx:-mt-20" id="health-monitoring"&gt;&lt;/span&gt;
+&lt;a href="#health-monitoring" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;p&gt;The engine&amp;rsquo;s McpoManager continuously monitors tool server health:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;On startup, it polls each server endpoint&lt;/li&gt;
+&lt;li&gt;Server status (running/error/configuring) is tracked in the database&lt;/li&gt;
+&lt;li&gt;Tool discovery extracts available tools from each server&amp;rsquo;s OpenAPI schema&lt;/li&gt;
+&lt;li&gt;Logs are streamed to Redis and visible in the dashboard&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h2&gt;Security&lt;span class="hx:absolute hx:-mt-20" id="security"&gt;&lt;/span&gt;
+&lt;a href="#security" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;p&gt;The mcpo proxy is protected by an API key (&lt;code&gt;MCPO_API_KEY&lt;/code&gt; in &lt;code&gt;.env&lt;/code&gt;). Agent containers receive this key and include it in their requests.&lt;/p&gt;
+&lt;p&gt;Environment variables in &lt;code&gt;mcp/config.json&lt;/code&gt; use &lt;code&gt;${VAR}&lt;/code&gt; syntax — the actual values come from the Docker environment, not the config file. Sensitive tokens never appear in the config.&lt;/p&gt;
+&lt;h2&gt;Custom MCP Servers&lt;span class="hx:absolute hx:-mt-20" id="custom-mcp-servers"&gt;&lt;/span&gt;
+&lt;a href="#custom-mcp-servers" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;p&gt;You can add any MCP-compatible tool server. The community maintains hundreds of servers for various APIs and services. Some popular ones:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;Filesystem&lt;/strong&gt; — file operations outside the workspace&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Postgres/MySQL&lt;/strong&gt; — direct database access&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Slack&lt;/strong&gt; — Slack API operations&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Brave Search&lt;/strong&gt; — web search&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Playwright&lt;/strong&gt; — browser automation&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;See &lt;a href="https://github.com/punkpeye/awesome-mcp-servers"target="_blank" rel="noopener"&gt;awesome-mcp-servers&lt;/a&gt; for a comprehensive list.&lt;/p&gt;</description></item><item><title>Pulse Mode</title><link>https://docs.djinn.bot/docs/concepts/pulse/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://docs.djinn.bot/docs/concepts/pulse/</guid><description>
+&lt;p&gt;Pulse mode lets agents work autonomously on a schedule — checking their inbox, finding tasks, and doing work without human intervention.&lt;/p&gt;
+&lt;h2&gt;How Pulse Works&lt;span class="hx:absolute hx:-mt-20" id="how-pulse-works"&gt;&lt;/span&gt;
+&lt;a href="#how-pulse-works" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;p&gt;When pulse mode is enabled for an agent, the engine wakes them up on a configurable interval (default: every 30 minutes). Each pulse cycle follows a routine:&lt;/p&gt;
+&lt;ol&gt;
+&lt;li&gt;&lt;strong&gt;Check inbox&lt;/strong&gt; — read messages from other agents&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Search memories&lt;/strong&gt; — recall recent context, handoffs, and active work&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Discover projects&lt;/strong&gt; — call &lt;code&gt;get_my_projects()&lt;/code&gt; to find assigned projects&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Check work queue&lt;/strong&gt; — call &lt;code&gt;get_ready_tasks(projectId)&lt;/code&gt; to find tasks in their columns&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Claim a task&lt;/strong&gt; — &lt;code&gt;claim_task(projectId, taskId)&lt;/code&gt; atomically assigns the task and provisions a git workspace&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Do the work&lt;/strong&gt; — implement the task in the provisioned workspace&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Open a PR&lt;/strong&gt; — &lt;code&gt;open_pull_request(projectId, taskId, title, body)&lt;/code&gt; when ready&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Transition the task&lt;/strong&gt; — move it through the kanban board (e.g., to &amp;ldquo;review&amp;rdquo;)&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Report&lt;/strong&gt; — message the human via Slack DM if there&amp;rsquo;s something important&lt;/li&gt;
+&lt;/ol&gt;
+&lt;p&gt;Agents only pick up &lt;strong&gt;one task per pulse&lt;/strong&gt; to stay focused.&lt;/p&gt;
+&lt;h2&gt;Configuration&lt;span class="hx:absolute hx:-mt-20" id="configuration"&gt;&lt;/span&gt;
+&lt;a href="#configuration" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;p&gt;Pulse is configured per-agent in &lt;code&gt;config.yml&lt;/code&gt;:&lt;/p&gt;
+&lt;div class="hextra-code-block hx:relative hx:mt-6 hx:first:mt-0 hx:group/code"&gt;
+&lt;div&gt;&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-yaml" data-lang="yaml"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nt"&gt;pulse_enabled&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="kc"&gt;true&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nt"&gt;pulse_interval_minutes&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;30&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nt"&gt;pulse_columns&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="c"&gt;# Which kanban columns this agent checks&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;- &lt;span class="l"&gt;Backlog&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;- &lt;span class="l"&gt;Ready&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nt"&gt;pulse_container_timeout_ms&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;120000&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nt"&gt;pulse_max_consecutive_skips&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;5&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nt"&gt;pulse_offset_minutes&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;3&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="c"&gt;# Stagger to avoid all agents waking simultaneously&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nt"&gt;pulse_blackouts&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;- &lt;span class="nt"&gt;label&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;Nighttime&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;start_time&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;23:00&amp;#39;&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;end_time&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;07:00&amp;#39;&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;type&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;recurring&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nt"&gt;pulse_transitions_to&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="c"&gt;# Allowed kanban transitions&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;- &lt;span class="l"&gt;planning&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;- &lt;span class="l"&gt;ready&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;- &lt;span class="l"&gt;in_progress&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;&lt;div class="hextra-code-copy-btn-container hx:opacity-0 hx:transition hx:group-hover/code:opacity-100 hx:flex hx:gap-1 hx:absolute hx:m-[11px] hx:right-0 hx:top-0"&gt;
+&lt;button
+class="hextra-code-copy-btn hx:group/copybtn hx:cursor-pointer hx:transition-all hx:active:opacity-50 hx:bg-primary-700/5 hx:border hx:border-black/5 hx:text-gray-600 hx:hover:text-gray-900 hx:rounded-md hx:p-1.5 hx:dark:bg-primary-300/10 hx:dark:border-white/10 hx:dark:text-gray-400 hx:dark:hover:text-gray-50"
+title="Copy code"
+aria-label="Copy code"
+data-copied-label="Copied!"
+&gt;
+&lt;div class="hextra-copy-icon hx:group-[.copied]/copybtn:hidden hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;div class="hextra-success-icon hx:hidden hx:group-[.copied]/copybtn:block hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;/button&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;p&gt;All settings can be edited through the dashboard agent configuration page.&lt;/p&gt;
+&lt;h2&gt;Project Tools&lt;span class="hx:absolute hx:-mt-20" id="project-tools"&gt;&lt;/span&gt;
+&lt;a href="#project-tools" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;p&gt;During pulse sessions, agents have access to project management tools:&lt;/p&gt;
+&lt;table&gt;
+&lt;thead&gt;
+&lt;tr&gt;
+&lt;th&gt;Tool&lt;/th&gt;
+&lt;th&gt;Purpose&lt;/th&gt;
+&lt;/tr&gt;
+&lt;/thead&gt;
+&lt;tbody&gt;
+&lt;tr&gt;
+&lt;td&gt;&lt;code&gt;get_my_projects()&lt;/code&gt;&lt;/td&gt;
+&lt;td&gt;List assigned projects&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;
+&lt;td&gt;&lt;code&gt;get_ready_tasks(projectId)&lt;/code&gt;&lt;/td&gt;
+&lt;td&gt;Find tasks in your columns&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;
+&lt;td&gt;&lt;code&gt;claim_task(projectId, taskId)&lt;/code&gt;&lt;/td&gt;
+&lt;td&gt;Claim a task + provision git workspace&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;
+&lt;td&gt;&lt;code&gt;get_task_context(projectId, taskId)&lt;/code&gt;&lt;/td&gt;
+&lt;td&gt;Full task details and acceptance criteria&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;
+&lt;td&gt;&lt;code&gt;open_pull_request(projectId, taskId, title, body)&lt;/code&gt;&lt;/td&gt;
+&lt;td&gt;Open a GitHub PR&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;
+&lt;td&gt;&lt;code&gt;transition_task(projectId, taskId, status)&lt;/code&gt;&lt;/td&gt;
+&lt;td&gt;Move task through kanban&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;
+&lt;td&gt;&lt;code&gt;execute_task(projectId, taskId)&lt;/code&gt;&lt;/td&gt;
+&lt;td&gt;Kick off a pipeline run for the task&lt;/td&gt;
+&lt;/tr&gt;
+&lt;/tbody&gt;
+&lt;/table&gt;
+&lt;h2&gt;Git Workflow&lt;span class="hx:absolute hx:-mt-20" id="git-workflow"&gt;&lt;/span&gt;
+&lt;a href="#git-workflow" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;p&gt;When an agent claims a task, the system:&lt;/p&gt;
+&lt;ol&gt;
+&lt;li&gt;Creates a feature branch: &lt;code&gt;feat/task_abc123-implement-oauth&lt;/code&gt;&lt;/li&gt;
+&lt;li&gt;Provisions a git workspace at &lt;code&gt;/home/agent/task-workspaces/{taskId}/&lt;/code&gt;&lt;/li&gt;
+&lt;li&gt;Configures git credentials for push access&lt;/li&gt;
+&lt;/ol&gt;
+&lt;p&gt;The agent works in this workspace, commits, pushes, and opens a PR — all within the isolated container.&lt;/p&gt;
+&lt;h2&gt;Blackout Windows&lt;span class="hx:absolute hx:-mt-20" id="blackout-windows"&gt;&lt;/span&gt;
+&lt;a href="#blackout-windows" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;p&gt;You can prevent agents from pulsing during certain times:&lt;/p&gt;
+&lt;div class="hextra-code-block hx:relative hx:mt-6 hx:first:mt-0 hx:group/code"&gt;
+&lt;div&gt;&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-yaml" data-lang="yaml"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nt"&gt;pulse_blackouts&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;- &lt;span class="nt"&gt;label&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;Nighttime&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;start_time&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;23:00&amp;#39;&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;end_time&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;07:00&amp;#39;&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;type&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;recurring&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;- &lt;span class="nt"&gt;label&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;Weekend&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;start_time&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;2026-03-01T00:00:00&amp;#39;&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;end_time&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s1"&gt;&amp;#39;2026-03-03T00:00:00&amp;#39;&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="nt"&gt;type&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="l"&gt;one_off&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;&lt;div class="hextra-code-copy-btn-container hx:opacity-0 hx:transition hx:group-hover/code:opacity-100 hx:flex hx:gap-1 hx:absolute hx:m-[11px] hx:right-0 hx:top-0"&gt;
+&lt;button
+class="hextra-code-copy-btn hx:group/copybtn hx:cursor-pointer hx:transition-all hx:active:opacity-50 hx:bg-primary-700/5 hx:border hx:border-black/5 hx:text-gray-600 hx:hover:text-gray-900 hx:rounded-md hx:p-1.5 hx:dark:bg-primary-300/10 hx:dark:border-white/10 hx:dark:text-gray-400 hx:dark:hover:text-gray-50"
+title="Copy code"
+aria-label="Copy code"
+data-copied-label="Copied!"
+&gt;
+&lt;div class="hextra-copy-icon hx:group-[.copied]/copybtn:hidden hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;div class="hextra-success-icon hx:hidden hx:group-[.copied]/copybtn:block hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;/button&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;h2&gt;Communication&lt;span class="hx:absolute hx:-mt-20" id="communication"&gt;&lt;/span&gt;
+&lt;a href="#communication" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;p&gt;Agents can communicate during pulse sessions:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;&lt;code&gt;message_agent(agentId, message)&lt;/code&gt;&lt;/strong&gt; — send a message to another agent&amp;rsquo;s inbox&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;&lt;code&gt;slack_dm(message)&lt;/code&gt;&lt;/strong&gt; — message the human via Slack DM (use sparingly — only for urgent findings or blockers)&lt;/li&gt;
+&lt;/ul&gt;</description></item><item><title>Agent Containers</title><link>https://docs.djinn.bot/docs/concepts/containers/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://docs.djinn.bot/docs/concepts/containers/</guid><description>
+&lt;p&gt;Every agent session runs in an isolated Docker container. This is one of DjinnBot&amp;rsquo;s key differentiators — agents get a full engineering environment without any host access.&lt;/p&gt;
+&lt;h2&gt;What&amp;rsquo;s Inside&lt;span class="hx:absolute hx:-mt-20" id="whats-inside"&gt;&lt;/span&gt;
+&lt;a href="#whats-inside" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;p&gt;The agent container (&lt;code&gt;Dockerfile.agent-runtime&lt;/code&gt;) is built on Debian bookworm and includes:&lt;/p&gt;
+&lt;h3&gt;Languages &amp;amp; Runtimes&lt;span class="hx:absolute hx:-mt-20" id="languages--runtimes"&gt;&lt;/span&gt;
+&lt;a href="#languages--runtimes" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h3&gt;&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;Node.js 22&lt;/strong&gt; — JavaScript/TypeScript&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Python 3&lt;/strong&gt; — with pip and venv&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Go 1.23+&lt;/strong&gt; — compiled language support&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Rust&lt;/strong&gt; — via rustup (stable toolchain)&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Bun 1.3.6&lt;/strong&gt; — for QMDR (semantic search)&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h3&gt;Developer Tools&lt;span class="hx:absolute hx:-mt-20" id="developer-tools"&gt;&lt;/span&gt;
+&lt;a href="#developer-tools" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h3&gt;&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;git&lt;/strong&gt; + git-lfs — version control&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;GitHub CLI&lt;/strong&gt; (&lt;code&gt;gh&lt;/code&gt;) — PR and issue management&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;ripgrep&lt;/strong&gt; (&lt;code&gt;rg&lt;/code&gt;) — fast code search&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;fd&lt;/strong&gt; — fast file finder&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;bat&lt;/strong&gt; — syntax-highlighted cat&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;fzf&lt;/strong&gt; — fuzzy finder&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;delta&lt;/strong&gt; — better git diffs&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;eza&lt;/strong&gt; — modern ls replacement&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;jq&lt;/strong&gt; + &lt;strong&gt;yq&lt;/strong&gt; — JSON/YAML processing&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;tree&lt;/strong&gt;, &lt;strong&gt;dust&lt;/strong&gt; — directory visualization&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h3&gt;System Utilities&lt;span class="hx:absolute hx:-mt-20" id="system-utilities"&gt;&lt;/span&gt;
+&lt;a href="#system-utilities" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h3&gt;&lt;ul&gt;
+&lt;li&gt;curl, wget, httpie — HTTP clients&lt;/li&gt;
+&lt;li&gt;netcat, socat, dnsutils — network tools&lt;/li&gt;
+&lt;li&gt;imagemagick — image processing&lt;/li&gt;
+&lt;li&gt;sqlite3, postgresql-client, redis-tools — database clients&lt;/li&gt;
+&lt;li&gt;make, cmake, autoconf — build systems&lt;/li&gt;
+&lt;li&gt;vim, nano — text editors&lt;/li&gt;
+&lt;li&gt;htop, lsof, strace — system monitoring&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h3&gt;Memory Tools&lt;span class="hx:absolute hx:-mt-20" id="memory-tools"&gt;&lt;/span&gt;
+&lt;a href="#memory-tools" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h3&gt;&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;QMDR&lt;/strong&gt; — semantic search CLI (ClawVault integration)&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;ClawVault CLI&lt;/strong&gt; — direct memory management&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h2&gt;Container Lifecycle&lt;span class="hx:absolute hx:-mt-20" id="container-lifecycle"&gt;&lt;/span&gt;
+&lt;a href="#container-lifecycle" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;ol&gt;
+&lt;li&gt;&lt;strong&gt;Spawn&lt;/strong&gt; — engine creates a new container via Docker API&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Mount&lt;/strong&gt; — shared data volume is mounted, symlinks are set up for agent home directory&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Inject&lt;/strong&gt; — persona files, memories, secrets, and environment variables are provided&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Execute&lt;/strong&gt; — agent runtime starts, processes the step or chat message&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Stream&lt;/strong&gt; — output flows to engine via Redis pub/sub&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Destroy&lt;/strong&gt; — container is removed when the step completes&lt;/li&gt;
+&lt;/ol&gt;
+&lt;p&gt;Each step gets a &lt;strong&gt;fresh container&lt;/strong&gt; — there&amp;rsquo;s no state leaking between steps. Persistence comes from:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;Data volume&lt;/strong&gt; — shared across containers for memory vaults and workspaces&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Database&lt;/strong&gt; — PostgreSQL stores step outputs, chat history, etc.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Git&lt;/strong&gt; — code changes are committed and pushed&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h2&gt;Volume Layout&lt;span class="hx:absolute hx:-mt-20" id="volume-layout"&gt;&lt;/span&gt;
+&lt;a href="#volume-layout" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;p&gt;Agent containers mount the shared &lt;code&gt;djinnbot-data&lt;/code&gt; volume at &lt;code&gt;/data&lt;/code&gt;. The container&amp;rsquo;s home directory (&lt;code&gt;/home/agent&lt;/code&gt;) is symlinked to &lt;code&gt;/data/sandboxes/{agentId}/&lt;/code&gt;, giving each agent a persistent home across sessions.&lt;/p&gt;
+&lt;div class="hextra-code-block hx:relative hx:mt-6 hx:first:mt-0 hx:group/code"&gt;
+&lt;div&gt;&lt;pre&gt;&lt;code&gt;/home/agent/ → /data/sandboxes/{agentId}/
+├── clawvault/
+│ ├── {agent-id}/ ← personal memory vault
+│ └── shared/ ← team shared knowledge
+├── run-workspace/ ← git worktree (pipeline sessions)
+├── project-workspace/ ← full project repo (pipeline sessions)
+└── task-workspaces/
+└── {taskId}/ ← authenticated git workspace (pulse sessions)&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;div class="hextra-code-copy-btn-container hx:opacity-0 hx:transition hx:group-hover/code:opacity-100 hx:flex hx:gap-1 hx:absolute hx:m-[11px] hx:right-0 hx:top-0"&gt;
+&lt;button
+class="hextra-code-copy-btn hx:group/copybtn hx:cursor-pointer hx:transition-all hx:active:opacity-50 hx:bg-primary-700/5 hx:border hx:border-black/5 hx:text-gray-600 hx:hover:text-gray-900 hx:rounded-md hx:p-1.5 hx:dark:bg-primary-300/10 hx:dark:border-white/10 hx:dark:text-gray-400 hx:dark:hover:text-gray-50"
+title="Copy code"
+aria-label="Copy code"
+data-copied-label="Copied!"
+&gt;
+&lt;div class="hextra-copy-icon hx:group-[.copied]/copybtn:hidden hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;div class="hextra-success-icon hx:hidden hx:group-[.copied]/copybtn:block hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;/button&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;h2&gt;Security Model&lt;span class="hx:absolute hx:-mt-20" id="security-model"&gt;&lt;/span&gt;
+&lt;a href="#security-model" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;No host access&lt;/strong&gt; — containers cannot reach the host filesystem&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Network isolation&lt;/strong&gt; — containers are on the &lt;code&gt;djinnbot_default&lt;/code&gt; bridge network&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;No Docker socket&lt;/strong&gt; — agent containers cannot spawn other containers (only the engine can)&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Ephemeral&lt;/strong&gt; — containers are destroyed after each step&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Credential injection&lt;/strong&gt; — API keys come from environment variables, not baked into the image&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;The engine container has Docker socket access (needed to spawn agent containers), but agent containers themselves are fully sandboxed.&lt;/p&gt;
+&lt;h2&gt;Customization&lt;span class="hx:absolute hx:-mt-20" id="customization"&gt;&lt;/span&gt;
+&lt;a href="#customization" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;p&gt;To add tools to the agent container, modify &lt;code&gt;Dockerfile.agent-runtime&lt;/code&gt; and rebuild:&lt;/p&gt;
+&lt;div class="hextra-code-block hx:relative hx:mt-6 hx:first:mt-0 hx:group/code"&gt;
+&lt;div&gt;&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-bash" data-lang="bash"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;docker compose build engine
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;docker compose up -d&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;&lt;div class="hextra-code-copy-btn-container hx:opacity-0 hx:transition hx:group-hover/code:opacity-100 hx:flex hx:gap-1 hx:absolute hx:m-[11px] hx:right-0 hx:top-0"&gt;
+&lt;button
+class="hextra-code-copy-btn hx:group/copybtn hx:cursor-pointer hx:transition-all hx:active:opacity-50 hx:bg-primary-700/5 hx:border hx:border-black/5 hx:text-gray-600 hx:hover:text-gray-900 hx:rounded-md hx:p-1.5 hx:dark:bg-primary-300/10 hx:dark:border-white/10 hx:dark:text-gray-400 hx:dark:hover:text-gray-50"
+title="Copy code"
+aria-label="Copy code"
+data-copied-label="Copied!"
+&gt;
+&lt;div class="hextra-copy-icon hx:group-[.copied]/copybtn:hidden hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;div class="hextra-success-icon hx:hidden hx:group-[.copied]/copybtn:block hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;/button&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;p&gt;The agent-runtime image is built independently from the other services, so you can customize the toolbox without affecting the API server or dashboard.&lt;/p&gt;</description></item></channel></rss>
