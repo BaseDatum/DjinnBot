@@ -1,0 +1,1 @@
+"""Djinnbot CLI commands package."""

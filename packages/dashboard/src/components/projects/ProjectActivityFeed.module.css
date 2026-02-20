@@ -1,0 +1,244 @@
+/* ── Flyout container ─────────────────────────────────────────────────────── */
+.flyout {
+  position: fixed;
+  top: 50%;
+  right: 0;
+  transform: translateY(-50%);
+  z-index: 30;
+  display: flex;
+  align-items: stretch;
+  /* Expand on hover */
+}
+
+/* ── Collapsed tab (always visible) ──────────────────────────────────────── */
+.tab {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  width: 1.75rem;
+  padding: 1rem 0;
+  background: hsl(var(--card));
+  border: 1px solid hsl(var(--border));
+  border-right: none;
+  border-radius: 0.5rem 0 0 0.5rem;
+  cursor: default;
+  box-shadow: -2px 0 8px hsl(var(--border) / 0.4);
+  /* Keep tab visible above the panel */
+  position: relative;
+  z-index: 1;
+  flex-shrink: 0;
+}
+
+.tabLabel {
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+  transform: rotate(180deg);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  color: hsl(var(--muted-foreground));
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.badge {
+  font-size: 0.625rem;
+  font-weight: 700;
+  background: hsl(142 76% 36%);
+  color: #fff;
+  border-radius: 999px;
+  padding: 0.1rem 0.3rem;
+  min-width: 1.1rem;
+  text-align: center;
+  line-height: 1.4;
+}
+
+/* ── Expanded panel (slides in on hover) ─────────────────────────────────── */
+.panel {
+  display: flex;
+  flex-direction: column;
+  width: 17rem;            /* 272px ≈ w-68 */
+  height: 28rem;           /* fixed height so it doesn't stretch full viewport */
+  max-height: 70vh;
+  background: hsl(var(--card));
+  border: 1px solid hsl(var(--border));
+  border-right: none;
+  border-radius: 0.5rem 0 0 0.5rem;
+  box-shadow: -4px 0 16px hsl(var(--border) / 0.5);
+  overflow: hidden;
+
+  /* Hidden by default — translate off-screen to the right */
+  transform: translateX(100%);
+  opacity: 0;
+  pointer-events: none;
+  transition: transform 0.22s cubic-bezier(0.4, 0, 0.2, 1),
+              opacity 0.18s ease;
+
+  /* Stack behind the tab (tab has z-index:1) */
+  position: absolute;
+  right: 1.75rem;          /* sits immediately left of the tab */
+  top: 50%;
+  transform: translateY(-50%) translateX(100%);
+}
+
+/* Expand when the whole flyout is hovered */
+.flyout:hover .panel {
+  transform: translateY(-50%) translateX(0);
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* Also subtly highlight the tab on hover */
+.flyout:hover .tab {
+  background: hsl(var(--muted) / 0.6);
+}
+
+/* ── Header ───────────────────────────────────────────────────────────────── */
+.header {
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid hsl(var(--border));
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+}
+
+.headerTitle {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+/* ── Live dot ─────────────────────────────────────────────────────────────── */
+.liveDot {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background: hsl(142 76% 36%);
+  animation: livePulse 2s ease-in-out infinite;
+  flex-shrink: 0;
+}
+
+@keyframes livePulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+/* ── Clear button ─────────────────────────────────────────────────────────── */
+.clearBtn {
+  font-size: 0.6875rem;
+  color: hsl(var(--muted-foreground));
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0.25rem 0.375rem;
+  border-radius: 0.25rem;
+  transition: background 0.15s, color 0.15s;
+}
+
+.clearBtn:hover {
+  background: hsl(var(--muted));
+  color: hsl(var(--foreground));
+}
+
+/* ── Feed scroll area ─────────────────────────────────────────────────────── */
+.feed {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0.5rem 0;
+  min-height: 0;
+}
+
+.empty {
+  padding: 2.5rem 1rem;
+  text-align: center;
+  color: hsl(var(--muted-foreground));
+  font-size: 0.8125rem;
+}
+
+/* ── Entry ────────────────────────────────────────────────────────────────── */
+.entry {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.625rem;
+  padding: 0.5rem 1rem;
+  border-bottom: 1px solid hsl(var(--border) / 0.5);
+  transition: background 0.1s;
+  animation: fadeSlideIn 0.2s ease-out;
+}
+
+.entry:hover {
+  background: hsl(var(--muted) / 0.4);
+}
+
+@keyframes fadeSlideIn {
+  from {
+    opacity: 0;
+    transform: translateX(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.entryIcon {
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  margin-top: 0.125rem;
+}
+
+.entryBody {
+  flex: 1;
+  min-width: 0;
+}
+
+.entryText {
+  font-size: 0.8125rem;
+  line-height: 1.4;
+}
+
+.entryMeta {
+  font-size: 0.6875rem;
+  color: hsl(var(--muted-foreground));
+  margin-top: 0.125rem;
+}
+
+/* ── Type-specific icon backgrounds ──────────────────────────────────────── */
+.iconClaimed      { background: hsl(217 91% 60% / 0.15); color: hsl(217 91% 60%); }
+.iconTransitioned { background: hsl(142 76% 36% / 0.15); color: hsl(142 76% 36%); }
+.iconUnblocked    { background: hsl(43 96% 56% / 0.15);  color: hsl(43 96% 56%);  }
+.iconBlocked      { background: hsl(0 84% 60% / 0.15);   color: hsl(0 84% 60%);   }
+.iconRunStarted   { background: hsl(262 83% 58% / 0.15); color: hsl(262 83% 58%); }
+.iconRunCompleted { background: hsl(142 76% 36% / 0.15); color: hsl(142 76% 36%); }
+.iconRunFailed    { background: hsl(0 84% 60% / 0.15);   color: hsl(0 84% 60%);   }
+.iconSystem       { background: hsl(var(--muted));        color: hsl(var(--muted-foreground)); }
+
+/* ── Agent chip ───────────────────────────────────────────────────────────── */
+.agentChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-weight: 600;
+  color: hsl(var(--foreground));
+}
+
+/* ── Task link ────────────────────────────────────────────────────────────── */
+.taskLink {
+  font-weight: 500;
+  color: hsl(var(--primary));
+  text-decoration: none;
+}
+
+.taskLink:hover {
+  text-decoration: underline;
+}

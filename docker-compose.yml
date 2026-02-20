@@ -1,0 +1,267 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: djinnbot-postgres
+    environment:
+      POSTGRES_USER: djinnbot
+      POSTGRES_PASSWORD: djinnbot
+      POSTGRES_DB: djinnbot
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - djinnbot_default
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U djinnbot -d djinnbot"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: djinnbot-redis
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis-data:/data
+    command: redis-server --appendonly yes
+    networks:
+      - djinnbot_default
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.server
+    container_name: djinnbot-api
+    ports:
+      - "${API_PORT:-8000}:8000"
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://djinnbot:djinnbot@postgres:5432/djinnbot
+      - REDIS_URL=redis://redis:6379
+      - DJINN_DATA_PATH=/data
+      - PIPELINES_DIR=/pipelines
+      - AGENTS_DIR=/agents
+      # Unified sandbox directory - each agent gets /data/sandboxes/{agentId}/
+      - SANDBOXES_DIR=/data/sandboxes
+      # Project workspaces (git repos for each project)
+      - WORKSPACES_DIR=/data/workspaces
+      # Shared runs for pipeline collaboration (run worktrees)
+      - SHARED_RUNS_DIR=/data/runs
+      # GitHub App Configuration
+      - GITHUB_APP_ID=${GITHUB_APP_ID:-}
+      - GITHUB_APP_CLIENT_ID=${GITHUB_APP_CLIENT_ID:-}
+      - GITHUB_APP_WEBHOOK_SECRET=${GITHUB_APP_WEBHOOK_SECRET:-}
+      - GITHUB_APP_PRIVATE_KEY_PATH=${GITHUB_APP_PRIVATE_KEY_PATH:-/data/secrets/github-app.pem}
+      - GITHUB_APP_NAME=${GITHUB_APP_NAME:-djinnbot}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - MCPO_BASE_URL=http://djinnbot-mcpo:8000
+    volumes:
+      # NOTE: We mount only djinnbot-data to /data. The sandboxes, workspaces, and runs
+      # directories are subdirectories within djinnbot-data (/data/sandboxes, etc).
+      # This avoids mount shadowing issues where separate volumes would override
+      # subdirectories and cause data to appear in different locations.
+      - djinnbot-data:/data
+      - ./pipelines:/pipelines
+      - ./agents:/agents
+      - ./secrets:/data/secrets:ro
+    networks:
+      - djinnbot_default
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/v1/status"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  engine:
+    # Engine uses QMDR (remote qmd) for ClawVault semantic search
+    # Embeddings/reranking via OpenRouter API - no GPU or local inference required
+    build:
+      context: .
+      dockerfile: Dockerfile.engine
+    cap_add:
+      - SYS_ADMIN
+    container_name: djinnbot-engine
+    environment:
+      # API Store mode - use PostgreSQL via API instead of local SQLite
+      - USE_API_STORE=true
+      - DJINNBOT_API_URL=http://api:8000
+      - DATABASE_URL=postgresql+asyncpg://djinnbot:djinnbot@postgres:5432/djinnbot
+      - REDIS_URL=redis://redis:6379
+      - DJINN_DATA_PATH=/data
+      - DATA_DIR=/data
+      - PIPELINES_DIR=/pipelines
+      - AGENTS_DIR=/agents
+      - VAULTS_DIR=/data/vaults
+      - MOCK_RUNNER=${MOCK_RUNNER:-false}
+      - USE_CONTAINER_RUNNER=${USE_CONTAINER_RUNNER:-true}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      # QMDR Configuration - uses OpenRouter for embeddings/reranking (no local GPU needed)
+      - QMD_OPENAI_API_KEY=${OPENROUTER_API_KEY}
+      - QMD_OPENAI_BASE_URL=https://openrouter.ai/api/v1
+      - QMD_EMBED_PROVIDER=openai
+      - QMD_OPENAI_EMBED_MODEL=openai/text-embedding-3-small
+      - QMD_RERANK_PROVIDER=openai
+      - QMD_RERANK_MODE=llm
+      - QMD_OPENAI_MODEL=openai/gpt-4o-mini
+      - QMD_QUERY_EXPANSION_PROVIDER=openai
+      - QMD_ALLOW_SQLITE_EXTENSIONS=1
+      # HOME=/data puts the qmd index at /data/.cache/qmd/index.sqlite (on the shared volume).
+      # Agent containers symlink /home/agent/.cache/qmd → /djinnbot-data/.cache/qmd so they
+      # all share the same index without needing HOME overridden at the agent level.
+      - HOME=/data
+      - SLACK_CHANNEL_ID=${SLACK_CHANNEL_ID}
+      - SLACK_CHIEKO_BOT_TOKEN=${SLACK_CHIEKO_BOT_TOKEN}
+      - SLACK_CHIEKO_APP_TOKEN=${SLACK_CHIEKO_APP_TOKEN}
+      - SLACK_ERIC_BOT_TOKEN=${SLACK_ERIC_BOT_TOKEN}
+      - SLACK_ERIC_APP_TOKEN=${SLACK_ERIC_APP_TOKEN}
+      - SLACK_FINN_BOT_TOKEN=${SLACK_FINN_BOT_TOKEN}
+      - SLACK_FINN_APP_TOKEN=${SLACK_FINN_APP_TOKEN}
+      - SLACK_HOLT_BOT_TOKEN=${SLACK_HOLT_BOT_TOKEN}
+      - SLACK_HOLT_APP_TOKEN=${SLACK_HOLT_APP_TOKEN}
+      - SLACK_JIM_BOT_TOKEN=${SLACK_JIM_BOT_TOKEN}
+      - SLACK_JIM_APP_TOKEN=${SLACK_JIM_APP_TOKEN}
+      - SLACK_LUKE_BOT_TOKEN=${SLACK_LUKE_BOT_TOKEN}
+      - SLACK_LUKE_APP_TOKEN=${SLACK_LUKE_APP_TOKEN}
+      - SLACK_SHIGEO_BOT_TOKEN=${SLACK_SHIGEO_BOT_TOKEN}
+      - SLACK_SHIGEO_APP_TOKEN=${SLACK_SHIGEO_APP_TOKEN}
+      - SLACK_STAS_BOT_TOKEN=${SLACK_STAS_BOT_TOKEN}
+      - SLACK_STAS_APP_TOKEN=${SLACK_STAS_APP_TOKEN}
+      - SLACK_YANG_BOT_TOKEN=${SLACK_YANG_BOT_TOKEN}
+      - SLACK_YANG_APP_TOKEN=${SLACK_YANG_APP_TOKEN}
+      - SLACK_YUKIHIRO_BOT_TOKEN=${SLACK_YUKIHIRO_BOT_TOKEN}
+      - SLACK_YUKIHIRO_APP_TOKEN=${SLACK_YUKIHIRO_APP_TOKEN}
+      - SKY_SLACK_USER_ID=${SKY_SLACK_USER_ID}
+      # Unified sandbox directory - each agent gets /data/sandboxes/{agentId}/
+      - SANDBOXES_DIR=/data/sandboxes
+      # Project workspaces (git repos for each project)
+      - WORKSPACES_DIR=/data/workspaces
+      # Shared runs for pipeline collaboration (run worktrees)
+      - SHARED_RUNS_DIR=/data/runs
+      - GITHUB_TOKEN=${GITHUB_TOKEN:-}
+      - GITHUB_USER=${GITHUB_USER:-djinnbot}
+      - LOG_LEVEL=${LOG_LEVEL:-DEBUG}
+      # MCP / mcpo integration
+      - MCPO_API_KEY=${MCPO_API_KEY:-changeme}
+      - MCPO_BASE_URL=http://djinnbot-mcpo:8000
+      - MCPO_CONFIG_PATH=/data/mcp/config.json
+      - DJINNBOT_API_URL=http://api:8000
+    volumes:
+      # NOTE: We mount only djinnbot-data to /data. The sandboxes, workspaces, and runs
+      # directories are subdirectories within djinnbot-data (/data/sandboxes, etc).
+      # This avoids mount shadowing issues where separate volumes would override
+      # subdirectories and cause data to appear in different locations.
+      - djinnbot-data:/data
+      - ./pipelines:/pipelines:ro
+      - ./agents:/agents:ro
+      # MCP config directory — same bind-mount as mcpo so the engine can write config.json
+      # and mcpo picks it up immediately via hot-reload.
+      - ./mcp:/data/mcp
+      # Docker socket for spawning agent containers (required for USE_CONTAINER_RUNNER=true)
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - djinnbot_default
+    depends_on:
+      api:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  mcpo:
+    image: ghcr.io/skymoore/mcpo:latest
+    platform: linux/amd64
+    container_name: djinnbot-mcpo
+    environment:
+      # Pass secrets needed by MCP servers through to the container.
+      # mcpo substitutes ${VAR} references in config.json env blocks.
+      - GITHUB_TOKEN=${GITHUB_TOKEN:-}
+    # mcpo reads config.json from the shared data volume.
+    # --hot-reload watches the file for changes and reloads servers without downtime.
+    # The engine writes /data/mcp/config.json via the MCP manager.
+    command: >
+      --config /data/mcp/config.json
+      --hot-reload
+      --port 8000
+      --api-key "${MCPO_API_KEY:-changeme}"
+    ports:
+      - "${MCPO_PORT:-8001}:8000"
+    volumes:
+      - djinnbot-data:/data
+      # Bind-mount the project-root ./mcp/ directory so config.json is always
+      # readable at /data/mcp/config.json without needing it in the Docker volume.
+      # The engine also writes to this path when servers are added via the UI.
+      - ./mcp:/data/mcp
+    networks:
+      - djinnbot_default
+    restart: unless-stopped
+    # mcpo starts even if config.json doesn't exist yet — it will be created by the engine.
+    # We use unless-stopped so it comes back after the engine rewrites config.json.
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8000/docs"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  dashboard:
+    build:
+      context: .
+      dockerfile: Dockerfile.dashboard
+      args:
+        # Bake the API URL into the frontend at build time.
+        # The dashboard calls the API directly — no nginx proxy needed for API traffic.
+        # Override with: VITE_API_URL=http://your-host:8000 docker compose up --build
+        VITE_API_URL: "${VITE_API_URL:-http://192.168.8.234:8000}"
+    container_name: djinnbot-dashboard
+    ports:
+      - "${DASHBOARD_PORT:-3000}:80"
+    networks:
+      - djinnbot_default
+    depends_on:
+      api:
+        condition: service_healthy
+
+  # Agent runtime template - dynamically created per run
+  # agent-runtime:
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile.agent-runtime
+  #   environment:
+  #     - RUN_ID=${RUN_ID}
+  #     - REDIS_URL=redis://redis:6379
+  #   volumes:
+  #     - ./data/runs/${RUN_ID}:/workspace
+  #   networks:
+  #     - djinnbot
+
+networks:
+  djinnbot_default:
+    driver: bridge
+
+volumes:
+  postgres-data:
+  redis-data:
+  # UNIFIED DATA VOLUME - contains all agent data as subdirectories:
+  #
+  # /data/                              <- djinnbot-data volume root
+  # ├── sandboxes/{agentId}/           <- Agent home directories (.local/, configs)
+  # ├── vaults/{agentId}/              <- ClawVault personal memories
+  # ├── vaults/shared/                 <- Shared team memories  
+  # ├── workspaces/{projectId}/        <- Project git repos (main branches)
+  # └── runs/{runId}/                  <- Run git worktrees (run branches)
+  #
+  # WHY UNIFIED: Using separate volumes for subdirectories causes "mount shadowing"
+  # where the child volume overrides the parent, making data appear in different
+  # locations for different services. A single volume avoids this entirely.
+  djinnbot-data:

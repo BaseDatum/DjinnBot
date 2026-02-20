@@ -1,0 +1,267 @@
+.root {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+/* ── Header ─────────────────────────────────────────── */
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.headerLeft {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+}
+
+.headerTitle {
+  font-size: 1rem;
+  font-weight: 600;
+  line-height: 1;
+}
+
+/* ── Autonomous badge ────────────────────────────────── */
+.autonomousBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3125rem;
+  font-size: 0.6875rem;
+  font-weight: 500;
+  padding: 0.1875rem 0.5rem;
+  border-radius: 9999px;
+  border: 1px solid;
+  line-height: 1;
+}
+
+.autonomousBadgeActive {
+  background: hsl(142 76% 36% / 0.1);
+  border-color: hsl(142 76% 36% / 0.3);
+  color: hsl(142 76% 36%);
+}
+
+.autonomousBadgeInactive {
+  background: hsl(var(--muted) / 0.5);
+  border-color: hsl(var(--border));
+  color: hsl(var(--muted-foreground));
+}
+
+/* ── Add-member form ────────────────────────────────── */
+.addSection {
+  display: flex;
+  flex-direction: column;
+  gap: 0.625rem;
+  padding: 0.875rem;
+  border-radius: 0.625rem;
+  border: 1px dashed hsl(var(--primary) / 0.35);
+  background: hsl(var(--primary) / 0.03);
+}
+
+.addSectionLabel {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: hsl(var(--muted-foreground));
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+/* Wraps on narrow viewports */
+.addRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+/* Agent picker stretches, role picker stays fixed */
+.addSelect {
+  flex: 1 1 10rem; /* shrinks but never below ~10rem */
+  min-width: 0;
+}
+
+.addRoleSelect {
+  flex: 0 0 7.5rem;
+}
+
+.addActions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+/* ── Error message ───────────────────────────────────── */
+.errorText {
+  font-size: 0.75rem;
+  color: hsl(var(--destructive));
+  padding: 0.25rem 0;
+}
+
+/* ── Team list ──────────────────────────────────────── */
+.teamList {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+/* ── Agent row ──────────────────────────────────────── */
+.agentRow {
+  display: grid;
+  /* avatar | info | pulse | role-select | remove */
+  grid-template-columns: 2.25rem 1fr auto auto auto;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.625rem 0.75rem;
+  border-radius: 0.5rem;
+  border: 1px solid hsl(var(--border));
+  background: hsl(var(--card));
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.agentRow:hover {
+  border-color: hsl(var(--primary) / 0.4);
+  box-shadow: 0 1px 4px hsl(var(--primary) / 0.06);
+}
+
+/* On very narrow screens stack into two rows */
+@media (max-width: 480px) {
+  .agentRow {
+    grid-template-columns: 2.25rem 1fr auto;
+    grid-template-rows: auto auto;
+    row-gap: 0.5rem;
+  }
+
+  /* pulse sits beside the avatar on row 1 */
+  .pulseIndicator {
+    grid-column: 3;
+    grid-row: 1;
+    justify-self: end;
+  }
+
+  /* role select + remove share row 2 */
+  .roleSelect {
+    grid-column: 2;
+    grid-row: 2;
+    width: 100%;
+  }
+
+  .removeBtn {
+    grid-column: 3;
+    grid-row: 2;
+    /* always visible on touch */
+    opacity: 1 !important;
+  }
+}
+
+/* ── Avatar ─────────────────────────────────────────── */
+.avatar {
+  width: 2.25rem;
+  height: 2.25rem;
+  border-radius: 0.5rem;
+  background: hsl(var(--muted));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.1rem;
+  flex-shrink: 0;
+  border: 1px solid hsl(var(--border));
+}
+
+/* ── Agent info ─────────────────────────────────────── */
+.agentInfo {
+  min-width: 0;
+}
+
+.agentName {
+  font-size: 0.8125rem;
+  font-weight: 500;
+  line-height: 1.3;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.columns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  margin-top: 0.25rem;
+}
+
+.columnChip {
+  font-size: 0.625rem;
+  padding: 0.125rem 0.375rem;
+  border-radius: 9999px;
+  background: hsl(var(--primary) / 0.1);
+  color: hsl(var(--primary));
+  border: 1px solid hsl(var(--primary) / 0.2);
+  white-space: nowrap;
+}
+
+/* ── Pulse indicator ────────────────────────────────── */
+.pulseIndicator {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+}
+
+.pulseDot {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background: hsl(var(--muted-foreground) / 0.5);
+  flex-shrink: 0;
+  transition: background 0.2s;
+}
+
+.pulseDotActive {
+  background: hsl(142 76% 36%);
+  animation: ping 1.5s cubic-bezier(0, 0, 0.2, 1) infinite;
+}
+
+@keyframes ping {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.65;
+    transform: scale(1.35);
+  }
+}
+
+/* ── Role select ────────────────────────────────────── */
+.roleSelect {
+  width: 6.75rem;
+  flex-shrink: 0;
+}
+
+/* ── Remove button ──────────────────────────────────── */
+.removeBtn {
+  /* visible by default — hidden only on pointer-fine (mouse) devices */
+  opacity: 1;
+  flex-shrink: 0;
+  transition: opacity 0.15s;
+}
+
+/* Only hide on hover-capable devices; reveal on row hover */
+@media (hover: hover) and (pointer: fine) {
+  .removeBtn {
+    opacity: 0;
+  }
+
+  .agentRow:hover .removeBtn {
+    opacity: 1;
+  }
+}
+
+/* ── Empty state ─────────────────────────────────────── */
+.empty {
+  text-align: center;
+  padding: 2.5rem 1rem;
+  color: hsl(var(--muted-foreground));
+  font-size: 0.8125rem;
+  line-height: 1.6;
+}

@@ -1,0 +1,85 @@
+# Bugfix Pipeline — Diagnose, fix, validate
+# For bug reports: reproduce, fix, test, verify
+
+id: bugfix
+name: Bugfix
+version: 1.0.0
+description: Diagnose and fix bugs with validation
+
+defaults:
+  model: openrouter/minimax/minimax-m2.5
+  tools:
+    - read
+    - write
+    - edit
+    - bash
+    - grep
+    - find
+    - ls
+  maxRetries: 2
+  timeout: 600
+
+agents:
+  - id: yukihiro
+    name: Yukihiro (Senior SWE)
+    persona: docs/personas/yukihiro.md
+
+  - id: chieko
+    name: Chieko (Senior Test Engineer)
+    persona: docs/personas/chieko.md
+
+steps:
+  # 1. Diagnose & Fix
+  - id: FIX
+    agent: yukihiro
+    input: |
+      You are a Senior Software Engineer. Diagnose and fix this bug.
+
+      Bug Report: {{task_description}}
+
+      Steps:
+      1. Read the relevant code and understand the issue
+      2. Reproduce the bug if possible (run the failing test/command)
+      3. Identify root cause
+      4. Implement the fix
+      5. Write or update tests to cover the bug
+      6. Commit with message: "fix: <description>"
+
+      Write your outputs:
+      - ROOT_CAUSE.md — What caused the bug
+      - FIX_NOTES.md — What you changed and why
+      - FILES_CHANGED.txt — List of files modified
+    outputs:
+      - root_cause
+      - fix_notes
+      - files_changed
+    onComplete: VALIDATE
+
+  # 2. Validate the fix
+  - id: VALIDATE
+    agent: chieko
+    input: |
+      You are a Senior Test Engineer. Validate this bug fix. DO NOT modify production code.
+
+      Bug Report: {{task_description}}
+      Root Cause: {{root_cause}}
+      Fix Notes: {{fix_notes}}
+      Files Changed: {{files_changed}}
+
+      Steps:
+      1. Run existing tests — confirm they pass
+      2. Run the new/updated tests for this bug
+      3. Check for regressions in related areas
+      4. Verify the original bug is actually fixed
+
+      Output VALIDATE_RESULT: PASS or FAIL
+
+      Write your outputs:
+      - VALIDATE_RESULT.txt — PASS or FAIL
+      - TEST_REPORT.md — What was tested and results
+    outputs:
+      - validate_result
+      - test_report
+    onResult:
+      FAIL:
+        goto: FIX

@@ -1,0 +1,399 @@
+# Engineering Pipeline — Full Software Development Workflow
+# Uses Sky's agent personas for collaborative development
+
+id: engineering
+name: Engineering Pipeline
+version: 1.0.0
+description: Full software development workflow from spec to deployment
+
+defaults:
+  model: openrouter/minimax/minimax-m2.5
+  tools:
+    - read
+    - write
+    - bash
+  maxRetries: 3
+  timeout: 4800
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Agent Definitions
+# ─────────────────────────────────────────────────────────────────────────────
+
+agents:
+  - id: eric
+    name: Eric (Product Owner)
+    persona: docs/personas/eric.md
+    tools:
+      - web_search
+      - read
+      - write
+
+  - id: finn
+    name: Finn (Solutions Architect)
+    persona: docs/personas/finn.md
+    tools:
+      - read
+      - write
+      - bash
+      - web_search
+
+  - id: shigeo
+    name: Shigeo (UX Specialist)
+    persona: docs/personas/shigeo.md
+    tools:
+      - read
+      - write
+      - web_search
+
+  - id: yukihiro
+    name: Yukihiro (Senior SWE)
+    persona: docs/personas/yukihiro.md
+    tools:
+      - read
+      - write
+      - edit
+      - bash
+      - grep
+      - find
+      - ls
+
+  - id: chieko
+    name: Chieko (Senior Test Engineer)
+    persona: docs/personas/chieko.md
+    tools:
+      - read
+      - bash
+      - grep
+      - find
+      - ls
+
+  - id: stas
+    name: Stas (SRE)
+    persona: docs/personas/stas.md
+    tools:
+      - read
+      - write
+      - bash
+
+  - id: yang
+    name: Yang (DevEx)
+    persona: docs/personas/yang.md
+    tools:
+      - read
+      - write
+      - edit
+      - bash
+      - grep
+      - find
+      - ls
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Pipeline Steps
+# ─────────────────────────────────────────────────────────────────────────────
+
+steps:
+  # ───────────────────────────────────────────────────────────────────────────
+  # 1. SPEC — Product Requirements
+  # ───────────────────────────────────────────────────────────────────────────
+  - id: SPEC
+    agent: eric
+    input: |
+      You are the Product Owner for this project.
+      
+      Task: {{task_description}}
+      
+      Create comprehensive product requirements including:
+      1. Market analysis and competitive landscape
+      2. Target users and use cases
+      3. Detailed requirements with acceptance criteria
+      4. Prioritized user stories (P0/P1/P2)
+      5. Success metrics and KPIs
+      
+      Write your outputs to the workspace:
+      - PRODUCT_BRIEF.md — Market analysis, target users
+      - REQUIREMENTS_DOC.md — Detailed requirements
+      - USER_STORIES.json — Structured stories with priorities
+      - SUCCESS_METRICS.md — How we measure success
+    outputs:
+      - product_brief
+      - requirements_doc
+      - user_stories_json
+      - success_metrics
+    onComplete: DESIGN
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # 2. DESIGN — Architecture & Planning
+  # ───────────────────────────────────────────────────────────────────────────
+  - id: DESIGN
+    agent: finn
+    input: |
+      You are the Solutions Architect. Review the product requirements and design the technical solution.
+      
+      Requirements:
+      {{requirements_doc}}
+      
+      User Stories:
+      {{user_stories_json}}
+      
+      Create:
+      1. System architecture and tech stack decisions
+      2. API design (endpoints, contracts, data models)
+      3. Database schema
+      4. Component breakdown for UX (what UI components are needed)
+      5. Task breakdown for implementation (structured tasks for the SWE)
+      6. Deployment plan for SRE
+      
+      Write your outputs to the workspace:
+      - ARCHITECTURE_DOC.md
+      - API_DESIGN.md
+      - DB_SCHEMA.sql
+      - COMPONENT_BREAKDOWN.json
+      - TASK_BREAKDOWN.json
+      - DEPLOYMENT_PLAN.md
+    outputs:
+      - architecture_doc
+      - api_design
+      - db_schema
+      - component_breakdown_json
+      - task_breakdown_json
+      - deployment_plan
+    onComplete: UX
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # 3. UX — User Experience Design
+  # ───────────────────────────────────────────────────────────────────────────
+  - id: UX
+    agent: shigeo
+    input: |
+      You are the UX Specialist. Design the user experience based on the architecture and product requirements.
+      
+      Product Brief:
+      {{product_brief}}
+      
+      Architecture:
+      {{architecture_doc}}
+      
+      Component Breakdown:
+      {{component_breakdown_json}}
+      
+      Create:
+      1. UX specification with user flows and wireframe descriptions
+      2. Design system (colors, typography, spacing, component variants)
+      3. Detailed component specs with states and interactions
+      4. Accessibility notes (WCAG, keyboard nav, screen readers)
+      
+      Write your outputs to the workspace:
+      - UX_SPEC.md
+      - DESIGN_SYSTEM.md
+      - COMPONENT_SPECS.json
+      - ACCESSIBILITY_NOTES.md
+    outputs:
+      - ux_spec
+      - design_system
+      - component_specs_json
+      - accessibility_notes
+    onComplete: IMPLEMENT
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # 4. IMPLEMENT — Code Implementation (Loop)
+  # ───────────────────────────────────────────────────────────────────────────
+  - id: IMPLEMENT
+    agent: yukihiro
+    input: |
+      You are the Senior Software Engineer. Implement the current task.
+      
+      Architecture:
+      {{architecture_doc}}
+      
+      UX Specification:
+      {{ux_spec}}
+      
+      Current Task:
+      {{current_item}}
+      
+      Progress File: {{progress_file}}
+      Completed Tasks: {{completed_items}}
+      
+      {% if review_feedback %}
+      Review Feedback (address these issues):
+      {{review_feedback}}
+      {% endif %}
+      
+      {% if bug_reports_json %}
+      Bug Reports (fix these):
+      {{bug_reports_json}}
+      {% endif %}
+      
+      Implement the task:
+      1. Write/modify code
+      2. Follow architecture and UX specs
+      3. Write tests
+      4. Commit your changes
+      5. Document what you did
+      
+      Write your outputs:
+      - IMPLEMENTATION_NOTES.md — What you did, decisions made
+      - FILES_CHANGED.txt — List of files modified
+      - COMMIT_HASH.txt — Git commit reference
+    outputs:
+      - implementation_notes
+      - files_changed
+      - commit_hash
+    loop:
+      over: task_breakdown_json
+      onEachComplete: REVIEW
+      onAllComplete: DEPLOY
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # 5. REVIEW — Code Review
+  # ───────────────────────────────────────────────────────────────────────────
+  - id: REVIEW
+    agent: finn
+    input: |
+      You are the Solutions Architect reviewing code. DO NOT modify code — only review.
+      
+      Architecture:
+      {{architecture_doc}}
+      
+      Current Task:
+      {{current_item}}
+      
+      Implementation Notes:
+      {{implementation_notes}}
+      
+      Review the implementation:
+      1. Check against architecture and requirements
+      2. Review code quality, patterns, best practices
+      3. Check for security issues
+      4. Verify test coverage
+      
+      Output REVIEW_RESULT to one of: APPROVED, CHANGES_REQUESTED
+      
+      Write your outputs:
+      - REVIEW_RESULT.txt — APPROVED or CHANGES_REQUESTED
+      - REVIEW_FEEDBACK.md — Detailed feedback (if changes requested)
+      - CODE_QUALITY_NOTES.md — Observations about code quality
+    outputs:
+      - review_result
+      - review_feedback
+      - code_quality_notes
+    onResult:
+      APPROVED:
+        goto: TEST
+      CHANGES_REQUESTED:
+        goto: IMPLEMENT
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # 6. TEST — Quality Assurance
+  # ───────────────────────────────────────────────────────────────────────────
+  - id: TEST
+    agent: chieko
+    input: |
+      You are the Senior Test Engineer. Test the implemented task. DO NOT modify code.
+      
+      Requirements:
+      {{requirements_doc}}
+      
+      Architecture:
+      {{architecture_doc}}
+      
+      Current Task:
+      {{current_item}}
+      
+      Implementation Notes:
+      {{implementation_notes}}
+      
+      Test the implementation:
+      1. Run unit tests
+      2. Run integration tests
+      3. Manual testing if needed
+      4. Check for regressions
+      5. Verify acceptance criteria
+      
+      Output TEST_RESULT to one of: PASS, FAIL
+      
+      Write your outputs:
+      - TEST_RESULT.txt — PASS or FAIL
+      - TEST_REPORT.md — What was tested, how, results
+      - BUG_REPORTS.json — Structured bug reports if failures
+      - REGRESSION_NOTES.md — Any regressions detected
+    outputs:
+      - test_result
+      - test_report
+      - bug_reports_json
+      - regression_notes
+    onResult:
+      PASS:
+        continueLoop: true
+      FAIL:
+        goto: IMPLEMENT
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # 7. DEPLOY — Deployment to Production
+  # ───────────────────────────────────────────────────────────────────────────
+  - id: DEPLOY
+    agent: stas
+    input: |
+      You are the SRE. Deploy the completed implementation to production.
+      
+      Architecture:
+      {{architecture_doc}}
+      
+      Deployment Plan:
+      {{deployment_plan}}
+      
+      Progress File: {{progress_file}}
+      
+      Deploy the application:
+      1. Set up infrastructure
+      2. Configure monitoring and alerts
+      3. Deploy the code
+      4. Verify deployment
+      5. Document the deployment
+      
+      Output DEPLOY_STATUS to one of: SUCCESS, FAIL
+      
+      Write your outputs:
+      - DEPLOY_STATUS.txt — SUCCESS or FAIL
+      - DEPLOY_URL.txt — Where it's running
+      - INFRA_NOTES.md — What was set up, costs, monitoring
+      - MONITORING_CONFIG.md — Alerts, dashboards configured
+    outputs:
+      - deploy_status
+      - deploy_url
+      - infra_notes
+      - monitoring_config
+    onResult:
+      SUCCESS:
+        notify:
+          agent: eric
+          message: "🚀 Deployment successful! Check DEPLOY_URL.txt"
+      FAIL:
+        notify:
+          agent: yukihiro
+          message: "⚠️ Deployment failed. Check DEPLOY_STATUS.txt"
+        goto: IMPLEMENT
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # 8. DX — DevEx Support (On-Demand)
+  # ───────────────────────────────────────────────────────────────────────────
+  - id: DX
+    agent: yang
+    input: |
+      You are the DevEx Engineer. Fix CI/CD or tooling issues.
+      
+      Problem: {{dx_problem}}
+      Requesting Agent: {{requesting_agent}}
+      
+      Fix the tooling issue:
+      1. Diagnose the problem
+      2. Fix CI/CD, build scripts, or dev environment
+      3. Test the fix
+      4. Document what you did
+      
+      Write your outputs:
+      - FIX_NOTES.md — What was fixed
+      - TOOLING_IMPROVEMENTS.md — Any improvements made to dev workflow
+    outputs:
+      - fix_notes
+      - tooling_improvements

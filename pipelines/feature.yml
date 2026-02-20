@@ -1,0 +1,149 @@
+# Feature Pipeline — Design, implement, review
+# For new features: light design, implement, code review, test
+
+id: feature
+name: Feature
+version: 1.0.0
+description: Build a feature with design, implementation, and review
+
+defaults:
+  model: openrouter/minimax/minimax-m2.5
+  tools:
+    - read
+    - write
+    - edit
+    - bash
+    - grep
+    - find
+    - ls
+  maxRetries: 2
+  timeout: 900
+
+agents:
+  - id: finn
+    name: Finn (Solutions Architect)
+    persona: docs/personas/finn.md
+    tools:
+      - read
+      - write
+      - bash
+      - web_search
+
+  - id: yukihiro
+    name: Yukihiro (Senior SWE)
+    persona: docs/personas/yukihiro.md
+
+  - id: chieko
+    name: Chieko (Senior Test Engineer)
+    persona: docs/personas/chieko.md
+
+steps:
+  # 1. Quick Design
+  - id: DESIGN
+    agent: finn
+    model: openrouter/minimax/minimax-m2.5
+    input: |
+      You are a Solutions Architect. Create a brief technical design for this feature.
+
+      Feature: {{task_description}}
+
+      Keep it concise — this is a single feature, not a full project. Cover:
+      1. Approach — how to implement this
+      2. Files to create/modify
+      3. API changes (if any)
+      4. Edge cases to handle
+      5. Testing strategy
+
+      Write your output:
+      - DESIGN_DOC.md — Technical design (1-2 pages max)
+    outputs:
+      - design_doc
+    onComplete: IMPLEMENT
+
+  # 2. Implement
+  - id: IMPLEMENT
+    agent: yukihiro
+    model: openrouter/minimax/minimax-m2.5
+    input: |
+      You are a Senior Software Engineer. Implement this feature.
+
+      Feature: {{task_description}}
+      Design: {{design_doc}}
+
+      {% if review_feedback %}
+      Review Feedback (address these):
+      {{review_feedback}}
+      {% endif %}
+
+      Steps:
+      1. Follow the design doc
+      2. Write clean, tested code
+      3. Commit with message: "feat: <description>"
+
+      Write your outputs:
+      - IMPLEMENTATION_NOTES.md — What you did
+      - FILES_CHANGED.txt — List of files modified
+    outputs:
+      - implementation_notes
+      - files_changed
+    onComplete: REVIEW
+
+  # 3. Code Review
+  - id: REVIEW
+    agent: finn
+    model: openrouter/minimax/minimax-m2.5
+    input: |
+      You are reviewing code. DO NOT modify code — only review.
+
+      Feature: {{task_description}}
+      Design: {{design_doc}}
+      Implementation Notes: {{implementation_notes}}
+      Files Changed: {{files_changed}}
+
+      Review for:
+      1. Matches the design
+      2. Code quality and patterns
+      3. Edge cases handled
+      4. Security concerns
+
+      Output REVIEW_RESULT: APPROVED or CHANGES_REQUESTED
+
+      Write your outputs:
+      - REVIEW_RESULT.txt — APPROVED or CHANGES_REQUESTED
+      - REVIEW_FEEDBACK.md — Feedback if changes requested
+    outputs:
+      - review_result
+      - review_feedback
+    onResult:
+      APPROVED:
+        goto: TEST
+      CHANGES_REQUESTED:
+        goto: IMPLEMENT
+
+  # 4. Test
+  - id: TEST
+    agent: chieko
+    model: openrouter/minimax/minimax-m2.5
+    input: |
+      You are a Test Engineer. Test this feature. DO NOT modify production code.
+
+      Feature: {{task_description}}
+      Design: {{design_doc}}
+      Implementation Notes: {{implementation_notes}}
+
+      Steps:
+      1. Run unit tests
+      2. Run integration tests
+      3. Check for regressions
+
+      Output TEST_RESULT: PASS or FAIL
+
+      Write your outputs:
+      - TEST_RESULT.txt — PASS or FAIL
+      - TEST_REPORT.md — What was tested and results
+    outputs:
+      - test_result
+      - test_report
+    onResult:
+      FAIL:
+        goto: IMPLEMENT

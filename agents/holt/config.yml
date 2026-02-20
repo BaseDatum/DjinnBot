@@ -1,0 +1,23 @@
+model: xai/grok-4-1-fast-reasoning
+pulse_blackouts:
+- end_time: 07:00
+  label: Nighttime
+  start_time: '23:00'
+  type: recurring
+pulse_columns:
+- Backlog
+- Ready
+pulse_container_timeout_ms: 120000
+pulse_enabled: false
+pulse_interval_minutes: 30
+pulse_max_consecutive_skips: 5
+pulse_offset_minutes: 9
+pulse_one_offs: []
+pulse_transitions_to:
+- in_progress
+- done
+thinkingModel: moonshotai/kimi-k2.5
+thinking_level: 'off'
+thinking_model: xai/grok-4-1-fast-reasoning
+thinking_model_thinking_level: 'off'
+thread_mode: passive

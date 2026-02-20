@@ -1,0 +1,38 @@
+{
+  "mcpServers": {
+    "github": {
+      "command": "/usr/local/bin/github-mcp-server",
+      "args": [
+        "stdio",
+        "--read-only",
+        "--toolsets",
+        "context,repos,issues"
+      ],
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_TOKEN}"
+      }
+    },
+    "time": {
+      "command": "uvx",
+      "args": [
+        "mcp-server-time",
+        "--local-timezone=Europe/Lisbon"
+      ]
+    },
+    "grokipedia": {
+      "command": "uvx",
+      "args": [
+        "grokipedia-mcp"
+      ]
+    },
+    "fetch": {
+      "command": "npx",
+      "args": [
+        "mcp-fetch-server"
+      ],
+      "env": {
+        "DEFAULT_LIMIT": "50000"
+      }
+    }
+  }
+}

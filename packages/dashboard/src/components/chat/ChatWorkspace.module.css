@@ -1,0 +1,432 @@
+/* ── Root ──────────────────────────────────────────────────────────────────── */
+
+.root {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+  background: hsl(var(--background));
+}
+
+/* ── Mobile session tab strip ──────────────────────────────────────────────── */
+
+.mobileTabStrip {
+  display: flex;
+  gap: 0.375rem;
+  padding: 0.5rem 0.75rem;
+  overflow-x: auto;
+  border-bottom: 1px solid hsl(var(--border));
+  background: hsl(var(--card));
+  flex-shrink: 0;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+
+.mobileTabStrip::-webkit-scrollbar {
+  display: none;
+}
+
+.mobileTab {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.375rem 0.625rem;
+  border-radius: 9999px;
+  border: 1px solid hsl(var(--border));
+  background: hsl(var(--background));
+  font-size: 0.75rem;
+  font-weight: 500;
+  white-space: nowrap;
+  flex-shrink: 0;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+  color: hsl(var(--muted-foreground));
+}
+
+.mobileTabActive {
+  background: hsl(var(--primary));
+  border-color: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
+}
+
+.mobileTabClose {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.25rem;
+  height: 1.25rem;
+  border-radius: 50%;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  color: inherit;
+  padding: 0;
+  opacity: 0.7;
+  transition: opacity 0.12s;
+}
+
+.mobileTabClose:hover {
+  opacity: 1;
+}
+
+/* ── Toolbar ───────────────────────────────────────────────────────────────── */
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  border-bottom: 1px solid hsl(var(--border));
+  background: hsl(var(--card));
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+
+.toolbarTitle {
+  font-size: 0.9375rem;
+  font-weight: 600;
+  margin-right: auto;
+  white-space: nowrap;
+}
+
+.spawnRow {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
+.spawnSelect {
+  height: 2rem !important;
+  font-size: 0.8125rem !important;
+}
+
+/* Skeleton placeholder while loading sessions */
+.sessionSelectSkeleton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 160px;
+  height: 2rem;
+  border: 1px solid hsl(var(--border));
+  border-radius: 0.375rem;
+  background: hsl(var(--muted) / 0.4);
+}
+
+.spawnBtn {
+  height: 2rem;
+  font-size: 0.8125rem;
+  gap: 0.375rem;
+  white-space: nowrap;
+}
+
+/* ── Empty state ───────────────────────────────────────────────────────────── */
+
+.empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.875rem;
+  color: hsl(var(--muted-foreground));
+  padding: 2rem;
+}
+
+.emptyTitle {
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: hsl(var(--foreground));
+}
+
+.emptyHint {
+  font-size: 0.875rem;
+  text-align: center;
+  max-width: 24rem;
+  line-height: 1.5;
+}
+
+.quickAgents {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  justify-content: center;
+  margin-top: 0.5rem;
+}
+
+.quickAgentBtn {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.5rem 0.875rem;
+  border-radius: 0.5rem;
+  border: 1px solid hsl(var(--border));
+  background: hsl(var(--card));
+  font-size: 0.8125rem;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s, transform 0.1s;
+}
+
+.quickAgentBtn:hover {
+  border-color: hsl(var(--primary) / 0.6);
+  background: hsl(var(--primary) / 0.06);
+  transform: translateY(-1px);
+}
+
+/* ── Panes area ────────────────────────────────────────────────────────────── */
+
+.panesArea {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* ── Individual pane ───────────────────────────────────────────────────────── */
+
+.paneWrapper {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-width: 0;
+}
+
+.paneHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.375rem 0.75rem;
+  border-bottom: 1px solid hsl(var(--border));
+  background: hsl(var(--muted) / 0.35);
+  flex-shrink: 0;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.paneHeaderLeft {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.paneEmoji {
+  font-size: 1rem;
+  shrink: 0;
+}
+
+.paneAgentName {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 12rem;
+}
+
+.paneModelChip {
+  font-size: 0.6875rem;
+  font-family: ui-monospace, monospace;
+  color: hsl(var(--muted-foreground));
+  background: hsl(var(--muted));
+  padding: 0.125rem 0.375rem;
+  border-radius: 0.25rem;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.paneHeaderActions {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  flex-shrink: 0;
+}
+
+.paneActionBtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: 0.3125rem;
+  border: none;
+  background: none;
+  cursor: pointer;
+  color: hsl(var(--muted-foreground));
+  transition: color 0.12s, background 0.12s;
+  font-size: 1.1rem;
+  line-height: 1;
+}
+
+.paneActionBtn:hover {
+  color: hsl(var(--foreground));
+  background: hsl(var(--accent));
+}
+
+.paneCloseBtn:hover {
+  color: hsl(var(--destructive-foreground));
+  background: hsl(var(--destructive) / 0.15);
+}
+
+.paneBody {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.paneStarting {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  gap: 0.75rem;
+  color: hsl(var(--muted-foreground));
+  font-size: 0.875rem;
+}
+
+/* ── Resize handle (react-resizable-panels) ────────────────────────────────── */
+
+.resizeHandle {
+  width: 4px;
+  background: hsl(var(--border));
+  cursor: col-resize;
+  transition: background 0.15s;
+  flex-shrink: 0;
+  position: relative;
+}
+
+.resizeHandle:hover,
+.resizeHandle[data-resize-handle-active] {
+  background: hsl(var(--primary) / 0.5);
+}
+
+.resizeHandle::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 2px;
+  height: 2rem;
+  border-radius: 9999px;
+  background: hsl(var(--muted-foreground) / 0.3);
+}
+
+/* ── Sessions tray (overflow / hidden panes) ───────────────────────────────── */
+
+.tray {
+  flex-shrink: 0;
+  border-top: 1px solid hsl(var(--border));
+  background: hsl(var(--card));
+}
+
+.trayToggle {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.4rem 1rem;
+  font-size: 0.8rem;
+  color: hsl(var(--muted-foreground));
+  background: none;
+  border: none;
+  cursor: pointer;
+  transition: color 0.12s, background 0.12s;
+}
+
+.trayToggle:hover {
+  color: hsl(var(--foreground));
+  background: hsl(var(--muted) / 0.5);
+}
+
+.trayCards {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem 0.625rem;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.trayCard {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-shrink: 0;
+  padding: 0.375rem 0.625rem;
+  border-radius: 0.5rem;
+  border: 1px solid hsl(var(--border));
+  background: hsl(var(--background));
+  min-width: 0;
+  max-width: 200px;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.trayCard:hover {
+  border-color: hsl(var(--primary) / 0.4);
+  background: hsl(var(--primary) / 0.04);
+}
+
+.trayCardVisible {
+  border-color: hsl(var(--primary) / 0.5);
+  background: hsl(var(--primary) / 0.06);
+}
+
+.trayCardEmoji {
+  font-size: 1rem;
+  flex-shrink: 0;
+}
+
+.trayCardInfo {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+
+.trayCardName {
+  font-size: 0.75rem;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.trayCardStatus {
+  font-size: 0.6875rem;
+  text-transform: capitalize;
+}
+
+.trayCardActions {
+  display: flex;
+  align-items: center;
+  gap: 0.125rem;
+  flex-shrink: 0;
+}
+
+.trayCardBtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 0.25rem;
+  border: none;
+  background: none;
+  cursor: pointer;
+  color: hsl(var(--muted-foreground));
+  transition: color 0.12s, background 0.12s;
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.trayCardBtn:hover {
+  color: hsl(var(--foreground));
+  background: hsl(var(--accent));
+}
+
+.trayCardClose:hover {
+  color: hsl(var(--destructive-foreground));
+  background: hsl(var(--destructive) / 0.12);
+}

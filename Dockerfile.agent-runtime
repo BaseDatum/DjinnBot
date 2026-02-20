@@ -1,0 +1,239 @@
+# Agent Runtime Container
+# This is where agents actually execute - full toolbox for coding/engineering tasks
+
+# Build stage
+FROM node:22-slim AS builder
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
+    ca-certificates \
+    build-essential \
+    python3 \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /build
+
+# Copy root workspace files
+COPY package.json package-lock.json tsconfig.base.json ./
+COPY packages/core/package.json ./packages/core/
+COPY packages/agent-runtime/package.json ./packages/agent-runtime/
+
+# Install all deps
+RUN npm install --include=dev
+
+# Copy source
+COPY packages/core ./packages/core
+COPY packages/agent-runtime ./packages/agent-runtime
+
+# Build TypeScript
+RUN npm run build -w @djinnbot/core
+RUN npm run build -w @djinnbot/agent-runtime
+
+# Runtime stage - Full engineering toolbox
+FROM debian:bookworm-slim
+
+WORKDIR /app
+
+# SYSTEM PACKAGES - Everything an agent needs for coding/engineering
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    # Python ecosystem
+    python3 \
+    python3-pip \
+    python3-venv \
+    python3-dev \
+    # Build tools
+    build-essential \
+    cmake \
+    ninja-build \
+    pkg-config \
+    autoconf \
+    automake \
+    libtool \
+    # Version control
+    git \
+    git-lfs \
+    # Shell & terminal
+    bash \
+    zsh \
+    tmux \
+    screen \
+    # Core utilities
+    coreutils \
+    findutils \
+    grep \
+    sed \
+    gawk \
+    # Network tools
+    curl \
+    wget \
+    httpie \
+    netcat-openbsd \
+    socat \
+    dnsutils \
+    iputils-ping \
+    net-tools \
+    iproute2 \
+    openssh-client \
+    rsync \
+    # Text processing & JSON
+    jq \
+    xmlstarlet \
+    # Compression
+    zip \
+    unzip \
+    gzip \
+    bzip2 \
+    xz-utils \
+    tar \
+    p7zip-full \
+    # File utilities
+    file \
+    tree \
+    less \
+    vim-tiny \
+    nano \
+    # Process & system monitoring
+    htop \
+    procps \
+    lsof \
+    strace \
+    # Crypto & SSL
+    openssl \
+    gnupg \
+    ca-certificates \
+    # Database clients
+    sqlite3 \
+    postgresql-client \
+    redis-tools \
+    # Image processing
+    imagemagick \
+    # PDF tools
+    poppler-utils \
+    # Misc development
+    make \
+    patch \
+    diffutils \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Node.js 22
+RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
+    apt-get install -y --no-install-recommends nodejs && \
+    rm -rf /var/lib/apt/lists/*
+
+# Install Go 1.23+
+RUN ARCH=$(uname -m) && \
+    if [ "$ARCH" = "x86_64" ]; then GO_ARCH="amd64"; \
+    elif [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then GO_ARCH="arm64"; \
+    else GO_ARCH="amd64"; fi && \
+    wget -q "https://go.dev/dl/go1.23.5.linux-${GO_ARCH}.tar.gz" -O /tmp/go.tar.gz && \
+    tar -C /usr/local -xzf /tmp/go.tar.gz && \
+    rm /tmp/go.tar.gz
+ENV PATH="/usr/local/go/bin:/root/go/bin:${PATH}"
+ENV GOPATH="/root/go"
+
+# Install GitHub CLI
+RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg && \
+    chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg && \
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | tee /etc/apt/sources.list.d/github-cli.list > /dev/null && \
+    apt-get update && apt-get install -y gh && rm -rf /var/lib/apt/lists/*
+
+# Install yq
+RUN ARCH=$(dpkg --print-architecture) && \
+    wget -q "https://github.com/mikefarah/yq/releases/latest/download/yq_linux_${ARCH}" -O /usr/local/bin/yq && \
+    chmod +x /usr/local/bin/yq
+
+# Install ripgrep, fd, bat
+RUN apt-get update && apt-get install -y --no-install-recommends ripgrep fd-find bat && \
+    ln -sf /usr/lib/cargo/bin/fd /usr/bin/fd && \
+    ln -sf /usr/bin/batcat /usr/bin/bat && \
+    rm -rf /var/lib/apt/lists/*
+
+# Install fzf
+RUN ARCH=$(dpkg --print-architecture) && \
+    wget -q "https://github.com/junegunn/fzf/releases/download/v0.56.3/fzf-0.56.3-linux_${ARCH}.tar.gz" -O /tmp/fzf.tar.gz && \
+    tar -xzf /tmp/fzf.tar.gz -C /usr/bin && rm /tmp/fzf.tar.gz
+
+# Install delta
+RUN ARCH=$(dpkg --print-architecture) && \
+    if [ "$ARCH" = "amd64" ]; then DELTA_ARCH="x86_64-unknown-linux-gnu"; \
+    else DELTA_ARCH="aarch64-unknown-linux-gnu"; fi && \
+    wget -q "https://github.com/dandavison/delta/releases/download/0.18.2/delta-0.18.2-${DELTA_ARCH}.tar.gz" -O /tmp/delta.tar.gz && \
+    tar -xzf /tmp/delta.tar.gz -C /tmp && cp /tmp/delta-*/delta /usr/local/bin/ && rm -rf /tmp/delta*
+
+# Install eza
+RUN ARCH=$(dpkg --print-architecture) && \
+    if [ "$ARCH" = "amd64" ]; then EZA_ARCH="x86_64"; else EZA_ARCH="aarch64"; fi && \
+    wget -q "https://github.com/eza-community/eza/releases/download/v0.20.14/eza_${EZA_ARCH}-unknown-linux-gnu.tar.gz" -O /tmp/eza.tar.gz && \
+    tar -xzf /tmp/eza.tar.gz -C /usr/local/bin && rm /tmp/eza.tar.gz
+
+# Install dust
+RUN ARCH=$(dpkg --print-architecture) && \
+    if [ "$ARCH" = "amd64" ]; then DUST_ARCH="x86_64-unknown-linux-gnu"; \
+    else DUST_ARCH="aarch64-unknown-linux-gnu"; fi && \
+    wget -q "https://github.com/bootandy/dust/releases/download/v1.1.1/dust-v1.1.1-${DUST_ARCH}.tar.gz" -O /tmp/dust.tar.gz && \
+    tar -xzf /tmp/dust.tar.gz -C /tmp && cp /tmp/dust-*/dust /usr/local/bin/ && rm -rf /tmp/dust*
+
+# Install Rust
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal
+ENV PATH="/root/.cargo/bin:${PATH}"
+
+# Install Bun 1.3.6 (for QMDR - 1.3.7+ has sqlite-vec segfault)
+RUN curl -fsSL https://bun.sh/install | bash -s "bun-v1.3.6"
+ENV PATH="/root/.bun/bin:${PATH}"
+
+# Install QMDR (semantic search CLI)
+RUN bun install -g github:uf-hy/qmdr && \
+    ln -sf /root/.bun/bin/qmd /usr/local/bin/qmd
+
+# Patch QMDR for remote embeddings
+RUN sed -i 's/await remote.embed(formattedText, { model, isQuery })/await remote.embed(formattedText, { isQuery })/' /root/.bun/install/global/node_modules/qmdr/src/store.ts && \
+    sed -i "s/process.env.QMD_EMBED_PROVIDER === 'siliconflow'/process.env.QMD_EMBED_PROVIDER === 'siliconflow' || process.env.QMD_EMBED_PROVIDER === 'openai'/" /root/.bun/install/global/node_modules/qmdr/src/qmd.ts && \
+    sed -i "s/const remoteModel = process.env.QMD_SILICONFLOW_EMBED_MODEL || 'Qwen\/Qwen3-Embedding-8B'/const remoteModel = process.env.QMD_EMBED_PROVIDER === 'openai' ? (process.env.QMD_OPENAI_EMBED_MODEL || 'text-embedding-3-small') : (process.env.QMD_SILICONFLOW_EMBED_MODEL || 'Qwen\/Qwen3-Embedding-8B')/" /root/.bun/install/global/node_modules/qmdr/src/qmd.ts
+
+# Copy root workspace for npm
+COPY package.json package-lock.json ./
+COPY packages/core/package.json ./packages/core/
+COPY packages/agent-runtime/package.json ./packages/agent-runtime/
+
+# Install production deps
+RUN npm install --omit=dev
+
+# Copy built code
+COPY --from=builder /build/packages/core/dist ./packages/core/dist
+COPY --from=builder /build/packages/agent-runtime/dist ./packages/agent-runtime/dist
+
+# Make clawvault CLI available (if it exists in node_modules)
+RUN test -f /app/node_modules/.bin/clawvault && \
+    ln -sf /app/node_modules/.bin/clawvault /usr/local/bin/clawvault || true
+
+# Create mount points
+# Note: /home/agent is created here for build-time config (git, bun, etc.)
+# but will be REPLACED by a symlink at container startup (see manager.ts Cmd)
+RUN mkdir -p /workspace /vault /shared /home/agent
+
+# Environment
+ENV NODE_ENV=production
+ENV WORKSPACE_PATH=/workspace
+ENV VAULT_PATH=/vault
+ENV SHARED_PATH=/shared
+ENV HOME=/home/agent
+ENV QMD_ALLOW_SQLITE_EXTENSIONS=1
+
+# Allow git to work with directories owned by other users (Docker volumes).
+# Use --system (/etc/gitconfig) so the setting survives at runtime regardless of
+# what HOME is pointed at (at runtime /home/agent is replaced by a symlink).
+RUN git config --system --add safe.directory '*'
+
+# Verify tools
+RUN echo "=== Agent Runtime Tools ===" && \
+    node --version && python3 --version && go version && \
+    git --version && gh --version | head -1 && \
+    rg --version | head -1 && fd --version && bat --version | head -1 && \
+    jq --version && yq --version | head -1 && \
+    bun --version && qmd --version 2>/dev/null || echo "qmd: installed" && \
+    echo "=== All tools verified! ==="
+
+# Use CMD instead of ENTRYPOINT so that manager.ts can provide a Cmd that
+# runs shell setup (symlinks, mkdir) before starting the node process.
+# With ENTRYPOINT, the Cmd is passed as arguments to ENTRYPOINT, not run instead.
+CMD ["node", "/app/packages/agent-runtime/dist/entrypoint.js"]

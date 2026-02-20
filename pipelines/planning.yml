@@ -1,0 +1,266 @@
+# Planning Pipeline — Decomposes a project into tasks with dependencies
+# NOTE: Steps with outputSchema use direct API calls with constrained JSON output.
+# Tools are not available in structured output mode.
+id: planning
+name: Project Planning Pipeline
+version: 1.0.0
+description: AI-driven project decomposition into tasks with dependency chains
+
+defaults:
+  model: openrouter/moonshotai/kimi-k2.5
+  timeout: 600
+
+agents:
+  - id: eric
+    name: Eric (Product Owner)
+    persona: agents/eric
+    model: openai/gpt-4o-mini
+
+  - id: finn
+    name: Finn (Solutions Architect)
+    persona: agents/finn
+    model: openai/gpt-4o-mini
+
+steps:
+  # Step 1: Product Owner decomposes into high-level tasks
+  - id: DECOMPOSE
+    agent: eric
+    outputSchema:
+      name: task_breakdown
+      strict: true
+      schema:
+        type: object
+        properties:
+          tasks:
+            type: array
+            items:
+              type: object
+              properties:
+                title:
+                  type: string
+                  description: "Clear, actionable task title (verb + noun)"
+                description:
+                  type: string
+                  description: "Detailed description of what needs to be done"
+                priority:
+                  type: string
+                  enum: ["P0", "P1", "P2", "P3"]
+                  description: "P0=critical, P1=high, P2=medium, P3=nice-to-have"
+                tags:
+                  type: array
+                  items:
+                    type: string
+                  description: "Category tags (backend, frontend, devops, design, testing, docs)"
+                estimatedHours:
+                  type: number
+                  description: "Realistic hours to complete"
+                dependencies:
+                  type: array
+                  items:
+                    type: string
+                  description: "Titles of tasks this depends on (must match exactly)"
+              required: ["title", "description", "priority", "tags", "estimatedHours", "dependencies"]
+              additionalProperties: false
+        required: ["tasks"]
+        additionalProperties: false
+    input: |
+      You are the Product Owner. Decompose this project into actionable tasks.
+
+      Project Name: {{project_name}}
+      Project Description: {{task_description}}
+
+      {% if additional_context %}
+      Additional Context:
+      {{additional_context}}
+      {% endif %}
+
+      Create a comprehensive task breakdown with 5-20 tasks.
+      Rules:
+      - Break down into 5-20 tasks (not too granular, not too high-level)
+      - Dependencies reference other task titles exactly
+      - No circular dependencies
+      - P0 tasks should have no or minimal dependencies
+      - Include testing and documentation tasks
+      - Be realistic with hour estimates
+    outputs:
+      - task_breakdown_json
+    onComplete: VALIDATE
+
+  # Step 2: Architect validates and enriches the task breakdown
+  - id: VALIDATE
+    agent: finn
+    outputSchema:
+      name: validated_tasks
+      strict: true
+      schema:
+        type: object
+        properties:
+          tasks:
+            type: array
+            items:
+              type: object
+              properties:
+                title:
+                  type: string
+                description:
+                  type: string
+                priority:
+                  type: string
+                  enum: ["P0", "P1", "P2", "P3"]
+                tags:
+                  type: array
+                  items:
+                    type: string
+                estimatedHours:
+                  type: number
+                dependencies:
+                  type: array
+                  items:
+                    type: string
+              required: ["title", "description", "priority", "tags", "estimatedHours", "dependencies"]
+              additionalProperties: false
+        required: ["tasks"]
+        additionalProperties: false
+    input: |
+      You are the Solutions Architect. Review and validate this task breakdown.
+
+      Project: {{project_name}}
+      
+      Task Breakdown:
+      {{task_breakdown_json}}
+
+      Review for:
+      1. Missing tasks (infrastructure, testing, CI/CD, documentation)
+      2. Incorrect dependencies
+      3. Unrealistic estimates
+      4. Missing technical tasks
+      5. Proper priority assignment
+
+      You may add, modify, or remove tasks. Fix any dependency issues.
+      Ensure:
+      - No circular dependencies
+      - All dependency references match exact task titles
+      - Estimates are realistic
+      - Critical path makes sense
+    outputs:
+      - validated_tasks_json
+    onComplete: DECOMPOSE_SUBTASKS
+
+  # Step 3: Product Owner decomposes tasks into bite-sized subtasks
+  - id: DECOMPOSE_SUBTASKS
+    agent: eric
+    outputSchema:
+      name: subtask_breakdown
+      strict: true
+      schema:
+        type: object
+        properties:
+          subtasks:
+            type: array
+            items:
+              type: object
+              properties:
+                parentTaskTitle:
+                  type: string
+                  description: "Exact title of the parent task this subtask belongs to"
+                title:
+                  type: string
+                  description: "Clear, specific subtask title"
+                description:
+                  type: string
+                  description: "Detailed implementation instructions small enough for a single focused session"
+                priority:
+                  type: string
+                  enum: ["P0", "P1", "P2", "P3"]
+                tags:
+                  type: array
+                  items:
+                    type: string
+                estimatedHours:
+                  type: number
+                  description: "Should be 1-4 hours max — bite-sized"
+                dependencies:
+                  type: array
+                  items:
+                    type: string
+                  description: "Titles of OTHER subtasks this depends on (within same parent or cross-parent)"
+              required: ["parentTaskTitle", "title", "description", "priority", "tags", "estimatedHours", "dependencies"]
+              additionalProperties: false
+        required: ["subtasks"]
+        additionalProperties: false
+    input: |
+      You are the Product Owner. Break down each validated task into 2-5 bite-sized subtasks.
+      
+      Each subtask should be small enough for a junior developer (or AI agent) to complete in 1-4 hours.
+      
+      Validated Task Breakdown:
+      {{validated_tasks_json}}
+      
+      Rules:
+      - Each parent task gets 2-5 subtasks
+      - Subtask estimated hours: 1-4 hours (never more)
+      - parentTaskTitle must EXACTLY match a task title from the input
+      - Dependencies can reference subtask titles within the same parent OR across parents
+      - Include setup, implementation, and testing subtasks where appropriate
+      - Be very specific in descriptions — these will be executed by AI agents
+    outputs:
+      - subtask_breakdown_json
+    onComplete: VALIDATE_SUBTASKS
+
+  # Step 4: Architect validates and enriches the subtask breakdown
+  - id: VALIDATE_SUBTASKS
+    agent: finn
+    outputSchema:
+      name: validated_subtasks
+      strict: true
+      schema:
+        type: object
+        properties:
+          subtasks:
+            type: array
+            items:
+              type: object
+              properties:
+                parentTaskTitle:
+                  type: string
+                title:
+                  type: string
+                description:
+                  type: string
+                priority:
+                  type: string
+                  enum: ["P0", "P1", "P2", "P3"]
+                tags:
+                  type: array
+                  items:
+                    type: string
+                estimatedHours:
+                  type: number
+                dependencies:
+                  type: array
+                  items:
+                    type: string
+              required: ["parentTaskTitle", "title", "description", "priority", "tags", "estimatedHours", "dependencies"]
+              additionalProperties: false
+        required: ["subtasks"]
+        additionalProperties: false
+    input: |
+      You are the Solutions Architect. Review and validate the subtask breakdown.
+      
+      Parent Tasks:
+      {{validated_tasks_json}}
+      
+      Subtask Breakdown:
+      {{subtask_breakdown_json}}
+      
+      Review for:
+      1. Every parent task has 2-5 subtasks
+      2. No parent task references are wrong
+      3. Subtask estimates are 1-4 hours
+      4. No circular dependencies
+      5. Dependencies reference exact subtask titles
+      6. Complete coverage — no gaps in implementation
+      
+      You may add, modify, or remove subtasks. Fix any issues.
+    outputs:
+      - final_subtasks_json

@@ -1,0 +1,59 @@
+# syntax=docker/dockerfile:1
+
+FROM python:3.13-slim AS base
+
+# Install uv
+RUN pip install --no-cache-dir uv
+
+# Set up environment
+ENV UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
+
+WORKDIR /app
+
+# Build stage - install all dependencies
+FROM base AS builder
+
+# Copy dependency files first (for caching)
+COPY packages/server/pyproject.toml packages/server/uv.lock* packages/server/README.md ./
+
+# Copy application code
+COPY packages/server/app/ app/
+COPY packages/server/alembic/ alembic/
+COPY packages/server/alembic.ini ./
+
+# Install dependencies + project (no dev deps)
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-dev
+
+# Final stage
+FROM python:3.13-slim AS runtime
+
+# Install curl for healthcheck and git for repository operations
+RUN apt-get update && apt-get install -y --no-install-recommends curl git && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy virtual environment from builder
+COPY --from=builder /app/.venv /app/.venv
+ENV PATH="/app/.venv/bin:$PATH"
+
+# Copy application code and alembic
+COPY --from=builder /app/app /app/app
+COPY --from=builder /app/alembic /app/alembic
+COPY --from=builder /app/alembic.ini /app/alembic.ini
+
+# Allow git to work with any directory ownership (engine creates vaults/runs as root)
+RUN git config --system --add safe.directory '*'
+
+# Expose port
+EXPOSE 8000
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
+    CMD curl -f http://localhost:8000/api/status || exit 1
+
+# Run with uvicorn
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

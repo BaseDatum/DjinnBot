@@ -1,0 +1,46 @@
+# Execute Pipeline — Simple single-agent task execution
+# For straightforward tasks: project init, scaffolding, config changes, etc.
+
+id: execute
+name: Simple Execute
+version: 1.0.0
+description: Single-agent execution for straightforward tasks
+
+defaults:
+  model: openrouter/minimax/minimax-m2.5
+  tools:
+    - read
+    - write
+    - edit
+    - bash
+    - grep
+    - find
+    - ls
+  maxRetries: 2
+  timeout: 600
+
+agents:
+  - id: yukihiro
+    name: Yukihiro (Senior SWE)
+    persona: docs/personas/yukihiro.md
+
+steps:
+  - id: EXECUTE
+    agent: yukihiro
+    input: |
+      You are a Senior Software Engineer. Execute this task directly.
+
+      Task: {{task_description}}
+
+      Instructions:
+      1. Understand what needs to be done
+      2. Implement it — write code, create files, run commands
+      3. Verify it works (run tests, check output)
+      4. Commit your changes with a clear message
+
+      Write your outputs:
+      - IMPLEMENTATION_NOTES.md — What you did, decisions made
+      - FILES_CHANGED.txt — List of files created/modified
+    outputs:
+      - implementation_notes
+      - files_changed

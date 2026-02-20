@@ -1,0 +1,28 @@
+{
+  "name": "djinnbot",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Event-driven agent orchestration framework",
+  "type": "module",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "clean": "turbo run clean && rm -rf node_modules .turbo"
+  },
+  "devDependencies": {
+    "turbo": "^2.0.0",
+    "typescript": "^5.4.0"
+  },
+  "packageManager": "npm@10.0.0",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "dependencies": {
+    "clawvault": "2.4.6"
+  }
+}

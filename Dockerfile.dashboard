@@ -1,0 +1,30 @@
+# Build stage
+FROM node:20-alpine AS builder
+
+WORKDIR /build
+
+# VITE_API_URL is baked in at build time.
+# Pass via: docker build --build-arg VITE_API_URL=http://your-api-host:8000
+# Defaults to empty string (relative paths, nginx proxy fallback).
+ARG VITE_API_URL=""
+ENV VITE_API_URL=$VITE_API_URL
+
+# Copy root workspace files for dependency resolution
+COPY package.json package-lock.json ./
+COPY packages/dashboard/package.json ./packages/dashboard/
+
+# Install all deps (with rollup native binary for musl/alpine)
+RUN npm install
+RUN npm install @rollup/rollup-linux-arm64-musl 2>/dev/null || true
+
+# Copy dashboard source
+COPY packages/dashboard ./packages/dashboard
+
+# Build (VITE_API_URL is read by vite.config.ts via process.env)
+RUN npm run build -w @djinnbot/dashboard
+
+# Production stage
+FROM nginx:alpine
+COPY --from=builder /build/packages/dashboard/dist /usr/share/nginx/html
+COPY packages/dashboard/nginx.conf /etc/nginx/conf.d/default.conf
+EXPOSE 80

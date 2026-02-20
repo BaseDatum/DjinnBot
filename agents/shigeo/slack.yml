@@ -1,0 +1,3 @@
+bot_token: ${SLACK_SHIGEO_BOT_TOKEN}
+app_token: ${SLACK_SHIGEO_APP_TOKEN}
+bot_user_id: U0ADHGW83T8
