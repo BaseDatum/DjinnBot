@@ -1,0 +1,209 @@
+# DjinnBot — Pre-built Images (GHCR)
+# Uses pre-built container images from ghcr.io/basedatum/djinnbot.
+# Faster startup — no local build required.
+#
+# Image tag is controlled by DJINNBOT_VERSION (set by `djinn setup`).
+# Requires Traefik reverse proxy for routing (dashboard uses relative API paths).
+#
+# Do NOT use `docker compose up --build` with this file.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: djinnbot-postgres
+    environment:
+      POSTGRES_USER: djinnbot
+      POSTGRES_PASSWORD: djinnbot
+      POSTGRES_DB: djinnbot
+    ports:
+      - "${BIND_HOST:-127.0.0.1}:${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - djinnbot_default
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U djinnbot -d djinnbot"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: djinnbot-redis
+    ports:
+      - "${BIND_HOST:-127.0.0.1}:${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis-data:/data
+    command: redis-server --appendonly yes
+    networks:
+      - djinnbot_default
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  api:
+    image: ghcr.io/basedatum/djinnbot/api:${DJINNBOT_VERSION:-latest}
+    container_name: djinnbot-api
+    ports:
+      - "${BIND_HOST:-127.0.0.1}:${API_PORT:-8000}:8000"
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://djinnbot:djinnbot@postgres:5432/djinnbot
+      - REDIS_URL=redis://redis:6379
+      - DJINN_DATA_PATH=/data
+      - PIPELINES_DIR=/pipelines
+      - AGENTS_DIR=/agents
+      - SANDBOXES_DIR=/data/sandboxes
+      - WORKSPACES_DIR=/data/workspaces
+      - SHARED_RUNS_DIR=/data/runs
+      - GITHUB_APP_ID=${GITHUB_APP_ID:-}
+      - GITHUB_APP_CLIENT_ID=${GITHUB_APP_CLIENT_ID:-}
+      - GITHUB_APP_WEBHOOK_SECRET=${GITHUB_APP_WEBHOOK_SECRET:-}
+      - GITHUB_APP_PRIVATE_KEY_PATH=${GITHUB_APP_PRIVATE_KEY_PATH:-/data/secrets/github-app.pem}
+      - GITHUB_APP_NAME=${GITHUB_APP_NAME:-djinnbot}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - MCPO_BASE_URL=http://djinnbot-mcpo:8000
+      - ENGINE_INTERNAL_TOKEN=${ENGINE_INTERNAL_TOKEN:-}
+      - AUTH_ENABLED=${AUTH_ENABLED:-false}
+      - AUTH_SECRET_KEY=${AUTH_SECRET_KEY:-}
+      - AUTH_TOTP_ISSUER=${AUTH_TOTP_ISSUER:-DjinnBot}
+    volumes:
+      - djinnbot-data:/data
+      - ./pipelines:/pipelines
+      - ./agents:/agents
+      - ./secrets:/data/secrets:ro
+    networks:
+      - djinnbot_default
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/v1/status"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  engine:
+    image: ghcr.io/basedatum/djinnbot/engine:${DJINNBOT_VERSION:-latest}
+    cap_add:
+      - SYS_ADMIN
+    container_name: djinnbot-engine
+    environment:
+      - USE_API_STORE=true
+      - DJINNBOT_API_URL=http://api:8000
+      - DATABASE_URL=postgresql+asyncpg://djinnbot:djinnbot@postgres:5432/djinnbot
+      - REDIS_URL=redis://redis:6379
+      - DJINN_DATA_PATH=/data
+      - DATA_DIR=/data
+      - PIPELINES_DIR=/pipelines
+      - AGENTS_DIR=/agents
+      - VAULTS_DIR=/data/vaults
+      - MOCK_RUNNER=${MOCK_RUNNER:-false}
+      - USE_CONTAINER_RUNNER=${USE_CONTAINER_RUNNER:-true}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - QMD_OPENAI_API_KEY=${OPENROUTER_API_KEY}
+      - QMD_OPENAI_BASE_URL=https://openrouter.ai/api/v1
+      - QMD_EMBED_PROVIDER=openai
+      - QMD_OPENAI_EMBED_MODEL=openai/text-embedding-3-small
+      - QMD_RERANK_PROVIDER=openai
+      - QMD_RERANK_MODE=llm
+      - QMD_OPENAI_MODEL=openai/gpt-4o-mini
+      - QMD_QUERY_EXPANSION_PROVIDER=openai
+      - QMD_ALLOW_SQLITE_EXTENSIONS=1
+      - HOME=/data
+      - SLACK_CHANNEL_ID=${SLACK_CHANNEL_ID}
+      - SLACK_CHIEKO_BOT_TOKEN=${SLACK_CHIEKO_BOT_TOKEN}
+      - SLACK_CHIEKO_APP_TOKEN=${SLACK_CHIEKO_APP_TOKEN}
+      - SLACK_ERIC_BOT_TOKEN=${SLACK_ERIC_BOT_TOKEN}
+      - SLACK_ERIC_APP_TOKEN=${SLACK_ERIC_APP_TOKEN}
+      - SLACK_FINN_BOT_TOKEN=${SLACK_FINN_BOT_TOKEN}
+      - SLACK_FINN_APP_TOKEN=${SLACK_FINN_APP_TOKEN}
+      - SLACK_HOLT_BOT_TOKEN=${SLACK_HOLT_BOT_TOKEN}
+      - SLACK_HOLT_APP_TOKEN=${SLACK_HOLT_APP_TOKEN}
+      - SLACK_JIM_BOT_TOKEN=${SLACK_JIM_BOT_TOKEN}
+      - SLACK_JIM_APP_TOKEN=${SLACK_JIM_APP_TOKEN}
+      - SLACK_LUKE_BOT_TOKEN=${SLACK_LUKE_BOT_TOKEN}
+      - SLACK_LUKE_APP_TOKEN=${SLACK_LUKE_APP_TOKEN}
+      - SLACK_SHIGEO_BOT_TOKEN=${SLACK_SHIGEO_BOT_TOKEN}
+      - SLACK_SHIGEO_APP_TOKEN=${SLACK_SHIGEO_APP_TOKEN}
+      - SLACK_STAS_BOT_TOKEN=${SLACK_STAS_BOT_TOKEN}
+      - SLACK_STAS_APP_TOKEN=${SLACK_STAS_APP_TOKEN}
+      - SLACK_YANG_BOT_TOKEN=${SLACK_YANG_BOT_TOKEN}
+      - SLACK_YANG_APP_TOKEN=${SLACK_YANG_APP_TOKEN}
+      - SLACK_YUKIHIRO_BOT_TOKEN=${SLACK_YUKIHIRO_BOT_TOKEN}
+      - SLACK_YUKIHIRO_APP_TOKEN=${SLACK_YUKIHIRO_APP_TOKEN}
+      - SKY_SLACK_USER_ID=${SKY_SLACK_USER_ID}
+      - SANDBOXES_DIR=/data/sandboxes
+      - WORKSPACES_DIR=/data/workspaces
+      - SHARED_RUNS_DIR=/data/runs
+      - GITHUB_TOKEN=${GITHUB_TOKEN:-}
+      - GITHUB_USER=${GITHUB_USER:-djinnbot}
+      - LOG_LEVEL=${LOG_LEVEL:-DEBUG}
+      - MCPO_API_KEY=${MCPO_API_KEY:-changeme}
+      - MCPO_BASE_URL=http://djinnbot-mcpo:8000
+      - MCPO_CONFIG_PATH=/data/mcp/config.json
+      - DJINNBOT_API_URL=http://api:8000
+      - ENGINE_INTERNAL_TOKEN=${ENGINE_INTERNAL_TOKEN:-}
+    volumes:
+      - djinnbot-data:/data
+      - ./pipelines:/pipelines:ro
+      - ./agents:/agents:ro
+      - ./mcp:/data/mcp
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - djinnbot_default
+    depends_on:
+      api:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  mcpo:
+    image: ghcr.io/skymoore/mcpo:latest
+    platform: linux/amd64
+    container_name: djinnbot-mcpo
+    environment:
+      - GITHUB_TOKEN=${GITHUB_TOKEN:-}
+    command: >
+      --config /data/mcp/config.json
+      --hot-reload
+      --port 8000
+      --api-key "${MCPO_API_KEY:-changeme}"
+    ports:
+      - "${BIND_HOST:-127.0.0.1}:${MCPO_PORT:-8001}:8000"
+    volumes:
+      - djinnbot-data:/data
+      - ./mcp:/data/mcp
+    networks:
+      - djinnbot_default
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8000/docs"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  dashboard:
+    image: ghcr.io/basedatum/djinnbot/dashboard:${DJINNBOT_VERSION:-latest}
+    container_name: djinnbot-dashboard
+    ports:
+      - "${BIND_HOST:-127.0.0.1}:${DASHBOARD_PORT:-3000}:80"
+    networks:
+      - djinnbot_default
+    depends_on:
+      api:
+        condition: service_healthy
+
+networks:
+  djinnbot_default:
+    driver: bridge
+
+volumes:
+  postgres-data:
+  redis-data:
+  djinnbot-data:

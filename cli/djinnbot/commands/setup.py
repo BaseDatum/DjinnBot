@@ -56,6 +56,14 @@ PROVIDER_ENV_KEYS = {
 }
 
 REPO_URL = "https://github.com/BaseDatum/djinnbot.git"
+GITHUB_API_RELEASES = "https://api.github.com/repos/BaseDatum/djinnbot/releases/latest"
+
+GHCR_IMAGES = {
+    "api": "ghcr.io/basedatum/djinnbot/api",
+    "engine": "ghcr.io/basedatum/djinnbot/engine",
+    "dashboard": "ghcr.io/basedatum/djinnbot/dashboard",
+    "agent-runtime": "ghcr.io/basedatum/djinnbot/agent-runtime",
+}
 
 # ── .env helpers ────────────────────────────────────────────────────────────
 
@@ -237,7 +245,69 @@ def wait_for_health(url: str, timeout: int = 180) -> bool:
     return False
 
 
+def fetch_latest_release_tag() -> str:
+    """Fetch the latest release tag from GitHub. Falls back to 'main'."""
+    try:
+        import json as _json
+
+        result = subprocess.run(
+            ["curl", "-sf", "--max-time", "10", GITHUB_API_RELEASES],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        if result.returncode == 0:
+            data = _json.loads(result.stdout)
+            tag = data.get("tag_name", "")
+            if tag:
+                # CI tags images as semver (without 'v' prefix) and also 'latest'
+                # e.g. tag "v1.2.3" → image tag "1.2.3" and "latest"
+                return "latest"
+        return "main"
+    except Exception:
+        return "main"
+
+
 # ── Setup steps ─────────────────────────────────────────────────────────────
+
+
+def step_image_mode(env_path: Path) -> str:
+    """Ask if user wants pre-built images or build from source.
+
+    Returns 'prebuilt' or 'build'.
+    """
+    console.print(Panel("[bold]Step 2: Image Mode[/bold]"))
+
+    console.print(
+        "[bold]How would you like to run DjinnBot?[/bold]\n\n"
+        "  [cyan]1.[/cyan] [bold]Pre-built images[/bold] (recommended)\n"
+        "     Pull ready-to-run images from GitHub Container Registry.\n"
+        "     Fastest startup — no compilation needed.\n\n"
+        "  [cyan]2.[/cyan] [bold]Build from source[/bold]\n"
+        "     Build all Docker images locally from the repository.\n"
+        "     Takes 5-15 minutes. Choose this if you want to modify the code.\n"
+    )
+
+    choice = typer.prompt("Select mode (1 or 2)", default="1")
+
+    if choice.strip() == "2":
+        console.print("[green]Mode: Build from source[/green]")
+        return "build"
+
+    # Pre-built: fetch latest tag
+    console.print("[dim]Checking for latest release...[/dim]")
+    tag = fetch_latest_release_tag()
+    set_env_value(env_path, "DJINNBOT_VERSION", tag)
+
+    console.print(f"[green]Mode: Pre-built images (tag: {tag})[/green]")
+
+    # Pre-built images require Traefik for routing (dashboard uses relative paths)
+    console.print(
+        "[dim]Pre-built images use Traefik for request routing "
+        "(dashboard and API served through a single entry point).[/dim]"
+    )
+
+    return "prebuilt"
 
 
 def step_locate_repo(install_dir: Optional[str]) -> Path:
@@ -360,19 +430,21 @@ def step_generate_secrets(env_path: Path) -> None:
             )
 
 
-def step_check_ports(env_path: Path, ssl_planned: bool) -> None:
+def step_check_ports(env_path: Path, use_proxy: bool) -> None:
     """Check for port conflicts before starting."""
-    console.print(Panel("[bold]Step 4: Port Check[/bold]"))
+    console.print(Panel("[bold]Port Check[/bold]"))
 
     ports_to_check = {
-        int(get_env_value(env_path, "API_PORT") or "8000"): "API",
-        int(get_env_value(env_path, "DASHBOARD_PORT") or "3000"): "Dashboard",
+        int(get_env_value(env_path, "API_PORT") or "8000"): "API (internal)",
+        int(
+            get_env_value(env_path, "DASHBOARD_PORT") or "3000"
+        ): "Dashboard (internal)",
         int(get_env_value(env_path, "REDIS_PORT") or "6379"): "Redis",
         5432: "PostgreSQL",
         int(get_env_value(env_path, "MCPO_PORT") or "8001"): "MCP Proxy",
     }
 
-    if ssl_planned:
+    if use_proxy:
         ports_to_check[80] = "HTTP (Traefik)"
         ports_to_check[443] = "HTTPS (Traefik)"
 
@@ -550,7 +622,7 @@ def step_configure_ssl(env_path: Path, repo_dir: Path, ip: str) -> Optional[str]
     console.print(f"[green]Proxy config written to proxy/.env[/green]")
 
     # Generate docker-compose.override.yml for Traefik integration
-    _write_compose_override(repo_dir, domain)
+    _write_compose_override(repo_dir, domain, ssl=True)
 
     # Create the shared Docker network
     docker = docker_cmd()
@@ -576,12 +648,41 @@ def _verify_dns(domain: str, expected_ip: str) -> bool:
         return False
 
 
-def _write_compose_override(repo_dir: Path, domain: str) -> None:
-    """Generate docker-compose.override.yml for Traefik integration."""
+def _write_compose_override(
+    repo_dir: Path,
+    domain: Optional[str],
+    ssl: bool = True,
+) -> None:
+    """Generate docker-compose.override.yml for Traefik integration.
+
+    When ssl=True, routes use the 'websecure' entrypoint with TLS.
+    When ssl=False (HTTP-only mode for pre-built images), routes use 'web' entrypoint.
+    """
     override_path = repo_dir / "docker-compose.override.yml"
 
+    # Determine entrypoint and TLS lines
+    if ssl and domain:
+        host_rule = f"Host(`{domain}`)"
+        api_entrypoint = "websecure"
+        dash_entrypoint = "websecure"
+        tls_lines_api = (
+            '      - "traefik.http.routers.djinnbot-api.tls.certresolver=letsencrypt"'
+        )
+        tls_lines_dash = '      - "traefik.http.routers.djinnbot-dashboard.tls.certresolver=letsencrypt"'
+    else:
+        # HTTP-only: match any host on the web (port 80) entrypoint
+        host_rule = "PathPrefix(`/`)"
+        api_entrypoint = "web"
+        dash_entrypoint = "web"
+        tls_lines_api = ""
+        tls_lines_dash = ""
+
+    api_rule = (
+        f"Host(`{domain}`) && PathPrefix(`/v1`)" if domain else "PathPrefix(`/v1`)"
+    )
+
     content = f"""# Generated by `djinn setup` — Traefik reverse proxy integration
-# This file is auto-picked-up by `docker compose` alongside docker-compose.yml.
+# {"SSL mode — routes via HTTPS with auto-renewing certificates." if ssl else "HTTP-only mode — Traefik routes port 80 to dashboard and API."}
 # Delete this file to revert to direct port-binding mode.
 
 services:
@@ -592,9 +693,9 @@ services:
     labels:
       - "traefik.enable=true"
       # Route /v1/* to the API (higher priority due to longer rule)
-      - "traefik.http.routers.djinnbot-api.rule=Host(`{domain}`) && PathPrefix(`/v1`)"
-      - "traefik.http.routers.djinnbot-api.entrypoints=websecure"
-      - "traefik.http.routers.djinnbot-api.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.djinnbot-api.rule={api_rule}"
+      - "traefik.http.routers.djinnbot-api.entrypoints={api_entrypoint}"
+{tls_lines_api}
       - "traefik.http.services.djinnbot-api.loadbalancer.server.port=8000"
       # Flush immediately for SSE streaming
       - "traefik.http.services.djinnbot-api.loadbalancer.responseforwarding.flushinterval=-1"
@@ -605,10 +706,10 @@ services:
       - djinnbot-proxy
     labels:
       - "traefik.enable=true"
-      # Catch-all for the domain (lower priority than /v1 prefix)
-      - "traefik.http.routers.djinnbot-dashboard.rule=Host(`{domain}`)"
-      - "traefik.http.routers.djinnbot-dashboard.entrypoints=websecure"
-      - "traefik.http.routers.djinnbot-dashboard.tls.certresolver=letsencrypt"
+      # Catch-all (lower priority than /v1 prefix)
+      - "traefik.http.routers.djinnbot-dashboard.rule={host_rule}"
+      - "traefik.http.routers.djinnbot-dashboard.entrypoints={dash_entrypoint}"
+{tls_lines_dash}
       - "traefik.http.services.djinnbot-dashboard.loadbalancer.server.port=80"
       - "traefik.http.routers.djinnbot-dashboard.priority=1"
 
@@ -616,15 +717,73 @@ networks:
   djinnbot-proxy:
     external: true
 """
+    # Clean up blank lines from empty TLS sections
+    content = re.sub(r"\n\n\n+", "\n\n", content)
+
     override_path.write_text(content)
     console.print(f"[green]Generated docker-compose.override.yml[/green]")
+
+
+def _setup_proxy_network() -> None:
+    """Create the shared djinnbot-proxy Docker network if it doesn't exist."""
+    docker = docker_cmd()
+    try:
+        run_cmd([*docker, "network", "create", "djinnbot-proxy"], check=False)
+        console.print("[green]Created djinnbot-proxy network[/green]")
+    except Exception:
+        console.print("[dim]djinnbot-proxy network already exists[/dim]")
+
+
+def _write_proxy_http_only(repo_dir: Path) -> None:
+    """Write an HTTP-only proxy/docker-compose.yml (no SSL, no ACME).
+
+    Used for pre-built images without SSL — Traefik serves port 80 only.
+    """
+    proxy_dir = repo_dir / "proxy"
+    proxy_dir.mkdir(exist_ok=True)
+    compose_path = proxy_dir / "docker-compose.yml"
+
+    content = """# DjinnBot Reverse Proxy — Traefik HTTP-only mode
+# Generated by `djinn setup` for pre-built image routing.
+# To upgrade to SSL, re-run `djinn setup` and choose SSL.
+
+services:
+  traefik:
+    image: traefik:v3
+    container_name: djinnbot-traefik
+    restart: unless-stopped
+    command:
+      - --entrypoints.web.address=:80
+      - --providers.docker=true
+      - --providers.docker.network=djinnbot-proxy
+      - --providers.docker.exposedbydefault=false
+      - --log.level=WARN
+      - --accesslog=false
+    ports:
+      - "80:80"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - djinnbot-proxy
+    healthcheck:
+      test: ["CMD", "traefik", "healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+networks:
+  djinnbot-proxy:
+    external: true
+"""
+    compose_path.write_text(content)
+    console.print("[green]Generated HTTP-only proxy config[/green]")
 
 
 def step_start_stack(
     repo_dir: Path,
     env_path: Path,
-    domain: Optional[str],
-    ip: str,
+    image_mode: str,
+    use_proxy: bool,
 ) -> None:
     """Start the Docker Compose stack."""
     console.print(Panel("[bold]Starting DjinnBot[/bold]"))
@@ -632,8 +791,8 @@ def step_start_stack(
     docker = docker_cmd()
     compose_cmd = [*docker, "compose"]
 
-    # Start proxy first if SSL is configured
-    if domain:
+    # Start proxy first if Traefik is being used (SSL or pre-built HTTP-only)
+    if use_proxy:
         console.print("[bold]Starting Traefik proxy...[/bold]")
         proxy_dir = repo_dir / "proxy"
         try:
@@ -650,18 +809,40 @@ def step_start_stack(
             )
             raise typer.Exit(1)
 
-    # Start main stack
-    console.print("[bold]Building and starting DjinnBot services...[/bold]")
-    console.print(
-        "[dim]This may take several minutes on first run (building images)...[/dim]"
-    )
+    # Build the compose command for the main stack
+    # When using ghcr images, tell compose which file to use via COMPOSE_FILE
+    compose_file = get_env_value(env_path, "COMPOSE_FILE")
+    main_cmd = [*compose_cmd]
+    if compose_file:
+        # COMPOSE_FILE env var is read automatically by docker compose from .env
+        pass  # docker compose reads it from .env
+
+    up_cmd = [*main_cmd, "up", "-d"]
+
+    if image_mode == "build":
+        console.print(
+            "[bold]Building and starting DjinnBot services...[/bold]\n"
+            "[dim]This may take 5-15 minutes on first run (building images)...[/dim]"
+        )
+        up_cmd.append("--build")
+    else:
+        console.print(
+            "[bold]Pulling and starting DjinnBot services...[/bold]\n"
+            "[dim]Downloading pre-built images...[/dim]"
+        )
+        # Pull first for better progress display
+        try:
+            run_cmd(
+                [*main_cmd, "pull"],
+                cwd=repo_dir,
+                stream=True,
+                check=False,
+            )
+        except Exception:
+            pass  # Pull failures are retried by up
 
     try:
-        run_cmd(
-            [*compose_cmd, "up", "-d", "--build"],
-            cwd=repo_dir,
-            stream=True,
-        )
+        run_cmd(up_cmd, cwd=repo_dir, stream=True)
     except Exception:
         console.print("[red]Failed to start DjinnBot stack[/red]")
         console.print("[dim]Check logs: docker compose logs --tail=50[/dim]")
@@ -761,6 +942,7 @@ def step_print_summary(
     ip: str,
     domain: Optional[str],
     ssl_enabled: bool,
+    use_proxy: bool,
     provider_id: Optional[str],
 ) -> None:
     """Print the final summary with access URLs and next steps."""
@@ -771,6 +953,10 @@ def step_print_summary(
     if ssl_enabled and domain:
         dashboard_url = f"https://{domain}"
         api_url = f"https://{domain}/v1"
+    elif use_proxy:
+        # HTTP-only Traefik (pre-built mode)
+        dashboard_url = f"http://{ip}"
+        api_url = f"http://{ip}/v1"
     else:
         dashboard_url = f"http://{ip}:{dash_port}"
         api_url = f"http://{ip}:{api_port}"
@@ -871,23 +1057,28 @@ def setup(
     repo_dir = step_locate_repo(install_dir)
     os.chdir(repo_dir)
 
-    # ── Step 2: .env file ───────────────────────────────────────────
+    # ── Step 2: Image mode (pre-built vs build) ─────────────────────
     env_path = step_configure_env(repo_dir)
+    image_mode = step_image_mode(env_path)
 
     # ── Step 3: Secrets ─────────────────────────────────────────────
     step_generate_secrets(env_path)
 
-    # ── Step 5: Network / IP detection ──────────────────────────────
+    # ── Step 4: Network / IP detection ──────────────────────────────
     ip = step_detect_ip(env_path)
 
-    # ── Step 7: SSL decision (ask early so we can set VITE_API_URL) ─
+    # ── Step 5: SSL decision (ask early so we can set VITE_API_URL) ─
     ssl_enabled = False
     domain = None
+    # Pre-built always uses Traefik; still ask about SSL for certs
+    use_proxy = image_mode == "prebuilt"
+
     if not skip_ssl:
         ssl_enabled = step_ask_ssl()
+    use_proxy = use_proxy or ssl_enabled
 
-    # ── Step 4: Port check ──────────────────────────────────────────
-    step_check_ports(env_path, ssl_enabled)
+    # ── Step 6: Port check ──────────────────────────────────────────
+    step_check_ports(env_path, use_proxy)
 
     # ── SSL configuration (sets VITE_API_URL, BIND_HOST, etc.) ──────
     if ssl_enabled:
@@ -896,22 +1087,57 @@ def setup(
             ssl_enabled = False
             console.print("[yellow]SSL setup skipped. Continuing without SSL.[/yellow]")
 
-    # Set VITE_API_URL for non-SSL case
-    if not ssl_enabled:
+    # ── Configure proxy / VITE_API_URL for the resolved mode ────────
+    if ssl_enabled and domain:
+        # SSL already configured VITE_API_URL and BIND_HOST in step_configure_ssl
+        pass
+    elif use_proxy:
+        # Pre-built without SSL — HTTP-only Traefik on port 80
+        set_env_value(env_path, "BIND_HOST", "127.0.0.1")
+        # Dashboard uses relative paths (empty VITE_API_URL in pre-built image),
+        # so we don't need to set VITE_API_URL — Traefik handles routing.
+        # But for build-from-source + proxy, we do set it:
+        if image_mode == "build":
+            set_env_value(env_path, "VITE_API_URL", f"http://{ip}")
+        _write_compose_override(repo_dir, domain=None, ssl=False)
+        _setup_proxy_network()
+        _write_proxy_http_only(repo_dir)
+    else:
+        # Build from source, no proxy — direct port access
         api_port = get_env_value(env_path, "API_PORT") or "8000"
         set_env_value(env_path, "VITE_API_URL", f"http://{ip}:{api_port}")
         set_env_value(env_path, "BIND_HOST", "0.0.0.0")
 
-    # ── Step 6: Provider API key ────────────────────────────────────
+    # ── Set COMPOSE_FILE for pre-built images ───────────────────────
+    if image_mode == "prebuilt":
+        compose_files = ["docker-compose.ghcr.yml"]
+        override_path = repo_dir / "docker-compose.override.yml"
+        if override_path.exists():
+            compose_files.append("docker-compose.override.yml")
+        set_env_value(env_path, "COMPOSE_FILE", ":".join(compose_files))
+    else:
+        # Build mode: docker compose auto-picks up override if it exists
+        # Don't set COMPOSE_FILE — let docker compose use defaults
+        pass
+
+    # ── Step 7: Provider API key ────────────────────────────────────
     provider_id = None
     if not skip_provider:
         provider_id = step_provider_key(env_path)
 
     # ── Start everything ────────────────────────────────────────────
-    step_start_stack(repo_dir, env_path, domain, ip)
+    step_start_stack(repo_dir, env_path, image_mode, use_proxy)
 
     # ── Register provider with running API ──────────────────────────
     step_configure_provider_api(env_path, provider_id)
 
     # ── Summary ─────────────────────────────────────────────────────
-    step_print_summary(env_path, repo_dir, ip, domain, ssl_enabled, provider_id)
+    step_print_summary(
+        env_path,
+        repo_dir,
+        ip,
+        domain,
+        ssl_enabled,
+        use_proxy,
+        provider_id,
+    )
