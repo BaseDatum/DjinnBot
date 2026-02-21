@@ -1742,11 +1742,9 @@ def setup(
     elif use_proxy:
         # Pre-built without SSL — HTTP-only Traefik on port 80
         set_env_value(env_path, "BIND_HOST", "127.0.0.1")
-        # Dashboard uses relative paths (empty VITE_API_URL in pre-built image),
-        # so we don't need to set VITE_API_URL — Traefik handles routing.
-        # But for build-from-source + proxy, we do set it:
-        if image_mode == "build":
-            set_env_value(env_path, "VITE_API_URL", f"http://{ip}")
+        # VITE_API_URL is injected at container startup (runtime config),
+        # so it works for both pre-built and build-from-source images.
+        set_env_value(env_path, "VITE_API_URL", f"http://{ip}")
         _write_compose_override(repo_dir, domain=None, ssl=False)
         _setup_proxy_network()
         _write_proxy_compose(repo_dir, ssl=False)

@@ -229,12 +229,12 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.dashboard
-      args:
-        # Bake the API URL into the frontend at build time.
-        # The dashboard calls the API directly — no nginx proxy needed for API traffic.
-        # Override with: VITE_API_URL=http://your-host:8000 docker compose up --build
-        VITE_API_URL: "${VITE_API_URL:-http://localhost:8000}"
     container_name: djinnbot-dashboard
+    environment:
+      # Runtime API URL injection — no rebuild needed for custom domains.
+      # The entrypoint.sh script writes this into config.js at container startup.
+      # Set in .env or override: VITE_API_URL=https://djinn.example.com docker compose up -d
+      - VITE_API_URL=${VITE_API_URL:-http://localhost:8000}
     ports:
       - "${BIND_HOST:-0.0.0.0}:${DASHBOARD_PORT:-3000}:80"
     networks:
