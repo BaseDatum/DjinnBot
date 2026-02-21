@@ -232,10 +232,10 @@ const ResearchParamsSchema = Type.Object({
 });
 type ResearchParams = Static<typeof ResearchParamsSchema>;
 
-// New: slack_dm tool for messaging Sky directly
+// slack_dm tool for messaging the user directly
 const SlackDmParamsSchema = Type.Object({
   message: Type.String({ 
-    description: 'Message to send to Sky via Slack DM' 
+    description: 'Message to send to the user via Slack DM' 
   }),
   urgent: Type.Optional(Type.Boolean({ 
     default: false,
@@ -575,11 +575,11 @@ export function createDjinnBotTools(
         };
       },
     },
-    // slack_dm tool - message Sky directly via Slack
+    // slack_dm tool - message the user directly via Slack
     {
       name: 'slack_dm',
       description:
-        'Send a direct message to Sky (the human) via Slack. Use this for: urgent findings needing human attention, questions requiring human input, status updates on important work, or blockers you cannot resolve. Do NOT use for routine updates - only when human attention is needed.',
+        'Send a direct message to the user (the human) via Slack. Use this for: urgent findings needing human attention, questions requiring human input, status updates on important work, or blockers you cannot resolve. Do NOT use for routine updates - only when human attention is needed.',
       label: 'slack_dm',
       parameters: SlackDmParamsSchema,
       execute: async (
@@ -591,7 +591,7 @@ export function createDjinnBotTools(
         const typedParams = params as SlackDmParams;
         if (!callbacks.onSlackDm) {
           return {
-            content: [{ type: 'text', text: 'Slack DM not available. Sky may not have configured Slack messaging.' }],
+            content: [{ type: 'text', text: 'Slack DM not available. The user may not have configured their Slack ID in Settings.' }],
             details: {},
           };
         }

@@ -732,8 +732,9 @@ async function main(): Promise<void> {
   try {
     // Fetch global settings from Redis
     const SETTINGS_KEY = "djinnbot:global:settings";
-    let globalSettings = {
-      defaultSlackDecisionModel: 'openrouter/minimax/minimax-m2.5'
+    let globalSettings: Record<string, any> = {
+      defaultSlackDecisionModel: 'openrouter/minimax/minimax-m2.5',
+      userSlackId: '',
     };
 
     // Initialize temporary Redis client to fetch settings
@@ -847,8 +848,8 @@ async function main(): Promise<void> {
             return [];
           }
         },
-        // Sky's Slack user ID for DMs from agents (e.g., U12345678)
-        process.env.SKY_SLACK_USER_ID
+        // User's Slack ID for DMs from agents (e.g., U12345678) — configured via dashboard settings
+        (globalSettings as any).userSlackId || undefined
       );
       console.log('[Engine] Slack bridge started');
     }

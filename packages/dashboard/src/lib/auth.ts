@@ -217,6 +217,40 @@ export async function setup(
   return res.json();
 }
 
+export interface TOTPSetupResponse {
+  secret: string;
+  provisioningUri: string;
+}
+
+export interface TOTPConfirmResponse {
+  status: string;
+  recoveryCodes: string[];
+}
+
+export async function setupTOTP(): Promise<TOTPSetupResponse> {
+  const res = await authFetch(`${API_BASE}/auth/totp/setup`, {
+    method: 'POST',
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.detail || 'TOTP setup failed');
+  }
+  return res.json();
+}
+
+export async function confirmTOTP(code: string): Promise<TOTPConfirmResponse> {
+  const res = await authFetch(`${API_BASE}/auth/totp/confirm`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ code }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.detail || 'TOTP confirmation failed');
+  }
+  return res.json();
+}
+
 export async function logout(): Promise<void> {
   const refreshToken = getRefreshToken();
   if (refreshToken && _accessToken) {

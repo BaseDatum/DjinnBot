@@ -63,7 +63,8 @@ That's the only required variable when using OpenRouter. Everything else has def
 | `SLACK_CHANNEL_ID` | Default channel for pipeline threads |
 | `SLACK_{AGENT}_BOT_TOKEN` | Per-agent Slack bot token |
 | `SLACK_{AGENT}_APP_TOKEN` | Per-agent Slack app token |
-| `SKY_SLACK_USER_ID` | Human user ID for DM notifications |
+
+> **User Slack ID** — Your Slack member ID for DM notifications from agents is configured in the dashboard under **Settings → Slack**, not as an environment variable.
 
 ### GitHub
 

@@ -572,7 +572,7 @@ export function createDjinnBotTools(config: DjinnBotToolsConfig): AgentTool[] {
     },
     {
       name: 'slack_dm',
-      description: 'Send a DM to Sky via Slack',
+      description: 'Send a DM to the user via Slack. Use for urgent findings, questions requiring human input, or blockers you cannot resolve.',
       label: 'slack_dm',
       parameters: SlackDmParamsSchema,
       execute: async (
@@ -589,7 +589,7 @@ export function createDjinnBotTools(config: DjinnBotToolsConfig): AgentTool[] {
           urgent: p.urgent || false,
         };
         await publisher.publishEvent(event as any);
-        return { content: [{ type: 'text', text: 'Message sent to Sky' }], details: {} };
+        return { content: [{ type: 'text', text: 'Message sent to user' }], details: {} };
       },
     },
     {

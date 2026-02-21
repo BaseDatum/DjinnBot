@@ -44,6 +44,7 @@
     "highlight.js": "^10.7.3",
     "js-yaml": "^3.14.2",
     "lucide-react": "^0.460.0",
+    "qrcode.react": "^4.2.0",
     "react": "^19.0.0",
     "react-arborist": "^3.4.3",
     "react-dom": "^19.0.0",

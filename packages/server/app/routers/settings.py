@@ -29,6 +29,7 @@ DEFAULT_SETTINGS: Dict[str, str] = {
     "defaultSlackDecisionModelThinkingLevel": "off",
     "pulseIntervalMinutes": "30",
     "pulseEnabled": "true",
+    "userSlackId": "",
 }
 
 # ─── Models known to support extended thinking/reasoning ─────────────────────
@@ -487,6 +488,7 @@ class GlobalSettings(BaseModel):
     defaultSlackDecisionModelThinkingLevel: str = "off"
     pulseIntervalMinutes: int = 30
     pulseEnabled: bool = True
+    userSlackId: str = ""
 
 
 class ExtraFieldSpec(BaseModel):
@@ -685,6 +687,7 @@ async def get_settings(
         ),
         pulseIntervalMinutes=int(_get("pulseIntervalMinutes")),
         pulseEnabled=_get("pulseEnabled").lower() == "true",
+        userSlackId=_get("userSlackId"),
     )
 
 
@@ -701,6 +704,7 @@ async def update_settings(
         "defaultSlackDecisionModel": settings.defaultSlackDecisionModel,
         "pulseIntervalMinutes": str(settings.pulseIntervalMinutes),
         "pulseEnabled": str(settings.pulseEnabled).lower(),
+        "userSlackId": settings.userSlackId,
     }
     for key, value in updates.items():
         row = await session.get(GlobalSetting, key)

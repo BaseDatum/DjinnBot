@@ -485,14 +485,14 @@ export class DjinnBot {
       },
       onSlackDm: async (agentId, runId, stepId, message, urgent) => {
         if (!this.slackBridge) {
-          return 'Slack bridge not started - cannot send DM to Sky.';
+          return 'Slack bridge not started - cannot send DM to user.';
         }
         try {
-          await this.slackBridge.sendDmToSky(agentId, message, urgent);
-          console.log(`[DjinnBot] Agent ${agentId} sent Slack DM to Sky: "${message.slice(0, 80)}..."`);
-          return `Message sent to Sky via Slack DM${urgent ? ' (marked urgent)' : ''}.`;
+          await this.slackBridge.sendDmToUser(agentId, message, urgent);
+          console.log(`[DjinnBot] Agent ${agentId} sent Slack DM to user: "${message.slice(0, 80)}..."`);
+          return `Message sent to user via Slack DM${urgent ? ' (marked urgent)' : ''}.`;
         } catch (err) {
-          console.error(`[DjinnBot] Failed to send Slack DM to Sky:`, err);
+          console.error(`[DjinnBot] Failed to send Slack DM to user:`, err);
           return `Failed to send Slack DM: ${(err as Error).message}`;
         }
       },
@@ -1010,12 +1010,12 @@ Start now.`;
     return this.sessionRunner.runSession(opts);
   }
 
-  /** Send a DM to Sky via Slack (for agents to contact the human) */
-  async sendSlackDmToSky(agentId: string, message: string, urgent: boolean = false): Promise<string> {
+  /** Send a DM to the user via Slack (for agents to escalate to the human) */
+  async sendSlackDmToUser(agentId: string, message: string, urgent: boolean = false): Promise<string> {
     if (!this.slackBridge) {
       throw new Error('Slack bridge not started');
     }
-    return this.slackBridge.sendDmToSky(agentId, message, urgent);
+    return this.slackBridge.sendDmToUser(agentId, message, urgent);
   }
 
   /** Start the Slack bridge for agent notifications and interactions */
@@ -1039,7 +1039,7 @@ Start now.`;
       query: string,
       limit?: number,
     ) => Promise<Array<{ title: string; snippet: string; category: string }>>,
-    skyUserId?: string,
+    userSlackId?: string,
   ): Promise<void> {
     // Dynamic import to avoid circular dependency
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1054,7 +1054,7 @@ Start now.`;
       onHumanGuidance,
       onMemorySearch,
       defaultSlackDecisionModel,
-      skyUserId,
+      userSlackId,
 
       // Wire up feedback → memory storage
       onFeedback: async (agentId: string, feedback: 'positive' | 'negative', responseText: string, userName: string) => {

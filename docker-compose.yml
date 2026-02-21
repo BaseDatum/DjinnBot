@@ -7,7 +7,7 @@ services:
       POSTGRES_PASSWORD: djinnbot
       POSTGRES_DB: djinnbot
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      - "${BIND_HOST:-0.0.0.0}:${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
     networks:
@@ -22,7 +22,7 @@ services:
     image: redis:7-alpine
     container_name: djinnbot-redis
     ports:
-      - "${REDIS_PORT:-6379}:6379"
+      - "${BIND_HOST:-0.0.0.0}:${REDIS_PORT:-6379}:6379"
     volumes:
       - redis-data:/data
     command: redis-server --appendonly yes
@@ -40,7 +40,7 @@ services:
       dockerfile: Dockerfile.server
     container_name: djinnbot-api
     ports:
-      - "${API_PORT:-8000}:8000"
+      - "${BIND_HOST:-0.0.0.0}:${API_PORT:-8000}:8000"
     environment:
       - DATABASE_URL=postgresql+asyncpg://djinnbot:djinnbot@postgres:5432/djinnbot
       - REDIS_URL=redis://redis:6379
@@ -148,7 +148,6 @@ services:
       - SLACK_YANG_APP_TOKEN=${SLACK_YANG_APP_TOKEN}
       - SLACK_YUKIHIRO_BOT_TOKEN=${SLACK_YUKIHIRO_BOT_TOKEN}
       - SLACK_YUKIHIRO_APP_TOKEN=${SLACK_YUKIHIRO_APP_TOKEN}
-      - SKY_SLACK_USER_ID=${SKY_SLACK_USER_ID}
       # Unified sandbox directory - each agent gets /data/sandboxes/{agentId}/
       - SANDBOXES_DIR=/data/sandboxes
       # Project workspaces (git repos for each project)
@@ -205,7 +204,7 @@ services:
       --port 8000
       --api-key "${MCPO_API_KEY:-changeme}"
     ports:
-      - "${MCPO_PORT:-8001}:8000"
+      - "${BIND_HOST:-0.0.0.0}:${MCPO_PORT:-8001}:8000"
     volumes:
       - djinnbot-data:/data
       # Bind-mount the project-root ./mcp/ directory so config.json is always
@@ -232,10 +231,10 @@ services:
         # Bake the API URL into the frontend at build time.
         # The dashboard calls the API directly — no nginx proxy needed for API traffic.
         # Override with: VITE_API_URL=http://your-host:8000 docker compose up --build
-        VITE_API_URL: "${VITE_API_URL:-http://192.168.8.234:8000}"
+        VITE_API_URL: "${VITE_API_URL:-http://localhost:8000}"
     container_name: djinnbot-dashboard
     ports:
-      - "${DASHBOARD_PORT:-3000}:80"
+      - "${BIND_HOST:-0.0.0.0}:${DASHBOARD_PORT:-3000}:80"
     networks:
       - djinnbot_default
     depends_on:

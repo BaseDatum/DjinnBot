@@ -1,0 +1,49 @@
+# DjinnBot Reverse Proxy — Traefik with automatic SSL
+# Managed by `djinn setup` — edit proxy/.env to change settings.
+#
+# This stack runs independently from the main DjinnBot stack.
+# Both stacks share the external "djinnbot-proxy" Docker network.
+
+services:
+  traefik:
+    image: traefik:v3
+    container_name: djinnbot-traefik
+    restart: unless-stopped
+    command:
+      # ── Entrypoints ────────────────────────────────────────────
+      - --entrypoints.web.address=:80
+      - --entrypoints.websecure.address=:443
+      # Redirect all HTTP → HTTPS
+      - --entrypoints.web.http.redirections.entryPoint.to=websecure
+      - --entrypoints.web.http.redirections.entryPoint.scheme=https
+      # ── Let's Encrypt ACME ─────────────────────────────────────
+      - --certificatesresolvers.letsencrypt.acme.email=${ACME_EMAIL}
+      - --certificatesresolvers.letsencrypt.acme.storage=/certs/acme.json
+      - --certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web
+      # ── Docker provider ────────────────────────────────────────
+      - --providers.docker=true
+      - --providers.docker.network=djinnbot-proxy
+      - --providers.docker.exposedbydefault=false
+      # ── Logging ────────────────────────────────────────────────
+      - --log.level=WARN
+      - --accesslog=false
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - traefik-certs:/certs
+    networks:
+      - djinnbot-proxy
+    healthcheck:
+      test: ["CMD", "traefik", "healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  traefik-certs:
+
+networks:
+  djinnbot-proxy:
+    external: true

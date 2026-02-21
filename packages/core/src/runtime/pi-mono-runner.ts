@@ -51,7 +51,7 @@ export interface PiMonoRunnerConfig {
   onAgentState?: (agentId: string, runId: string, stepId: string, state: 'thinking' | 'streaming' | 'tool_calling' | 'idle', toolName?: string) => void;
   /** Called when agent sends a message to another agent */
   onMessageAgent?: (agentId: string, runId: string, stepId: string, to: string, message: string, priority: string, type: string) => Promise<string>;
-  /** Called when agent sends a Slack DM to Sky */
+  /** Called when agent sends a Slack DM to the user */
   onSlackDm?: (agentId: string, runId: string, stepId: string, message: string, urgent: boolean) => Promise<string>;
   /** Called when agent calls the research tool (Perplexity via OpenRouter) */
   onResearch?: (agentId: string, runId: string, stepId: string, query: string, focus: string, model: string) => Promise<string>;
@@ -239,7 +239,7 @@ export class PiMonoRunner implements AgentRunner {
         if (this.config.onSlackDm) {
           return await this.config.onSlackDm(options.agentId, options.runId, options.stepId, message, urgent);
         }
-        return 'Slack DM not available - Sky user ID may not be configured.';
+        return 'Slack DM not available - user Slack ID may not be configured in Settings.';
       },
       onResearch: async (query, focus, model) => {
         if (this.config.onResearch) {

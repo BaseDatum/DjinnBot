@@ -82,8 +82,8 @@ export interface SlackBridgeConfig {
   ) => Promise<{ systemPrompt: string; identity: string; soul: string; agents: string; decision: string }>;
   /** Default model for Slack decisions when agent config is missing */
   defaultSlackDecisionModel?: string;
-  /** Sky's Slack user ID for DMs from agents */
-  skyUserId?: string;
+  /** User's Slack member ID for DMs from agents */
+  userSlackId?: string;
   /**
    * Called when a user gives feedback (thumbs up/down) on an agent response.
    * The agent stores a lesson in its memory vault based on the feedback.
@@ -808,12 +808,13 @@ export class SlackBridge {
   }
 
   /**
-   * Send a direct message to Sky from an agent.
+   * Send a direct message to the user from an agent.
    * Uses the agent's Slack client (bot token) to send the DM.
    */
-  async sendDmToSky(agentId: string, message: string, urgent: boolean = false): Promise<string> {
-    if (!this.config.skyUserId) {
-      throw new Error('Sky user ID not configured - cannot send DM');
+  async sendDmToUser(agentId: string, message: string, urgent: boolean = false): Promise<string> {
+    if (!this.config.userSlackId) {
+      console.warn(`[SlackBridge] Agent ${agentId} tried to DM user but userSlackId is not configured`);
+      throw new Error('User Slack ID not configured — set it in Settings → Slack in the dashboard');
     }
 
     const runtime = this.agentRuntimes.get(agentId);
@@ -839,13 +840,13 @@ export class SlackBridge {
 
     const client = new WebClient(slackConfig.botToken);
 
-    // Open DM channel with Sky
+    // Open DM channel with user
     const openResponse = await client.conversations.open({
-      users: this.config.skyUserId,
+      users: this.config.userSlackId,
     });
 
     if (!openResponse.ok || !openResponse.channel?.id) {
-      throw new Error(`Failed to open DM channel with Sky: ${openResponse.error}`);
+      throw new Error(`Failed to open DM channel with user: ${openResponse.error}`);
     }
 
     const channelId = openResponse.channel.id;
@@ -857,10 +858,10 @@ export class SlackBridge {
     });
 
     if (!response.ok || !response.ts) {
-      throw new Error(`Failed to send DM to Sky: ${response.error}`);
+      throw new Error(`Failed to send DM to user: ${response.error}`);
     }
 
-    console.log(`[SlackBridge] Agent ${agentId} sent DM to Sky: "${message.slice(0, 50)}..."`);
+    console.log(`[SlackBridge] Agent ${agentId} sent DM to user: "${message.slice(0, 50)}..."`);
     return response.ts;
   }
 

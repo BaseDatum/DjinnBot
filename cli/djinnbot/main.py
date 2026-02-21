@@ -3,7 +3,7 @@
 from typing import Optional
 
 import typer
-from djinnbot.commands import pipeline, agent, memory, provider
+from djinnbot.commands import pipeline, agent, memory, provider, setup
 from djinnbot.client import DjinnBotClient
 from djinnbot.formatting import print_status, console
 
@@ -17,6 +17,9 @@ app.add_typer(pipeline.app, name="pipeline")
 app.add_typer(agent.app, name="agent")
 app.add_typer(memory.app, name="memory")
 app.add_typer(provider.app, name="provider")
+
+# Register setup as a top-level command (not a sub-group)
+app.command("setup")(setup.setup)
 
 
 @app.callback()
