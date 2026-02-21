@@ -327,13 +327,13 @@ def step_image_mode(env_path: Path) -> str:
 
 def step_locate_repo(install_dir: Optional[str]) -> Path:
     """Find or clone the DjinnBot repository."""
-    console.print(Panel("[bold]Step 1: Locate DjinnBot Repository[/bold]"))
+    console.print(Panel("[bold]Locate DjinnBot Repository[/bold]"))
 
     # Check if a directory was explicitly provided
     if install_dir:
         repo_dir = Path(install_dir).expanduser().resolve()
         if repo_dir.exists() and (repo_dir / "docker-compose.yml").exists():
-            console.print(f"[green]Using existing repo at {repo_dir}[/green]")
+            _update_existing_repo(repo_dir)
             return repo_dir
         # Clone to this directory
         return _clone_repo(repo_dir)
@@ -342,6 +342,7 @@ def step_locate_repo(install_dir: Optional[str]) -> Path:
     cwd = Path.cwd()
     if (cwd / "docker-compose.yml").exists() and (cwd / ".env.example").exists():
         console.print(f"[green]Found DjinnBot repo in current directory: {cwd}[/green]")
+        _update_existing_repo(cwd)
         return cwd
 
     # Ask user
@@ -353,7 +354,7 @@ def step_locate_repo(install_dir: Optional[str]) -> Path:
     repo_dir = Path(response).expanduser().resolve()
 
     if repo_dir.exists() and (repo_dir / "docker-compose.yml").exists():
-        console.print(f"[green]Using existing repo at {repo_dir}[/green]")
+        _update_existing_repo(repo_dir)
         return repo_dir
 
     return _clone_repo(repo_dir)
@@ -373,6 +374,133 @@ def _clone_repo(target: Path) -> Path:
         raise typer.Exit(1)
     console.print(f"[green]Repository cloned to {target}[/green]")
     return target
+
+
+def _update_existing_repo(repo_dir: Path) -> None:
+    """Pull latest changes from git for an existing repo."""
+    console.print(f"[green]Using existing repo at {repo_dir}[/green]")
+
+    # Check if it's a git repo
+    if not (repo_dir / ".git").exists():
+        console.print("[dim]Not a git repo — skipping update[/dim]")
+        return
+
+    console.print("[dim]Pulling latest changes...[/dim]")
+    try:
+        result = run_cmd(
+            ["git", "pull", "--ff-only"],
+            cwd=repo_dir,
+            check=False,
+        )
+        if result.returncode == 0:
+            output = (result.stdout or "").strip()
+            if "Already up to date" in output:
+                console.print("[dim]Already up to date[/dim]")
+            else:
+                console.print("[green]Updated to latest version[/green]")
+        else:
+            # ff-only failed — local changes or diverged branch
+            console.print(
+                "[yellow]Could not fast-forward. You may have local changes.[/yellow]\n"
+                "[dim]Continuing with current version.[/dim]"
+            )
+    except Exception:
+        console.print(
+            "[yellow]Could not pull updates (non-fatal). "
+            "Continuing with current version.[/yellow]"
+        )
+
+
+def _detect_running_stack(repo_dir: Path) -> bool:
+    """Check if there's a DjinnBot docker compose stack already running."""
+    docker = docker_cmd()
+    try:
+        result = subprocess.run(
+            [*docker, "compose", "ps", "--format", "json", "-q"],
+            cwd=repo_dir,
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        # If there are running container IDs, the stack is up
+        return bool(result.stdout.strip())
+    except Exception:
+        return False
+
+
+def _detect_running_proxy(repo_dir: Path) -> bool:
+    """Check if the Traefik proxy stack is running."""
+    proxy_dir = repo_dir / "proxy"
+    if not proxy_dir.exists() or not (proxy_dir / "docker-compose.yml").exists():
+        return False
+
+    docker = docker_cmd()
+    try:
+        result = subprocess.run(
+            [*docker, "compose", "ps", "--format", "json", "-q"],
+            cwd=proxy_dir,
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        return bool(result.stdout.strip())
+    except Exception:
+        return False
+
+
+def step_stop_existing(repo_dir: Path) -> None:
+    """Detect and stop any existing DjinnBot stacks before re-deploying."""
+    proxy_running = _detect_running_proxy(repo_dir)
+    stack_running = _detect_running_stack(repo_dir)
+
+    if not stack_running and not proxy_running:
+        return
+
+    console.print(Panel("[bold]Existing Stack Detected[/bold]"))
+
+    if stack_running:
+        console.print("[yellow]DjinnBot services are currently running.[/yellow]")
+    if proxy_running:
+        console.print("[yellow]Traefik proxy is currently running.[/yellow]")
+
+    console.print(
+        "\n[dim]The existing stack will be stopped and re-created "
+        "with the new configuration.[/dim]"
+    )
+    proceed = typer.confirm("Stop existing stack and continue?", default=True)
+    if not proceed:
+        console.print("[dim]Setup cancelled. Existing stack left running.[/dim]")
+        raise typer.Exit(0)
+
+    docker = docker_cmd()
+    compose_cmd = [*docker, "compose"]
+
+    if stack_running:
+        console.print("[dim]Stopping DjinnBot services...[/dim]")
+        try:
+            run_cmd(
+                [*compose_cmd, "down"],
+                cwd=repo_dir,
+                stream=True,
+                check=False,
+            )
+            console.print("[green]DjinnBot services stopped[/green]")
+        except Exception:
+            console.print("[yellow]Warning: could not stop main stack cleanly[/yellow]")
+
+    if proxy_running:
+        console.print("[dim]Stopping Traefik proxy...[/dim]")
+        proxy_dir = repo_dir / "proxy"
+        try:
+            run_cmd(
+                [*compose_cmd, "down"],
+                cwd=proxy_dir,
+                stream=True,
+                check=False,
+            )
+            console.print("[green]Traefik proxy stopped[/green]")
+        except Exception:
+            console.print("[yellow]Warning: could not stop proxy cleanly[/yellow]")
 
 
 def step_configure_env(repo_dir: Path) -> Path:
@@ -445,15 +573,57 @@ def step_generate_secrets(env_path: Path) -> None:
             )
 
 
-def step_check_ports(env_path: Path, use_proxy: bool) -> None:
-    """Check for port conflicts before starting."""
+def _identify_port_owner(port: int) -> Optional[str]:
+    """Try to identify what's using a port. Returns a description or None."""
+    # Check if it's a djinnbot container
+    try:
+        result = subprocess.run(
+            [
+                "docker",
+                "ps",
+                "--filter",
+                f"publish={port}",
+                "--format",
+                "{{{{.Names}}}}",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        name = result.stdout.strip()
+        if name:
+            return f"docker: {name}"
+    except Exception:
+        pass
+
+    # Try ss/lsof
+    for cmd in [
+        ["ss", "-tlnp", f"sport = :{port}"],
+        ["lsof", "-i", f":{port}", "-sTCP:LISTEN", "-P", "-n"],
+    ]:
+        try:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            if result.stdout.strip():
+                # Grab just the process name from the output
+                return result.stdout.strip().split("\n")[-1][:80]
+        except Exception:
+            continue
+
+    return None
+
+
+def step_check_ports(env_path: Path, use_proxy: bool, repo_dir: Path) -> None:
+    """Check for port conflicts. Auto-handles conflicts from own stack."""
     console.print(Panel("[bold]Port Check[/bold]"))
 
     ports_to_check = {
-        int(get_env_value(env_path, "API_PORT") or "8000"): "API (internal)",
-        int(
-            get_env_value(env_path, "DASHBOARD_PORT") or "3000"
-        ): "Dashboard (internal)",
+        int(get_env_value(env_path, "API_PORT") or "8000"): "API",
+        int(get_env_value(env_path, "DASHBOARD_PORT") or "3000"): "Dashboard",
         int(get_env_value(env_path, "REDIS_PORT") or "6379"): "Redis",
         5432: "PostgreSQL",
         int(get_env_value(env_path, "MCPO_PORT") or "8001"): "MCP Proxy",
@@ -463,27 +633,66 @@ def step_check_ports(env_path: Path, use_proxy: bool) -> None:
         ports_to_check[80] = "HTTP (Traefik)"
         ports_to_check[443] = "HTTPS (Traefik)"
 
-    conflicts = []
+    # Known djinnbot container names — conflicts from these are expected
+    # and handled by step_stop_existing
+    own_containers = {
+        "djinnbot-api",
+        "djinnbot-postgres",
+        "djinnbot-redis",
+        "djinnbot-engine",
+        "djinnbot-mcpo",
+        "djinnbot-dashboard",
+        "djinnbot-traefik",
+    }
+
+    external_conflicts = []
+    own_conflicts = []
+
     for port, name in sorted(ports_to_check.items()):
-        available = check_port(port)
-        if available:
+        if check_port(port):
             console.print(f"  [green]:{port}[/green] {name} — available")
         else:
-            console.print(f"  [red]:{port}[/red] {name} — IN USE")
-            conflicts.append((port, name))
+            owner = _identify_port_owner(port)
+            # Check if the conflict is from our own stack
+            is_own = False
+            if owner:
+                for cn in own_containers:
+                    if cn in owner:
+                        is_own = True
+                        break
 
-    if conflicts:
+            if is_own:
+                console.print(
+                    f"  [yellow]:{port}[/yellow] {name} — used by existing DjinnBot stack"
+                )
+                own_conflicts.append((port, name))
+            else:
+                owner_str = f" ({owner})" if owner else ""
+                console.print(f"  [red]:{port}[/red] {name} — IN USE{owner_str}")
+                external_conflicts.append((port, name))
+
+    if own_conflicts and not external_conflicts:
+        console.print(
+            f"\n[dim]All conflicts are from the existing DjinnBot stack — "
+            f"these will be resolved when the stack restarts.[/dim]"
+        )
+        return
+
+    if external_conflicts:
         console.print("")
-        console.print("[yellow]Port conflicts detected.[/yellow]")
+        console.print(
+            f"[yellow]{len(external_conflicts)} port(s) in use by other services.[/yellow]"
+        )
         console.print("Options:")
-        console.print("  1. Stop the conflicting services")
+        console.print("  1. Stop the conflicting services and re-run setup")
         console.print("  2. Change ports in .env (e.g. API_PORT=8080)")
         console.print("")
         proceed = typer.confirm("Continue anyway?", default=False)
         if not proceed:
             console.print("[dim]Fix port conflicts and re-run: djinn setup[/dim]")
             raise typer.Exit(1)
-    else:
+
+    if not own_conflicts and not external_conflicts:
         console.print("[green]All ports available[/green]")
 
 
@@ -677,16 +886,11 @@ def step_configure_ssl(env_path: Path, repo_dir: Path, ip: str) -> Optional[str]
     # Generate docker-compose.override.yml for Traefik integration
     _write_compose_override(repo_dir, domain, ssl=True)
 
+    # Generate the SSL proxy compose (always write — never rely on static file)
+    _write_proxy_compose(repo_dir, ssl=True)
+
     # Create the shared Docker network
-    docker = docker_cmd()
-    try:
-        run_cmd(
-            [*docker, "network", "create", "djinnbot-proxy"],
-            check=False,
-        )
-        console.print("[green]Created djinnbot-proxy network[/green]")
-    except Exception:
-        console.print("[dim]djinnbot-proxy network already exists[/dim]")
+    _setup_proxy_network()
 
     console.print(f"[green]SSL configured for {domain}[/green]")
     return domain
@@ -787,18 +991,68 @@ def _setup_proxy_network() -> None:
         console.print("[dim]djinnbot-proxy network already exists[/dim]")
 
 
-def _write_proxy_http_only(repo_dir: Path) -> None:
-    """Write an HTTP-only proxy/docker-compose.yml (no SSL, no ACME).
+def _write_proxy_compose(repo_dir: Path, ssl: bool = False) -> None:
+    """Generate proxy/docker-compose.yml for the chosen mode.
 
-    Used for pre-built images without SSL — Traefik serves port 80 only.
+    Always called by the setup wizard — never rely on the static file
+    in the repo, since a previous run may have overwritten it.
     """
     proxy_dir = repo_dir / "proxy"
     proxy_dir.mkdir(exist_ok=True)
     compose_path = proxy_dir / "docker-compose.yml"
 
-    content = """# DjinnBot Reverse Proxy — Traefik HTTP-only mode
-# Generated by `djinn setup` for pre-built image routing.
-# To upgrade to SSL, re-run `djinn setup` and choose SSL.
+    if ssl:
+        content = """# DjinnBot Reverse Proxy — Traefik with automatic SSL
+# Generated by `djinn setup`. Re-run setup to change mode.
+
+services:
+  traefik:
+    image: traefik:v3
+    container_name: djinnbot-traefik
+    restart: unless-stopped
+    command:
+      # Entrypoints
+      - --entrypoints.web.address=:80
+      - --entrypoints.websecure.address=:443
+      # Redirect all HTTP to HTTPS
+      - --entrypoints.web.http.redirections.entryPoint.to=websecure
+      - --entrypoints.web.http.redirections.entryPoint.scheme=https
+      # Let's Encrypt ACME
+      - --certificatesresolvers.letsencrypt.acme.email=${ACME_EMAIL}
+      - --certificatesresolvers.letsencrypt.acme.storage=/certs/acme.json
+      - --certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web
+      # Docker provider
+      - --providers.docker=true
+      - --providers.docker.network=djinnbot-proxy
+      - --providers.docker.exposedbydefault=false
+      # Logging
+      - --log.level=WARN
+      - --accesslog=false
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - traefik-certs:/certs
+    networks:
+      - djinnbot-proxy
+    healthcheck:
+      test: ["CMD", "traefik", "healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  traefik-certs:
+
+networks:
+  djinnbot-proxy:
+    external: true
+"""
+        console.print("[green]Generated SSL proxy config[/green]")
+    else:
+        content = """# DjinnBot Reverse Proxy — Traefik HTTP-only mode
+# Generated by `djinn setup`. Re-run setup to upgrade to SSL.
 
 services:
   traefik:
@@ -828,8 +1082,9 @@ networks:
   djinnbot-proxy:
     external: true
 """
+        console.print("[green]Generated HTTP-only proxy config[/green]")
+
     compose_path.write_text(content)
-    console.print("[green]Generated HTTP-only proxy config[/green]")
 
 
 def step_start_stack(
@@ -1037,6 +1292,295 @@ def step_configure_provider_api(
         )
 
 
+def step_verify_deployment(
+    env_path: Path,
+    repo_dir: Path,
+    ip: str,
+    domain: Optional[str],
+    ssl_enabled: bool,
+    use_proxy: bool,
+) -> None:
+    """Verify the dashboard is reachable and SSL is working if enabled."""
+    console.print(Panel("[bold]Verifying Deployment[/bold]"))
+
+    api_port = get_env_value(env_path, "API_PORT") or "8000"
+    dash_port = get_env_value(env_path, "DASHBOARD_PORT") or "3000"
+    docker = docker_cmd()
+    all_ok = True
+
+    # ── 1. Check API is healthy (internal) ──────────────────────────
+    console.print("[dim]Checking API health (internal)...[/dim]")
+    api_ok = wait_for_health(f"http://127.0.0.1:{api_port}/v1/status", timeout=30)
+    if api_ok:
+        console.print("  [green]API responding on localhost[/green]")
+    else:
+        console.print("  [red]API not responding on localhost[/red]")
+        _troubleshoot_api(docker, repo_dir)
+        all_ok = False
+
+    # ── 2. Check dashboard is reachable at the configured URL ───────
+    if ssl_enabled and domain:
+        dashboard_url = f"https://{domain}"
+        api_url = f"https://{domain}/v1/status"
+    elif use_proxy:
+        dashboard_url = f"http://{ip}"
+        api_url = f"http://{ip}/v1/status"
+    else:
+        dashboard_url = f"http://{ip}:{dash_port}"
+        api_url = f"http://{ip}:{api_port}/v1/status"
+
+    # Check dashboard
+    console.print(f"[dim]Checking dashboard at {dashboard_url} ...[/dim]")
+    dash_ok = _check_url(dashboard_url, timeout=20)
+    if dash_ok:
+        console.print(f"  [green]Dashboard reachable at {dashboard_url}[/green]")
+    else:
+        console.print(f"  [red]Dashboard not reachable at {dashboard_url}[/red]")
+        all_ok = False
+
+    # Check API through the public URL
+    console.print(f"[dim]Checking API at {api_url} ...[/dim]")
+    api_public_ok = _check_url(api_url, timeout=20)
+    if api_public_ok:
+        console.print(f"  [green]API reachable at {api_url}[/green]")
+    else:
+        console.print(f"  [red]API not reachable at {api_url}[/red]")
+        all_ok = False
+
+    # ── 3. SSL-specific checks ──────────────────────────────────────
+    if ssl_enabled and domain:
+        console.print(f"[dim]Verifying SSL certificate for {domain}...[/dim]")
+        ssl_ok, ssl_detail = _check_ssl_cert(domain)
+        if ssl_ok:
+            console.print(f"  [green]SSL certificate valid ({ssl_detail})[/green]")
+        else:
+            console.print(f"  [red]SSL certificate issue: {ssl_detail}[/red]")
+            all_ok = False
+
+    # ── Troubleshooting ─────────────────────────────────────────────
+    if not all_ok:
+        console.print("")
+        console.print(Panel("[bold yellow]Some checks failed[/bold yellow]"))
+        _print_troubleshooting(
+            env_path,
+            repo_dir,
+            ip,
+            domain,
+            ssl_enabled,
+            use_proxy,
+            api_ok,
+            dash_ok if "dash_ok" in dir() else False,
+        )
+
+        retry = typer.confirm(
+            "Would you like to view container logs to diagnose?",
+            default=True,
+        )
+        if retry:
+            console.print("")
+            _show_diagnostic_logs(docker, repo_dir, ssl_enabled)
+
+        console.print(
+            "\n[dim]You can re-run setup after fixing issues: djinn setup[/dim]"
+        )
+    else:
+        console.print("\n[green]All checks passed.[/green]")
+
+
+def _check_url(url: str, timeout: int = 20) -> bool:
+    """Check if a URL returns any HTTP response (2xx or 3xx)."""
+    try:
+        result = subprocess.run(
+            [
+                "curl",
+                "-sfSL",
+                "--max-time",
+                str(timeout),
+                "-o",
+                "/dev/null",
+                "-w",
+                "%{http_code}",
+                # Allow self-signed certs during initial setup
+                "--insecure",
+                url,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=timeout + 5,
+        )
+        code = result.stdout.strip()
+        return code.startswith("2") or code.startswith("3")
+    except Exception:
+        return False
+
+
+def _check_ssl_cert(domain: str) -> tuple[bool, str]:
+    """Verify the SSL certificate for a domain. Returns (ok, detail)."""
+    try:
+        result = subprocess.run(
+            [
+                "curl",
+                "-svI",
+                f"https://{domain}",
+                "--max-time",
+                "15",
+                "-o",
+                "/dev/null",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+        stderr = result.stderr or ""
+
+        # Check for successful TLS handshake
+        if "SSL certificate verify ok" in stderr:
+            # Extract issuer
+            for line in stderr.splitlines():
+                if "issuer:" in line.lower():
+                    issuer = line.split(":", 1)[-1].strip()
+                    return True, f"issued by {issuer}"
+            return True, "verified"
+
+        if "SSL certificate problem" in stderr:
+            for line in stderr.splitlines():
+                if "SSL certificate problem" in line:
+                    return False, line.strip()
+            return False, "certificate problem"
+
+        # Traefik may still be provisioning the cert
+        if "self-signed certificate" in stderr or "self signed" in stderr:
+            return (
+                False,
+                "self-signed certificate (Let's Encrypt may still be provisioning)",
+            )
+
+        if result.returncode != 0:
+            return False, "could not establish TLS connection"
+
+        return True, "connected"
+    except Exception as e:
+        return False, str(e)
+
+
+def _troubleshoot_api(docker: list[str], repo_dir: Path) -> None:
+    """Print troubleshooting tips for API failures."""
+    console.print("  [dim]Possible causes:[/dim]")
+    console.print("    - Services still starting (database migrations)")
+    console.print("    - Check API logs: docker compose logs api --tail=30")
+
+    # Quick peek at API container status
+    try:
+        result = subprocess.run(
+            [
+                *docker,
+                "compose",
+                "ps",
+                "api",
+                "--format",
+                "table {{.Name}}\t{{.Status}}",
+            ],
+            cwd=repo_dir,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if result.stdout.strip():
+            console.print(f"  [dim]Container status:\n{result.stdout.strip()}[/dim]")
+    except Exception:
+        pass
+
+
+def _print_troubleshooting(
+    env_path: Path,
+    repo_dir: Path,
+    ip: str,
+    domain: Optional[str],
+    ssl_enabled: bool,
+    use_proxy: bool,
+    api_ok: bool,
+    dash_ok: bool,
+) -> None:
+    """Print targeted troubleshooting based on which checks failed."""
+
+    if not api_ok:
+        console.print("[bold]API not responding:[/bold]")
+        console.print("  - Wait 1-2 minutes for database migrations to complete")
+        console.print("  - Check: docker compose logs api --tail=50")
+        console.print("  - Check: docker compose logs postgres --tail=20")
+        console.print("")
+
+    if api_ok and not dash_ok:
+        if use_proxy:
+            console.print("[bold]Dashboard not reachable through Traefik:[/bold]")
+            console.print(
+                "  - Check Traefik is running: docker compose -f proxy/docker-compose.yml ps"
+            )
+            console.print(
+                "  - Check Traefik logs: docker compose -f proxy/docker-compose.yml logs"
+            )
+            console.print("  - Verify ports 80/443 are not blocked by a firewall")
+            if ssl_enabled and domain:
+                console.print(f"  - Verify DNS: dig {domain} (should return {ip})")
+                console.print("  - Traefik may need a minute to obtain the certificate")
+        else:
+            console.print("[bold]Dashboard not reachable:[/bold]")
+            dash_port = get_env_value(env_path, "DASHBOARD_PORT") or "3000"
+            console.print(f"  - Verify port {dash_port} is not blocked by a firewall")
+            console.print(f"  - Check: docker compose logs dashboard --tail=20")
+            console.print(f"  - Try locally: curl -I http://127.0.0.1:{dash_port}")
+        console.print("")
+
+    if ssl_enabled and domain:
+        console.print("[bold]SSL troubleshooting:[/bold]")
+        console.print(f"  - DNS must resolve: {domain} -> {ip}")
+        console.print("  - Port 80 must be open (Let's Encrypt HTTP challenge)")
+        console.print("  - Port 443 must be open")
+        console.print(
+            "  - Check firewall: ufw status / iptables -L / firewall-cmd --list-all"
+        )
+        console.print(
+            "  - Traefik cert logs: docker compose -f proxy/docker-compose.yml logs traefik | grep -i acme"
+        )
+        console.print("  - Let's Encrypt rate limits: max 5 certs per domain per week")
+        console.print("  - Certificate provisioning can take up to 2 minutes")
+        console.print("")
+
+
+def _show_diagnostic_logs(
+    docker: list[str],
+    repo_dir: Path,
+    ssl_enabled: bool,
+) -> None:
+    """Show recent logs from key services for troubleshooting."""
+    compose_cmd = [*docker, "compose"]
+
+    services = [("api", 20), ("dashboard", 10), ("postgres", 10)]
+    for svc, lines in services:
+        console.print(f"\n[bold]--- {svc} logs (last {lines} lines) ---[/bold]")
+        try:
+            subprocess.run(
+                [*compose_cmd, "logs", "--tail", str(lines), "--no-color", svc],
+                cwd=repo_dir,
+                timeout=10,
+            )
+        except Exception:
+            console.print(f"  [dim]Could not retrieve {svc} logs[/dim]")
+
+    if ssl_enabled:
+        proxy_dir = repo_dir / "proxy"
+        if proxy_dir.exists():
+            console.print("\n[bold]--- traefik logs (last 20 lines) ---[/bold]")
+            try:
+                subprocess.run(
+                    [*compose_cmd, "logs", "--tail", "20", "--no-color", "traefik"],
+                    cwd=proxy_dir,
+                    timeout=10,
+                )
+            except Exception:
+                console.print("  [dim]Could not retrieve traefik logs[/dim]")
+
+
 def step_print_summary(
     env_path: Path,
     repo_dir: Path,
@@ -1158,7 +1702,10 @@ def setup(
     repo_dir = step_locate_repo(install_dir)
     os.chdir(repo_dir)
 
-    # ── Step 2: Image mode (pre-built vs build) ─────────────────────
+    # ── Detect & stop existing stack ────────────────────────────────
+    step_stop_existing(repo_dir)
+
+    # ── Step 2: .env + image mode ───────────────────────────────────
     env_path = step_configure_env(repo_dir)
     image_mode = step_image_mode(env_path)
 
@@ -1179,7 +1726,7 @@ def setup(
     use_proxy = use_proxy or ssl_enabled
 
     # ── Step 6: Port check ──────────────────────────────────────────
-    step_check_ports(env_path, use_proxy)
+    step_check_ports(env_path, use_proxy, repo_dir)
 
     # ── SSL configuration (sets VITE_API_URL, BIND_HOST, etc.) ──────
     if ssl_enabled:
@@ -1202,7 +1749,7 @@ def setup(
             set_env_value(env_path, "VITE_API_URL", f"http://{ip}")
         _write_compose_override(repo_dir, domain=None, ssl=False)
         _setup_proxy_network()
-        _write_proxy_http_only(repo_dir)
+        _write_proxy_compose(repo_dir, ssl=False)
     else:
         # Build from source, no proxy — direct port access
         api_port = get_env_value(env_path, "API_PORT") or "8000"
@@ -1231,6 +1778,9 @@ def setup(
 
     # ── Register provider with running API ──────────────────────────
     step_configure_provider_api(env_path, provider_id)
+
+    # ── Verify dashboard & SSL reachability ─────────────────────────
+    step_verify_deployment(env_path, repo_dir, ip, domain, ssl_enabled, use_proxy)
 
     # ── Summary ─────────────────────────────────────────────────────
     step_print_summary(

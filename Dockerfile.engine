@@ -132,7 +132,7 @@ RUN ARCH=$(uname -m) && \
     else \
         GO_ARCH="amd64"; \
     fi && \
-    wget -q "https://go.dev/dl/go1.23.5.linux-${GO_ARCH}.tar.gz" -O /tmp/go.tar.gz && \
+    curl -fsSL "https://go.dev/dl/go1.23.5.linux-${GO_ARCH}.tar.gz" -o /tmp/go.tar.gz && \
     tar -C /usr/local -xzf /tmp/go.tar.gz && \
     rm /tmp/go.tar.gz
 
@@ -154,7 +154,7 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | d
 
 # Install yq (YAML processor, like jq for YAML)
 RUN ARCH=$(dpkg --print-architecture) && \
-    wget -q "https://github.com/mikefarah/yq/releases/latest/download/yq_linux_${ARCH}" -O /usr/local/bin/yq && \
+    curl -fsSL "https://github.com/mikefarah/yq/releases/latest/download/yq_linux_${ARCH}" -o /usr/local/bin/yq && \
     chmod +x /usr/local/bin/yq
 
 # Install modern CLI tools from GitHub releases
@@ -175,7 +175,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends bat && \
 
 # Install fzf (fuzzy finder)
 RUN ARCH=$(dpkg --print-architecture) && \
-    wget -q "https://github.com/junegunn/fzf/releases/download/v0.56.3/fzf-0.56.3-linux_${ARCH}.tar.gz" -O /tmp/fzf.tar.gz && \
+    curl -fsSL "https://github.com/junegunn/fzf/releases/download/v0.56.3/fzf-0.56.3-linux_${ARCH}.tar.gz" -o /tmp/fzf.tar.gz && \
     tar -xzf /tmp/fzf.tar.gz -C /usr/bin && \
     rm /tmp/fzf.tar.gz
 
@@ -183,7 +183,7 @@ RUN ARCH=$(dpkg --print-architecture) && \
 RUN ARCH=$(dpkg --print-architecture) && \
     if [ "$ARCH" = "amd64" ]; then DELTA_ARCH="x86_64-unknown-linux-gnu"; \
     else DELTA_ARCH="aarch64-unknown-linux-gnu"; fi && \
-    wget -q "https://github.com/dandavison/delta/releases/download/0.18.2/delta-0.18.2-${DELTA_ARCH}.tar.gz" -O /tmp/delta.tar.gz && \
+    curl -fsSL "https://github.com/dandavison/delta/releases/download/0.18.2/delta-0.18.2-${DELTA_ARCH}.tar.gz" -o /tmp/delta.tar.gz && \
     tar -xzf /tmp/delta.tar.gz -C /tmp && \
     cp /tmp/delta-*/delta /usr/local/bin/ && \
     rm -rf /tmp/delta.tar.gz /tmp/delta-*
@@ -191,7 +191,7 @@ RUN ARCH=$(dpkg --print-architecture) && \
 # Install eza (modern ls replacement) - using deb package
 RUN ARCH=$(dpkg --print-architecture) && \
     if [ "$ARCH" = "amd64" ]; then EZA_ARCH="x86_64"; else EZA_ARCH="aarch64"; fi && \
-    wget -q "https://github.com/eza-community/eza/releases/download/v0.20.14/eza_${EZA_ARCH}-unknown-linux-gnu.tar.gz" -O /tmp/eza.tar.gz && \
+    curl -fsSL "https://github.com/eza-community/eza/releases/download/v0.20.14/eza_${EZA_ARCH}-unknown-linux-gnu.tar.gz" -o /tmp/eza.tar.gz && \
     tar -xzf /tmp/eza.tar.gz -C /usr/local/bin && \
     rm /tmp/eza.tar.gz
 
@@ -199,7 +199,7 @@ RUN ARCH=$(dpkg --print-architecture) && \
 RUN ARCH=$(dpkg --print-architecture) && \
     if [ "$ARCH" = "amd64" ]; then DUST_ARCH="x86_64-unknown-linux-gnu"; \
     else DUST_ARCH="aarch64-unknown-linux-gnu"; fi && \
-    wget -q "https://github.com/bootandy/dust/releases/download/v1.1.1/dust-v1.1.1-${DUST_ARCH}.tar.gz" -O /tmp/dust.tar.gz && \
+    curl -fsSL "https://github.com/bootandy/dust/releases/download/v1.1.1/dust-v1.1.1-${DUST_ARCH}.tar.gz" -o /tmp/dust.tar.gz && \
     tar -xzf /tmp/dust.tar.gz -C /tmp && \
     cp /tmp/dust-*/dust /usr/local/bin/ && \
     rm -rf /tmp/dust.tar.gz /tmp/dust-*
