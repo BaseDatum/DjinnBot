@@ -184,6 +184,7 @@ class ChatApp(App):
         agent_id: str,
         agent_name: str,
         model: str,
+        token: Optional[str] = None,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -191,7 +192,7 @@ class ChatApp(App):
         self.agent_id = agent_id
         self.agent_name = agent_name
         self.model = model
-        self.client = DjinnBotClient(base_url=base_url)
+        self.client = DjinnBotClient(base_url=base_url, token=token)
         self.session_id: Optional[str] = None
 
         # Turn state — tracks the current assistant response as a sequence
@@ -610,6 +611,7 @@ def run_chat(
     agent_id: str,
     agent_name: str,
     model: str,
+    token: Optional[str] = None,
 ) -> None:
     """Launch the chat TUI."""
     app = ChatApp(
@@ -617,5 +619,6 @@ def run_chat(
         agent_id=agent_id,
         agent_name=agent_name,
         model=model,
+        token=token,
     )
     app.run()

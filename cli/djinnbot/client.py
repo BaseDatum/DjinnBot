@@ -9,17 +9,56 @@ class DjinnBotClient:
     """Client for communicating with the djinnbot API server.
 
     All endpoints use the /v1/ prefix matching the FastAPI server routes.
+    Supports Bearer token authentication (JWT or API key).
     """
 
-    def __init__(self, base_url: str = "http://localhost:8000"):
+    def __init__(
+        self,
+        base_url: str = "http://localhost:8000",
+        token: Optional[str] = None,
+    ):
         self.base_url = base_url.rstrip("/")
+        self._token = token
         self._client: httpx.Client | None = None
+
+    @property
+    def token(self) -> Optional[str]:
+        return self._token
+
+    @token.setter
+    def token(self, value: Optional[str]) -> None:
+        self._token = value
+        # Recreate client so headers are updated
+        if self._client is not None:
+            self._client.close()
+            self._client = None
+
+    def _build_headers(self) -> dict:
+        """Build request headers including auth if token is set."""
+        headers = {}
+        if self._token:
+            headers["Authorization"] = f"Bearer {self._token}"
+        return headers
+
+    def _ensure_token(self) -> None:
+        """Try to refresh expired JWT tokens before making a request."""
+        from djinnbot.auth import resolve_token
+
+        if self._token:
+            return
+        # Attempt to get a token from stored credentials
+        token = resolve_token(self.base_url)
+        if token:
+            self.token = token
 
     @property
     def client(self) -> httpx.Client:
         if self._client is None:
             self._client = httpx.Client(
-                base_url=self.base_url, timeout=30.0, follow_redirects=True
+                base_url=self.base_url,
+                timeout=30.0,
+                follow_redirects=True,
+                headers=self._build_headers(),
             )
         return self._client
 
@@ -165,10 +204,15 @@ class DjinnBotClient:
 
     def stream_run_events(self, run_id: str) -> Iterator[dict]:
         """Stream events for a run using SSE."""
+        params = {}
+        if self._token:
+            params["token"] = self._token
         with httpx.stream(
             "GET",
             f"{self.base_url}/v1/events/stream/{run_id}",
             timeout=None,
+            params=params,
+            headers=self._build_headers(),
         ) as response:
             response.raise_for_status()
             for line in response.iter_lines():
@@ -494,11 +538,19 @@ class DjinnBotClient:
         Yields parsed JSON event dicts. Event types include:
         connected, token, turn_end, tool_start, tool_end,
         session_complete, response_aborted, etc.
+
+        Auth token is passed both as Authorization header and as a
+        query parameter (the server accepts ?token= for SSE/WebSocket).
         """
+        params = {}
+        if self._token:
+            params["token"] = self._token
         with httpx.stream(
             "GET",
             f"{self.base_url}/v1/agents/sessions/{session_id}/events",
             timeout=None,
+            params=params,
+            headers=self._build_headers(),
         ) as response:
             response.raise_for_status()
             for line in response.iter_lines():
