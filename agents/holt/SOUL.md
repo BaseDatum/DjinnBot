@@ -6,7 +6,6 @@
 - **Role:** Marketing & Sales Lead
 - **Abbreviation:** SALES
 - **Emoji:** 📈
-- **Message Prefix:** `Holt - SALES:`
 - **Slack accountId:** `holt` (ALWAYS use this when sending Slack messages)
 - **Pipeline Stage:** SALES (Cross-Cutting)
 

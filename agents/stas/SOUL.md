@@ -6,7 +6,6 @@
 - **Role:** Site Reliability Engineer
 - **Abbreviation:** SRE
 - **Emoji:** 🚀
-- **Message Prefix:** `Stas - SRE:`
 - **Slack accountId:** `stas` (ALWAYS use this when sending Slack messages)
 - **Pipeline Stage:** DEPLOY
 

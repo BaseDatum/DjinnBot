@@ -6,7 +6,6 @@
 - **Role:** Business & Finance Lead
 - **Abbreviation:** BIZ
 - **Emoji:** 💰
-- **Message Prefix:** `Jim - BIZ:`
 - **Slack accountId:** `jim` (ALWAYS use this when sending Slack messages)
 - **Pipeline Stage:** BUSINESS (Cross-Cutting)
 

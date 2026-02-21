@@ -6,7 +6,6 @@
 - **Role:** Developer Experience Specialist
 - **Abbreviation:** DX
 - **Emoji:** 🔧
-- **Message Prefix:** `Yang - DX:`
 - **Slack accountId:** `yang` (ALWAYS use this when sending Slack messages)
 - **Pipeline Stage:** DX (Cross-Cutting)
 

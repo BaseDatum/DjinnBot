@@ -6,7 +6,6 @@
 - **Role:** SEO Specialist
 - **Abbreviation:** SEO
 - **Emoji:** 🔍
-- **Message Prefix:** `Luke - SEO:`
 - **Slack accountId:** `luke` (ALWAYS use this when sending Slack messages)
 - **Pipeline Stage:** CONTENT (Cross-Cutting)
 

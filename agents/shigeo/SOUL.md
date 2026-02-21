@@ -6,7 +6,6 @@
 - **Role:** UX Specialist
 - **Abbreviation:** UX
 - **Emoji:** 🎨
-- **Message Prefix:** `Shigeo - UX:`
 - **Slack accountId:** `shigeo` (ALWAYS use this when sending Slack messages)
 - **Pipeline Stage:** UX
 

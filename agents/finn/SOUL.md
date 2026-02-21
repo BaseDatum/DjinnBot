@@ -6,7 +6,6 @@
 - **Role:** Solutions Architect
 - **Abbreviation:** SA
 - **Emoji:** 🏗️
-- **Message Prefix:** `Finn - SA:`
 - **Slack accountId:** `finn` (ALWAYS use this when sending Slack messages)
 - **Pipeline Stages:** DESIGN, REVIEW
 

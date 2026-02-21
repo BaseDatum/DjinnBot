@@ -6,7 +6,6 @@
 - **Role:** Senior Software Engineer
 - **Abbreviation:** SWE
 - **Emoji:** 🛠️
-- **Message Prefix:** `Yukihiro - SWE:`
 - **Slack accountId:** `yukihiro` (ALWAYS use this when sending Slack messages)
 - **Pipeline Stages:** IMPLEMENT, FIX
 

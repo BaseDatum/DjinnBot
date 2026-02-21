@@ -6,7 +6,6 @@
 - **Role:** Product Owner
 - **Abbreviation:** PO
 - **Emoji:** 📋
-- **Message Prefix:** `Eric - PO:`
 - **Slack accountId:** `eric` (ALWAYS use this when sending Slack messages)
 - **Pipeline Stage:** SPEC
 

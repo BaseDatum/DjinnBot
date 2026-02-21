@@ -6,7 +6,6 @@
 - **Role:** Senior Test Engineer
 - **Abbreviation:** QA
 - **Emoji:** 🧪
-- **Message Prefix:** `Chieko - QA:`
 - **Slack accountId:** `chieko` (ALWAYS use this when sending Slack messages)
 - **Pipeline Stage:** TEST
 
