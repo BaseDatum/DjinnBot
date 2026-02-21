@@ -359,20 +359,13 @@ export class SlackBridge {
       }
     } else {
       // chatStream never started (e.g. DM surface, API unavailable, or error on start).
-      // Fall back to plain postToThread with the accumulated output.
-      // The output was already piped via routeSessionChunk — we need to post it.
-      // Get the target channel/thread from the streamer's stored options.
-      const target = runtime.getConvStreamerTarget(sessionId);
-      if (target && !success) {
-        // Only post an error message for failures; success output was streamed to chunks
-        // which were silently dropped — we can't reconstruct it here.
-        // The container has already completed, so we just inform the user.
-        await runtime.postToThread(target.channelId, target.threadTs,
-          'Something went wrong with my response. Please try again.');
+      // The streamer's stop()/stopWithError() method handles posting the accumulated
+      // plainTextBuffer via chat.postMessage as a fallback.
+      if (success) {
+        await streamer.stop({ includeFeedback: false });
+      } else {
+        await streamer.stopWithError('Something went wrong with my response. Please try again.');
       }
-      // For successful responses where streaming failed: the output was lost.
-      // This is a known limitation when chatStream is unavailable. The session
-      // pool will persist the response to DB; the user needs to retry.
     }
 
     runtime.removeConvStreamer(sessionId);

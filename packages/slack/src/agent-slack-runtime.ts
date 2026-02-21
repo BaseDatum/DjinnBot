@@ -572,18 +572,16 @@ export class AgentSlackRuntime {
       return;
     }
 
-    // DM channels start with 'D' — don't pass recipient fields, chatStream works differently there
-    const isDm = channelId.startsWith('D');
-
     // Create the streamer — it will be populated by SlackBridge session hooks.
     // We start it now so Slack shows a typing indicator immediately.
+    // recipientUserId is always passed — the Slack chatStream API requires it
+    // for channel threads and tolerates it for DMs.
     const streamer = new SlackStreamer({
       client: this.client,
       channel: channelId,
       threadTs,
-      // Only set recipient fields for non-DM channels (channel threads)
-      recipientUserId: isDm ? undefined : userId,
-      recipientTeamId: isDm ? undefined : this.teamId,
+      recipientUserId: userId,
+      recipientTeamId: this.teamId,
       taskDisplayMode: 'plan',
     });
 

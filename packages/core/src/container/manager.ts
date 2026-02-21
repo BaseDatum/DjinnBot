@@ -454,7 +454,7 @@ export class ContainerManager {
       });
 
       subscriber.on('close', () => {
-        console.log('[ContainerManager] Redis subscriber closed');
+        console.log(`[ContainerManager] Container ready — redis subscriber for ${runId} closed`);
       });
 
       subscriber.on('message', (ch, message) => {
