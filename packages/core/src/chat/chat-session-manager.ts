@@ -958,7 +958,12 @@ export class ChatSessionManager {
    */
   private async fetchAgentSecretEnvVars(agentId: string): Promise<Record<string, string>> {
     try {
-      const res = await fetch(`${this.apiBaseUrl}/v1/secrets/agents/${encodeURIComponent(agentId)}/env`);
+      const headers: Record<string, string> = {};
+      const internalToken = process.env.ENGINE_INTERNAL_TOKEN;
+      if (internalToken) {
+        headers['Authorization'] = `Bearer ${internalToken}`;
+      }
+      const res = await fetch(`${this.apiBaseUrl}/v1/secrets/agents/${encodeURIComponent(agentId)}/env`, { headers });
       if (res.ok) {
         const data = await res.json() as { agent_id: string; env: Record<string, string> };
         return data.env ?? {};
@@ -1089,6 +1094,8 @@ export class ChatSessionManager {
           ...(sessionType === 'onboarding' && onboardingSessionId
             ? { ONBOARDING_SESSION_ID: onboardingSessionId }
             : {}),
+          // Internal token for authenticating to the secrets /env endpoint
+          ...(process.env.ENGINE_INTERNAL_TOKEN ? { ENGINE_INTERNAL_TOKEN: process.env.ENGINE_INTERNAL_TOKEN } : {}),
           // MCP / mcpo: inject base URL and API key so agents can call tools directly.
           // These are only set if the engine has mcpo configured.
           ...(process.env.MCPO_BASE_URL ? { MCPO_BASE_URL: process.env.MCPO_BASE_URL } : {}),

@@ -61,6 +61,8 @@ services:
       - GITHUB_APP_NAME=${GITHUB_APP_NAME:-djinnbot}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - MCPO_BASE_URL=http://djinnbot-mcpo:8000
+      # Internal service-to-service auth token — protects the plaintext secrets /env endpoint
+      - ENGINE_INTERNAL_TOKEN=${ENGINE_INTERNAL_TOKEN:-}
     volumes:
       # NOTE: We mount only djinnbot-data to /data. The sandboxes, workspaces, and runs
       # directories are subdirectories within djinnbot-data (/data/sandboxes, etc).
@@ -156,6 +158,9 @@ services:
       - MCPO_BASE_URL=http://djinnbot-mcpo:8000
       - MCPO_CONFIG_PATH=/data/mcp/config.json
       - DJINNBOT_API_URL=http://api:8000
+      # Internal service-to-service auth token — protects the plaintext secrets /env endpoint.
+      # The engine sends this token when fetching secrets and injects it into agent containers.
+      - ENGINE_INTERNAL_TOKEN=${ENGINE_INTERNAL_TOKEN:-}
     volumes:
       # NOTE: We mount only djinnbot-data to /data. The sandboxes, workspaces, and runs
       # directories are subdirectories within djinnbot-data (/data/sandboxes, etc).

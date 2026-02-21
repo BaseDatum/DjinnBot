@@ -14,23 +14,27 @@ Endpoints:
     POST   /v1/secrets/{secret_id}/grant/{agent_id}     grant secret to agent
     DELETE /v1/secrets/{secret_id}/grant/{agent_id}     revoke secret from agent
 
-  Engine injection endpoint (internal — called by the Node engine):
+  Engine injection endpoint (protected by ENGINE_INTERNAL_TOKEN):
     GET    /v1/secrets/agents/{agent_id}/env            plaintext env map for container injection
 
 SECURITY NOTES
 --------------
 * The plaintext secret value is NEVER returned by any endpoint except
-  ``/v1/secrets/agents/{agent_id}/env`` which is an internal endpoint intended
-  only for the engine container (not exposed to the dashboard).
+  ``/v1/secrets/agents/{agent_id}/env`` which is protected by the
+  ENGINE_INTERNAL_TOKEN shared secret. Callers must send the token in
+  the Authorization header as ``Bearer <token>``.
+* When ENGINE_INTERNAL_TOKEN is not set, the /env endpoint is UNPROTECTED
+  (for backward compatibility and local dev). A warning is logged on startup.
 * All secrets are stored AES-256-GCM encrypted in the database.
 * The encryption key is sourced from SECRET_ENCRYPTION_KEY env var.
 * Masked previews (e.g. "ghp_...abc1") are shown in all list/get responses.
 """
 
+import os
 import uuid
 from typing import Optional, List
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -137,6 +141,37 @@ def _validate_env_key(env_key: str) -> str:
     return key
 
 
+# ── Internal auth ──────────────────────────────────────────────────────────────
+
+_ENGINE_INTERNAL_TOKEN: Optional[str] = os.environ.get("ENGINE_INTERNAL_TOKEN") or None
+
+if not _ENGINE_INTERNAL_TOKEN:
+    logger.warning(
+        "ENGINE_INTERNAL_TOKEN is not set — the plaintext secrets /env endpoint "
+        "is UNPROTECTED. Set this variable in production to secure internal "
+        "service-to-service calls."
+    )
+
+
+def _verify_internal_token(request: Request) -> None:
+    """Verify the caller provided a valid ENGINE_INTERNAL_TOKEN.
+
+    If the token is not configured (local dev), this is a no-op.
+    If it IS configured, missing or wrong tokens get a 403.
+    """
+    if not _ENGINE_INTERNAL_TOKEN:
+        return  # Not configured — allow (backward compat / local dev)
+
+    auth = request.headers.get("authorization", "")
+    if auth.startswith("Bearer "):
+        token = auth[7:]
+    else:
+        token = auth
+
+    if not token or token != _ENGINE_INTERNAL_TOKEN:
+        raise HTTPException(status_code=403, detail="Invalid or missing internal token")
+
+
 # ── Fixed-path routes (MUST come before /{secret_id} to avoid shadowing) ──────
 
 
@@ -151,18 +186,20 @@ async def list_secret_types() -> dict:
 
 @router.get("/agents/{agent_id}/env", response_model=AgentSecretEnvResponse)
 async def get_agent_env(
+    request: Request,
     agent_id: str,
     session: AsyncSession = Depends(get_async_session),
 ) -> AgentSecretEnvResponse:
     """Return decrypted env vars for all secrets granted to *agent_id*.
 
-    This endpoint is called by the engine immediately before launching a
-    container.  It returns the plaintext values so the engine can inject them
-    as environment variables.
+    This endpoint is called by the engine and agent containers immediately
+    before or during execution.  It returns the plaintext values so the
+    engine can inject them as environment variables.
 
-    SECURITY: This endpoint should NOT be exposed to the public internet or the
-    dashboard.  In production, restrict access to the engine's internal network.
+    SECURITY: Protected by ENGINE_INTERNAL_TOKEN. Callers must send the token
+    in the Authorization header as ``Bearer <token>``.
     """
+    _verify_internal_token(request)
     result = await session.execute(
         select(AgentSecretGrant).where(AgentSecretGrant.agent_id == agent_id)
     )

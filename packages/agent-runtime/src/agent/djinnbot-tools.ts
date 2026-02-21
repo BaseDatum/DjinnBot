@@ -1589,9 +1589,14 @@ export function createDjinnBotTools(config: DjinnBotToolsConfig): AgentTool[] {
         const apiBase = config.apiBaseUrl || process.env.DJINNBOT_API_URL || 'http://api:8000';
 
         try {
+          const headers: Record<string, string> = {};
+          const internalToken = process.env.ENGINE_INTERNAL_TOKEN;
+          if (internalToken) {
+            headers['Authorization'] = `Bearer ${internalToken}`;
+          }
           const res = await fetch(
             `${apiBase}/v1/secrets/agents/${encodeURIComponent(agentId)}/env`,
-            { signal: signal ?? undefined },
+            { signal: signal ?? undefined, headers },
           );
 
           if (res.status === 404) {
