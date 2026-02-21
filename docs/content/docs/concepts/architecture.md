@@ -100,7 +100,20 @@ The [mcpo](https://github.com/skymoore/mcpo) proxy exposes MCP tool servers as R
 
 ## Event Flow
 
-Here's what happens when you start a pipeline run:
+### Pulse (Autonomous Work)
+
+The primary workflow — agents pick up tasks from the board:
+
+1. **Engine** fires a pulse timer for an agent → spawns an **Agent Container** with persona, memories, and project tools
+2. **Agent** calls `get_ready_tasks()` → finds tasks in its assigned columns
+3. **Agent** calls `claim_task()` → provisions an authenticated git workspace on a feature branch
+4. **Agent** does the work — writes code, runs tests, uses tools — streaming output via **Redis Pub/Sub**
+5. **Agent** calls `open_pull_request()` and `transition_task()` → task moves to the next column
+6. **Engine** relays events to **API Server** → **Dashboard** displays via SSE
+
+### Pipeline Runs
+
+For structured workflows (planning, onboarding, engineering SDLC):
 
 1. **Dashboard** → `POST /v1/runs` → **API Server** creates run in PostgreSQL
 2. **API Server** → publishes `RUN_CREATED` event → **Redis Streams**

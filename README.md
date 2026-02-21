@@ -70,44 +70,45 @@ Open the dashboard, start a new run with the engineering pipeline, describe what
 ## Architecture
 
 ```
-┌──────────────────┐      ┌──────────────────┐      ┌──────────────┐
-│    Dashboard     │◄─SSE─│   API Server     │◄─────│  PostgreSQL  │
-│  (React + Vite)  │      │   (FastAPI)      │      │              │
-└──────────────────┘      └──────────────────┘      └──────────────┘
-                                  │                        ▲
-                                  ▼                        │
-                          ┌──────────────────┐      ┌──────────────┐
-                          │  Pipeline Engine │─────►│    Redis     │
-                          │  (State Machine) │      │  (Streams)   │
-                          └──────────────────┘      └──────────────┘
-                                  │
-                    ┌─────────────┼─────────────┐
-                    ▼             ▼              ▼
-            ┌──────────┐  ┌──────────┐  ┌──────────────┐
-            │  Agent   │  │  Agent   │  │  Slack       │
-            │Container │  │Container │  │  Bridge      │
-            │(Isolated)│  │(Isolated)│  │(Per-Agent)   │
-            └──────────┘  └──────────┘  └──────────────┘
-                    │             │
-                    ▼             ▼
-            ┌──────────────────────────┐
-            │      ClawVault           │
-            │  (Persistent Memory +    │
-            │   Semantic Search)       │
-            └──────────────────────────┘
+┌──────────────────┐     ┌──────────────────┐     ┌──────────────┐
+│    Dashboard     │◄SSE─│   API Server     │────►│  PostgreSQL  │
+│  (React + Vite)  │     │   (FastAPI)      │     │              │
+└──────────────────┘     └──────┬───────────┘     └──────────────┘
+                                │
+                                ▼
+                        ┌──────────────┐
+                        │    Redis     │
+                        │(Streams+Pub/ │
+                        │    Sub)      │
+                        └──────┬───────┘
+                               │
+              ┌────────────────┼────────────────┐
+              │                │                │
+              ▼                ▼                ▼
+     ┌────────────────┐ ┌──────────┐  ┌──────────────┐
+     │Pipeline Engine │ │  Agent   │  │  Agent       │
+     │(State Machine) │ │Container │  │  Container   │
+     └───────┬────────┘ │(Isolated)│  │  (Isolated)  │
+             │          └────┬─────┘  └──────┬───────┘
+             │               │               │
+             ▼               ▼               ▼
+     ┌──────────────┐  ┌──────────────────────────┐
+     │  Slack       │  │     mcpo Proxy            │
+     │  Bridge      │  │  (MCP → Native Tools)     │
+     └──────────────┘  └──────────────────────────┘
 ```
 
 **How it works:**
 
-1. You describe a task (via dashboard, API, CLI, or Slack)
-2. The pipeline engine assigns the first step to the right agent
-3. A fresh Docker container spins up for that agent with a full engineering toolbox
-4. The agent reads its persona files, loads memories, and executes the step
-5. Output flows to the next agent in the pipeline (or branches based on results)
-6. Agents review each other's work, request changes, fix bugs, and re-test
-7. The pipeline completes when all steps succeed
+1. **Create a project** — describe what you want built via the dashboard's guided onboarding, or import an existing repo
+2. **Plan it** — the planning pipeline decomposes your project into tasks on a kanban board with priorities and dependencies
+3. **Assign agents** — each agent is assigned to project board columns matching their role (e.g., Yukihiro watches "Ready", Chieko watches "Review")
+4. **Agents work autonomously** — on pulse cycles, agents wake up, check the board, claim a task, spin up an isolated container, do the work, open a PR, and move the task forward
+5. **Watch it happen** — streaming output in the dashboard, Slack threads, or the kanban board. Step in when you want, or let them run
 
-Each agent container is fully isolated — its own filesystem, git workspace, installed tools, and network. No host access.
+Pipelines also exist for structured workflows — the planning pipeline generates tasks, the engineering pipeline runs a full SDLC for a single task, and you can create custom pipelines for any repeatable process.
+
+Each agent runs in a fully isolated Docker container — its own filesystem, git workspace, installed tools, and network. No host access.
 
 ---
 
@@ -128,13 +129,13 @@ DjinnBot ships with a default software engineering team. Each agent has a rich p
 | **Luke** | SEO Specialist | On-demand — Content strategy, keyword research |
 | **Jim** | Business & Finance Lead | On-demand — Budget, pricing, runway |
 
-> The engineering pipeline (Eric → Finn → Shigeo → Yukihiro ↔ Finn ↔ Chieko → Stas) is fully functional today. Marketing, sales, and finance agents work in chat and pulse modes. More pipeline templates are coming.
+> Agents are assigned to projects and kanban columns. On pulse cycles, they autonomously pick up tasks, do the work, open PRs, and advance tasks through the board. Marketing, sales, and finance agents work in chat and pulse modes. More project types are coming.
 
 ---
 
 ## Pipelines
 
-Pipelines are YAML files that define multi-agent workflows:
+Pipelines are YAML files that define structured multi-step workflows. They power project planning, guided onboarding, and predefined SDLC passes:
 
 | Pipeline | Description |
 |----------|------------|

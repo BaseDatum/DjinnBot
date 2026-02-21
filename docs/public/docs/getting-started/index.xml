@@ -60,6 +60,22 @@ data-copied-label="Copied!"
 &lt;/div&gt;
 &lt;/div&gt;
 &lt;p&gt;This encrypts user-defined secrets (API keys, SSH keys, etc.) at rest. Without it, secrets are encrypted with an ephemeral key that resets on restart.&lt;/p&gt;
+&lt;h3&gt;Optional: Internal Token&lt;span class="hx:absolute hx:-mt-20" id="optional-internal-token"&gt;&lt;/span&gt;
+&lt;a href="#optional-internal-token" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h3&gt;&lt;p&gt;Protects the plaintext secrets endpoint from unauthorized access:&lt;/p&gt;
+&lt;div class="hextra-code-block hx:relative hx:mt-6 hx:first:mt-0 hx:group/code"&gt;
+&lt;div&gt;&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-bash" data-lang="bash"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;python3 -c &lt;span class="s2"&gt;&amp;#34;import secrets; print(&amp;#39;ENGINE_INTERNAL_TOKEN=&amp;#39; + secrets.token_urlsafe(32))&amp;#34;&lt;/span&gt; &amp;gt;&amp;gt; .env&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;&lt;div class="hextra-code-copy-btn-container hx:opacity-0 hx:transition hx:group-hover/code:opacity-100 hx:flex hx:gap-1 hx:absolute hx:m-[11px] hx:right-0 hx:top-0"&gt;
+&lt;button
+class="hextra-code-copy-btn hx:group/copybtn hx:cursor-pointer hx:transition-all hx:active:opacity-50 hx:bg-primary-700/5 hx:border hx:border-black/5 hx:text-gray-600 hx:hover:text-gray-900 hx:rounded-md hx:p-1.5 hx:dark:bg-primary-300/10 hx:dark:border-white/10 hx:dark:text-gray-400 hx:dark:hover:text-gray-50"
+title="Copy code"
+aria-label="Copy code"
+data-copied-label="Copied!"
+&gt;
+&lt;div class="hextra-copy-icon hx:group-[.copied]/copybtn:hidden hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;div class="hextra-success-icon hx:hidden hx:group-[.copied]/copybtn:block hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;/button&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;p&gt;Without this, the endpoint that returns decrypted secrets is open to anyone who can reach the API. See &lt;a href="https://docs.djinn.bot/docs/advanced/security/"&gt;Security Model&lt;/a&gt; for details.&lt;/p&gt;
 &lt;h2&gt;Start Services&lt;span class="hx:absolute hx:-mt-20" id="start-services"&gt;&lt;/span&gt;
 &lt;a href="#start-services" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;div class="hextra-code-block hx:relative hx:mt-6 hx:first:mt-0 hx:group/code"&gt;
 &lt;div&gt;&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-bash" data-lang="bash"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;docker compose up -d&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;&lt;div class="hextra-code-copy-btn-container hx:opacity-0 hx:transition hx:group-hover/code:opacity-100 hx:flex hx:gap-1 hx:absolute hx:m-[11px] hx:right-0 hx:top-0"&gt;
@@ -186,73 +202,43 @@ class="hextra-card hx:group hx:flex hx:flex-col hx:justify-start hx:overflow-hid
 &gt;&lt;div class="hx:mt-auto"&gt;
 &lt;span class="hextra-card-icon hx:flex hx:font-semibold hx:items-start hx:gap-2 hx:pt-4 hx:px-4 hx:text-gray-700 hx:hover:text-gray-900 hx:dark:text-neutral-200 hx:dark:hover:text-neutral-50"&gt;Run Your First Pipeline&lt;/span&gt;&lt;div class="hextra-card-subtitle hx:line-clamp-3 hx:text-sm hx:font-normal hx:text-gray-500 hx:dark:text-gray-400 hx:px-4 hx:mb-4 hx:mt-2"&gt;Start an engineering pipeline and watch agents collaborate.&lt;/div&gt;&lt;/div&gt;&lt;/a&gt;
 &lt;/div&gt;</description></item><item><title>Your First Run</title><link>https://docs.djinn.bot/docs/getting-started/first-run/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://docs.djinn.bot/docs/getting-started/first-run/</guid><description>
-&lt;p&gt;Now that DjinnBot is running, let&amp;rsquo;s kick off a pipeline and watch agents collaborate in real-time.&lt;/p&gt;
-&lt;h2&gt;Start a Pipeline via the Dashboard&lt;span class="hx:absolute hx:-mt-20" id="start-a-pipeline-via-the-dashboard"&gt;&lt;/span&gt;
-&lt;a href="#start-a-pipeline-via-the-dashboard" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;ol&gt;
-&lt;li&gt;
-&lt;p&gt;Open &lt;strong&gt;http://localhost:3000&lt;/strong&gt;&lt;/p&gt;
-&lt;/li&gt;
-&lt;li&gt;
-&lt;p&gt;Click &lt;strong&gt;New Run&lt;/strong&gt; in the top navigation&lt;/p&gt;
-&lt;/li&gt;
-&lt;li&gt;
-&lt;p&gt;Select the &lt;strong&gt;engineering&lt;/strong&gt; pipeline&lt;/p&gt;
-&lt;/li&gt;
-&lt;li&gt;
-&lt;p&gt;Enter a task description, for example:&lt;/p&gt;
-&lt;blockquote&gt;
-&lt;p&gt;Build a REST API for a bookmarks manager with CRUD endpoints, tag support, and search. Use FastAPI and SQLite.&lt;/p&gt;
-&lt;/blockquote&gt;
-&lt;/li&gt;
-&lt;li&gt;
-&lt;p&gt;Click &lt;strong&gt;Start Run&lt;/strong&gt;&lt;/p&gt;
-&lt;/li&gt;
-&lt;/ol&gt;
-&lt;h2&gt;What Happens Next&lt;span class="hx:absolute hx:-mt-20" id="what-happens-next"&gt;&lt;/span&gt;
-&lt;a href="#what-happens-next" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;p&gt;The engineering pipeline assigns work through these stages:&lt;/p&gt;
-&lt;div class="hextra-code-block hx:relative hx:mt-6 hx:first:mt-0 hx:group/code"&gt;
-&lt;div&gt;&lt;pre&gt;&lt;code&gt;SPEC (Eric) → DESIGN (Finn) → UX (Shigeo) → IMPLEMENT (Yukihiro)
-↕
-REVIEW (Finn)
-↕
-TEST (Chieko)
-↓
-DEPLOY (Stas)&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;div class="hextra-code-copy-btn-container hx:opacity-0 hx:transition hx:group-hover/code:opacity-100 hx:flex hx:gap-1 hx:absolute hx:m-[11px] hx:right-0 hx:top-0"&gt;
-&lt;button
-class="hextra-code-copy-btn hx:group/copybtn hx:cursor-pointer hx:transition-all hx:active:opacity-50 hx:bg-primary-700/5 hx:border hx:border-black/5 hx:text-gray-600 hx:hover:text-gray-900 hx:rounded-md hx:p-1.5 hx:dark:bg-primary-300/10 hx:dark:border-white/10 hx:dark:text-gray-400 hx:dark:hover:text-gray-50"
-title="Copy code"
-aria-label="Copy code"
-data-copied-label="Copied!"
-&gt;
-&lt;div class="hextra-copy-icon hx:group-[.copied]/copybtn:hidden hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
-&lt;div class="hextra-success-icon hx:hidden hx:group-[.copied]/copybtn:block hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
-&lt;/button&gt;
-&lt;/div&gt;
-&lt;/div&gt;
+&lt;p&gt;Now that DjinnBot is running, let&amp;rsquo;s set up a project and watch agents work.&lt;/p&gt;
+&lt;h2&gt;The Two Workflows&lt;span class="hx:absolute hx:-mt-20" id="the-two-workflows"&gt;&lt;/span&gt;
+&lt;a href="#the-two-workflows" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;p&gt;DjinnBot has two complementary ways of getting work done:&lt;/p&gt;
 &lt;ol&gt;
-&lt;li&gt;&lt;strong&gt;Eric&lt;/strong&gt; (Product Owner) reads your task description and produces requirements, user stories, and acceptance criteria&lt;/li&gt;
-&lt;li&gt;&lt;strong&gt;Finn&lt;/strong&gt; (Architect) takes Eric&amp;rsquo;s requirements and designs the architecture, API, database schema, and task breakdown&lt;/li&gt;
-&lt;li&gt;&lt;strong&gt;Shigeo&lt;/strong&gt; (UX) creates UX specifications and design system guidelines&lt;/li&gt;
-&lt;li&gt;&lt;strong&gt;Yukihiro&lt;/strong&gt; (SWE) implements each task from the breakdown — writing actual code in an isolated container&lt;/li&gt;
-&lt;li&gt;&lt;strong&gt;Finn&lt;/strong&gt; reviews each implementation, approving or requesting changes&lt;/li&gt;
-&lt;li&gt;&lt;strong&gt;Chieko&lt;/strong&gt; (QA) tests approved implementations, passing or sending back for fixes&lt;/li&gt;
-&lt;li&gt;&lt;strong&gt;Stas&lt;/strong&gt; (SRE) handles deployment once all tasks pass&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Projects + Board + Pulse&lt;/strong&gt; (primary) — agents are assigned to kanban columns and autonomously pick up, work on, and advance tasks on a schedule&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Pipelines&lt;/strong&gt; (supporting) — structured multi-step workflows for specific operations like project planning, onboarding, or running a full SDLC pass on a single task&lt;/li&gt;
 &lt;/ol&gt;
-&lt;p&gt;Each agent runs in its own Docker container with a full toolbox — they can read files, write code, run bash commands, use git, and more.&lt;/p&gt;
-&lt;h2&gt;Watch in Real-Time&lt;span class="hx:absolute hx:-mt-20" id="watch-in-real-time"&gt;&lt;/span&gt;
-&lt;a href="#watch-in-real-time" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;p&gt;The dashboard shows:&lt;/p&gt;
+&lt;p&gt;Most of the time you&amp;rsquo;ll use projects. Pipelines are the machinery that powers planning, structured output, and predefined workflows.&lt;/p&gt;
+&lt;h2&gt;Create a Project&lt;span class="hx:absolute hx:-mt-20" id="create-a-project"&gt;&lt;/span&gt;
+&lt;a href="#create-a-project" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;ol&gt;
+&lt;li&gt;Open &lt;strong&gt;http://localhost:3000&lt;/strong&gt;&lt;/li&gt;
+&lt;li&gt;Go to &lt;strong&gt;Projects&lt;/strong&gt; and click &lt;strong&gt;New Project&lt;/strong&gt;&lt;/li&gt;
+&lt;li&gt;The guided onboarding walks you through describing your project — what you&amp;rsquo;re building, the tech stack, constraints, and goals&lt;/li&gt;
+&lt;li&gt;Optionally link a GitHub repository&lt;/li&gt;
+&lt;/ol&gt;
+&lt;h2&gt;Plan the Project&lt;span class="hx:absolute hx:-mt-20" id="plan-the-project"&gt;&lt;/span&gt;
+&lt;a href="#plan-the-project" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;p&gt;Once your project exists, decompose it into tasks:&lt;/p&gt;
+&lt;ol&gt;
+&lt;li&gt;Open your project and click &lt;strong&gt;Plan Project&lt;/strong&gt;&lt;/li&gt;
+&lt;li&gt;This runs the &lt;strong&gt;planning pipeline&lt;/strong&gt; — Eric (Product Owner) breaks the project into tasks with priorities and dependencies, Finn (Architect) validates the breakdown&lt;/li&gt;
+&lt;li&gt;Tasks are automatically imported onto the kanban board with priority labels (P0-P3), dependency chains, hour estimates, and tags&lt;/li&gt;
+&lt;/ol&gt;
+&lt;p&gt;The board starts with columns: &lt;strong&gt;Backlog&lt;/strong&gt;, &lt;strong&gt;Ready&lt;/strong&gt;, &lt;strong&gt;In Progress&lt;/strong&gt;, &lt;strong&gt;Review&lt;/strong&gt;, &lt;strong&gt;Done&lt;/strong&gt;.&lt;/p&gt;
+&lt;h2&gt;Assign Agents and Enable Pulse&lt;span class="hx:absolute hx:-mt-20" id="assign-agents-and-enable-pulse"&gt;&lt;/span&gt;
+&lt;a href="#assign-agents-and-enable-pulse" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;p&gt;Each agent is configured to watch specific board columns matching their role:&lt;/p&gt;
 &lt;ul&gt;
-&lt;li&gt;&lt;strong&gt;Pipeline progress&lt;/strong&gt; — which step is active, which are complete&lt;/li&gt;
-&lt;li&gt;&lt;strong&gt;Streaming output&lt;/strong&gt; — agent responses stream in real-time as they think and work&lt;/li&gt;
-&lt;li&gt;&lt;strong&gt;Thinking blocks&lt;/strong&gt; — expandable sections showing the agent&amp;rsquo;s reasoning process&lt;/li&gt;
-&lt;li&gt;&lt;strong&gt;Tool calls&lt;/strong&gt; — every file read, write, bash command, and git operation&lt;/li&gt;
-&lt;li&gt;&lt;strong&gt;Step transitions&lt;/strong&gt; — when agents hand off to the next step&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Yukihiro&lt;/strong&gt; (SWE) watches &lt;strong&gt;Ready&lt;/strong&gt; — picks up implementation tasks&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Finn&lt;/strong&gt; (Architect) watches &lt;strong&gt;Review&lt;/strong&gt; — reviews implementations&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Chieko&lt;/strong&gt; (QA) watches &lt;strong&gt;Review&lt;/strong&gt; — tests implementations&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Stas&lt;/strong&gt; (SRE) watches deployment-related tasks&lt;/li&gt;
 &lt;/ul&gt;
-&lt;h2&gt;Start a Pipeline via CLI&lt;span class="hx:absolute hx:-mt-20" id="start-a-pipeline-via-cli"&gt;&lt;/span&gt;
-&lt;a href="#start-a-pipeline-via-cli" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;p&gt;If you prefer the command line, install the CLI:&lt;/p&gt;
+&lt;p&gt;Enable pulse mode for your agents via the dashboard (Settings &amp;gt; Agents) or in each agent&amp;rsquo;s &lt;code&gt;config.yml&lt;/code&gt;:&lt;/p&gt;
 &lt;div class="hextra-code-block hx:relative hx:mt-6 hx:first:mt-0 hx:group/code"&gt;
-&lt;div&gt;&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-bash" data-lang="bash"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nb"&gt;cd&lt;/span&gt; cli
-&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;pip install -e .&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;&lt;div class="hextra-code-copy-btn-container hx:opacity-0 hx:transition hx:group-hover/code:opacity-100 hx:flex hx:gap-1 hx:absolute hx:m-[11px] hx:right-0 hx:top-0"&gt;
+&lt;div&gt;&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-yaml" data-lang="yaml"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nt"&gt;pulse_enabled&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="kc"&gt;true&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nt"&gt;pulse_interval_minutes&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;30&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nt"&gt;pulse_columns&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;- &lt;span class="l"&gt;Ready&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;&lt;div class="hextra-code-copy-btn-container hx:opacity-0 hx:transition hx:group-hover/code:opacity-100 hx:flex hx:gap-1 hx:absolute hx:m-[11px] hx:right-0 hx:top-0"&gt;
 &lt;button
 class="hextra-code-copy-btn hx:group/copybtn hx:cursor-pointer hx:transition-all hx:active:opacity-50 hx:bg-primary-700/5 hx:border hx:border-black/5 hx:text-gray-600 hx:hover:text-gray-900 hx:rounded-md hx:p-1.5 hx:dark:bg-primary-300/10 hx:dark:border-white/10 hx:dark:text-gray-400 hx:dark:hover:text-gray-50"
 title="Copy code"
@@ -264,87 +250,66 @@ data-copied-label="Copied!"
 &lt;/button&gt;
 &lt;/div&gt;
 &lt;/div&gt;
-&lt;p&gt;Then run:&lt;/p&gt;
-&lt;div class="hextra-code-block hx:relative hx:mt-6 hx:first:mt-0 hx:group/code"&gt;
-&lt;div&gt;&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-bash" data-lang="bash"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="c1"&gt;# List available pipelines&lt;/span&gt;
-&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;djinnbot pipeline list
-&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;
-&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="c1"&gt;# Start a run&lt;/span&gt;
-&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;djinnbot pipeline start engineering &lt;span class="se"&gt;\
-&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt; --task &lt;span class="s2"&gt;&amp;#34;Build a REST API for a bookmarks manager&amp;#34;&lt;/span&gt;
-&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;
-&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="c1"&gt;# Watch the output stream&lt;/span&gt;
-&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;djinnbot run stream &amp;lt;run-id&amp;gt;&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;&lt;div class="hextra-code-copy-btn-container hx:opacity-0 hx:transition hx:group-hover/code:opacity-100 hx:flex hx:gap-1 hx:absolute hx:m-[11px] hx:right-0 hx:top-0"&gt;
-&lt;button
-class="hextra-code-copy-btn hx:group/copybtn hx:cursor-pointer hx:transition-all hx:active:opacity-50 hx:bg-primary-700/5 hx:border hx:border-black/5 hx:text-gray-600 hx:hover:text-gray-900 hx:rounded-md hx:p-1.5 hx:dark:bg-primary-300/10 hx:dark:border-white/10 hx:dark:text-gray-400 hx:dark:hover:text-gray-50"
-title="Copy code"
-aria-label="Copy code"
-data-copied-label="Copied!"
-&gt;
-&lt;div class="hextra-copy-icon hx:group-[.copied]/copybtn:hidden hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
-&lt;div class="hextra-success-icon hx:hidden hx:group-[.copied]/copybtn:block hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
-&lt;/button&gt;
-&lt;/div&gt;
-&lt;/div&gt;
-&lt;h2&gt;Start a Pipeline via API&lt;span class="hx:absolute hx:-mt-20" id="start-a-pipeline-via-api"&gt;&lt;/span&gt;
-&lt;a href="#start-a-pipeline-via-api" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;div class="hextra-code-block hx:relative hx:mt-6 hx:first:mt-0 hx:group/code"&gt;
-&lt;div&gt;&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-bash" data-lang="bash"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;curl -X POST http://localhost:8000/v1/runs &lt;span class="se"&gt;\
-&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt; -H &lt;span class="s2"&gt;&amp;#34;Content-Type: application/json&amp;#34;&lt;/span&gt; &lt;span class="se"&gt;\
-&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt; -d &lt;span class="s1"&gt;&amp;#39;{
-&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="s1"&gt; &amp;#34;pipeline_id&amp;#34;: &amp;#34;engineering&amp;#34;,
-&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="s1"&gt; &amp;#34;task_description&amp;#34;: &amp;#34;Build a REST API for a bookmarks manager&amp;#34;
-&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="s1"&gt; }&amp;#39;&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;&lt;div class="hextra-code-copy-btn-container hx:opacity-0 hx:transition hx:group-hover/code:opacity-100 hx:flex hx:gap-1 hx:absolute hx:m-[11px] hx:right-0 hx:top-0"&gt;
-&lt;button
-class="hextra-code-copy-btn hx:group/copybtn hx:cursor-pointer hx:transition-all hx:active:opacity-50 hx:bg-primary-700/5 hx:border hx:border-black/5 hx:text-gray-600 hx:hover:text-gray-900 hx:rounded-md hx:p-1.5 hx:dark:bg-primary-300/10 hx:dark:border-white/10 hx:dark:text-gray-400 hx:dark:hover:text-gray-50"
-title="Copy code"
-aria-label="Copy code"
-data-copied-label="Copied!"
-&gt;
-&lt;div class="hextra-copy-icon hx:group-[.copied]/copybtn:hidden hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
-&lt;div class="hextra-success-icon hx:hidden hx:group-[.copied]/copybtn:block hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
-&lt;/button&gt;
-&lt;/div&gt;
-&lt;/div&gt;
-&lt;h2&gt;Try Other Pipelines&lt;span class="hx:absolute hx:-mt-20" id="try-other-pipelines"&gt;&lt;/span&gt;
-&lt;a href="#try-other-pipelines" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;table&gt;
-&lt;thead&gt;
-&lt;tr&gt;
-&lt;th&gt;Pipeline&lt;/th&gt;
-&lt;th&gt;Best For&lt;/th&gt;
-&lt;th&gt;Agents Involved&lt;/th&gt;
-&lt;/tr&gt;
-&lt;/thead&gt;
-&lt;tbody&gt;
-&lt;tr&gt;
-&lt;td&gt;&lt;code&gt;engineering&lt;/code&gt;&lt;/td&gt;
-&lt;td&gt;Full projects from scratch&lt;/td&gt;
-&lt;td&gt;All engineering agents&lt;/td&gt;
-&lt;/tr&gt;
-&lt;tr&gt;
-&lt;td&gt;&lt;code&gt;feature&lt;/code&gt;&lt;/td&gt;
-&lt;td&gt;Adding a feature to existing code&lt;/td&gt;
-&lt;td&gt;Finn, Yukihiro, Chieko&lt;/td&gt;
-&lt;/tr&gt;
-&lt;tr&gt;
-&lt;td&gt;&lt;code&gt;bugfix&lt;/code&gt;&lt;/td&gt;
-&lt;td&gt;Diagnosing and fixing bugs&lt;/td&gt;
-&lt;td&gt;Yukihiro, Chieko&lt;/td&gt;
-&lt;/tr&gt;
-&lt;tr&gt;
-&lt;td&gt;&lt;code&gt;planning&lt;/code&gt;&lt;/td&gt;
-&lt;td&gt;Breaking down a project into tasks&lt;/td&gt;
-&lt;td&gt;Eric, Finn&lt;/td&gt;
-&lt;/tr&gt;
-&lt;/tbody&gt;
-&lt;/table&gt;
+&lt;p&gt;When pulse fires, agents autonomously:&lt;/p&gt;
+&lt;ol&gt;
+&lt;li&gt;Check the board for tasks in their columns&lt;/li&gt;
+&lt;li&gt;Claim the highest-priority task&lt;/li&gt;
+&lt;li&gt;Create a feature branch and spin up an isolated container&lt;/li&gt;
+&lt;li&gt;Do the work — write code, run tests, use tools&lt;/li&gt;
+&lt;li&gt;Open a pull request&lt;/li&gt;
+&lt;li&gt;Move the task to the next column&lt;/li&gt;
+&lt;/ol&gt;
+&lt;h2&gt;Watch It Happen&lt;span class="hx:absolute hx:-mt-20" id="watch-it-happen"&gt;&lt;/span&gt;
+&lt;a href="#watch-it-happen" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;p&gt;The dashboard shows everything in real-time:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;Board view&lt;/strong&gt; — tasks moving across columns as agents work&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Streaming output&lt;/strong&gt; — live agent output as they think and work&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Thinking blocks&lt;/strong&gt; — expandable reasoning sections&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Tool calls&lt;/strong&gt; — every file read, write, bash command, and git operation&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Slack threads&lt;/strong&gt; — if configured, watch agents discuss in your workspace&lt;/li&gt;
+&lt;/ul&gt;
 &lt;h2&gt;Chat With Agents&lt;span class="hx:absolute hx:-mt-20" id="chat-with-agents"&gt;&lt;/span&gt;
-&lt;a href="#chat-with-agents" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;p&gt;Don&amp;rsquo;t want to run a pipeline? Talk to any agent directly:&lt;/p&gt;
+&lt;a href="#chat-with-agents" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;p&gt;Talk to any agent directly without going through a project:&lt;/p&gt;
 &lt;ol&gt;
 &lt;li&gt;Go to the &lt;strong&gt;Chat&lt;/strong&gt; page in the dashboard&lt;/li&gt;
 &lt;li&gt;Select an agent (e.g., Finn for architecture advice)&lt;/li&gt;
 &lt;li&gt;Start a conversation&lt;/li&gt;
 &lt;/ol&gt;
-&lt;p&gt;Chat sessions use the same isolated containers and full toolbox. Agents can read and write code, search the web, and use all their tools — just like in a pipeline, but interactive.&lt;/p&gt;
+&lt;p&gt;Chat sessions use the same isolated containers and full toolbox.&lt;/p&gt;
+&lt;h2&gt;Run a Pipeline Directly&lt;span class="hx:absolute hx:-mt-20" id="run-a-pipeline-directly"&gt;&lt;/span&gt;
+&lt;a href="#run-a-pipeline-directly" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;p&gt;For one-off structured workflows, you can also run pipelines directly:&lt;/p&gt;
+&lt;ol&gt;
+&lt;li&gt;Click &lt;strong&gt;New Run&lt;/strong&gt; in the dashboard&lt;/li&gt;
+&lt;li&gt;Select a pipeline (e.g., &lt;code&gt;engineering&lt;/code&gt;, &lt;code&gt;feature&lt;/code&gt;, &lt;code&gt;bugfix&lt;/code&gt;)&lt;/li&gt;
+&lt;li&gt;Describe the task&lt;/li&gt;
+&lt;li&gt;Watch agents execute the predefined steps&lt;/li&gt;
+&lt;/ol&gt;
+&lt;table&gt;
+&lt;thead&gt;
+&lt;tr&gt;
+&lt;th&gt;Pipeline&lt;/th&gt;
+&lt;th&gt;Best For&lt;/th&gt;
+&lt;/tr&gt;
+&lt;/thead&gt;
+&lt;tbody&gt;
+&lt;tr&gt;
+&lt;td&gt;&lt;code&gt;planning&lt;/code&gt;&lt;/td&gt;
+&lt;td&gt;Decomposing a project into board tasks&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;
+&lt;td&gt;&lt;code&gt;engineering&lt;/code&gt;&lt;/td&gt;
+&lt;td&gt;Full SDLC for a single task (spec → design → implement → review → test → deploy)&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;
+&lt;td&gt;&lt;code&gt;feature&lt;/code&gt;&lt;/td&gt;
+&lt;td&gt;Adding a feature to existing code&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;
+&lt;td&gt;&lt;code&gt;bugfix&lt;/code&gt;&lt;/td&gt;
+&lt;td&gt;Diagnosing and fixing a specific bug&lt;/td&gt;
+&lt;/tr&gt;
+&lt;/tbody&gt;
+&lt;/table&gt;
 &lt;h2&gt;Next Steps&lt;span class="hx:absolute hx:-mt-20" id="next-steps"&gt;&lt;/span&gt;
 &lt;a href="#next-steps" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;div class="hextra-cards hx:mt-4 hx:gap-4 hx:grid not-prose" style="--hextra-cards-grid-cols: 3;"&gt;
 &lt;a
@@ -352,9 +317,9 @@ class="hextra-card hx:group hx:flex hx:flex-col hx:justify-start hx:overflow-hid
 &gt;&lt;div class="hx:mt-auto"&gt;
 &lt;span class="hextra-card-icon hx:flex hx:font-semibold hx:items-start hx:gap-2 hx:pt-4 hx:px-4 hx:text-gray-700 hx:hover:text-gray-900 hx:dark:text-neutral-200 hx:dark:hover:text-neutral-50"&gt;Dashboard Tour&lt;/span&gt;&lt;div class="hextra-card-subtitle hx:line-clamp-3 hx:text-sm hx:font-normal hx:text-gray-500 hx:dark:text-gray-400 hx:px-4 hx:mb-4 hx:mt-2"&gt;Learn to navigate the full dashboard interface.&lt;/div&gt;&lt;/div&gt;&lt;/a&gt;
 &lt;a
-class="hextra-card hx:group hx:flex hx:flex-col hx:justify-start hx:overflow-hidden hx:rounded-lg hx:border hx:border-gray-200 hx:text-current hx:no-underline hx:dark:shadow-none hx:hover:shadow-gray-100 hx:dark:hover:shadow-none hx:shadow-gray-100 hx:active:shadow-sm hx:active:shadow-gray-200 hx:transition-all hx:duration-200 hx:hover:border-gray-300 hx:bg-transparent hx:shadow-xs hx:dark:border-neutral-800 hx:hover:bg-slate-50 hx:hover:shadow-md hx:dark:hover:border-neutral-700 hx:dark:hover:bg-neutral-900"href="https://docs.djinn.bot/docs/concepts/pipelines"
+class="hextra-card hx:group hx:flex hx:flex-col hx:justify-start hx:overflow-hidden hx:rounded-lg hx:border hx:border-gray-200 hx:text-current hx:no-underline hx:dark:shadow-none hx:hover:shadow-gray-100 hx:dark:hover:shadow-none hx:shadow-gray-100 hx:active:shadow-sm hx:active:shadow-gray-200 hx:transition-all hx:duration-200 hx:hover:border-gray-300 hx:bg-transparent hx:shadow-xs hx:dark:border-neutral-800 hx:hover:bg-slate-50 hx:hover:shadow-md hx:dark:hover:border-neutral-700 hx:dark:hover:bg-neutral-900"href="https://docs.djinn.bot/docs/concepts/pulse"
 &gt;&lt;div class="hx:mt-auto"&gt;
-&lt;span class="hextra-card-icon hx:flex hx:font-semibold hx:items-start hx:gap-2 hx:pt-4 hx:px-4 hx:text-gray-700 hx:hover:text-gray-900 hx:dark:text-neutral-200 hx:dark:hover:text-neutral-50"&gt;Understanding Pipelines&lt;/span&gt;&lt;div class="hextra-card-subtitle hx:line-clamp-3 hx:text-sm hx:font-normal hx:text-gray-500 hx:dark:text-gray-400 hx:px-4 hx:mb-4 hx:mt-2"&gt;Learn how YAML pipelines work.&lt;/div&gt;&lt;/div&gt;&lt;/a&gt;
+&lt;span class="hextra-card-icon hx:flex hx:font-semibold hx:items-start hx:gap-2 hx:pt-4 hx:px-4 hx:text-gray-700 hx:hover:text-gray-900 hx:dark:text-neutral-200 hx:dark:hover:text-neutral-50"&gt;Pulse Mode&lt;/span&gt;&lt;div class="hextra-card-subtitle hx:line-clamp-3 hx:text-sm hx:font-normal hx:text-gray-500 hx:dark:text-gray-400 hx:px-4 hx:mb-4 hx:mt-2"&gt;How agents work autonomously on a schedule.&lt;/div&gt;&lt;/div&gt;&lt;/a&gt;
 &lt;a
 class="hextra-card hx:group hx:flex hx:flex-col hx:justify-start hx:overflow-hidden hx:rounded-lg hx:border hx:border-gray-200 hx:text-current hx:no-underline hx:dark:shadow-none hx:hover:shadow-gray-100 hx:dark:hover:shadow-none hx:shadow-gray-100 hx:active:shadow-sm hx:active:shadow-gray-200 hx:transition-all hx:duration-200 hx:hover:border-gray-300 hx:bg-transparent hx:shadow-xs hx:dark:border-neutral-800 hx:hover:bg-slate-50 hx:hover:shadow-md hx:dark:hover:border-neutral-700 hx:dark:hover:bg-neutral-900"href="https://docs.djinn.bot/docs/guides/slack-setup"
 &gt;&lt;div class="hx:mt-auto"&gt;

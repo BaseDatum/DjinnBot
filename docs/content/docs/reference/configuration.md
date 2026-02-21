@@ -53,6 +53,7 @@ That's the only required variable when using OpenRouter. Everything else has def
 | Variable | Description |
 |----------|------------|
 | `SECRET_ENCRYPTION_KEY` | AES-256-GCM key for encrypting secrets at rest |
+| `ENGINE_INTERNAL_TOKEN` | Shared secret protecting the plaintext secrets `/env` endpoint. Set this in production. |
 | `MCPO_API_KEY` | API key protecting the mcpo proxy |
 
 ### Slack

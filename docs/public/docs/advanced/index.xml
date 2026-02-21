@@ -550,6 +550,23 @@ data-copied-label="Copied!"
 &lt;div class="hx:mt-6 hx:leading-7 hx:first:mt-0"&gt;Without &lt;code&gt;SECRET_ENCRYPTION_KEY&lt;/code&gt;, secrets are encrypted with an ephemeral key that changes on restart — making stored secrets permanently unrecoverable. Always set this in production.&lt;/div&gt;
 &lt;/div&gt;
 &lt;/div&gt;
+&lt;h3&gt;Internal Token (&lt;code&gt;ENGINE_INTERNAL_TOKEN&lt;/code&gt;)&lt;span class="hx:absolute hx:-mt-20" id="internal-token-engine_internal_token"&gt;&lt;/span&gt;
+&lt;a href="#internal-token-engine_internal_token" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h3&gt;&lt;p&gt;The plaintext secrets endpoint (&lt;code&gt;/v1/secrets/agents/{id}/env&lt;/code&gt;) is protected by a shared secret token. The engine and agent containers send this token in the &lt;code&gt;Authorization: Bearer &amp;lt;token&amp;gt;&lt;/code&gt; header. Without it, the endpoint returns &lt;code&gt;403 Forbidden&lt;/code&gt;.&lt;/p&gt;
+&lt;div class="hextra-code-block hx:relative hx:mt-6 hx:first:mt-0 hx:group/code"&gt;
+&lt;div&gt;&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-bash" data-lang="bash"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="c1"&gt;# Generate and add to .env&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;python3 -c &lt;span class="s2"&gt;&amp;#34;import secrets; print(&amp;#39;ENGINE_INTERNAL_TOKEN=&amp;#39; + secrets.token_urlsafe(32))&amp;#34;&lt;/span&gt; &amp;gt;&amp;gt; .env&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;&lt;div class="hextra-code-copy-btn-container hx:opacity-0 hx:transition hx:group-hover/code:opacity-100 hx:flex hx:gap-1 hx:absolute hx:m-[11px] hx:right-0 hx:top-0"&gt;
+&lt;button
+class="hextra-code-copy-btn hx:group/copybtn hx:cursor-pointer hx:transition-all hx:active:opacity-50 hx:bg-primary-700/5 hx:border hx:border-black/5 hx:text-gray-600 hx:hover:text-gray-900 hx:rounded-md hx:p-1.5 hx:dark:bg-primary-300/10 hx:dark:border-white/10 hx:dark:text-gray-400 hx:dark:hover:text-gray-50"
+title="Copy code"
+aria-label="Copy code"
+data-copied-label="Copied!"
+&gt;
+&lt;div class="hextra-copy-icon hx:group-[.copied]/copybtn:hidden hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;div class="hextra-success-icon hx:hidden hx:group-[.copied]/copybtn:block hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;/button&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;p&gt;The token is shared between three parties: the API server (validates it), the engine (sends it when fetching secrets and injects it into containers), and agent containers (send it when using the &lt;code&gt;get_secret&lt;/code&gt; tool at runtime). If &lt;code&gt;ENGINE_INTERNAL_TOKEN&lt;/code&gt; is not set, the endpoint is unprotected for backward compatibility with local development.&lt;/p&gt;
 &lt;h3&gt;MCP Proxy Authentication&lt;span class="hx:absolute hx:-mt-20" id="mcp-proxy-authentication"&gt;&lt;/span&gt;
 &lt;a href="#mcp-proxy-authentication" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h3&gt;&lt;p&gt;The mcpo proxy is protected by &lt;code&gt;MCPO_API_KEY&lt;/code&gt;. Agent containers receive this key to authenticate tool calls. Generate a strong key:&lt;/p&gt;
 &lt;div class="hextra-code-block hx:relative hx:mt-6 hx:first:mt-0 hx:group/code"&gt;

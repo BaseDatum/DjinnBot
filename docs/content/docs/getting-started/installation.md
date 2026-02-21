@@ -42,6 +42,16 @@ python3 -c "import secrets; print('SECRET_ENCRYPTION_KEY=' + secrets.token_hex(3
 
 This encrypts user-defined secrets (API keys, SSH keys, etc.) at rest. Without it, secrets are encrypted with an ephemeral key that resets on restart.
 
+### Optional: Internal Token
+
+Protects the plaintext secrets endpoint from unauthorized access:
+
+```bash
+python3 -c "import secrets; print('ENGINE_INTERNAL_TOKEN=' + secrets.token_urlsafe(32))" >> .env
+```
+
+Without this, the endpoint that returns decrypted secrets is open to anyone who can reach the API. See [Security Model](/docs/advanced/security) for details.
+
 ## Start Services
 
 ```bash

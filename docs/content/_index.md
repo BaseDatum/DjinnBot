@@ -77,13 +77,17 @@ layout: hextra-home
 
 <div class="hx-mt-4 hx-mb-8" style="max-width: 52rem; margin: 0 auto;">
 
-**1. Describe what you want built** — via the dashboard, API, CLI, or Slack.
+**1. Create a project** — describe what you want built via the dashboard's guided onboarding, or import an existing repo.
 
-**2. The pipeline engine assigns work to the right agents** — each step runs in an isolated container with a full engineering toolbox.
+**2. Plan it** — the planning pipeline decomposes your project into tasks on a kanban board with priorities and dependencies.
 
-**3. Agents collaborate autonomously** — Eric writes the spec, Finn designs the architecture, Yukihiro implements it, Finn reviews the code, Chieko runs tests, Stas deploys it.
+**3. Assign agents to columns** — Yukihiro watches "Ready" for implementation work, Chieko watches "Review" for testing, Stas watches for deployment. Each agent knows their lane.
 
-**4. You watch it happen in real-time** — streaming output, Slack threads, or the dashboard. Step in when you want, or let them run.
+**4. Agents work autonomously** — on pulse cycles, agents wake up, check the board, claim a task, spin up an isolated container, do the work, open a PR, and advance the task.
+
+**5. Watch it happen** — streaming output in the dashboard, Slack threads, or the kanban board. Step in when you want, or let them run.
+
+Pipelines handle structured workflows — the planning pipeline generates the task board, the engineering pipeline runs a full SDLC for a single task, and you can build custom pipelines for any repeatable process.
 
 </div>
 

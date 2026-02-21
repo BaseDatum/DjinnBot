@@ -586,6 +586,10 @@ data-copied-label="Copied!"
 &lt;td&gt;AES-256-GCM key for encrypting secrets at rest&lt;/td&gt;
 &lt;/tr&gt;
 &lt;tr&gt;
+&lt;td&gt;&lt;code&gt;ENGINE_INTERNAL_TOKEN&lt;/code&gt;&lt;/td&gt;
+&lt;td&gt;Shared secret protecting the plaintext secrets &lt;code&gt;/env&lt;/code&gt; endpoint. Set this in production.&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;
 &lt;td&gt;&lt;code&gt;MCPO_API_KEY&lt;/code&gt;&lt;/td&gt;
 &lt;td&gt;API key protecting the mcpo proxy&lt;/td&gt;
 &lt;/tr&gt;

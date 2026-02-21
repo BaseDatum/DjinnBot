@@ -14,7 +14,7 @@ Secrets are stored in PostgreSQL, encrypted at rest with **AES-256-GCM**. The en
 - 128-bit authentication tag (GCM default)
 - Storage format: `base64(nonce[12] + tag[16] + ciphertext)`
 
-Plaintext secret values are **never** returned by the API to the dashboard or any external client. All list and detail endpoints return masked previews only (e.g., `ghp_...abc1`).
+Most API endpoints return only masked previews (e.g., `ghp_...abc1`). However, the engine injection endpoint (`/v1/secrets/agents/{agent_id}/env`) returns plaintext values — see the security note below.
 
 ## Secret Types
 
@@ -39,11 +39,27 @@ This prevents agents from accessing credentials they don't need.
 
 When the engine spawns an agent container:
 
-1. It calls the internal endpoint `GET /v1/secrets/agents/{agent_id}/env`
-2. The API decrypts the agent's granted secrets and returns them as an environment variable map
+1. It calls `GET /v1/secrets/agents/{agent_id}/env` on the API server
+2. The API decrypts the agent's granted secrets and returns them as a plaintext environment variable map
 3. The engine injects these as environment variables into the container
 
-This is the **only** endpoint that returns plaintext values, and it's an internal endpoint called only by the engine — not exposed to the dashboard or external clients.
+This endpoint is protected by the `ENGINE_INTERNAL_TOKEN` shared secret. The engine and agent containers send the token in the `Authorization: Bearer <token>` header. Without a valid token, the endpoint returns `403 Forbidden`.
+
+{{< callout type="warning" >}}
+If `ENGINE_INTERNAL_TOKEN` is **not set**, the `/env` endpoint is unprotected for backward compatibility and local development. **Always set this variable in production.** Generate one with:
+
+```bash
+python3 -c "import secrets; print(secrets.token_urlsafe(32))"
+```
+{{< /callout >}}
+
+The token flows as follows:
+
+1. You set `ENGINE_INTERNAL_TOKEN` in `.env`
+2. Docker Compose passes it to the API server and engine containers
+3. The engine injects it into agent containers as an environment variable
+4. All three (engine, agent container, API) share the same secret
+5. The API validates the token on the `/env` endpoint only — all other endpoints remain open
 
 ## Managing Secrets
 
@@ -100,5 +116,6 @@ python3 -c "import secrets; print(secrets.token_hex(32))"
 - Secrets are encrypted before touching the database — PostgreSQL never sees plaintext
 - Each encryption uses a unique random nonce — identical secrets produce different ciphertexts
 - GCM authentication tags prevent tampering — any modification is detected on decryption
-- The dashboard and API only expose masked previews — you can verify a secret exists without seeing its value
+- Most API endpoints return only masked previews — you can verify a secret exists without seeing its value
+- The plaintext injection endpoint (`/env`) is protected by `ENGINE_INTERNAL_TOKEN` — without it, callers get `403 Forbidden`
 - Agent containers receive secrets only at spawn time via environment variables — they're not written to disk inside the container

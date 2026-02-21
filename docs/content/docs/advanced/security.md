@@ -47,6 +47,17 @@ python3 -c "import secrets; print(secrets.token_hex(32))"
 Without `SECRET_ENCRYPTION_KEY`, secrets are encrypted with an ephemeral key that changes on restart — making stored secrets permanently unrecoverable. Always set this in production.
 {{< /callout >}}
 
+### Internal Token (`ENGINE_INTERNAL_TOKEN`)
+
+The plaintext secrets endpoint (`/v1/secrets/agents/{id}/env`) is protected by a shared secret token. The engine and agent containers send this token in the `Authorization: Bearer <token>` header. Without it, the endpoint returns `403 Forbidden`.
+
+```bash
+# Generate and add to .env
+python3 -c "import secrets; print('ENGINE_INTERNAL_TOKEN=' + secrets.token_urlsafe(32))" >> .env
+```
+
+The token is shared between three parties: the API server (validates it), the engine (sends it when fetching secrets and injects it into containers), and agent containers (send it when using the `get_secret` tool at runtime). If `ENGINE_INTERNAL_TOKEN` is not set, the endpoint is unprotected for backward compatibility with local development.
+
 ### MCP Proxy Authentication
 
 The mcpo proxy is protected by `MCPO_API_KEY`. Agent containers receive this key to authenticate tool calls. Generate a strong key:

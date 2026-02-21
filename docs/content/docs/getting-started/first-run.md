@@ -3,110 +3,100 @@ title: Your First Run
 weight: 2
 ---
 
-Now that DjinnBot is running, let's kick off a pipeline and watch agents collaborate in real-time.
+Now that DjinnBot is running, let's set up a project and watch agents work.
 
-## Start a Pipeline via the Dashboard
+## The Two Workflows
+
+DjinnBot has two complementary ways of getting work done:
+
+1. **Projects + Board + Pulse** (primary) — agents are assigned to kanban columns and autonomously pick up, work on, and advance tasks on a schedule
+2. **Pipelines** (supporting) — structured multi-step workflows for specific operations like project planning, onboarding, or running a full SDLC pass on a single task
+
+Most of the time you'll use projects. Pipelines are the machinery that powers planning, structured output, and predefined workflows.
+
+## Create a Project
 
 1. Open **http://localhost:3000**
-2. Click **New Run** in the top navigation
-3. Select the **engineering** pipeline
-4. Enter a task description, for example:
+2. Go to **Projects** and click **New Project**
+3. The guided onboarding walks you through describing your project — what you're building, the tech stack, constraints, and goals
+4. Optionally link a GitHub repository
 
-   > Build a REST API for a bookmarks manager with CRUD endpoints, tag support, and search. Use FastAPI and SQLite.
+## Plan the Project
 
-5. Click **Start Run**
+Once your project exists, decompose it into tasks:
 
-## What Happens Next
+1. Open your project and click **Plan Project**
+2. This runs the **planning pipeline** — Eric (Product Owner) breaks the project into tasks with priorities and dependencies, Finn (Architect) validates the breakdown
+3. Tasks are automatically imported onto the kanban board with priority labels (P0-P3), dependency chains, hour estimates, and tags
 
-The engineering pipeline assigns work through these stages:
+The board starts with columns: **Backlog**, **Ready**, **In Progress**, **Review**, **Done**.
 
+## Assign Agents and Enable Pulse
+
+Each agent is configured to watch specific board columns matching their role:
+
+- **Yukihiro** (SWE) watches **Ready** — picks up implementation tasks
+- **Finn** (Architect) watches **Review** — reviews implementations
+- **Chieko** (QA) watches **Review** — tests implementations
+- **Stas** (SRE) watches deployment-related tasks
+
+Enable pulse mode for your agents via the dashboard (Settings > Agents) or in each agent's `config.yml`:
+
+```yaml
+pulse_enabled: true
+pulse_interval_minutes: 30
+pulse_columns:
+  - Ready
 ```
-SPEC (Eric) → DESIGN (Finn) → UX (Shigeo) → IMPLEMENT (Yukihiro)
-                                                     ↕
-                                               REVIEW (Finn)
-                                                     ↕
-                                                TEST (Chieko)
-                                                     ↓
-                                               DEPLOY (Stas)
-```
 
-1. **Eric** (Product Owner) reads your task description and produces requirements, user stories, and acceptance criteria
-2. **Finn** (Architect) takes Eric's requirements and designs the architecture, API, database schema, and task breakdown
-3. **Shigeo** (UX) creates UX specifications and design system guidelines
-4. **Yukihiro** (SWE) implements each task from the breakdown — writing actual code in an isolated container
-5. **Finn** reviews each implementation, approving or requesting changes
-6. **Chieko** (QA) tests approved implementations, passing or sending back for fixes
-7. **Stas** (SRE) handles deployment once all tasks pass
+When pulse fires, agents autonomously:
+1. Check the board for tasks in their columns
+2. Claim the highest-priority task
+3. Create a feature branch and spin up an isolated container
+4. Do the work — write code, run tests, use tools
+5. Open a pull request
+6. Move the task to the next column
 
-Each agent runs in its own Docker container with a full toolbox — they can read files, write code, run bash commands, use git, and more.
+## Watch It Happen
 
-## Watch in Real-Time
+The dashboard shows everything in real-time:
 
-The dashboard shows:
-
-- **Pipeline progress** — which step is active, which are complete
-- **Streaming output** — agent responses stream in real-time as they think and work
-- **Thinking blocks** — expandable sections showing the agent's reasoning process
+- **Board view** — tasks moving across columns as agents work
+- **Streaming output** — live agent output as they think and work
+- **Thinking blocks** — expandable reasoning sections
 - **Tool calls** — every file read, write, bash command, and git operation
-- **Step transitions** — when agents hand off to the next step
-
-## Start a Pipeline via CLI
-
-If you prefer the command line, install the CLI:
-
-```bash
-cd cli
-pip install -e .
-```
-
-Then run:
-
-```bash
-# List available pipelines
-djinnbot pipeline list
-
-# Start a run
-djinnbot pipeline start engineering \
-  --task "Build a REST API for a bookmarks manager"
-
-# Watch the output stream
-djinnbot run stream <run-id>
-```
-
-## Start a Pipeline via API
-
-```bash
-curl -X POST http://localhost:8000/v1/runs \
-  -H "Content-Type: application/json" \
-  -d '{
-    "pipeline_id": "engineering",
-    "task_description": "Build a REST API for a bookmarks manager"
-  }'
-```
-
-## Try Other Pipelines
-
-| Pipeline | Best For | Agents Involved |
-|----------|---------|----------------|
-| `engineering` | Full projects from scratch | All engineering agents |
-| `feature` | Adding a feature to existing code | Finn, Yukihiro, Chieko |
-| `bugfix` | Diagnosing and fixing bugs | Yukihiro, Chieko |
-| `planning` | Breaking down a project into tasks | Eric, Finn |
+- **Slack threads** — if configured, watch agents discuss in your workspace
 
 ## Chat With Agents
 
-Don't want to run a pipeline? Talk to any agent directly:
+Talk to any agent directly without going through a project:
 
 1. Go to the **Chat** page in the dashboard
 2. Select an agent (e.g., Finn for architecture advice)
 3. Start a conversation
 
-Chat sessions use the same isolated containers and full toolbox. Agents can read and write code, search the web, and use all their tools — just like in a pipeline, but interactive.
+Chat sessions use the same isolated containers and full toolbox.
+
+## Run a Pipeline Directly
+
+For one-off structured workflows, you can also run pipelines directly:
+
+1. Click **New Run** in the dashboard
+2. Select a pipeline (e.g., `engineering`, `feature`, `bugfix`)
+3. Describe the task
+4. Watch agents execute the predefined steps
+
+| Pipeline | Best For |
+|----------|---------|
+| `planning` | Decomposing a project into board tasks |
+| `engineering` | Full SDLC for a single task (spec → design → implement → review → test → deploy) |
+| `feature` | Adding a feature to existing code |
+| `bugfix` | Diagnosing and fixing a specific bug |
 
 ## Next Steps
 
 {{< cards >}}
   {{< card link="../dashboard-tour" title="Dashboard Tour" subtitle="Learn to navigate the full dashboard interface." >}}
-  {{< card link="/docs/concepts/pipelines" title="Understanding Pipelines" subtitle="Learn how YAML pipelines work." >}}
+  {{< card link="/docs/concepts/pulse" title="Pulse Mode" subtitle="How agents work autonomously on a schedule." >}}
   {{< card link="/docs/guides/slack-setup" title="Set Up Slack" subtitle="Give each agent its own Slack bot." >}}
 {{< /cards >}}

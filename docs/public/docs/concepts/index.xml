@@ -79,7 +79,18 @@ style mcpo fill:#6366f1,color:#fff,stroke:#4f46e5
 &lt;h3&gt;mcpo Proxy&lt;span class="hx:absolute hx:-mt-20" id="mcpo-proxy"&gt;&lt;/span&gt;
 &lt;a href="#mcpo-proxy" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h3&gt;&lt;p&gt;The &lt;a href="https://github.com/skymoore/mcpo"target="_blank" rel="noopener"&gt;mcpo&lt;/a&gt; proxy exposes MCP tool servers as REST/OpenAPI endpoints. See &lt;a href="https://docs.djinn.bot/docs/concepts/mcp-tools/"&gt;MCP Tools&lt;/a&gt; for details.&lt;/p&gt;
 &lt;h2&gt;Event Flow&lt;span class="hx:absolute hx:-mt-20" id="event-flow"&gt;&lt;/span&gt;
-&lt;a href="#event-flow" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;p&gt;Here&amp;rsquo;s what happens when you start a pipeline run:&lt;/p&gt;
+&lt;a href="#event-flow" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;h3&gt;Pulse (Autonomous Work)&lt;span class="hx:absolute hx:-mt-20" id="pulse-autonomous-work"&gt;&lt;/span&gt;
+&lt;a href="#pulse-autonomous-work" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h3&gt;&lt;p&gt;The primary workflow — agents pick up tasks from the board:&lt;/p&gt;
+&lt;ol&gt;
+&lt;li&gt;&lt;strong&gt;Engine&lt;/strong&gt; fires a pulse timer for an agent → spawns an &lt;strong&gt;Agent Container&lt;/strong&gt; with persona, memories, and project tools&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Agent&lt;/strong&gt; calls &lt;code&gt;get_ready_tasks()&lt;/code&gt; → finds tasks in its assigned columns&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Agent&lt;/strong&gt; calls &lt;code&gt;claim_task()&lt;/code&gt; → provisions an authenticated git workspace on a feature branch&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Agent&lt;/strong&gt; does the work — writes code, runs tests, uses tools — streaming output via &lt;strong&gt;Redis Pub/Sub&lt;/strong&gt;&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Agent&lt;/strong&gt; calls &lt;code&gt;open_pull_request()&lt;/code&gt; and &lt;code&gt;transition_task()&lt;/code&gt; → task moves to the next column&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Engine&lt;/strong&gt; relays events to &lt;strong&gt;API Server&lt;/strong&gt; → &lt;strong&gt;Dashboard&lt;/strong&gt; displays via SSE&lt;/li&gt;
+&lt;/ol&gt;
+&lt;h3&gt;Pipeline Runs&lt;span class="hx:absolute hx:-mt-20" id="pipeline-runs"&gt;&lt;/span&gt;
+&lt;a href="#pipeline-runs" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h3&gt;&lt;p&gt;For structured workflows (planning, onboarding, engineering SDLC):&lt;/p&gt;
 &lt;ol&gt;
 &lt;li&gt;&lt;strong&gt;Dashboard&lt;/strong&gt; → &lt;code&gt;POST /v1/runs&lt;/code&gt; → &lt;strong&gt;API Server&lt;/strong&gt; creates run in PostgreSQL&lt;/li&gt;
 &lt;li&gt;&lt;strong&gt;API Server&lt;/strong&gt; → publishes &lt;code&gt;RUN_CREATED&lt;/code&gt; event → &lt;strong&gt;Redis Streams&lt;/strong&gt;&lt;/li&gt;
@@ -1431,7 +1442,7 @@ data-copied-label="Copied!"
 &lt;li&gt;128-bit authentication tag (GCM default)&lt;/li&gt;
 &lt;li&gt;Storage format: &lt;code&gt;base64(nonce[12] + tag[16] + ciphertext)&lt;/code&gt;&lt;/li&gt;
 &lt;/ul&gt;
-&lt;p&gt;Plaintext secret values are &lt;strong&gt;never&lt;/strong&gt; returned by the API to the dashboard or any external client. All list and detail endpoints return masked previews only (e.g., &lt;code&gt;ghp_...abc1&lt;/code&gt;).&lt;/p&gt;
+&lt;p&gt;Most API endpoints return only masked previews (e.g., &lt;code&gt;ghp_...abc1&lt;/code&gt;). However, the engine injection endpoint (&lt;code&gt;/v1/secrets/agents/{agent_id}/env&lt;/code&gt;) returns plaintext values — see the security note below.&lt;/p&gt;
 &lt;h2&gt;Secret Types&lt;span class="hx:absolute hx:-mt-20" id="secret-types"&gt;&lt;/span&gt;
 &lt;a href="#secret-types" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;p&gt;Secrets support different types to help organize credentials:&lt;/p&gt;
 &lt;ul&gt;
@@ -1451,11 +1462,38 @@ data-copied-label="Copied!"
 &lt;h2&gt;How Secrets Reach Agents&lt;span class="hx:absolute hx:-mt-20" id="how-secrets-reach-agents"&gt;&lt;/span&gt;
 &lt;a href="#how-secrets-reach-agents" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;p&gt;When the engine spawns an agent container:&lt;/p&gt;
 &lt;ol&gt;
-&lt;li&gt;It calls the internal endpoint &lt;code&gt;GET /v1/secrets/agents/{agent_id}/env&lt;/code&gt;&lt;/li&gt;
-&lt;li&gt;The API decrypts the agent&amp;rsquo;s granted secrets and returns them as an environment variable map&lt;/li&gt;
+&lt;li&gt;It calls &lt;code&gt;GET /v1/secrets/agents/{agent_id}/env&lt;/code&gt; on the API server&lt;/li&gt;
+&lt;li&gt;The API decrypts the agent&amp;rsquo;s granted secrets and returns them as a plaintext environment variable map&lt;/li&gt;
 &lt;li&gt;The engine injects these as environment variables into the container&lt;/li&gt;
 &lt;/ol&gt;
-&lt;p&gt;This is the &lt;strong&gt;only&lt;/strong&gt; endpoint that returns plaintext values, and it&amp;rsquo;s an internal endpoint called only by the engine — not exposed to the dashboard or external clients.&lt;/p&gt;
+&lt;p&gt;This endpoint is protected by the &lt;code&gt;ENGINE_INTERNAL_TOKEN&lt;/code&gt; shared secret. The engine and agent containers send the token in the &lt;code&gt;Authorization: Bearer &amp;lt;token&amp;gt;&lt;/code&gt; header. Without a valid token, the endpoint returns &lt;code&gt;403 Forbidden&lt;/code&gt;.&lt;/p&gt;
+&lt;div class="hx:overflow-x-auto hx:mt-6 hx:flex hx:rounded-lg hx:border hx:py-2 hx:ltr:pr-4 hx:rtl:pl-4 hx:contrast-more:border-current hx:contrast-more:dark:border-current hx:border-amber-200 hx:bg-amber-100 hx:text-amber-900 hx:dark:border-amber-200/30 hx:dark:bg-amber-900/30 hx:dark:text-amber-200"&gt;
+&lt;div class="hx:ltr:pl-3 hx:ltr:pr-2 hx:rtl:pr-3 hx:rtl:pl-2"&gt;&lt;svg height=1.2em class="hx:inline-block hx:align-middle" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" aria-hidden="true"&gt;&lt;path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/&gt;&lt;/svg&gt;&lt;/div&gt;
+&lt;div class="hx:w-full hx:min-w-0 hx:leading-7"&gt;
+&lt;div class="hx:mt-6 hx:leading-7 hx:first:mt-0"&gt;&lt;p&gt;If &lt;code&gt;ENGINE_INTERNAL_TOKEN&lt;/code&gt; is &lt;strong&gt;not set&lt;/strong&gt;, the &lt;code&gt;/env&lt;/code&gt; endpoint is unprotected for backward compatibility and local development. &lt;strong&gt;Always set this variable in production.&lt;/strong&gt; Generate one with:&lt;/p&gt;
+&lt;div class="hextra-code-block hx:relative hx:mt-6 hx:first:mt-0 hx:group/code"&gt;
+&lt;div&gt;&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-bash" data-lang="bash"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;python3 -c &lt;span class="s2"&gt;&amp;#34;import secrets; print(secrets.token_urlsafe(32))&amp;#34;&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;&lt;div class="hextra-code-copy-btn-container hx:opacity-0 hx:transition hx:group-hover/code:opacity-100 hx:flex hx:gap-1 hx:absolute hx:m-[11px] hx:right-0 hx:top-0"&gt;
+&lt;button
+class="hextra-code-copy-btn hx:group/copybtn hx:cursor-pointer hx:transition-all hx:active:opacity-50 hx:bg-primary-700/5 hx:border hx:border-black/5 hx:text-gray-600 hx:hover:text-gray-900 hx:rounded-md hx:p-1.5 hx:dark:bg-primary-300/10 hx:dark:border-white/10 hx:dark:text-gray-400 hx:dark:hover:text-gray-50"
+title="Copy code"
+aria-label="Copy code"
+data-copied-label="Copied!"
+&gt;
+&lt;div class="hextra-copy-icon hx:group-[.copied]/copybtn:hidden hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;div class="hextra-success-icon hx:hidden hx:group-[.copied]/copybtn:block hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;/button&gt;
+&lt;/div&gt;
+&lt;/div&gt;&lt;/div&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;p&gt;The token flows as follows:&lt;/p&gt;
+&lt;ol&gt;
+&lt;li&gt;You set &lt;code&gt;ENGINE_INTERNAL_TOKEN&lt;/code&gt; in &lt;code&gt;.env&lt;/code&gt;&lt;/li&gt;
+&lt;li&gt;Docker Compose passes it to the API server and engine containers&lt;/li&gt;
+&lt;li&gt;The engine injects it into agent containers as an environment variable&lt;/li&gt;
+&lt;li&gt;All three (engine, agent container, API) share the same secret&lt;/li&gt;
+&lt;li&gt;The API validates the token on the &lt;code&gt;/env&lt;/code&gt; endpoint only — all other endpoints remain open&lt;/li&gt;
+&lt;/ol&gt;
 &lt;h2&gt;Managing Secrets&lt;span class="hx:absolute hx:-mt-20" id="managing-secrets"&gt;&lt;/span&gt;
 &lt;a href="#managing-secrets" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;h3&gt;Via Dashboard&lt;span class="hx:absolute hx:-mt-20" id="via-dashboard"&gt;&lt;/span&gt;
 &lt;a href="#via-dashboard" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h3&gt;&lt;ol&gt;
@@ -1527,6 +1565,7 @@ data-copied-label="Copied!"
 &lt;li&gt;Secrets are encrypted before touching the database — PostgreSQL never sees plaintext&lt;/li&gt;
 &lt;li&gt;Each encryption uses a unique random nonce — identical secrets produce different ciphertexts&lt;/li&gt;
 &lt;li&gt;GCM authentication tags prevent tampering — any modification is detected on decryption&lt;/li&gt;
-&lt;li&gt;The dashboard and API only expose masked previews — you can verify a secret exists without seeing its value&lt;/li&gt;
+&lt;li&gt;Most API endpoints return only masked previews — you can verify a secret exists without seeing its value&lt;/li&gt;
+&lt;li&gt;The plaintext injection endpoint (&lt;code&gt;/env&lt;/code&gt;) is protected by &lt;code&gt;ENGINE_INTERNAL_TOKEN&lt;/code&gt; — without it, callers get &lt;code&gt;403 Forbidden&lt;/code&gt;&lt;/li&gt;
 &lt;li&gt;Agent containers receive secrets only at spawn time via environment variables — they&amp;rsquo;re not written to disk inside the container&lt;/li&gt;
 &lt;/ul&gt;</description></item></channel></rss>
