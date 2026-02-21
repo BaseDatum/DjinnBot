@@ -836,8 +836,16 @@ def step_ask_ssl(ip: str) -> bool:
     return typer.confirm("Set up SSL with automatic certificates?", default=True)
 
 
-def step_configure_ssl(env_path: Path, repo_dir: Path, ip: str) -> Optional[str]:
-    """Configure SSL with Traefik. Returns domain name or None."""
+def step_configure_ssl(
+    env_path: Path, repo_dir: Path, ip: str
+) -> tuple[Optional[str], Optional[str], str]:
+    """Configure SSL with Traefik.
+
+    Returns (domain, api_domain, routing_mode) where:
+      - domain: the primary domain (dashboard)
+      - api_domain: the API domain (same as domain for path mode, subdomain for subdomain mode)
+      - routing_mode: "path" or "subdomain"
+    """
     console.print(Panel("[bold]SSL Setup[/bold]"))
 
     # Get domain
@@ -847,7 +855,7 @@ def step_configure_ssl(env_path: Path, repo_dir: Path, ip: str) -> Optional[str]
 
     if not domain or "." not in domain:
         console.print("[red]Invalid domain name[/red]")
-        return None
+        return None, None, "path"
 
     # Verify DNS
     console.print(f"[dim]Checking DNS for {domain}...[/dim]")
@@ -860,7 +868,57 @@ def step_configure_ssl(env_path: Path, repo_dir: Path, ip: str) -> Optional[str]
         )
         proceed = typer.confirm("Continue anyway?", default=False)
         if not proceed:
-            return None
+            return None, None, "path"
+
+    # ── API routing mode ────────────────────────────────────────────
+    console.print(
+        "\n[bold]How should the API be accessed?[/bold]\n\n"
+        "  [cyan]1.[/cyan] [bold]Same domain, path prefix[/bold] (recommended)\n"
+        f"     Dashboard: https://{domain}\n"
+        f"     API:       https://{domain}/api/v1/...\n"
+        "     Single certificate. Traefik rewrites /api → / for the API.\n\n"
+        "  [cyan]2.[/cyan] [bold]Separate subdomain[/bold]\n"
+        f"     Dashboard: https://{domain}\n"
+        f"     API:       https://api.{domain}/v1/...\n"
+        "     Two certificates. Requires a second DNS A record.\n"
+    )
+
+    mode_choice = typer.prompt("Select routing mode (1 or 2)", default="1").strip()
+
+    if mode_choice == "2":
+        routing_mode = "subdomain"
+        # Derive api subdomain from the dashboard domain
+        default_api_domain = f"api.{domain}"
+        api_domain = (
+            typer.prompt(
+                "API subdomain",
+                default=default_api_domain,
+            )
+            .strip()
+            .lower()
+        )
+
+        # Verify DNS for api subdomain
+        console.print(f"[dim]Checking DNS for {api_domain}...[/dim]")
+        api_dns_ok = _verify_dns(api_domain, ip)
+        if not api_dns_ok:
+            console.print(
+                f"[yellow]DNS for {api_domain} does not appear to resolve to {ip}[/yellow]\n"
+                f"Make sure you have an A record: {api_domain} → {ip}\n"
+            )
+            proceed = typer.confirm("Continue anyway?", default=False)
+            if not proceed:
+                return None, None, "path"
+
+        console.print(
+            f"[green]Subdomain mode:[/green] API at [cyan]https://{api_domain}[/cyan]"
+        )
+    else:
+        routing_mode = "path"
+        api_domain = domain
+        console.print(
+            f"[green]Path mode:[/green] API at [cyan]https://{domain}/api[/cyan]"
+        )
 
     # Get email for Let's Encrypt
     email = typer.prompt(
@@ -869,22 +927,37 @@ def step_configure_ssl(env_path: Path, repo_dir: Path, ip: str) -> Optional[str]
 
     if not email or "@" not in email:
         console.print("[red]Valid email required for Let's Encrypt[/red]")
-        return None
+        return None, None, "path"
 
     # Set env values
     set_env_value(env_path, "DOMAIN", domain)
     set_env_value(env_path, "BIND_HOST", "127.0.0.1")
     set_env_value(env_path, "TRAEFIK_ENABLED", "true")
-    set_env_value(env_path, "VITE_API_URL", f"https://{domain}")
+
+    if routing_mode == "subdomain":
+        set_env_value(env_path, "API_DOMAIN", api_domain)
+        set_env_value(env_path, "VITE_API_URL", f"https://{api_domain}")
+    else:
+        # Path mode: dashboard calls /api/v1/..., Traefik strips /api
+        set_env_value(env_path, "VITE_API_URL", f"https://{domain}/api")
 
     # Write proxy/.env
     proxy_dir = repo_dir / "proxy"
     proxy_env = proxy_dir / ".env"
-    proxy_env.write_text(f"ACME_EMAIL={email}\nDOMAIN={domain}\n")
+    proxy_env_content = f"ACME_EMAIL={email}\nDOMAIN={domain}\n"
+    if routing_mode == "subdomain":
+        proxy_env_content += f"API_DOMAIN={api_domain}\n"
+    proxy_env.write_text(proxy_env_content)
     console.print(f"[green]Proxy config written to proxy/.env[/green]")
 
     # Generate docker-compose.override.yml for Traefik integration
-    _write_compose_override(repo_dir, domain, ssl=True)
+    _write_compose_override(
+        repo_dir,
+        domain=domain,
+        api_domain=api_domain,
+        routing_mode=routing_mode,
+        ssl=True,
+    )
 
     # Generate the SSL proxy compose (always write — never rely on static file)
     _write_proxy_compose(repo_dir, ssl=True)
@@ -893,7 +966,7 @@ def step_configure_ssl(env_path: Path, repo_dir: Path, ip: str) -> Optional[str]
     _setup_proxy_network()
 
     console.print(f"[green]SSL configured for {domain}[/green]")
-    return domain
+    return domain, api_domain, routing_mode
 
 
 def _verify_dns(domain: str, expected_ip: str) -> bool:
@@ -909,37 +982,105 @@ def _write_compose_override(
     repo_dir: Path,
     domain: Optional[str],
     ssl: bool = True,
+    api_domain: Optional[str] = None,
+    routing_mode: str = "path",
 ) -> None:
     """Generate docker-compose.override.yml for Traefik integration.
 
-    When ssl=True, routes use the 'websecure' entrypoint with TLS.
-    When ssl=False (HTTP-only mode for pre-built images), routes use 'web' entrypoint.
+    Supports three routing modes:
+      - "path" (SSL):       Same domain, /api/* → API with StripPrefix, /* → dashboard
+      - "subdomain" (SSL):  api.domain → API, domain → dashboard, two certs
+      - HTTP-only (no SSL): PathPrefix routing on port 80
     """
     override_path = repo_dir / "docker-compose.override.yml"
 
-    # Determine entrypoint and TLS lines
-    if ssl and domain:
-        host_rule = f"Host(`{domain}`)"
-        api_entrypoint = "websecure"
-        dash_entrypoint = "websecure"
-        tls_lines_api = (
-            '      - "traefik.http.routers.djinnbot-api.tls.certresolver=letsencrypt"'
-        )
-        tls_lines_dash = '      - "traefik.http.routers.djinnbot-dashboard.tls.certresolver=letsencrypt"'
+    if ssl and domain and routing_mode == "subdomain":
+        # ── Subdomain mode: api.domain.com → API, domain.com → dashboard ──
+        effective_api_domain = api_domain or f"api.{domain}"
+
+        content = f"""# Generated by `djinn setup` — Traefik reverse proxy (subdomain mode)
+# API:       https://{effective_api_domain}
+# Dashboard: https://{domain}
+# Delete this file to revert to direct port-binding mode.
+
+services:
+  api:
+    networks:
+      - djinnbot_default
+      - djinnbot-proxy
+    labels:
+      - "traefik.enable=true"
+      # Route all traffic for the API subdomain to the API
+      - "traefik.http.routers.djinnbot-api.rule=Host(`{effective_api_domain}`)"
+      - "traefik.http.routers.djinnbot-api.entrypoints=websecure"
+      - "traefik.http.routers.djinnbot-api.tls.certresolver=letsencrypt"
+      - "traefik.http.services.djinnbot-api.loadbalancer.server.port=8000"
+      # Flush immediately for SSE streaming
+      - "traefik.http.services.djinnbot-api.loadbalancer.responseforwarding.flushinterval=-1"
+
+  dashboard:
+    networks:
+      - djinnbot_default
+      - djinnbot-proxy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.djinnbot-dashboard.rule=Host(`{domain}`)"
+      - "traefik.http.routers.djinnbot-dashboard.entrypoints=websecure"
+      - "traefik.http.routers.djinnbot-dashboard.tls.certresolver=letsencrypt"
+      - "traefik.http.services.djinnbot-dashboard.loadbalancer.server.port=80"
+
+networks:
+  djinnbot-proxy:
+    external: true
+"""
+
+    elif ssl and domain:
+        # ── Path mode: domain.com/api/* → API, domain.com/* → dashboard ──
+        content = f"""# Generated by `djinn setup` — Traefik reverse proxy (path mode)
+# API:       https://{domain}/api/v1/...
+# Dashboard: https://{domain}
+# Traefik strips /api prefix before forwarding to the API container.
+# Delete this file to revert to direct port-binding mode.
+
+services:
+  api:
+    networks:
+      - djinnbot_default
+      - djinnbot-proxy
+    labels:
+      - "traefik.enable=true"
+      # Route /api/* to the API container
+      - "traefik.http.routers.djinnbot-api.rule=Host(`{domain}`) && PathPrefix(`/api`)"
+      - "traefik.http.routers.djinnbot-api.entrypoints=websecure"
+      - "traefik.http.routers.djinnbot-api.tls.certresolver=letsencrypt"
+      # Strip /api prefix: /api/v1/status → /v1/status (what the API expects)
+      - "traefik.http.routers.djinnbot-api.middlewares=strip-api@docker"
+      - "traefik.http.middlewares.strip-api.stripprefix.prefixes=/api"
+      - "traefik.http.services.djinnbot-api.loadbalancer.server.port=8000"
+      # Flush immediately for SSE streaming
+      - "traefik.http.services.djinnbot-api.loadbalancer.responseforwarding.flushinterval=-1"
+
+  dashboard:
+    networks:
+      - djinnbot_default
+      - djinnbot-proxy
+    labels:
+      - "traefik.enable=true"
+      # Catch-all for the domain (lower priority than /api prefix)
+      - "traefik.http.routers.djinnbot-dashboard.rule=Host(`{domain}`)"
+      - "traefik.http.routers.djinnbot-dashboard.entrypoints=websecure"
+      - "traefik.http.routers.djinnbot-dashboard.tls.certresolver=letsencrypt"
+      - "traefik.http.services.djinnbot-dashboard.loadbalancer.server.port=80"
+      - "traefik.http.routers.djinnbot-dashboard.priority=1"
+
+networks:
+  djinnbot-proxy:
+    external: true
+"""
+
     else:
-        # HTTP-only: match any host on the web (port 80) entrypoint
-        host_rule = "PathPrefix(`/`)"
-        api_entrypoint = "web"
-        dash_entrypoint = "web"
-        tls_lines_api = ""
-        tls_lines_dash = ""
-
-    api_rule = (
-        f"Host(`{domain}`) && PathPrefix(`/v1`)" if domain else "PathPrefix(`/v1`)"
-    )
-
-    content = f"""# Generated by `djinn setup` — Traefik reverse proxy integration
-# {"SSL mode — routes via HTTPS with auto-renewing certificates." if ssl else "HTTP-only mode — Traefik routes port 80 to dashboard and API."}
+        # ── HTTP-only mode (no SSL, pre-built images) ──
+        content = """# Generated by `djinn setup` — Traefik reverse proxy (HTTP-only)
 # Delete this file to revert to direct port-binding mode.
 
 services:
@@ -950,9 +1091,8 @@ services:
     labels:
       - "traefik.enable=true"
       # Route /v1/* to the API (higher priority due to longer rule)
-      - "traefik.http.routers.djinnbot-api.rule={api_rule}"
-      - "traefik.http.routers.djinnbot-api.entrypoints={api_entrypoint}"
-{tls_lines_api}
+      - "traefik.http.routers.djinnbot-api.rule=PathPrefix(`/v1`)"
+      - "traefik.http.routers.djinnbot-api.entrypoints=web"
       - "traefik.http.services.djinnbot-api.loadbalancer.server.port=8000"
       # Flush immediately for SSE streaming
       - "traefik.http.services.djinnbot-api.loadbalancer.responseforwarding.flushinterval=-1"
@@ -964,9 +1104,8 @@ services:
     labels:
       - "traefik.enable=true"
       # Catch-all (lower priority than /v1 prefix)
-      - "traefik.http.routers.djinnbot-dashboard.rule={host_rule}"
-      - "traefik.http.routers.djinnbot-dashboard.entrypoints={dash_entrypoint}"
-{tls_lines_dash}
+      - "traefik.http.routers.djinnbot-dashboard.rule=PathPrefix(`/`)"
+      - "traefik.http.routers.djinnbot-dashboard.entrypoints=web"
       - "traefik.http.services.djinnbot-dashboard.loadbalancer.server.port=80"
       - "traefik.http.routers.djinnbot-dashboard.priority=1"
 
@@ -974,8 +1113,6 @@ networks:
   djinnbot-proxy:
     external: true
 """
-    # Clean up blank lines from empty TLS sections
-    content = re.sub(r"\n\n\n+", "\n\n", content)
 
     override_path.write_text(content)
     console.print(f"[green]Generated docker-compose.override.yml[/green]")
@@ -1319,15 +1456,19 @@ def step_verify_deployment(
         all_ok = False
 
     # ── 2. Check dashboard is reachable at the configured URL ───────
+    # Read VITE_API_URL from .env — this is the source of truth set by the
+    # setup wizard for all modes (path, subdomain, direct, proxy).
+    vite_api_url = get_env_value(env_path, "VITE_API_URL")
+
     if ssl_enabled and domain:
         dashboard_url = f"https://{domain}"
-        api_url = f"https://{domain}/v1/status"
+        api_url = f"{vite_api_url}/v1/status" if vite_api_url else f"https://{domain}/v1/status"
     elif use_proxy:
         dashboard_url = f"http://{ip}"
-        api_url = f"http://{ip}/v1/status"
+        api_url = f"{vite_api_url}/v1/status" if vite_api_url else f"http://{ip}/v1/status"
     else:
         dashboard_url = f"http://{ip}:{dash_port}"
-        api_url = f"http://{ip}:{api_port}/v1/status"
+        api_url = f"{vite_api_url}/v1/status" if vite_api_url else f"http://{ip}:{api_port}/v1/status"
 
     # Check dashboard
     console.print(f"[dim]Checking dashboard at {dashboard_url} ...[/dim]")
@@ -1356,6 +1497,21 @@ def step_verify_deployment(
         else:
             console.print(f"  [red]SSL certificate issue: {ssl_detail}[/red]")
             all_ok = False
+
+        # Check API subdomain cert if using subdomain routing
+        api_domain = get_env_value(env_path, "API_DOMAIN")
+        if api_domain and api_domain != domain:
+            console.print(f"[dim]Verifying SSL certificate for {api_domain}...[/dim]")
+            api_ssl_ok, api_ssl_detail = _check_ssl_cert(api_domain)
+            if api_ssl_ok:
+                console.print(
+                    f"  [green]API SSL certificate valid ({api_ssl_detail})[/green]"
+                )
+            else:
+                console.print(
+                    f"  [red]API SSL certificate issue: {api_ssl_detail}[/red]"
+                )
+                all_ok = False
 
     # ── Troubleshooting ─────────────────────────────────────────────
     if not all_ok:
@@ -1534,6 +1690,9 @@ def _print_troubleshooting(
     if ssl_enabled and domain:
         console.print("[bold]SSL troubleshooting:[/bold]")
         console.print(f"  - DNS must resolve: {domain} -> {ip}")
+        api_domain = get_env_value(env_path, "API_DOMAIN")
+        if api_domain and api_domain != domain:
+            console.print(f"  - API DNS must also resolve: {api_domain} -> {ip}")
         console.print("  - Port 80 must be open (Let's Encrypt HTTP challenge)")
         console.print("  - Port 443 must be open")
         console.print(
@@ -1595,16 +1754,19 @@ def step_print_summary(
     dash_port = get_env_value(env_path, "DASHBOARD_PORT") or "3000"
     auth_enabled = get_env_value(env_path, "AUTH_ENABLED") == "true"
 
+    # Read VITE_API_URL from .env — the source of truth for all routing modes
+    vite_api_url = get_env_value(env_path, "VITE_API_URL")
+
     if ssl_enabled and domain:
         dashboard_url = f"https://{domain}"
-        api_url = f"https://{domain}/v1"
+        api_url = f"{vite_api_url}/v1" if vite_api_url else f"https://{domain}/v1"
     elif use_proxy:
         # HTTP-only Traefik (pre-built mode)
         dashboard_url = f"http://{ip}"
-        api_url = f"http://{ip}/v1"
+        api_url = f"{vite_api_url}/v1" if vite_api_url else f"http://{ip}/v1"
     else:
         dashboard_url = f"http://{ip}:{dash_port}"
-        api_url = f"http://{ip}:{api_port}"
+        api_url = f"{vite_api_url}/v1" if vite_api_url else f"http://{ip}:{api_port}/v1"
 
     console.print("")
     console.print(
@@ -1730,7 +1892,7 @@ def setup(
 
     # ── SSL configuration (sets VITE_API_URL, BIND_HOST, etc.) ──────
     if ssl_enabled:
-        domain = step_configure_ssl(env_path, repo_dir, ip)
+        domain, _api_domain, _routing_mode = step_configure_ssl(env_path, repo_dir, ip)
         if not domain:
             ssl_enabled = False
             console.print("[yellow]SSL setup skipped. Continuing without SSL.[/yellow]")
