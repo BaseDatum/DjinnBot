@@ -65,6 +65,30 @@ This starts 5 services: PostgreSQL, Redis, API server, pipeline engine, dashboar
 
 Open the dashboard, start a new run with the engineering pipeline, describe what you want built, and watch the agents work.
 
+### CLI
+
+Install the CLI to manage agents, providers, and chat from the terminal:
+
+```bash
+pip install djinn-bot-cli
+djinn --help
+```
+
+Chat with an agent interactively:
+
+```bash
+djinn chat
+```
+
+Configure model provider API keys:
+
+```bash
+djinn provider set-key anthropic
+djinn provider set-key openrouter
+```
+
+See the [CLI reference](https://docs.djinn.bot/docs/reference/cli/) for all commands.
+
 ---
 
 ## Architecture
@@ -274,7 +298,7 @@ djinnbot/
 │   ├── slack/                  # Slack bridge and per-agent bots
 │   └── agent-runtime/          # Agent container entrypoint + tools
 ├── mcp/                        # MCP tool server config
-├── cli/                        # Python CLI (djinnbot command)
+├── cli/                        # Python CLI (pip install djinn-bot-cli)
 ├── docker-compose.yml
 ├── Dockerfile.engine
 ├── Dockerfile.server
@@ -294,7 +318,7 @@ For local development (not Docker):
 # Install dependencies
 npm install
 cd packages/server && pip install -e ".[dev]" && cd ../..
-cd cli && pip install -e . && cd ..
+cd cli && uv sync --all-extras && cd ..
 
 # Start services
 redis-server &

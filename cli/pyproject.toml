@@ -1,5 +1,5 @@
 [project]
-name = "djinnbot-cli"
+name = "djinn-bot-cli"
 version = "0.1.0"
 description = "Python CLI for djinnbot"
 readme = "README.md"
@@ -9,10 +9,18 @@ dependencies = [
     "httpx>=0.27.0",
     "rich>=13.0.0",
     "websockets>=12.0",
+    "textual>=0.80.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-mock>=3.12",
+    "respx>=0.21.0",
 ]
 
 [project.scripts]
-djinnbot = "djinnbot.main:app"
+djinn = "djinnbot.main:app"
 
 [build-system]
 requires = ["hatchling"]
@@ -20,3 +28,6 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["djinnbot"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
