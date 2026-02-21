@@ -560,4 +560,56 @@ export class ContainerManager {
   getContainer(runId: string): ContainerInfo | undefined {
     return this.containers.get(runId);
   }
+
+  /**
+   * Kill any running containers whose name matches a prefix pattern.
+   *
+   * Used on engine startup as a safety net to clean up Docker containers that
+   * survived a restart but are not tracked in the in-memory session maps or the
+   * database.  Typical pattern: `djinn-run-slack_` to catch orphaned Slack
+   * conversation containers.
+   *
+   * @param namePrefix - Docker container name prefix to match (e.g. `djinn-run-slack_`)
+   * @param excludeRunIds - Set of runIds that are actively managed and should NOT be killed
+   * @returns Number of containers stopped
+   */
+  async killOrphanedContainersByPrefix(
+    namePrefix: string,
+    excludeRunIds?: Set<string>,
+  ): Promise<number> {
+    let stopped = 0;
+    try {
+      // List all running containers
+      const containers = await this.docker.listContainers({ all: false });
+      for (const info of containers) {
+        // Docker container names are prefixed with '/'
+        const name = (info.Names?.[0] ?? '').replace(/^\//, '');
+        if (!name.startsWith(namePrefix)) continue;
+
+        // Derive runId from the container name (strip the "djinn-run-" prefix)
+        const runId = name.replace(/^djinn-run-/, '');
+        if (excludeRunIds?.has(runId)) continue;
+
+        console.log(`[ContainerManager] Killing orphaned container: ${name} (${info.Id.slice(0, 12)})`);
+        try {
+          const container = this.docker.getContainer(info.Id);
+          await container.stop({ t: 5 });
+          stopped++;
+          // AutoRemove should clean it up; explicit remove as safety net
+          try {
+            await container.remove({ force: false });
+          } catch {
+            // Ignore — AutoRemove or already gone
+          }
+        } catch (err: any) {
+          if (!err.message?.includes('not running')) {
+            console.warn(`[ContainerManager] Failed to kill orphaned container ${name}:`, err.message);
+          }
+        }
+      }
+    } catch (err) {
+      console.error('[ContainerManager] Error listing containers for orphan cleanup:', err);
+    }
+    return stopped;
+  }
 }

@@ -982,6 +982,21 @@ async function main(): Promise<void> {
       }
     }
 
+    // Docker-level safety net: kill any running djinn-run-slack_* containers
+    // that are not tracked by the current engine process.  This catches containers
+    // that survived a docker-compose restart but were never registered in the DB
+    // (e.g. Slack sessions started before the DB-registration fix).
+    if (chatSessionManager) {
+      try {
+        const killed = await chatSessionManager.killOrphanedContainersByPrefix('djinn-run-slack_');
+        if (killed > 0) {
+          console.log(`[Engine] Killed ${killed} orphaned Slack container(s) at Docker level`);
+        }
+      } catch (err) {
+        console.warn('[Engine] Docker-level Slack container cleanup failed:', err);
+      }
+    }
+
     // Start listening for new run events
     console.log('[Engine] Ready to process runs');
     

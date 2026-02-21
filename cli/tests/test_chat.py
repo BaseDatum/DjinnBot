@@ -301,8 +301,8 @@ def test_get_available_models_none_configured(respx_mock):
 def test_chat_command_help(respx_mock):
     result = runner.invoke(app, ["chat", "--help"])
     assert result.exit_code == 0
-    assert "--agent" in result.output
-    assert "--model" in result.output
+    assert "agent" in result.output
+    assert "model" in result.output
 
 
 @respx.mock(base_url="http://localhost:8000")

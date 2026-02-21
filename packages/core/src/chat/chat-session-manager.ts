@@ -1003,6 +1003,13 @@ export class ChatSessionManager {
     };
     this.activeSessions.set(sessionId, session);
     
+    // Ensure the session has a DB row. Dashboard/CLI sessions are created via
+    // the API (POST /agents/{id}/chat/start) before the engine is signaled, but
+    // Slack-originated sessions bypass that flow — they call startSession()
+    // directly. Without a DB row the orphan-recovery path cannot discover the
+    // session after an engine restart, leaving Docker containers running forever.
+    await this.ensureSessionInDb(sessionId, agentId, model);
+    
     // Update API
     await this.updateSessionStatus(sessionId, 'starting');
     
@@ -1797,6 +1804,30 @@ export class ChatSessionManager {
   }
 
   /**
+   * Ensure a ChatSession row exists in the database for this session.
+   *
+   * Dashboard / CLI sessions are created via POST /agents/{id}/chat/start
+   * before the engine is signaled.  Slack-originated sessions bypass that
+   * endpoint and call startSession() directly, so without this call the DB
+   * has no record of the session — making orphan recovery impossible after
+   * an engine restart.
+   *
+   * Uses PUT (upsert) so it's safe to call even if the row already exists.
+   */
+  private async ensureSessionInDb(sessionId: string, agentId: string, model: string): Promise<void> {
+    try {
+      await fetch(`${this.apiBaseUrl}/v1/internal/chat/sessions/${sessionId}/ensure`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ agent_id: agentId, model, status: 'starting' }),
+      });
+    } catch (err) {
+      console.warn(`[ChatSessionManager] Failed to ensure session DB row for ${sessionId}:`, err);
+      // Non-fatal — the session will still work, just won't be recoverable after restart
+    }
+  }
+
+  /**
    * Update session status via API.
    */
   private async updateSessionStatus(sessionId: string, status: string, error?: string): Promise<void> {
@@ -1827,6 +1858,21 @@ export class ChatSessionManager {
     } catch (err) {
       console.error(`[ChatSessionManager] Failed to update container info:`, err);
     }
+  }
+
+  /**
+   * Kill orphaned Docker containers whose names match the given prefix.
+   *
+   * Called on engine startup as a safety net: even if the DB-based orphan
+   * recovery runs first, there may be containers that were never registered
+   * in the database (e.g. Slack sessions started before the DB-registration
+   * fix was deployed).  This catches them at the Docker level.
+   *
+   * Excludes any sessions that are currently active in this manager.
+   */
+  async killOrphanedContainersByPrefix(namePrefix: string): Promise<number> {
+    const activeIds = new Set(this.activeSessions.keys());
+    return this.containerManager.killOrphanedContainersByPrefix(namePrefix, activeIds);
   }
 
   /**

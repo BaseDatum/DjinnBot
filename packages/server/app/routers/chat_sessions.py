@@ -426,6 +426,56 @@ async def update_session_container(
     return {"ok": True}
 
 
+class EnsureSessionRequest(BaseModel):
+    """Create a chat session if it doesn't already exist.
+
+    Used by the engine for Slack-originated sessions which bypass the normal
+    ``POST /agents/{agent_id}/chat/start`` flow (that endpoint creates the DB
+    row).  Without a DB row the orphan-recovery logic cannot find the session
+    after an engine restart, leaving Docker containers running indefinitely.
+    """
+
+    agent_id: str
+    model: str
+    status: str = "starting"
+
+
+@router.put("/internal/chat/sessions/{session_id}/ensure")
+async def ensure_chat_session(
+    session_id: str,
+    request: EnsureSessionRequest,
+    db: AsyncSession = Depends(get_async_session),
+):
+    """Upsert a chat session row — create it if missing, update if exists.
+
+    Called by the engine's ChatSessionManager.startSession() so that every
+    session (including Slack-originated ones) has a DB presence that the
+    orphan-recovery path can discover after a restart.
+    """
+    result = await db.execute(select(ChatSession).where(ChatSession.id == session_id))
+    session = result.scalar_one_or_none()
+
+    now = now_ms()
+    if session:
+        # Row exists — touch last_activity_at and update status
+        session.status = request.status
+        session.last_activity_at = now
+    else:
+        # Create a new row
+        session = ChatSession(
+            id=session_id,
+            agent_id=request.agent_id,
+            status=request.status,
+            model=request.model,
+            created_at=now,
+            last_activity_at=now,
+        )
+        db.add(session)
+
+    await db.commit()
+    return {"ok": True, "created": session.created_at == now}
+
+
 class AddMessageRequest(BaseModel):
     role: str
     content: str
