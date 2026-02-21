@@ -3,7 +3,7 @@ title: CLI Reference
 weight: 2
 ---
 
-The DjinnBot CLI (`djinn`) provides command-line access to agents, pipelines, memory, model providers, and an interactive chat TUI.
+The DjinnBot CLI (`djinn`) provides command-line access to setup, authentication, agents, pipelines, memory, model providers, and an interactive chat TUI.
 
 ## Installation
 
@@ -19,11 +19,19 @@ Or with [uv](https://docs.astral.sh/uv/):
 uv tool install djinn-bot-cli
 ```
 
+Or with [pipx](https://pipx.pypa.io/):
+
+```bash
+pipx install djinn-bot-cli
+```
+
 Verify installation:
 
 ```bash
 djinn --help
 ```
+
+The [one-line installer](/docs/getting-started/installation#one-line-install-recommended) also installs the CLI automatically.
 
 ### Development Install
 
@@ -48,7 +56,76 @@ export DJINNBOT_URL=http://your-server:8000
 djinn status
 ```
 
+### Authentication
+
+When the server has authentication enabled, you need to log in before using most commands. The CLI automatically resolves credentials in this order:
+
+1. `--api-key` flag (explicit)
+2. `DJINNBOT_API_KEY` environment variable
+3. Stored credentials from `djinn login` (saved in `~/.config/djinnbot/auth.json`)
+
+Stored JWT tokens are automatically refreshed when expired.
+
 ## Commands
+
+### Setup
+
+```bash
+djinn setup
+```
+
+Interactive setup wizard for first-time installation. Walks you through:
+
+1. Locating or cloning the DjinnBot repository
+2. Creating `.env` from `.env.example`
+3. Generating encryption keys and secrets
+4. Enabling authentication
+5. Detecting your server IP
+6. Optional SSL/TLS setup with Traefik
+7. Checking for port conflicts
+8. Configuring a model provider API key
+9. Starting the Docker Compose stack
+
+Options:
+
+| Flag | Description |
+|------|------------|
+| `--dir`, `-d` | Directory to install DjinnBot (default: `~/djinnbot` or current dir if already a repo) |
+| `--no-ssl` | Skip the SSL setup prompt |
+| `--no-provider` | Skip the provider API key prompt |
+
+Safe to re-run — detects existing configuration and skips what's already done.
+
+### Login
+
+```bash
+djinn login
+```
+
+Interactive login with email and password. If the account has 2FA enabled, you'll be prompted for a TOTP code. Enter `r` at the TOTP prompt to use a recovery code instead.
+
+```bash
+# Login with an API key instead of credentials
+djinn login --api-key <key>
+```
+
+API key login validates the key against the server and stores it for future use.
+
+### Logout
+
+```bash
+djinn logout
+```
+
+Clears stored credentials and invalidates the server-side refresh session.
+
+### Whoami
+
+```bash
+djinn whoami
+```
+
+Shows the currently authenticated user: display name, email, ID, admin status, service account status, and 2FA status.
 
 ### Status
 

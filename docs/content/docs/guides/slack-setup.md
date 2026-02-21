@@ -142,11 +142,21 @@ docker compose down && docker compose up -d
 
 The engine will connect each agent to Slack via Socket Mode on startup.
 
+## Project-Level Slack Configuration
+
+In addition to the global Slack channel, you can configure Slack settings per project through the dashboard:
+
+1. Open your project in the dashboard
+2. Go to **Settings > Slack**
+3. Configure a project-specific Slack channel
+
+This allows different projects to post updates to different channels, keeping conversations organized.
+
 ## How Slack Integration Works
 
 ### Pipeline Threads
 
-When a pipeline run starts, the engine creates a thread in the configured channel. Each step's output is posted as replies in the thread, attributed to the agent handling that step. You can watch a full engineering pipeline unfold as a Slack conversation.
+When a pipeline run starts, the engine creates a thread in the configured channel (project-specific or global fallback). Each step's output is posted as replies in the thread, attributed to the agent handling that step. You can watch a full engineering pipeline unfold as a Slack conversation.
 
 ### Mentions
 

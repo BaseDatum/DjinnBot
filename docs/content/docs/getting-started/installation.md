@@ -3,16 +3,51 @@ title: Installation
 weight: 1
 ---
 
-## Prerequisites
+## One-Line Install (Recommended)
 
-You need exactly two things:
+The fastest way to get DjinnBot running. A single command installs all prerequisites, launches the setup wizard, and starts the stack:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/BaseDatum/djinnbot/main/install.sh | bash
+```
+
+The installer automatically:
+
+1. Detects your platform (Linux or macOS, amd64 or arm64)
+2. Installs **git**, **Docker + Compose**, and **Python 3.11+** if missing
+3. Installs the **`djinn` CLI** via pip/pipx
+4. Launches the **interactive setup wizard** (`djinn setup`)
+
+The setup wizard then walks you through:
+
+1. **Cloning the repo** (or detecting an existing checkout)
+2. **Creating `.env`** from `.env.example`
+3. **Generating encryption keys** (`SECRET_ENCRYPTION_KEY`, `ENGINE_INTERNAL_TOKEN`, `AUTH_SECRET_KEY`, `MCPO_API_KEY`)
+4. **Enabling authentication** (recommended for anything beyond localhost)
+5. **Detecting your server IP** for network configuration
+6. **Optional SSL/TLS** with Traefik and automatic Let's Encrypt certificates
+7. **Port conflict checks**
+8. **Choosing a model provider** and entering your API key
+9. **Starting the Docker Compose stack**
+
+Supported platforms: **Ubuntu**, **Debian**, **Fedora**, **CentOS/RHEL**, **Rocky/Alma**, **Amazon Linux**, **Arch**, **macOS** (Intel and Apple Silicon).
+
+{{< callout type="info" >}}
+The setup wizard is idempotent — safe to re-run anytime. It detects existing configuration and skips what's already done. Run `djinn setup` again to change settings or add SSL later.
+{{< /callout >}}
+
+## Manual Install
+
+If you prefer to set things up yourself:
+
+### Prerequisites
 
 - **Docker + Docker Compose** — [Install Docker Desktop](https://docs.docker.com/get-docker/) (includes Compose)
 - **An LLM API key** — [OpenRouter](https://openrouter.ai/) is recommended (one key, access to all models)
 
 That's it. No Node.js, no Python, no database setup. Docker handles everything.
 
-## Clone & Configure
+### Clone & Configure
 
 ```bash
 git clone https://github.com/BaseDatum/djinnbot.git
@@ -31,28 +66,36 @@ OPENROUTER_API_KEY=sk-or-v1-your-key-here
 **OpenRouter** gives you access to Claude, GPT-4, Gemini, Kimi, and dozens of other models through a single API key. It's the fastest way to get started. You can also use direct provider keys (Anthropic, OpenAI, etc.) — see [LLM Providers](/docs/advanced/llm-providers) for details.
 {{< /callout >}}
 
-### Optional: Encryption Key
+### Generate Secrets
 
-For production deployments, generate a secrets encryption key:
+For production deployments, generate all required secrets:
 
 ```bash
-# Generate and add to .env
+# Encryption key for secrets at rest (AES-256-GCM)
 python3 -c "import secrets; print('SECRET_ENCRYPTION_KEY=' + secrets.token_hex(32))" >> .env
+
+# Internal service-to-service auth token
+python3 -c "import secrets; print('ENGINE_INTERNAL_TOKEN=' + secrets.token_urlsafe(32))" >> .env
+
+# JWT signing key for user authentication
+python3 -c "import secrets; print('AUTH_SECRET_KEY=' + secrets.token_urlsafe(64))" >> .env
 ```
 
-This encrypts user-defined secrets (API keys, SSH keys, etc.) at rest. Without it, secrets are encrypted with an ephemeral key that resets on restart.
+{{< callout type="warning" >}}
+When `AUTH_ENABLED=true`, both `ENGINE_INTERNAL_TOKEN` and `AUTH_SECRET_KEY` are **required**. The server will refuse to start without them. The setup wizard generates these automatically.
+{{< /callout >}}
 
-### Optional: Internal Token
+### Enable Authentication
 
-Protects the plaintext secrets endpoint from unauthorized access:
+To enable the built-in authentication system, set in `.env`:
 
 ```bash
-python3 -c "import secrets; print('ENGINE_INTERNAL_TOKEN=' + secrets.token_urlsafe(32))" >> .env
+AUTH_ENABLED=true
 ```
 
-Without this, the endpoint that returns decrypted secrets is open to anyone who can reach the API. See [Security Model](/docs/advanced/security) for details.
+When enabled, the dashboard will redirect to a setup page on first visit where you create an admin account and optionally enable two-factor authentication. See [Security Model](/docs/advanced/security) for details.
 
-## Start Services
+### Start Services
 
 ```bash
 docker compose up -d
@@ -77,6 +120,53 @@ docker compose ps
 
 You should see all services running with healthy status.
 
+## SSL/TLS with Traefik
+
+For production deployments exposed to the internet, DjinnBot includes a Traefik reverse proxy with automatic Let's Encrypt certificates.
+
+The setup wizard configures this automatically when you choose SSL. To set it up manually:
+
+**Requirements:**
+- A domain name with an A record pointing to your server
+- Ports 80 and 443 accessible from the internet
+
+**Configuration:**
+
+1. Set environment variables in `.env`:
+
+```bash
+DOMAIN=djinn.example.com
+BIND_HOST=127.0.0.1          # Only Traefik faces the internet
+TRAEFIK_ENABLED=true
+VITE_API_URL=https://djinn.example.com
+```
+
+2. Create `proxy/.env`:
+
+```bash
+ACME_EMAIL=you@example.com
+DOMAIN=djinn.example.com
+```
+
+3. Create the shared Docker network and start the proxy:
+
+```bash
+docker network create djinnbot-proxy
+docker compose -f proxy/docker-compose.yml up -d
+```
+
+4. Start the main stack (it picks up `docker-compose.override.yml` automatically):
+
+```bash
+docker compose up -d
+```
+
+Traefik handles:
+- Automatic certificate issuance and renewal via Let's Encrypt
+- HTTP to HTTPS redirection
+- Routing `/v1/*` to the API and everything else to the dashboard
+- SSE streaming support with proper flush intervals
+
 ## Verify
 
 Open the dashboard:
@@ -84,6 +174,8 @@ Open the dashboard:
 ```
 http://localhost:3000
 ```
+
+If authentication is enabled, you'll be redirected to the setup page to create your admin account.
 
 Check the API:
 
@@ -97,11 +189,11 @@ You should see a JSON response with `"status": "ok"` and connected service count
 
 Docker Compose built and started the entire stack:
 
-1. **PostgreSQL** stores pipeline runs, steps, agent state, project boards, and settings
+1. **PostgreSQL** stores pipeline runs, steps, agent state, project boards, user accounts, and settings
 2. **Redis** provides the event bus via Redis Streams — reliable, ordered message delivery between services
-3. **API Server** (FastAPI/Python) exposes REST endpoints for the dashboard, CLI, and external integrations
+3. **API Server** (FastAPI/Python) exposes REST endpoints for the dashboard, CLI, and external integrations, with optional JWT authentication
 4. **Pipeline Engine** (TypeScript/Node) runs the state machine that coordinates agent execution, spawns agent containers, manages memory, and bridges Slack
-5. **Dashboard** (React/Vite) serves the web interface with real-time SSE streaming
+5. **Dashboard** (React/Vite) serves the web interface with real-time SSE streaming, authentication pages, and project management
 6. **mcpo** proxies MCP tool servers (GitHub, web fetch, etc.) as OpenAPI endpoints for agents
 
 When a pipeline runs, the engine dynamically spawns **agent containers** — isolated Docker containers with a full engineering toolbox — for each step. These are separate from the 6 core services and are created/destroyed per step.
@@ -109,5 +201,6 @@ When a pipeline runs, the engine dynamically spawns **agent containers** — iso
 ## Next Steps
 
 {{< cards >}}
-  {{< card link="../first-run" title="Run Your First Pipeline" subtitle="Start an engineering pipeline and watch agents collaborate." >}}
+  {{< card link="../first-run" title="Run Your First Pipeline" subtitle="Create a project and watch agents collaborate." >}}
+  {{< card link="/docs/advanced/security" title="Security Model" subtitle="Authentication, 2FA, API keys, and container isolation." >}}
 {{< /cards >}}

@@ -25,7 +25,7 @@ layout: hextra-home
 {{< hextra/feature-grid >}}
   {{< hextra/feature-card
     title="Plug and Play"
-    subtitle="Clone, add an API key, docker compose up. No Kubernetes, no cloud accounts, no hour-long setup. Your AI team is running in under 5 minutes."
+    subtitle="One curl command installs everything. The setup wizard handles secrets, API keys, Docker, and optional SSL. Your AI team is running in under 5 minutes."
     class="hx-aspect-auto md:hx-aspect-[1.1/1] max-md:hx-min-h-[340px]"
     style="background: radial-gradient(ellipse at 50% 80%,rgba(45,112,234,0.15),hsla(0,0%,100%,0));"
   >}}
@@ -138,9 +138,9 @@ The engineering pipeline is fully operational today. Marketing, sales, and finan
 <tr><th></th><th>DjinnBot</th><th>OpenClaw</th><th>Typical Agent Frameworks</th></tr>
 </thead>
 <tbody>
-<tr><td><strong>Setup time</strong></td><td><code>docker compose up</code> &mdash; 5 minutes</td><td>Kubernetes + cloud config &mdash; hours</td><td>Framework wiring + custom code &mdash; hours to days</td></tr>
+<tr><td><strong>Setup time</strong></td><td>One <code>curl</code> command &mdash; 5 minutes</td><td>Kubernetes + cloud config &mdash; hours</td><td>Framework wiring + custom code &mdash; hours to days</td></tr>
 <tr><td><strong>Interface</strong></td><td>Full dashboard, Slack bots, chat, CLI, API</td><td>Basic web UI</td><td>Terminal output or minimal web UI</td></tr>
-<tr><td><strong>Security</strong></td><td>Every agent in isolated Docker container. No host access.</td><td>Direct host access, shell execution</td><td>Direct host access, shell execution</td></tr>
+<tr><td><strong>Security</strong></td><td>Container isolation, built-in auth with 2FA, automatic SSL, encrypted secrets</td><td>Direct host access, shell execution</td><td>Direct host access, shell execution</td></tr>
 <tr><td><strong>Agent memory</strong></td><td>Persistent semantic memory with knowledge graph across runs</td><td>Stateless or basic file storage</td><td>Stateless or basic file storage</td></tr>
 <tr><td><strong>Multi-agent collaboration</strong></td><td>Agents review, critique, and build on each other's work</td><td>Loose coordination</td><td>Single-agent or sequential handoff</td></tr>
 <tr><td><strong>Customization</strong></td><td>YAML pipelines, markdown personas &mdash; no code</td><td>Code-level changes</td><td>Code-level changes</td></tr>

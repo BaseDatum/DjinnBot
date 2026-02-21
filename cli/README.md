@@ -1,6 +1,6 @@
 # djinn-bot-cli
 
-CLI for the [DjinnBot](https://github.com/BaseDatum/djinnbot) agent orchestration platform. Chat with agents, manage pipelines, configure model providers, and browse agent memory — all from the terminal.
+CLI for the [DjinnBot](https://github.com/BaseDatum/djinnbot) agent orchestration platform. Set up DjinnBot, authenticate, chat with agents, manage pipelines, configure model providers, and browse agent memory — all from the terminal.
 
 ## Installation
 
@@ -14,9 +14,23 @@ Or with [uv](https://docs.astral.sh/uv/):
 uv tool install djinn-bot-cli
 ```
 
+Or with [pipx](https://pipx.pypa.io/):
+
+```bash
+pipx install djinn-bot-cli
+```
+
+The [one-line installer](https://github.com/BaseDatum/djinnbot#one-line-install-recommended) also installs the CLI automatically.
+
 ## Quick Start
 
 ```bash
+# First-time setup (interactive wizard)
+djinn setup
+
+# Log in to the server
+djinn login
+
 # Check server connectivity
 djinn status
 
@@ -31,6 +45,32 @@ djinn provider set-key anthropic
 ```
 
 ## Commands
+
+### `djinn setup`
+
+Interactive setup wizard for first-time installation. Handles cloning the repo, generating secrets, configuring a model provider, optional SSL/TLS with Traefik, and starting the Docker stack. Safe to re-run.
+
+```bash
+djinn setup                         # interactive setup
+djinn setup --dir /opt/djinnbot     # specify install directory
+djinn setup --no-ssl                # skip SSL prompt
+djinn setup --no-provider           # skip provider prompt
+```
+
+### `djinn login` / `djinn logout` / `djinn whoami`
+
+Authentication commands for servers with `AUTH_ENABLED=true`.
+
+```bash
+djinn login                         # interactive email/password + optional 2FA
+djinn login --api-key <key>         # login with an API key
+djinn whoami                        # show current user info
+djinn logout                        # clear credentials and invalidate session
+```
+
+Credentials are stored per server URL in `~/.config/djinnbot/auth.json`. JWT tokens are automatically refreshed when expired.
+
+**Authentication resolution order:** `--api-key` flag > `DJINNBOT_API_KEY` env var > stored credentials.
 
 ### `djinn status`
 

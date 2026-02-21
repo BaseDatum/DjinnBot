@@ -3,7 +3,19 @@ title: Your First Run
 weight: 2
 ---
 
-Now that DjinnBot is running, let's set up a project and watch agents work.
+Now that DjinnBot is running, let's complete initial setup and get agents working.
+
+## Initial Account Setup
+
+If you enabled authentication (`AUTH_ENABLED=true`), the first time you open the dashboard you'll be redirected to the **setup page**:
+
+1. **Create your admin account** — enter email, display name, and password (minimum 8 characters)
+2. **Enable 2FA** (recommended) — the setup wizard prompts you to set up TOTP two-factor authentication
+3. **Save recovery codes** — if you enabled 2FA, store these somewhere safe
+
+After completing setup, you're logged in and ready to go. Subsequent users can be created through the API.
+
+If authentication is disabled, you skip this step and go straight to the dashboard.
 
 ## The Two Workflows
 
@@ -93,10 +105,28 @@ For one-off structured workflows, you can also run pipelines directly:
 | `feature` | Adding a feature to existing code |
 | `bugfix` | Diagnosing and fixing a specific bug |
 
+## CLI Access
+
+If you want to interact from the terminal, install the CLI and log in:
+
+```bash
+pip install djinn-bot-cli
+
+# Log in (if auth is enabled)
+djinn login
+
+# Chat with an agent
+djinn chat
+
+# Check server status
+djinn status
+```
+
 ## Next Steps
 
 {{< cards >}}
   {{< card link="../dashboard-tour" title="Dashboard Tour" subtitle="Learn to navigate the full dashboard interface." >}}
   {{< card link="/docs/concepts/pulse" title="Pulse Mode" subtitle="How agents work autonomously on a schedule." >}}
+  {{< card link="/docs/advanced/security" title="Security Model" subtitle="Authentication, 2FA, API keys, and SSL setup." >}}
   {{< card link="/docs/guides/slack-setup" title="Set Up Slack" subtitle="Give each agent its own Slack bot." >}}
 {{< /cards >}}

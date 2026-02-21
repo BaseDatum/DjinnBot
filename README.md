@@ -4,7 +4,7 @@
 
 DjinnBot is an open-core agent orchestration platform that deploys a full team of AI agents — product owner, architect, engineers, QA, SRE, and more — to collaboratively execute software development workflows. Each agent has a distinct persona, persistent memory, and its own Slack presence. Define a task, kick off a pipeline, and watch your AI team spec, design, implement, review, test, and deploy — autonomously.
 
-Self-hosted is free. `docker compose up` and you're running.
+Self-hosted is free. One command to install, one command to run.
 
 **Docs:** [docs.djinn.bot](https://docs.djinn.bot) | **License:** [FSL-1.1-ALv2](LICENSE) (free to use, converts to Apache 2.0 after 2 years)
 
@@ -12,7 +12,7 @@ Self-hosted is free. `docker compose up` and you're running.
 
 ## Why DjinnBot
 
-- **Plug and play.** Clone, add an API key, `docker compose up`. No Kubernetes, no cloud accounts, no 45-minute setup guides.
+- **Plug and play.** One `curl` command installs everything. The setup wizard handles secrets, API keys, Docker, and optional SSL. No Kubernetes, no cloud accounts, no 45-minute setup guides.
 - **Fully containerized.** Every agent runs in its own isolated Docker container with a full engineering toolbox (Node, Python, Go, Rust, git, ripgrep, GitHub CLI, and dozens more). No host access, no security concerns.
 - **Real team, not a chatbot.** Agents have personas, opinions, and memory. Eric (Product Owner) pushes back on vague specs. Finn (Architect) rejects PRs that violate architecture. Chieko (QA) finds the edge cases you forgot.
 - **Persistent memory.** Agents remember decisions, lessons, and patterns across runs using ClawVault with semantic search. They learn and improve over time.
@@ -20,18 +20,35 @@ Self-hosted is free. `docker compose up` and you're running.
 - **Slack-native.** Each agent gets its own Slack bot. Watch your team discuss in threads. Mention an agent to get their perspective. Or skip Slack entirely and use the built-in chat.
 - **YAML pipelines.** Define workflows as simple YAML — steps, agents, branching, loops, retries. No code required for orchestration.
 - **MCP tools.** Agents can use any MCP-compatible tool server via the built-in mcpo proxy. Add GitHub, web search, or any custom tool with a single config entry.
+- **Built-in auth.** User accounts with email/password, TOTP two-factor authentication, API keys, and optional OIDC single sign-on. Enable with one toggle for production deployments.
 - **Open core.** Self-hosted is completely free. Use it, modify it, run it on your own infra. SaaS option coming for teams that don't want to manage infrastructure.
 
 ---
 
 ## Quick Start
 
-### Prerequisites
+### One-Line Install (Recommended)
 
-- **Docker + Docker Compose** (that's it for running)
-- **An LLM API key** — OpenRouter (recommended, access to all models), Anthropic, OpenAI, xAI, Google, or any supported provider
+The installer handles everything — Docker, Python, the CLI, cloning the repo, generating secrets, configuring your first model provider, optional SSL, and starting the stack:
 
-### 1. Clone & Configure
+```bash
+curl -fsSL https://raw.githubusercontent.com/BaseDatum/djinnbot/main/install.sh | bash
+```
+
+This installs prerequisites (Docker, Python 3.11+, git), installs the `djinn` CLI, and launches the interactive setup wizard which walks you through:
+
+1. Cloning the DjinnBot repository
+2. Generating encryption keys and secrets
+3. Choosing a model provider and entering your API key
+4. Detecting your server IP and configuring network access
+5. Optional SSL/TLS setup with Traefik (automatic Let's Encrypt certificates)
+6. Starting the Docker stack
+
+Works on **Linux** (Ubuntu, Debian, Fedora, CentOS, Arch, Amazon Linux) and **macOS** (Intel and Apple Silicon).
+
+### Manual Install
+
+If you prefer to set things up yourself:
 
 ```bash
 git clone https://github.com/BaseDatum/djinnbot.git
@@ -45,17 +62,23 @@ Edit `.env` and add your API key:
 OPENROUTER_API_KEY=sk-or-v1-your-key-here
 ```
 
-That's the minimum. Everything else has sensible defaults.
+Generate required secrets:
 
-### 2. Start
+```bash
+python3 -c "import secrets; print('SECRET_ENCRYPTION_KEY=' + secrets.token_hex(32))" >> .env
+python3 -c "import secrets; print('ENGINE_INTERNAL_TOKEN=' + secrets.token_urlsafe(32))" >> .env
+python3 -c "import secrets; print('AUTH_SECRET_KEY=' + secrets.token_urlsafe(64))" >> .env
+```
+
+Start services:
 
 ```bash
 docker compose up -d
 ```
 
-This starts 5 services: PostgreSQL, Redis, API server, pipeline engine, dashboard, and the mcpo tool proxy.
+This starts 6 services: PostgreSQL, Redis, API server, pipeline engine, dashboard, and the mcpo tool proxy.
 
-### 3. Use It
+### First Visit
 
 | Service | URL |
 |---------|-----|
@@ -63,21 +86,29 @@ This starts 5 services: PostgreSQL, Redis, API server, pipeline engine, dashboar
 | API | http://localhost:8000 |
 | MCP Tools | http://localhost:8001 |
 
-Open the dashboard, start a new run with the engineering pipeline, describe what you want built, and watch the agents work.
+When authentication is enabled (`AUTH_ENABLED=true`), the dashboard redirects you to a setup page on first visit where you create your admin account and optionally enable two-factor authentication.
 
 ### CLI
 
-Install the CLI to manage agents, providers, and chat from the terminal:
+Install the CLI to manage agents, providers, authenticate, and chat from the terminal:
 
 ```bash
 pip install djinn-bot-cli
 djinn --help
 ```
 
-Chat with an agent interactively:
+Log in and chat with agents:
 
 ```bash
-djinn chat
+djinn login                         # email/password + optional 2FA
+djinn chat                          # interactive agent + model selection
+djinn whoami                        # show current user
+```
+
+Run the setup wizard anytime:
+
+```bash
+djinn setup                         # interactive setup (safe to re-run)
 ```
 
 Configure model provider API keys:
@@ -261,7 +292,7 @@ Configure providers in `.env` or through the dashboard settings page. Each agent
 | Component | Technology |
 |-----------|-----------|
 | Pipeline Engine | TypeScript, Redis Streams |
-| API Server | Python, FastAPI, PostgreSQL, SQLAlchemy |
+| API Server | Python, FastAPI, PostgreSQL, SQLAlchemy, JWT auth |
 | Dashboard | React, Vite, TanStack Router, Tailwind CSS |
 | Agent Runtime | Node.js 22, Debian (full toolbox) |
 | Memory | ClawVault + QMDR (semantic search) |
@@ -299,6 +330,8 @@ djinnbot/
 │   └── agent-runtime/          # Agent container entrypoint + tools
 ├── mcp/                        # MCP tool server config
 ├── cli/                        # Python CLI (pip install djinn-bot-cli)
+├── proxy/                      # Traefik reverse proxy for SSL
+├── install.sh                  # One-shot installer script
 ├── docker-compose.yml
 ├── Dockerfile.engine
 ├── Dockerfile.server
@@ -338,12 +371,12 @@ cd packages/dashboard && npm run dev
 
 ## Roadmap
 
+- **RBAC & team management** — Role-based access control with granular permissions per project
 - **Marketing & sales pipelines** — Structured workflows for content, outreach, and deal management
 - **More bot interfaces** — Discord, Microsoft Teams, and other platforms beyond Slack
 - **SaaS offering** — Managed hosting at djinn.bot for teams that don't want to self-host
 - **Pipeline marketplace** — Share and discover community pipeline templates
 - **Custom agent builder** — Create new agents with custom personas through the UI
-- **GitHub App integration** — Trigger pipelines from issues, PRs, and webhooks
 
 ---
 

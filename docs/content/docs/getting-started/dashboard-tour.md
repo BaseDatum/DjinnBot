@@ -5,6 +5,10 @@ weight: 3
 
 The DjinnBot dashboard at **http://localhost:3000** gives you real-time visibility into everything your AI team is doing.
 
+{{< callout type="info" >}}
+If authentication is enabled, you'll see a **login page** when first visiting the dashboard. If no accounts exist yet, you'll be redirected to the **setup page** to create your admin account. See [Your First Run](/docs/getting-started/first-run#initial-account-setup) for details.
+{{< /callout >}}
+
 ## Home
 
 The home page shows:
@@ -94,3 +98,7 @@ Configure global settings:
 - **Default models** — set the default working model, thinking model, and Slack decision model
 - **Pulse settings** — enable/disable autonomous pulse mode, set intervals
 - **Secrets** — manage encrypted secrets (GitHub tokens, SSH keys, etc.)
+- **Two-Factor Authentication** — enable/disable TOTP 2FA for your account, view recovery codes
+- **API Keys** — generate and manage API keys for CLI and programmatic access
+- **OIDC Providers** — configure external identity providers for single sign-on (Google, Azure AD, Okta, etc.)
+- **Authentication** — view auth status and configuration
