@@ -24,14 +24,28 @@
 &lt;li&gt;Select your workspace&lt;/li&gt;
 &lt;li&gt;Click &lt;strong&gt;Create App&lt;/strong&gt;&lt;/li&gt;
 &lt;/ol&gt;
+&lt;h2&gt;Step 2: Enable AI Agent Features&lt;span class="hx:absolute hx:-mt-20" id="step-2-enable-ai-agent-features"&gt;&lt;/span&gt;
+&lt;a href="#step-2-enable-ai-agent-features" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;p&gt;Slack has released AI-powered features specifically for bots. Enable these to get the best experience:&lt;/p&gt;
+&lt;ol&gt;
+&lt;li&gt;In your app settings, go to &lt;strong&gt;Features&lt;/strong&gt; in the sidebar&lt;/li&gt;
+&lt;li&gt;Click &lt;strong&gt;Agents &amp;amp; AI Apps&lt;/strong&gt;&lt;/li&gt;
+&lt;li&gt;Toggle &lt;strong&gt;Enable Agent or Assistant&lt;/strong&gt; to ON&lt;/li&gt;
+&lt;li&gt;Under &lt;strong&gt;Agent Settings&lt;/strong&gt;:
+&lt;ul&gt;
+&lt;li&gt;Enable &lt;strong&gt;Dynamic Prompts&lt;/strong&gt; — this allows DjinnBot to provide rich, context-aware responses&lt;/li&gt;
+&lt;li&gt;Enable &lt;strong&gt;Model Context Protocol&lt;/strong&gt; — this allows the agent to use MCP tools natively within Slack&amp;rsquo;s AI framework&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/li&gt;
+&lt;li&gt;Click &lt;strong&gt;Save Changes&lt;/strong&gt;&lt;/li&gt;
+&lt;/ol&gt;
 &lt;div class="hx:overflow-x-auto hx:mt-6 hx:flex hx:rounded-lg hx:border hx:py-2 hx:ltr:pr-4 hx:rtl:pl-4 hx:contrast-more:border-current hx:contrast-more:dark:border-current hx:border-green-200 hx:bg-green-100 hx:text-green-900 hx:dark:border-green-200/30 hx:dark:bg-green-900/30 hx:dark:text-green-200"&gt;
 &lt;div class="hx:ltr:pl-3 hx:ltr:pr-2 hx:rtl:pr-3 hx:rtl:pl-2"&gt;&lt;svg height=1.2em class="hx:inline-block hx:align-middle" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" aria-hidden="true"&gt;&lt;path stroke-linecap="round" stroke-linejoin="round" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/&gt;&lt;/svg&gt;&lt;/div&gt;
 &lt;div class="hx:w-full hx:min-w-0 hx:leading-7"&gt;
-&lt;div class="hx:mt-6 hx:leading-7 hx:first:mt-0"&gt;&lt;strong&gt;Slack&amp;rsquo;s AI features:&lt;/strong&gt; Slack has recently released AI-powered features for bots including Agents &amp;amp; Assistants. DjinnBot agents use &lt;strong&gt;Socket Mode&lt;/strong&gt; which is the recommended approach for internal tools and works within Slack&amp;rsquo;s AI framework. See &lt;a href="https://api.slack.com/docs/agents-assistants"target="_blank" rel="noopener"&gt;Slack&amp;rsquo;s Agents &amp;amp; Assistants documentation&lt;/a&gt; for the latest on building AI-powered Slack experiences.&lt;/div&gt;
+&lt;div class="hx:mt-6 hx:leading-7 hx:first:mt-0"&gt;Slack&amp;rsquo;s Agents &amp;amp; Assistants framework is what makes DjinnBot agents feel native in your workspace. With dynamic prompts enabled, agents can provide contextual suggestions and structured responses. With MCP enabled, agents can surface tool results directly in Slack threads. See &lt;a href="https://api.slack.com/docs/agents-assistants"target="_blank" rel="noopener"&gt;Slack&amp;rsquo;s Agents &amp;amp; Assistants documentation&lt;/a&gt; for the latest on these features.&lt;/div&gt;
 &lt;/div&gt;
 &lt;/div&gt;
-&lt;h2&gt;Step 2: Configure OAuth Permissions&lt;span class="hx:absolute hx:-mt-20" id="step-2-configure-oauth-permissions"&gt;&lt;/span&gt;
-&lt;a href="#step-2-configure-oauth-permissions" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;p&gt;Navigate to &lt;strong&gt;OAuth &amp;amp; Permissions&lt;/strong&gt; and add these &lt;strong&gt;Bot Token Scopes&lt;/strong&gt;:&lt;/p&gt;
+&lt;h2&gt;Step 3: Configure OAuth Permissions&lt;span class="hx:absolute hx:-mt-20" id="step-3-configure-oauth-permissions"&gt;&lt;/span&gt;
+&lt;a href="#step-3-configure-oauth-permissions" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;p&gt;Navigate to &lt;strong&gt;OAuth &amp;amp; Permissions&lt;/strong&gt; and add these &lt;strong&gt;Bot Token Scopes&lt;/strong&gt;:&lt;/p&gt;
 &lt;table&gt;
 &lt;thead&gt;
 &lt;tr&gt;
@@ -94,8 +108,8 @@
 &lt;/tr&gt;
 &lt;/tbody&gt;
 &lt;/table&gt;
-&lt;h2&gt;Step 3: Enable Socket Mode&lt;span class="hx:absolute hx:-mt-20" id="step-3-enable-socket-mode"&gt;&lt;/span&gt;
-&lt;a href="#step-3-enable-socket-mode" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;p&gt;Navigate to &lt;strong&gt;Socket Mode&lt;/strong&gt; in the sidebar:&lt;/p&gt;
+&lt;h2&gt;Step 4: Enable Socket Mode&lt;span class="hx:absolute hx:-mt-20" id="step-4-enable-socket-mode"&gt;&lt;/span&gt;
+&lt;a href="#step-4-enable-socket-mode" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;p&gt;Navigate to &lt;strong&gt;Socket Mode&lt;/strong&gt; in the sidebar:&lt;/p&gt;
 &lt;ol&gt;
 &lt;li&gt;Toggle &lt;strong&gt;Enable Socket Mode&lt;/strong&gt; to ON&lt;/li&gt;
 &lt;li&gt;Give the app-level token a name (e.g., &amp;ldquo;eric-socket&amp;rdquo;)&lt;/li&gt;
@@ -104,8 +118,8 @@
 &lt;li&gt;Save the &lt;strong&gt;App-Level Token&lt;/strong&gt; (&lt;code&gt;xapp-...&lt;/code&gt;) — this is the &lt;code&gt;APP_TOKEN&lt;/code&gt;&lt;/li&gt;
 &lt;/ol&gt;
 &lt;p&gt;Socket Mode lets the bot connect without exposing a public URL, which is ideal for self-hosted deployments behind firewalls.&lt;/p&gt;
-&lt;h2&gt;Step 4: Enable Events&lt;span class="hx:absolute hx:-mt-20" id="step-4-enable-events"&gt;&lt;/span&gt;
-&lt;a href="#step-4-enable-events" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;p&gt;Navigate to &lt;strong&gt;Event Subscriptions&lt;/strong&gt;:&lt;/p&gt;
+&lt;h2&gt;Step 5: Enable Events&lt;span class="hx:absolute hx:-mt-20" id="step-5-enable-events"&gt;&lt;/span&gt;
+&lt;a href="#step-5-enable-events" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;p&gt;Navigate to &lt;strong&gt;Event Subscriptions&lt;/strong&gt;:&lt;/p&gt;
 &lt;ol&gt;
 &lt;li&gt;
 &lt;p&gt;Toggle &lt;strong&gt;Enable Events&lt;/strong&gt; to ON&lt;/p&gt;
@@ -123,15 +137,15 @@
 &lt;p&gt;Click &lt;strong&gt;Save Changes&lt;/strong&gt;&lt;/p&gt;
 &lt;/li&gt;
 &lt;/ol&gt;
-&lt;h2&gt;Step 5: Install to Workspace&lt;span class="hx:absolute hx:-mt-20" id="step-5-install-to-workspace"&gt;&lt;/span&gt;
-&lt;a href="#step-5-install-to-workspace" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;p&gt;Navigate to &lt;strong&gt;Install App&lt;/strong&gt;:&lt;/p&gt;
+&lt;h2&gt;Step 6: Install to Workspace&lt;span class="hx:absolute hx:-mt-20" id="step-6-install-to-workspace"&gt;&lt;/span&gt;
+&lt;a href="#step-6-install-to-workspace" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;p&gt;Navigate to &lt;strong&gt;Install App&lt;/strong&gt;:&lt;/p&gt;
 &lt;ol&gt;
 &lt;li&gt;Click &lt;strong&gt;Install to Workspace&lt;/strong&gt;&lt;/li&gt;
 &lt;li&gt;Review the permissions and approve&lt;/li&gt;
 &lt;li&gt;Copy the &lt;strong&gt;Bot User OAuth Token&lt;/strong&gt; (&lt;code&gt;xoxb-...&lt;/code&gt;) — this is the &lt;code&gt;BOT_TOKEN&lt;/code&gt;&lt;/li&gt;
 &lt;/ol&gt;
-&lt;h2&gt;Step 6: Add Tokens to DjinnBot&lt;span class="hx:absolute hx:-mt-20" id="step-6-add-tokens-to-djinnbot"&gt;&lt;/span&gt;
-&lt;a href="#step-6-add-tokens-to-djinnbot" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;p&gt;Edit your &lt;code&gt;.env&lt;/code&gt; file and add the tokens for each agent:&lt;/p&gt;
+&lt;h2&gt;Step 7: Add Tokens to DjinnBot&lt;span class="hx:absolute hx:-mt-20" id="step-7-add-tokens-to-djinnbot"&gt;&lt;/span&gt;
+&lt;a href="#step-7-add-tokens-to-djinnbot" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;p&gt;Edit your &lt;code&gt;.env&lt;/code&gt; file and add the tokens for each agent:&lt;/p&gt;
 &lt;div class="hextra-code-block hx:relative hx:mt-6 hx:first:mt-0 hx:group/code"&gt;
 &lt;div&gt;&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-bash" data-lang="bash"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="c1"&gt;# Slack channel where agents post pipeline updates&lt;/span&gt;
 &lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nv"&gt;SLACK_CHANNEL_ID&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;C0123456789
@@ -172,15 +186,15 @@ data-copied-label="Copied!"
 &lt;/button&gt;
 &lt;/div&gt;
 &lt;/div&gt;
-&lt;h2&gt;Step 7: Set Up the Channel&lt;span class="hx:absolute hx:-mt-20" id="step-7-set-up-the-channel"&gt;&lt;/span&gt;
-&lt;a href="#step-7-set-up-the-channel" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;ol&gt;
+&lt;h2&gt;Step 8: Set Up the Channel&lt;span class="hx:absolute hx:-mt-20" id="step-8-set-up-the-channel"&gt;&lt;/span&gt;
+&lt;a href="#step-8-set-up-the-channel" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;ol&gt;
 &lt;li&gt;Create a channel for your DjinnBot team (e.g., &lt;code&gt;#djinnbot-dev&lt;/code&gt;)&lt;/li&gt;
 &lt;li&gt;Invite each agent bot to the channel&lt;/li&gt;
 &lt;li&gt;Copy the channel ID (right-click channel name → Copy Link, the ID is the &lt;code&gt;C...&lt;/code&gt; part)&lt;/li&gt;
 &lt;li&gt;Set &lt;code&gt;SLACK_CHANNEL_ID&lt;/code&gt; in &lt;code&gt;.env&lt;/code&gt;&lt;/li&gt;
 &lt;/ol&gt;
-&lt;h2&gt;Step 8: Restart&lt;span class="hx:absolute hx:-mt-20" id="step-8-restart"&gt;&lt;/span&gt;
-&lt;a href="#step-8-restart" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;div class="hextra-code-block hx:relative hx:mt-6 hx:first:mt-0 hx:group/code"&gt;
+&lt;h2&gt;Step 9: Restart&lt;span class="hx:absolute hx:-mt-20" id="step-9-restart"&gt;&lt;/span&gt;
+&lt;a href="#step-9-restart" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;div class="hextra-code-block hx:relative hx:mt-6 hx:first:mt-0 hx:group/code"&gt;
 &lt;div&gt;&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-bash" data-lang="bash"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;docker compose down &lt;span class="o"&gt;&amp;amp;&amp;amp;&lt;/span&gt; docker compose up -d&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;&lt;div class="hextra-code-copy-btn-container hx:opacity-0 hx:transition hx:group-hover/code:opacity-100 hx:flex hx:gap-1 hx:absolute hx:m-[11px] hx:right-0 hx:top-0"&gt;
 &lt;button
 class="hextra-code-copy-btn hx:group/copybtn hx:cursor-pointer hx:transition-all hx:active:opacity-50 hx:bg-primary-700/5 hx:border hx:border-black/5 hx:text-gray-600 hx:hover:text-gray-900 hx:rounded-md hx:p-1.5 hx:dark:bg-primary-300/10 hx:dark:border-white/10 hx:dark:text-gray-400 hx:dark:hover:text-gray-50"

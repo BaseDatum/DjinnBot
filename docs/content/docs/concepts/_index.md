@@ -14,4 +14,5 @@ Understand how DjinnBot works under the hood. These concepts form the foundation
   {{< card link="mcp-tools" title="MCP Tools" subtitle="External tool servers via the mcpo proxy." >}}
   {{< card link="pulse" title="Pulse Mode" subtitle="Autonomous agent wake-up cycles for ongoing work." >}}
   {{< card link="containers" title="Agent Containers" subtitle="Isolated Docker environments with full toolboxes." >}}
+  {{< card link="secrets" title="Secrets Management" subtitle="Encrypted credential storage with per-agent access control." >}}
 {{< /cards >}}

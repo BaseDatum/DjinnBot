@@ -7,7 +7,13 @@ Pulse mode lets agents work autonomously on a schedule — checking their inbox,
 
 ## How Pulse Works
 
-When pulse mode is enabled for an agent, the engine wakes them up on a configurable interval (default: every 30 minutes). Each pulse cycle follows a routine:
+When pulse mode is enabled for an agent, the engine wakes them up on a configurable interval (default: every 30 minutes). Each pulse cycle is driven by the agent's **PULSE.md** file — a fully customizable markdown file that defines the agent's wake-up routine.
+
+The default template (`agents/_templates/PULSE.md`) provides a general-purpose routine, but each agent can override it with their own `PULSE.md` to define entirely different behavior. The file is injected as part of the agent's system prompt during pulse sessions, so whatever instructions you write become the agent's autonomous behavior.
+
+### Default Pulse Routine
+
+The default template covers:
 
 1. **Check inbox** — read messages from other agents
 2. **Search memories** — recall recent context, handoffs, and active work
@@ -19,7 +25,26 @@ When pulse mode is enabled for an agent, the engine wakes them up on a configura
 8. **Transition the task** — move it through the kanban board (e.g., to "review")
 9. **Report** — message the human via Slack DM if there's something important
 
-Agents only pick up **one task per pulse** to stay focused.
+But you can rewrite `PULSE.md` to do anything — check monitoring dashboards, run reports, review PRs, triage issues, or follow any custom workflow you define.
+
+### Customizing Pulse Behavior
+
+Edit `agents/<id>/PULSE.md` to change what an agent does when it wakes up. For example, a QA agent might:
+
+```markdown
+# Pulse Routine
+
+### 1. Check for open PRs that need review
+Search for PRs assigned to you or your team.
+
+### 2. Run regression tests
+Execute the test suite and report any failures.
+
+### 3. Review recently merged code
+Check for untested code paths in recent merges.
+```
+
+The engine doesn't hard-code the routine — it's entirely defined by the markdown file you provide.
 
 ## Configuration
 

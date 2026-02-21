@@ -500,6 +500,23 @@ data-copied-label="Copied!"
 &lt;/div&gt;
 &lt;p&gt;Migrations run automatically on API server startup via &lt;code&gt;ensure_migrations()&lt;/code&gt;.&lt;/p&gt;</description></item><item><title>Security Model</title><link>https://docs.djinn.bot/docs/advanced/security/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://docs.djinn.bot/docs/advanced/security/</guid><description>
 &lt;p&gt;DjinnBot takes security seriously with container isolation, encrypted secrets, and minimal attack surface.&lt;/p&gt;
+&lt;h2&gt;Authentication&lt;span class="hx:absolute hx:-mt-20" id="authentication"&gt;&lt;/span&gt;
+&lt;a href="#authentication" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;div class="hx:overflow-x-auto hx:mt-6 hx:flex hx:rounded-lg hx:border hx:py-2 hx:ltr:pr-4 hx:rtl:pl-4 hx:contrast-more:border-current hx:contrast-more:dark:border-current hx:border-amber-200 hx:bg-amber-100 hx:text-amber-900 hx:dark:border-amber-200/30 hx:dark:bg-amber-900/30 hx:dark:text-amber-200"&gt;
+&lt;div class="hx:ltr:pl-3 hx:ltr:pr-2 hx:rtl:pr-3 hx:rtl:pl-2"&gt;&lt;svg height=1.2em class="hx:inline-block hx:align-middle" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" aria-hidden="true"&gt;&lt;path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/&gt;&lt;/svg&gt;&lt;/div&gt;
+&lt;div class="hx:w-full hx:min-w-0 hx:leading-7"&gt;
+&lt;div class="hx:mt-6 hx:leading-7 hx:first:mt-0"&gt;&lt;p&gt;&lt;strong&gt;DjinnBot does not currently include built-in authentication.&lt;/strong&gt; The API and dashboard are open to anyone who can reach them on the network. This is fine for local development and private networks, but if you need to expose DjinnBot publicly, you &lt;strong&gt;must&lt;/strong&gt; place it behind an authentication proxy.&lt;/p&gt;
+&lt;p&gt;Recommended options:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;a href="https://oauth2-proxy.github.io/oauth2-proxy/"target="_blank" rel="noopener"&gt;OAuth2 Proxy&lt;/a&gt; — supports Google, GitHub, Azure AD, and dozens of other providers&lt;/li&gt;
+&lt;li&gt;&lt;a href="https://www.authelia.com/"target="_blank" rel="noopener"&gt;Authelia&lt;/a&gt; — self-hosted SSO with 2FA&lt;/li&gt;
+&lt;li&gt;&lt;a href="https://caddyserver.com/"target="_blank" rel="noopener"&gt;Caddy&lt;/a&gt; with &lt;a href="https://github.com/greenpau/caddy-security"target="_blank" rel="noopener"&gt;caddy-security&lt;/a&gt; — simple reverse proxy with built-in auth&lt;/li&gt;
+&lt;li&gt;&lt;a href="https://nginx.org/"target="_blank" rel="noopener"&gt;Nginx&lt;/a&gt; with &lt;code&gt;auth_request&lt;/code&gt; — forward auth to an external provider&lt;/li&gt;
+&lt;li&gt;&lt;a href="https://www.cloudflare.com/products/zero-trust/access/"target="_blank" rel="noopener"&gt;Cloudflare Access&lt;/a&gt; — zero-trust access without a VPN&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;Built-in authentication (user accounts, API keys, RBAC) is on the near-term roadmap.&lt;/p&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;/div&gt;
 &lt;h2&gt;Container Isolation&lt;span class="hx:absolute hx:-mt-20" id="container-isolation"&gt;&lt;/span&gt;
 &lt;a href="#container-isolation" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;p&gt;Every agent runs in its own Docker container. This provides:&lt;/p&gt;
 &lt;ul&gt;

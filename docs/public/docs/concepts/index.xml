@@ -1,36 +1,31 @@
 <rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>DjinnBot – Core Concepts</title><link>https://docs.djinn.bot/docs/concepts/</link><description>Recent content in Core Concepts on DjinnBot</description><generator>Hugo -- gohugo.io</generator><language>en-us</language><atom:link href="https://docs.djinn.bot/docs/concepts/index.xml" rel="self" type="application/rss+xml"/><item><title>Architecture</title><link>https://docs.djinn.bot/docs/concepts/architecture/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://docs.djinn.bot/docs/concepts/architecture/</guid><description>
 &lt;p&gt;DjinnBot is a distributed system built around an event-driven architecture. Here&amp;rsquo;s how the pieces fit together.&lt;/p&gt;
 &lt;h2&gt;System Overview&lt;span class="hx:absolute hx:-mt-20" id="system-overview"&gt;&lt;/span&gt;
-&lt;a href="#system-overview" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;div class="hextra-code-block hx:relative hx:mt-6 hx:first:mt-0 hx:group/code"&gt;
-&lt;div&gt;&lt;pre&gt;&lt;code&gt;┌──────────────────┐ ┌──────────────────┐ ┌──────────────┐
-│ Dashboard │◄─SSE─│ API Server │◄─────│ PostgreSQL │
-│ (React &amp;#43; Vite) │ │ (FastAPI) │ │ │
-└──────────────────┘ └──────────────────┘ └──────────────┘
-│ ▲
-▼ │
-┌──────────────────┐ ┌──────────────┐
-│ Pipeline Engine │─────►│ Redis │
-│ (State Machine) │ │ (Streams) │
-└──────────────────┘ └──────────────┘
-│
-┌─────────────┼─────────────┐
-▼ ▼ ▼
-┌──────────┐ ┌──────────┐ ┌──────────────┐
-│ Agent │ │ Agent │ │ mcpo Proxy │
-│Container │ │Container │ │ (MCP Tools) │
-└──────────┘ └──────────┘ └──────────────┘&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;div class="hextra-code-copy-btn-container hx:opacity-0 hx:transition hx:group-hover/code:opacity-100 hx:flex hx:gap-1 hx:absolute hx:m-[11px] hx:right-0 hx:top-0"&gt;
-&lt;button
-class="hextra-code-copy-btn hx:group/copybtn hx:cursor-pointer hx:transition-all hx:active:opacity-50 hx:bg-primary-700/5 hx:border hx:border-black/5 hx:text-gray-600 hx:hover:text-gray-900 hx:rounded-md hx:p-1.5 hx:dark:bg-primary-300/10 hx:dark:border-white/10 hx:dark:text-gray-400 hx:dark:hover:text-gray-50"
-title="Copy code"
-aria-label="Copy code"
-data-copied-label="Copied!"
-&gt;
-&lt;div class="hextra-copy-icon hx:group-[.copied]/copybtn:hidden hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
-&lt;div class="hextra-success-icon hx:hidden hx:group-[.copied]/copybtn:block hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
-&lt;/button&gt;
-&lt;/div&gt;
-&lt;/div&gt;
-&lt;h2&gt;Services&lt;span class="hx:absolute hx:-mt-20" id="services"&gt;&lt;/span&gt;
+&lt;a href="#system-overview" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;div role="img" aria-label="Diagram"&gt;
+&lt;pre class="mermaid hx:mt-6"&gt;
+graph TB
+Dashboard[&amp;#34;Dashboard&amp;lt;br/&amp;gt;(React + Vite)&amp;#34;] --&amp;gt;|SSE| API[&amp;#34;API Server&amp;lt;br/&amp;gt;(FastAPI)&amp;#34;]
+API --&amp;gt; DB[&amp;#34;PostgreSQL&amp;#34;]
+API --&amp;gt; Redis[&amp;#34;Redis&amp;lt;br/&amp;gt;(Streams + Pub/Sub)&amp;#34;]
+Engine[&amp;#34;Pipeline Engine&amp;lt;br/&amp;gt;(State Machine)&amp;#34;] --&amp;gt; API
+Engine --&amp;gt; Redis
+Engine --&amp;gt; Agent1[&amp;#34;Agent Container&amp;lt;br/&amp;gt;(Isolated)&amp;#34;]
+Engine --&amp;gt; Agent2[&amp;#34;Agent Container&amp;lt;br/&amp;gt;(Isolated)&amp;#34;]
+Engine --&amp;gt; mcpo[&amp;#34;mcpo Proxy&amp;lt;br/&amp;gt;(MCP Tools)&amp;#34;]
+Agent1 --&amp;gt; Redis
+Agent2 --&amp;gt; Redis
+Agent1 --&amp;gt; mcpo
+Agent2 --&amp;gt; mcpo
+style Dashboard fill:#3b82f6,color:#fff,stroke:#2563eb
+style API fill:#8b5cf6,color:#fff,stroke:#7c3aed
+style Engine fill:#8b5cf6,color:#fff,stroke:#7c3aed
+style DB fill:#059669,color:#fff,stroke:#047857
+style Redis fill:#dc2626,color:#fff,stroke:#b91c1c
+style Agent1 fill:#f59e0b,color:#000,stroke:#d97706
+style Agent2 fill:#f59e0b,color:#000,stroke:#d97706
+style mcpo fill:#6366f1,color:#fff,stroke:#4f46e5
+&lt;/pre&gt;
+&lt;/div&gt;&lt;h2&gt;Services&lt;span class="hx:absolute hx:-mt-20" id="services"&gt;&lt;/span&gt;
 &lt;a href="#services" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;h3&gt;API Server (Python / FastAPI)&lt;span class="hx:absolute hx:-mt-20" id="api-server-python--fastapi"&gt;&lt;/span&gt;
 &lt;a href="#api-server-python--fastapi" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h3&gt;&lt;p&gt;The API server is the central coordination point. It provides:&lt;/p&gt;
 &lt;ul&gt;
@@ -1027,10 +1022,17 @@ data-copied-label="Copied!"
 &lt;li&gt;&lt;strong&gt;Tagged well&lt;/strong&gt; — keywords that match when agents encounter relevant tasks&lt;/li&gt;
 &lt;li&gt;&lt;strong&gt;Example-rich&lt;/strong&gt; — show concrete examples of commands, code, and output&lt;/li&gt;
 &lt;/ul&gt;</description></item><item><title>MCP Tools</title><link>https://docs.djinn.bot/docs/concepts/mcp-tools/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://docs.djinn.bot/docs/concepts/mcp-tools/</guid><description>
-&lt;p&gt;DjinnBot agents can use external tools through the &lt;a href="https://modelcontextprotocol.io/"target="_blank" rel="noopener"&gt;Model Context Protocol (MCP)&lt;/a&gt;. An &lt;a href="https://github.com/skymoore/mcpo"target="_blank" rel="noopener"&gt;mcpo&lt;/a&gt; proxy converts MCP tool servers into REST/OpenAPI endpoints that agents call like any other tool.&lt;/p&gt;
+&lt;p&gt;DjinnBot agents can use external tools through the &lt;a href="https://modelcontextprotocol.io/"target="_blank" rel="noopener"&gt;Model Context Protocol (MCP)&lt;/a&gt;. An &lt;a href="https://github.com/skymoore/mcpo"target="_blank" rel="noopener"&gt;mcpo&lt;/a&gt; proxy runs MCP tool servers, and DjinnBot converts them into &lt;strong&gt;native agent tools&lt;/strong&gt; at runtime — agents use them exactly like built-in tools with no difference in the interface.&lt;/p&gt;
 &lt;h2&gt;How It Works&lt;span class="hx:absolute hx:-mt-20" id="how-it-works"&gt;&lt;/span&gt;
-&lt;a href="#how-it-works" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;div class="hextra-code-block hx:relative hx:mt-6 hx:first:mt-0 hx:group/code"&gt;
-&lt;div&gt;&lt;pre&gt;&lt;code&gt;Agent Container → HTTP → mcpo Proxy → stdio → MCP Server&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;div class="hextra-code-copy-btn-container hx:opacity-0 hx:transition hx:group-hover/code:opacity-100 hx:flex hx:gap-1 hx:absolute hx:m-[11px] hx:right-0 hx:top-0"&gt;
+&lt;a href="#how-it-works" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;p&gt;At startup, the engine:&lt;/p&gt;
+&lt;ol&gt;
+&lt;li&gt;Reads each MCP server&amp;rsquo;s OpenAPI schema from the mcpo proxy&lt;/li&gt;
+&lt;li&gt;Converts every operation into a &lt;strong&gt;native &lt;code&gt;AgentTool&lt;/code&gt;&lt;/strong&gt; with proper parameter schemas&lt;/li&gt;
+&lt;li&gt;Registers them alongside built-in tools (read, write, bash, etc.)&lt;/li&gt;
+&lt;/ol&gt;
+&lt;p&gt;When an agent calls an MCP tool, the code handles the HTTP request to mcpo internally — the agent never sees URLs, curl commands, or HTTP details. Tool calls appear in the dashboard UI identically to built-in tools via the standard &lt;code&gt;toolStart&lt;/code&gt;/&lt;code&gt;toolEnd&lt;/code&gt; events.&lt;/p&gt;
+&lt;div class="hextra-code-block hx:relative hx:mt-6 hx:first:mt-0 hx:group/code"&gt;
+&lt;div&gt;&lt;pre&gt;&lt;code&gt;Agent calls tool → Engine makes HTTP request → mcpo Proxy → stdio → MCP Server&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;div class="hextra-code-copy-btn-container hx:opacity-0 hx:transition hx:group-hover/code:opacity-100 hx:flex hx:gap-1 hx:absolute hx:m-[11px] hx:right-0 hx:top-0"&gt;
 &lt;button
 class="hextra-code-copy-btn hx:group/copybtn hx:cursor-pointer hx:transition-all hx:active:opacity-50 hx:bg-primary-700/5 hx:border hx:border-black/5 hx:text-gray-600 hx:hover:text-gray-900 hx:rounded-md hx:p-1.5 hx:dark:bg-primary-300/10 hx:dark:border-white/10 hx:dark:text-gray-400 hx:dark:hover:text-gray-50"
 title="Copy code"
@@ -1042,13 +1044,7 @@ data-copied-label="Copied!"
 &lt;/button&gt;
 &lt;/div&gt;
 &lt;/div&gt;
-&lt;ol&gt;
-&lt;li&gt;The mcpo proxy runs as a Docker service (&lt;code&gt;djinnbot-mcpo&lt;/code&gt;)&lt;/li&gt;
-&lt;li&gt;It reads &lt;code&gt;mcp/config.json&lt;/code&gt; to discover configured tool servers&lt;/li&gt;
-&lt;li&gt;Each MCP server is exposed as a set of REST endpoints&lt;/li&gt;
-&lt;li&gt;Agents call these endpoints like any other HTTP tool&lt;/li&gt;
-&lt;li&gt;The proxy handles stdio communication with the actual MCP server&lt;/li&gt;
-&lt;/ol&gt;
+&lt;p&gt;This means adding a new MCP server immediately gives agents new native tools with no code changes.&lt;/p&gt;
 &lt;h2&gt;Default Tools&lt;span class="hx:absolute hx:-mt-20" id="default-tools"&gt;&lt;/span&gt;
 &lt;a href="#default-tools" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;p&gt;DjinnBot ships with these MCP servers pre-configured:&lt;/p&gt;
 &lt;table&gt;
@@ -1174,7 +1170,10 @@ data-copied-label="Copied!"
 &lt;p&gt;See &lt;a href="https://github.com/punkpeye/awesome-mcp-servers"target="_blank" rel="noopener"&gt;awesome-mcp-servers&lt;/a&gt; for a comprehensive list.&lt;/p&gt;</description></item><item><title>Pulse Mode</title><link>https://docs.djinn.bot/docs/concepts/pulse/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://docs.djinn.bot/docs/concepts/pulse/</guid><description>
 &lt;p&gt;Pulse mode lets agents work autonomously on a schedule — checking their inbox, finding tasks, and doing work without human intervention.&lt;/p&gt;
 &lt;h2&gt;How Pulse Works&lt;span class="hx:absolute hx:-mt-20" id="how-pulse-works"&gt;&lt;/span&gt;
-&lt;a href="#how-pulse-works" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;p&gt;When pulse mode is enabled for an agent, the engine wakes them up on a configurable interval (default: every 30 minutes). Each pulse cycle follows a routine:&lt;/p&gt;
+&lt;a href="#how-pulse-works" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;p&gt;When pulse mode is enabled for an agent, the engine wakes them up on a configurable interval (default: every 30 minutes). Each pulse cycle is driven by the agent&amp;rsquo;s &lt;strong&gt;PULSE.md&lt;/strong&gt; file — a fully customizable markdown file that defines the agent&amp;rsquo;s wake-up routine.&lt;/p&gt;
+&lt;p&gt;The default template (&lt;code&gt;agents/_templates/PULSE.md&lt;/code&gt;) provides a general-purpose routine, but each agent can override it with their own &lt;code&gt;PULSE.md&lt;/code&gt; to define entirely different behavior. The file is injected as part of the agent&amp;rsquo;s system prompt during pulse sessions, so whatever instructions you write become the agent&amp;rsquo;s autonomous behavior.&lt;/p&gt;
+&lt;h3&gt;Default Pulse Routine&lt;span class="hx:absolute hx:-mt-20" id="default-pulse-routine"&gt;&lt;/span&gt;
+&lt;a href="#default-pulse-routine" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h3&gt;&lt;p&gt;The default template covers:&lt;/p&gt;
 &lt;ol&gt;
 &lt;li&gt;&lt;strong&gt;Check inbox&lt;/strong&gt; — read messages from other agents&lt;/li&gt;
 &lt;li&gt;&lt;strong&gt;Search memories&lt;/strong&gt; — recall recent context, handoffs, and active work&lt;/li&gt;
@@ -1186,7 +1185,32 @@ data-copied-label="Copied!"
 &lt;li&gt;&lt;strong&gt;Transition the task&lt;/strong&gt; — move it through the kanban board (e.g., to &amp;ldquo;review&amp;rdquo;)&lt;/li&gt;
 &lt;li&gt;&lt;strong&gt;Report&lt;/strong&gt; — message the human via Slack DM if there&amp;rsquo;s something important&lt;/li&gt;
 &lt;/ol&gt;
-&lt;p&gt;Agents only pick up &lt;strong&gt;one task per pulse&lt;/strong&gt; to stay focused.&lt;/p&gt;
+&lt;p&gt;But you can rewrite &lt;code&gt;PULSE.md&lt;/code&gt; to do anything — check monitoring dashboards, run reports, review PRs, triage issues, or follow any custom workflow you define.&lt;/p&gt;
+&lt;h3&gt;Customizing Pulse Behavior&lt;span class="hx:absolute hx:-mt-20" id="customizing-pulse-behavior"&gt;&lt;/span&gt;
+&lt;a href="#customizing-pulse-behavior" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h3&gt;&lt;p&gt;Edit &lt;code&gt;agents/&amp;lt;id&amp;gt;/PULSE.md&lt;/code&gt; to change what an agent does when it wakes up. For example, a QA agent might:&lt;/p&gt;
+&lt;div class="hextra-code-block hx:relative hx:mt-6 hx:first:mt-0 hx:group/code"&gt;
+&lt;div&gt;&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-markdown" data-lang="markdown"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="gh"&gt;# Pulse Routine
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="gu"&gt;### 1. Check for open PRs that need review
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;Search for PRs assigned to you or your team.
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="gu"&gt;### 2. Run regression tests
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;Execute the test suite and report any failures.
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="gu"&gt;### 3. Review recently merged code
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;Check for untested code paths in recent merges.&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;&lt;div class="hextra-code-copy-btn-container hx:opacity-0 hx:transition hx:group-hover/code:opacity-100 hx:flex hx:gap-1 hx:absolute hx:m-[11px] hx:right-0 hx:top-0"&gt;
+&lt;button
+class="hextra-code-copy-btn hx:group/copybtn hx:cursor-pointer hx:transition-all hx:active:opacity-50 hx:bg-primary-700/5 hx:border hx:border-black/5 hx:text-gray-600 hx:hover:text-gray-900 hx:rounded-md hx:p-1.5 hx:dark:bg-primary-300/10 hx:dark:border-white/10 hx:dark:text-gray-400 hx:dark:hover:text-gray-50"
+title="Copy code"
+aria-label="Copy code"
+data-copied-label="Copied!"
+&gt;
+&lt;div class="hextra-copy-icon hx:group-[.copied]/copybtn:hidden hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;div class="hextra-success-icon hx:hidden hx:group-[.copied]/copybtn:block hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;/button&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;p&gt;The engine doesn&amp;rsquo;t hard-code the routine — it&amp;rsquo;s entirely defined by the markdown file you provide.&lt;/p&gt;
 &lt;h2&gt;Configuration&lt;span class="hx:absolute hx:-mt-20" id="configuration"&gt;&lt;/span&gt;
 &lt;a href="#configuration" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;p&gt;Pulse is configured per-agent in &lt;code&gt;config.yml&lt;/code&gt;:&lt;/p&gt;
 &lt;div class="hextra-code-block hx:relative hx:mt-6 hx:first:mt-0 hx:group/code"&gt;
@@ -1397,4 +1421,112 @@ data-copied-label="Copied!"
 &lt;/button&gt;
 &lt;/div&gt;
 &lt;/div&gt;
-&lt;p&gt;The agent-runtime image is built independently from the other services, so you can customize the toolbox without affecting the API server or dashboard.&lt;/p&gt;</description></item></channel></rss>
+&lt;p&gt;The agent-runtime image is built independently from the other services, so you can customize the toolbox without affecting the API server or dashboard.&lt;/p&gt;</description></item><item><title>Secrets Management</title><link>https://docs.djinn.bot/docs/concepts/secrets/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://docs.djinn.bot/docs/concepts/secrets/</guid><description>
+&lt;p&gt;DjinnBot includes a built-in secrets management system for storing sensitive values — API keys, tokens, SSH keys, and other credentials — that agents need during execution.&lt;/p&gt;
+&lt;h2&gt;How It Works&lt;span class="hx:absolute hx:-mt-20" id="how-it-works"&gt;&lt;/span&gt;
+&lt;a href="#how-it-works" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;p&gt;Secrets are stored in PostgreSQL, encrypted at rest with &lt;strong&gt;AES-256-GCM&lt;/strong&gt;. The encryption scheme uses:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;256-bit key derived from the &lt;code&gt;SECRET_ENCRYPTION_KEY&lt;/code&gt; environment variable&lt;/li&gt;
+&lt;li&gt;Random 96-bit nonce per encryption operation&lt;/li&gt;
+&lt;li&gt;128-bit authentication tag (GCM default)&lt;/li&gt;
+&lt;li&gt;Storage format: &lt;code&gt;base64(nonce[12] + tag[16] + ciphertext)&lt;/code&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;Plaintext secret values are &lt;strong&gt;never&lt;/strong&gt; returned by the API to the dashboard or any external client. All list and detail endpoints return masked previews only (e.g., &lt;code&gt;ghp_...abc1&lt;/code&gt;).&lt;/p&gt;
+&lt;h2&gt;Secret Types&lt;span class="hx:absolute hx:-mt-20" id="secret-types"&gt;&lt;/span&gt;
+&lt;a href="#secret-types" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;p&gt;Secrets support different types to help organize credentials:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;API keys&lt;/strong&gt; — third-party service credentials&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Tokens&lt;/strong&gt; — GitHub PATs, OAuth tokens, etc.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;SSH keys&lt;/strong&gt; — for git operations or server access&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Custom&lt;/strong&gt; — any sensitive value&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h2&gt;Agent Access Control&lt;span class="hx:absolute hx:-mt-20" id="agent-access-control"&gt;&lt;/span&gt;
+&lt;a href="#agent-access-control" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;p&gt;Secrets are &lt;strong&gt;not&lt;/strong&gt; globally available to all agents. You explicitly grant each secret to specific agents:&lt;/p&gt;
+&lt;ol&gt;
+&lt;li&gt;Create a secret in the dashboard or via API&lt;/li&gt;
+&lt;li&gt;Grant the secret to one or more agents&lt;/li&gt;
+&lt;li&gt;Only granted agents receive the secret in their container environment&lt;/li&gt;
+&lt;/ol&gt;
+&lt;p&gt;This prevents agents from accessing credentials they don&amp;rsquo;t need.&lt;/p&gt;
+&lt;h2&gt;How Secrets Reach Agents&lt;span class="hx:absolute hx:-mt-20" id="how-secrets-reach-agents"&gt;&lt;/span&gt;
+&lt;a href="#how-secrets-reach-agents" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;p&gt;When the engine spawns an agent container:&lt;/p&gt;
+&lt;ol&gt;
+&lt;li&gt;It calls the internal endpoint &lt;code&gt;GET /v1/secrets/agents/{agent_id}/env&lt;/code&gt;&lt;/li&gt;
+&lt;li&gt;The API decrypts the agent&amp;rsquo;s granted secrets and returns them as an environment variable map&lt;/li&gt;
+&lt;li&gt;The engine injects these as environment variables into the container&lt;/li&gt;
+&lt;/ol&gt;
+&lt;p&gt;This is the &lt;strong&gt;only&lt;/strong&gt; endpoint that returns plaintext values, and it&amp;rsquo;s an internal endpoint called only by the engine — not exposed to the dashboard or external clients.&lt;/p&gt;
+&lt;h2&gt;Managing Secrets&lt;span class="hx:absolute hx:-mt-20" id="managing-secrets"&gt;&lt;/span&gt;
+&lt;a href="#managing-secrets" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;h3&gt;Via Dashboard&lt;span class="hx:absolute hx:-mt-20" id="via-dashboard"&gt;&lt;/span&gt;
+&lt;a href="#via-dashboard" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h3&gt;&lt;ol&gt;
+&lt;li&gt;Go to &lt;strong&gt;Settings&lt;/strong&gt; in the dashboard&lt;/li&gt;
+&lt;li&gt;Navigate to the &lt;strong&gt;Secrets&lt;/strong&gt; section&lt;/li&gt;
+&lt;li&gt;Create, update, or delete secrets&lt;/li&gt;
+&lt;li&gt;Grant or revoke agent access&lt;/li&gt;
+&lt;/ol&gt;
+&lt;h3&gt;Via API&lt;span class="hx:absolute hx:-mt-20" id="via-api"&gt;&lt;/span&gt;
+&lt;a href="#via-api" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h3&gt;&lt;div class="hextra-code-block hx:relative hx:mt-6 hx:first:mt-0 hx:group/code"&gt;
+&lt;div&gt;&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-bash" data-lang="bash"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="c1"&gt;# List secrets (masked, no plaintext)&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;GET /v1/secrets/
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="c1"&gt;# Create a secret&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;POST /v1/secrets/
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="o"&gt;{&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt; &lt;span class="s2"&gt;&amp;#34;name&amp;#34;&lt;/span&gt;: &lt;span class="s2"&gt;&amp;#34;GITHUB_TOKEN&amp;#34;&lt;/span&gt;,
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt; &lt;span class="s2"&gt;&amp;#34;description&amp;#34;&lt;/span&gt;: &lt;span class="s2"&gt;&amp;#34;GitHub PAT for repo access&amp;#34;&lt;/span&gt;,
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt; &lt;span class="s2"&gt;&amp;#34;secret_type&amp;#34;&lt;/span&gt;: &lt;span class="s2"&gt;&amp;#34;token&amp;#34;&lt;/span&gt;,
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt; &lt;span class="s2"&gt;&amp;#34;value&amp;#34;&lt;/span&gt;: &lt;span class="s2"&gt;&amp;#34;ghp_actual_secret_value&amp;#34;&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="o"&gt;}&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="c1"&gt;# Grant to an agent&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;POST /v1/secrets/&lt;span class="o"&gt;{&lt;/span&gt;secret_id&lt;span class="o"&gt;}&lt;/span&gt;/grant/&lt;span class="o"&gt;{&lt;/span&gt;agent_id&lt;span class="o"&gt;}&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="c1"&gt;# Revoke from an agent&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;DELETE /v1/secrets/&lt;span class="o"&gt;{&lt;/span&gt;secret_id&lt;span class="o"&gt;}&lt;/span&gt;/grant/&lt;span class="o"&gt;{&lt;/span&gt;agent_id&lt;span class="o"&gt;}&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="c1"&gt;# List secrets granted to an agent (masked)&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;GET /v1/secrets/agents/&lt;span class="o"&gt;{&lt;/span&gt;agent_id&lt;span class="o"&gt;}&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="c1"&gt;# Delete a secret (and all its grants)&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;DELETE /v1/secrets/&lt;span class="o"&gt;{&lt;/span&gt;secret_id&lt;span class="o"&gt;}&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;&lt;div class="hextra-code-copy-btn-container hx:opacity-0 hx:transition hx:group-hover/code:opacity-100 hx:flex hx:gap-1 hx:absolute hx:m-[11px] hx:right-0 hx:top-0"&gt;
+&lt;button
+class="hextra-code-copy-btn hx:group/copybtn hx:cursor-pointer hx:transition-all hx:active:opacity-50 hx:bg-primary-700/5 hx:border hx:border-black/5 hx:text-gray-600 hx:hover:text-gray-900 hx:rounded-md hx:p-1.5 hx:dark:bg-primary-300/10 hx:dark:border-white/10 hx:dark:text-gray-400 hx:dark:hover:text-gray-50"
+title="Copy code"
+aria-label="Copy code"
+data-copied-label="Copied!"
+&gt;
+&lt;div class="hextra-copy-icon hx:group-[.copied]/copybtn:hidden hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;div class="hextra-success-icon hx:hidden hx:group-[.copied]/copybtn:block hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;/button&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;h2&gt;Encryption Key&lt;span class="hx:absolute hx:-mt-20" id="encryption-key"&gt;&lt;/span&gt;
+&lt;a href="#encryption-key" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;p&gt;The encryption key is configured via the &lt;code&gt;SECRET_ENCRYPTION_KEY&lt;/code&gt; environment variable:&lt;/p&gt;
+&lt;div class="hextra-code-block hx:relative hx:mt-6 hx:first:mt-0 hx:group/code"&gt;
+&lt;div&gt;&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-bash" data-lang="bash"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="c1"&gt;# Generate a strong key&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;python3 -c &lt;span class="s2"&gt;&amp;#34;import secrets; print(secrets.token_hex(32))&amp;#34;&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;&lt;div class="hextra-code-copy-btn-container hx:opacity-0 hx:transition hx:group-hover/code:opacity-100 hx:flex hx:gap-1 hx:absolute hx:m-[11px] hx:right-0 hx:top-0"&gt;
+&lt;button
+class="hextra-code-copy-btn hx:group/copybtn hx:cursor-pointer hx:transition-all hx:active:opacity-50 hx:bg-primary-700/5 hx:border hx:border-black/5 hx:text-gray-600 hx:hover:text-gray-900 hx:rounded-md hx:p-1.5 hx:dark:bg-primary-300/10 hx:dark:border-white/10 hx:dark:text-gray-400 hx:dark:hover:text-gray-50"
+title="Copy code"
+aria-label="Copy code"
+data-copied-label="Copied!"
+&gt;
+&lt;div class="hextra-copy-icon hx:group-[.copied]/copybtn:hidden hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;div class="hextra-success-icon hx:hidden hx:group-[.copied]/copybtn:block hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;/button&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class="hx:overflow-x-auto hx:mt-6 hx:flex hx:rounded-lg hx:border hx:py-2 hx:ltr:pr-4 hx:rtl:pl-4 hx:contrast-more:border-current hx:contrast-more:dark:border-current hx:border-amber-200 hx:bg-amber-100 hx:text-amber-900 hx:dark:border-amber-200/30 hx:dark:bg-amber-900/30 hx:dark:text-amber-200"&gt;
+&lt;div class="hx:ltr:pl-3 hx:ltr:pr-2 hx:rtl:pr-3 hx:rtl:pl-2"&gt;&lt;svg height=1.2em class="hx:inline-block hx:align-middle" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" aria-hidden="true"&gt;&lt;path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/&gt;&lt;/svg&gt;&lt;/div&gt;
+&lt;div class="hx:w-full hx:min-w-0 hx:leading-7"&gt;
+&lt;div class="hx:mt-6 hx:leading-7 hx:first:mt-0"&gt;&lt;strong&gt;Production requirement:&lt;/strong&gt; Without &lt;code&gt;SECRET_ENCRYPTION_KEY&lt;/code&gt; set, the system auto-generates an ephemeral key on first use. This key is lost if the database is reset or the service restarts without persisting it, making all stored secrets &lt;strong&gt;permanently unrecoverable&lt;/strong&gt;. Always set this variable in production.&lt;/div&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;h2&gt;Security Properties&lt;span class="hx:absolute hx:-mt-20" id="security-properties"&gt;&lt;/span&gt;
+&lt;a href="#security-properties" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;ul&gt;
+&lt;li&gt;Secrets are encrypted before touching the database — PostgreSQL never sees plaintext&lt;/li&gt;
+&lt;li&gt;Each encryption uses a unique random nonce — identical secrets produce different ciphertexts&lt;/li&gt;
+&lt;li&gt;GCM authentication tags prevent tampering — any modification is detected on decryption&lt;/li&gt;
+&lt;li&gt;The dashboard and API only expose masked previews — you can verify a secret exists without seeing its value&lt;/li&gt;
+&lt;li&gt;Agent containers receive secrets only at spawn time via environment variables — they&amp;rsquo;re not written to disk inside the container&lt;/li&gt;
+&lt;/ul&gt;</description></item></channel></rss>

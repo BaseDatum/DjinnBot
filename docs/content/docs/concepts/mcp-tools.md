@@ -3,19 +3,23 @@ title: MCP Tools
 weight: 6
 ---
 
-DjinnBot agents can use external tools through the [Model Context Protocol (MCP)](https://modelcontextprotocol.io/). An [mcpo](https://github.com/skymoore/mcpo) proxy converts MCP tool servers into REST/OpenAPI endpoints that agents call like any other tool.
+DjinnBot agents can use external tools through the [Model Context Protocol (MCP)](https://modelcontextprotocol.io/). An [mcpo](https://github.com/skymoore/mcpo) proxy runs MCP tool servers, and DjinnBot converts them into **native agent tools** at runtime — agents use them exactly like built-in tools with no difference in the interface.
 
 ## How It Works
 
+At startup, the engine:
+
+1. Reads each MCP server's OpenAPI schema from the mcpo proxy
+2. Converts every operation into a **native `AgentTool`** with proper parameter schemas
+3. Registers them alongside built-in tools (read, write, bash, etc.)
+
+When an agent calls an MCP tool, the code handles the HTTP request to mcpo internally — the agent never sees URLs, curl commands, or HTTP details. Tool calls appear in the dashboard UI identically to built-in tools via the standard `toolStart`/`toolEnd` events.
+
 ```
-Agent Container → HTTP → mcpo Proxy → stdio → MCP Server
+Agent calls tool → Engine makes HTTP request → mcpo Proxy → stdio → MCP Server
 ```
 
-1. The mcpo proxy runs as a Docker service (`djinnbot-mcpo`)
-2. It reads `mcp/config.json` to discover configured tool servers
-3. Each MCP server is exposed as a set of REST endpoints
-4. Agents call these endpoints like any other HTTP tool
-5. The proxy handles stdio communication with the actual MCP server
+This means adding a new MCP server immediately gives agents new native tools with no code changes.
 
 ## Default Tools
 

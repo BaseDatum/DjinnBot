@@ -95,20 +95,25 @@ layout: hextra-home
 
 </div>
 
-<div class="hx-mt-4 hx-mb-8" style="max-width: 52rem; margin: 0 auto;">
+<div class="hx-mt-4 hx-mb-8" style="max-width: 64rem; margin: 0 auto;">
 
-| Agent | Role | What They Do |
-|-------|------|-------------|
-| **Eric** | Product Owner | Requirements, user stories, scope management |
-| **Finn** | Solutions Architect | System design, tech decisions, code review |
-| **Shigeo** | UX Specialist | User flows, design systems, accessibility |
-| **Yukihiro** | Senior SWE | Implementation, bug fixes, coding |
-| **Chieko** | Test Engineer | QA, testing, regression detection |
-| **Stas** | SRE | Deployment, infrastructure, monitoring |
-| **Yang** | DevEx Specialist | CI/CD, tooling, developer workflow |
-| **Holt** | Marketing & Sales | Sales strategy, outreach, positioning |
-| **Luke** | SEO Specialist | Content strategy, keyword research |
-| **Jim** | Finance Lead | Budget, pricing, runway management |
+<table>
+<thead>
+<tr><th>Agent</th><th>Role</th><th>Pipeline Stage</th><th>What They Do</th></tr>
+</thead>
+<tbody>
+<tr><td><strong>Eric</strong></td><td>Product Owner</td><td>SPEC</td><td>Requirements, user stories, acceptance criteria, scope management</td></tr>
+<tr><td><strong>Finn</strong></td><td>Solutions Architect</td><td>DESIGN / REVIEW</td><td>System architecture, tech decisions, code review, API design</td></tr>
+<tr><td><strong>Shigeo</strong></td><td>UX Specialist</td><td>UX</td><td>User flows, design systems, component specs, accessibility</td></tr>
+<tr><td><strong>Yukihiro</strong></td><td>Senior SWE</td><td>IMPLEMENT / FIX</td><td>Implementation, bug fixes, writing production code</td></tr>
+<tr><td><strong>Chieko</strong></td><td>Test Engineer</td><td>TEST</td><td>QA strategy, regression detection, test automation</td></tr>
+<tr><td><strong>Stas</strong></td><td>SRE</td><td>DEPLOY</td><td>Infrastructure, deployment, monitoring, incident response</td></tr>
+<tr><td><strong>Yang</strong></td><td>DevEx Specialist</td><td>DX (on-demand)</td><td>CI/CD pipelines, tooling, developer workflow optimization</td></tr>
+<tr><td><strong>Holt</strong></td><td>Marketing &amp; Sales</td><td>On-demand</td><td>Sales strategy, outreach, deal management, positioning</td></tr>
+<tr><td><strong>Luke</strong></td><td>SEO Specialist</td><td>On-demand</td><td>Content strategy, keyword research, technical SEO</td></tr>
+<tr><td><strong>Jim</strong></td><td>Finance Lead</td><td>On-demand</td><td>Budget, pricing, runway management, financial modeling</td></tr>
+</tbody>
+</table>
 
 The engineering pipeline is fully operational today. Marketing, sales, and finance agents work in chat and pulse modes, with structured pipeline support coming soon.
 
@@ -122,17 +127,24 @@ The engineering pipeline is fully operational today. Marketing, sales, and finan
 
 </div>
 
-<div class="hx-mt-4 hx-mb-8" style="max-width: 52rem; margin: 0 auto;">
+<div class="hx-mt-4 hx-mb-8" style="max-width: 64rem; margin: 0 auto;">
 
-| | DjinnBot | Typical Agent Frameworks |
-|---|---------|------------------------|
-| **Setup time** | `docker compose up` (5 min) | Kubernetes + cloud accounts + config files (hours) |
-| **Interface** | Full dashboard, Slack bots, chat, CLI | Terminal output or basic web UI |
-| **Security** | Every agent in isolated Docker container | Direct host access, shell execution |
-| **Memory** | Persistent semantic memory across runs | Stateless or basic file storage |
-| **Collaboration** | Agents review each other's work | Single-agent or loose coordination |
-| **Customization** | YAML pipelines, markdown personas | Code-level changes required |
+<table>
+<thead>
+<tr><th></th><th>DjinnBot</th><th>OpenClaw</th><th>Typical Agent Frameworks</th></tr>
+</thead>
+<tbody>
+<tr><td><strong>Setup time</strong></td><td><code>docker compose up</code> &mdash; 5 minutes</td><td>Kubernetes + cloud config &mdash; hours</td><td>Framework wiring + custom code &mdash; hours to days</td></tr>
+<tr><td><strong>Interface</strong></td><td>Full dashboard, Slack bots, chat, CLI, API</td><td>Basic web UI</td><td>Terminal output or minimal web UI</td></tr>
+<tr><td><strong>Security</strong></td><td>Every agent in isolated Docker container. No host access.</td><td>Direct host access, shell execution</td><td>Direct host access, shell execution</td></tr>
+<tr><td><strong>Agent memory</strong></td><td>Persistent semantic memory with knowledge graph across runs</td><td>Stateless or basic file storage</td><td>Stateless or basic file storage</td></tr>
+<tr><td><strong>Multi-agent collaboration</strong></td><td>Agents review, critique, and build on each other's work</td><td>Loose coordination</td><td>Single-agent or sequential handoff</td></tr>
+<tr><td><strong>Customization</strong></td><td>YAML pipelines, markdown personas &mdash; no code</td><td>Code-level changes</td><td>Code-level changes</td></tr>
+<tr><td><strong>Agent personas</strong></td><td>Rich characters with opinions, beliefs, and anti-patterns</td><td>Generic system prompts</td><td>Generic system prompts</td></tr>
+<tr><td><strong>Tool system</strong></td><td>MCP tools converted to native tools at runtime</td><td>Manual tool configuration</td><td>Custom tool integrations</td></tr>
+</tbody>
+</table>
 
-DjinnBot is built for people who want autonomous AI teams working on real projects — not another framework to wire together.
+DjinnBot is built for people who want autonomous AI teams working on real projects &mdash; not another framework to wire together.
 
 </div>

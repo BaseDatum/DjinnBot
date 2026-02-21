@@ -7,24 +7,29 @@ DjinnBot is a distributed system built around an event-driven architecture. Here
 
 ## System Overview
 
-```
-┌──────────────────┐      ┌──────────────────┐      ┌──────────────┐
-│    Dashboard     │◄─SSE─│   API Server     │◄─────│  PostgreSQL  │
-│  (React + Vite)  │      │   (FastAPI)      │      │              │
-└──────────────────┘      └──────────────────┘      └──────────────┘
-                                  │                        ▲
-                                  ▼                        │
-                          ┌──────────────────┐      ┌──────────────┐
-                          │  Pipeline Engine │─────►│    Redis     │
-                          │  (State Machine) │      │  (Streams)   │
-                          └──────────────────┘      └──────────────┘
-                                  │
-                    ┌─────────────┼─────────────┐
-                    ▼             ▼              ▼
-            ┌──────────┐  ┌──────────┐  ┌──────────────┐
-            │  Agent   │  │  Agent   │  │  mcpo Proxy  │
-            │Container │  │Container │  │ (MCP Tools)  │
-            └──────────┘  └──────────┘  └──────────────┘
+```mermaid
+graph TB
+    Dashboard["Dashboard<br/>(React + Vite)"] -->|SSE| API["API Server<br/>(FastAPI)"]
+    API --> DB["PostgreSQL"]
+    API --> Redis["Redis<br/>(Streams + Pub/Sub)"]
+    Engine["Pipeline Engine<br/>(State Machine)"] --> API
+    Engine --> Redis
+    Engine --> Agent1["Agent Container<br/>(Isolated)"]
+    Engine --> Agent2["Agent Container<br/>(Isolated)"]
+    Engine --> mcpo["mcpo Proxy<br/>(MCP Tools)"]
+    Agent1 --> Redis
+    Agent2 --> Redis
+    Agent1 --> mcpo
+    Agent2 --> mcpo
+
+    style Dashboard fill:#3b82f6,color:#fff,stroke:#2563eb
+    style API fill:#8b5cf6,color:#fff,stroke:#7c3aed
+    style Engine fill:#8b5cf6,color:#fff,stroke:#7c3aed
+    style DB fill:#059669,color:#fff,stroke:#047857
+    style Redis fill:#dc2626,color:#fff,stroke:#b91c1c
+    style Agent1 fill:#f59e0b,color:#000,stroke:#d97706
+    style Agent2 fill:#f59e0b,color:#000,stroke:#d97706
+    style mcpo fill:#6366f1,color:#fff,stroke:#4f46e5
 ```
 
 ## Services

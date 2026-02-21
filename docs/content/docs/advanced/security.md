@@ -5,6 +5,21 @@ weight: 4
 
 DjinnBot takes security seriously with container isolation, encrypted secrets, and minimal attack surface.
 
+## Authentication
+
+{{< callout type="warning" >}}
+**DjinnBot does not currently include built-in authentication.** The API and dashboard are open to anyone who can reach them on the network. This is fine for local development and private networks, but if you need to expose DjinnBot publicly, you **must** place it behind an authentication proxy.
+
+Recommended options:
+- [OAuth2 Proxy](https://oauth2-proxy.github.io/oauth2-proxy/) — supports Google, GitHub, Azure AD, and dozens of other providers
+- [Authelia](https://www.authelia.com/) — self-hosted SSO with 2FA
+- [Caddy](https://caddyserver.com/) with [caddy-security](https://github.com/greenpau/caddy-security) — simple reverse proxy with built-in auth
+- [Nginx](https://nginx.org/) with `auth_request` — forward auth to an external provider
+- [Cloudflare Access](https://www.cloudflare.com/products/zero-trust/access/) — zero-trust access without a VPN
+
+Built-in authentication (user accounts, API keys, RBAC) is on the near-term roadmap.
+{{< /callout >}}
+
 ## Container Isolation
 
 Every agent runs in its own Docker container. This provides:

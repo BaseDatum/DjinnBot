@@ -288,36 +288,31 @@ data-copied-label="Copied!"
 &lt;/div&gt;</description></item><item><title>Architecture</title><link>https://docs.djinn.bot/docs/concepts/architecture/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://docs.djinn.bot/docs/concepts/architecture/</guid><description>
 &lt;p&gt;DjinnBot is a distributed system built around an event-driven architecture. Here&amp;rsquo;s how the pieces fit together.&lt;/p&gt;
 &lt;h2&gt;System Overview&lt;span class="hx:absolute hx:-mt-20" id="system-overview"&gt;&lt;/span&gt;
-&lt;a href="#system-overview" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;div class="hextra-code-block hx:relative hx:mt-6 hx:first:mt-0 hx:group/code"&gt;
-&lt;div&gt;&lt;pre&gt;&lt;code&gt;┌──────────────────┐ ┌──────────────────┐ ┌──────────────┐
-│ Dashboard │◄─SSE─│ API Server │◄─────│ PostgreSQL │
-│ (React &amp;#43; Vite) │ │ (FastAPI) │ │ │
-└──────────────────┘ └──────────────────┘ └──────────────┘
-│ ▲
-▼ │
-┌──────────────────┐ ┌──────────────┐
-│ Pipeline Engine │─────►│ Redis │
-│ (State Machine) │ │ (Streams) │
-└──────────────────┘ └──────────────┘
-│
-┌─────────────┼─────────────┐
-▼ ▼ ▼
-┌──────────┐ ┌──────────┐ ┌──────────────┐
-│ Agent │ │ Agent │ │ mcpo Proxy │
-│Container │ │Container │ │ (MCP Tools) │
-└──────────┘ └──────────┘ └──────────────┘&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;div class="hextra-code-copy-btn-container hx:opacity-0 hx:transition hx:group-hover/code:opacity-100 hx:flex hx:gap-1 hx:absolute hx:m-[11px] hx:right-0 hx:top-0"&gt;
-&lt;button
-class="hextra-code-copy-btn hx:group/copybtn hx:cursor-pointer hx:transition-all hx:active:opacity-50 hx:bg-primary-700/5 hx:border hx:border-black/5 hx:text-gray-600 hx:hover:text-gray-900 hx:rounded-md hx:p-1.5 hx:dark:bg-primary-300/10 hx:dark:border-white/10 hx:dark:text-gray-400 hx:dark:hover:text-gray-50"
-title="Copy code"
-aria-label="Copy code"
-data-copied-label="Copied!"
-&gt;
-&lt;div class="hextra-copy-icon hx:group-[.copied]/copybtn:hidden hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
-&lt;div class="hextra-success-icon hx:hidden hx:group-[.copied]/copybtn:block hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
-&lt;/button&gt;
-&lt;/div&gt;
-&lt;/div&gt;
-&lt;h2&gt;Services&lt;span class="hx:absolute hx:-mt-20" id="services"&gt;&lt;/span&gt;
+&lt;a href="#system-overview" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;div role="img" aria-label="Diagram"&gt;
+&lt;pre class="mermaid hx:mt-6"&gt;
+graph TB
+Dashboard[&amp;#34;Dashboard&amp;lt;br/&amp;gt;(React + Vite)&amp;#34;] --&amp;gt;|SSE| API[&amp;#34;API Server&amp;lt;br/&amp;gt;(FastAPI)&amp;#34;]
+API --&amp;gt; DB[&amp;#34;PostgreSQL&amp;#34;]
+API --&amp;gt; Redis[&amp;#34;Redis&amp;lt;br/&amp;gt;(Streams + Pub/Sub)&amp;#34;]
+Engine[&amp;#34;Pipeline Engine&amp;lt;br/&amp;gt;(State Machine)&amp;#34;] --&amp;gt; API
+Engine --&amp;gt; Redis
+Engine --&amp;gt; Agent1[&amp;#34;Agent Container&amp;lt;br/&amp;gt;(Isolated)&amp;#34;]
+Engine --&amp;gt; Agent2[&amp;#34;Agent Container&amp;lt;br/&amp;gt;(Isolated)&amp;#34;]
+Engine --&amp;gt; mcpo[&amp;#34;mcpo Proxy&amp;lt;br/&amp;gt;(MCP Tools)&amp;#34;]
+Agent1 --&amp;gt; Redis
+Agent2 --&amp;gt; Redis
+Agent1 --&amp;gt; mcpo
+Agent2 --&amp;gt; mcpo
+style Dashboard fill:#3b82f6,color:#fff,stroke:#2563eb
+style API fill:#8b5cf6,color:#fff,stroke:#7c3aed
+style Engine fill:#8b5cf6,color:#fff,stroke:#7c3aed
+style DB fill:#059669,color:#fff,stroke:#047857
+style Redis fill:#dc2626,color:#fff,stroke:#b91c1c
+style Agent1 fill:#f59e0b,color:#000,stroke:#d97706
+style Agent2 fill:#f59e0b,color:#000,stroke:#d97706
+style mcpo fill:#6366f1,color:#fff,stroke:#4f46e5
+&lt;/pre&gt;
+&lt;/div&gt;&lt;h2&gt;Services&lt;span class="hx:absolute hx:-mt-20" id="services"&gt;&lt;/span&gt;
 &lt;a href="#services" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;h3&gt;API Server (Python / FastAPI)&lt;span class="hx:absolute hx:-mt-20" id="api-server-python--fastapi"&gt;&lt;/span&gt;
 &lt;a href="#api-server-python--fastapi" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h3&gt;&lt;p&gt;The API server is the central coordination point. It provides:&lt;/p&gt;
 &lt;ul&gt;
@@ -919,14 +914,28 @@ data-copied-label="Copied!"
 &lt;li&gt;Select your workspace&lt;/li&gt;
 &lt;li&gt;Click &lt;strong&gt;Create App&lt;/strong&gt;&lt;/li&gt;
 &lt;/ol&gt;
+&lt;h2&gt;Step 2: Enable AI Agent Features&lt;span class="hx:absolute hx:-mt-20" id="step-2-enable-ai-agent-features"&gt;&lt;/span&gt;
+&lt;a href="#step-2-enable-ai-agent-features" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;p&gt;Slack has released AI-powered features specifically for bots. Enable these to get the best experience:&lt;/p&gt;
+&lt;ol&gt;
+&lt;li&gt;In your app settings, go to &lt;strong&gt;Features&lt;/strong&gt; in the sidebar&lt;/li&gt;
+&lt;li&gt;Click &lt;strong&gt;Agents &amp;amp; AI Apps&lt;/strong&gt;&lt;/li&gt;
+&lt;li&gt;Toggle &lt;strong&gt;Enable Agent or Assistant&lt;/strong&gt; to ON&lt;/li&gt;
+&lt;li&gt;Under &lt;strong&gt;Agent Settings&lt;/strong&gt;:
+&lt;ul&gt;
+&lt;li&gt;Enable &lt;strong&gt;Dynamic Prompts&lt;/strong&gt; — this allows DjinnBot to provide rich, context-aware responses&lt;/li&gt;
+&lt;li&gt;Enable &lt;strong&gt;Model Context Protocol&lt;/strong&gt; — this allows the agent to use MCP tools natively within Slack&amp;rsquo;s AI framework&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/li&gt;
+&lt;li&gt;Click &lt;strong&gt;Save Changes&lt;/strong&gt;&lt;/li&gt;
+&lt;/ol&gt;
 &lt;div class="hx:overflow-x-auto hx:mt-6 hx:flex hx:rounded-lg hx:border hx:py-2 hx:ltr:pr-4 hx:rtl:pl-4 hx:contrast-more:border-current hx:contrast-more:dark:border-current hx:border-green-200 hx:bg-green-100 hx:text-green-900 hx:dark:border-green-200/30 hx:dark:bg-green-900/30 hx:dark:text-green-200"&gt;
 &lt;div class="hx:ltr:pl-3 hx:ltr:pr-2 hx:rtl:pr-3 hx:rtl:pl-2"&gt;&lt;svg height=1.2em class="hx:inline-block hx:align-middle" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" aria-hidden="true"&gt;&lt;path stroke-linecap="round" stroke-linejoin="round" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/&gt;&lt;/svg&gt;&lt;/div&gt;
 &lt;div class="hx:w-full hx:min-w-0 hx:leading-7"&gt;
-&lt;div class="hx:mt-6 hx:leading-7 hx:first:mt-0"&gt;&lt;strong&gt;Slack&amp;rsquo;s AI features:&lt;/strong&gt; Slack has recently released AI-powered features for bots including Agents &amp;amp; Assistants. DjinnBot agents use &lt;strong&gt;Socket Mode&lt;/strong&gt; which is the recommended approach for internal tools and works within Slack&amp;rsquo;s AI framework. See &lt;a href="https://api.slack.com/docs/agents-assistants"target="_blank" rel="noopener"&gt;Slack&amp;rsquo;s Agents &amp;amp; Assistants documentation&lt;/a&gt; for the latest on building AI-powered Slack experiences.&lt;/div&gt;
+&lt;div class="hx:mt-6 hx:leading-7 hx:first:mt-0"&gt;Slack&amp;rsquo;s Agents &amp;amp; Assistants framework is what makes DjinnBot agents feel native in your workspace. With dynamic prompts enabled, agents can provide contextual suggestions and structured responses. With MCP enabled, agents can surface tool results directly in Slack threads. See &lt;a href="https://api.slack.com/docs/agents-assistants"target="_blank" rel="noopener"&gt;Slack&amp;rsquo;s Agents &amp;amp; Assistants documentation&lt;/a&gt; for the latest on these features.&lt;/div&gt;
 &lt;/div&gt;
 &lt;/div&gt;
-&lt;h2&gt;Step 2: Configure OAuth Permissions&lt;span class="hx:absolute hx:-mt-20" id="step-2-configure-oauth-permissions"&gt;&lt;/span&gt;
-&lt;a href="#step-2-configure-oauth-permissions" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;p&gt;Navigate to &lt;strong&gt;OAuth &amp;amp; Permissions&lt;/strong&gt; and add these &lt;strong&gt;Bot Token Scopes&lt;/strong&gt;:&lt;/p&gt;
+&lt;h2&gt;Step 3: Configure OAuth Permissions&lt;span class="hx:absolute hx:-mt-20" id="step-3-configure-oauth-permissions"&gt;&lt;/span&gt;
+&lt;a href="#step-3-configure-oauth-permissions" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;p&gt;Navigate to &lt;strong&gt;OAuth &amp;amp; Permissions&lt;/strong&gt; and add these &lt;strong&gt;Bot Token Scopes&lt;/strong&gt;:&lt;/p&gt;
 &lt;table&gt;
 &lt;thead&gt;
 &lt;tr&gt;
@@ -989,8 +998,8 @@ data-copied-label="Copied!"
 &lt;/tr&gt;
 &lt;/tbody&gt;
 &lt;/table&gt;
-&lt;h2&gt;Step 3: Enable Socket Mode&lt;span class="hx:absolute hx:-mt-20" id="step-3-enable-socket-mode"&gt;&lt;/span&gt;
-&lt;a href="#step-3-enable-socket-mode" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;p&gt;Navigate to &lt;strong&gt;Socket Mode&lt;/strong&gt; in the sidebar:&lt;/p&gt;
+&lt;h2&gt;Step 4: Enable Socket Mode&lt;span class="hx:absolute hx:-mt-20" id="step-4-enable-socket-mode"&gt;&lt;/span&gt;
+&lt;a href="#step-4-enable-socket-mode" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;p&gt;Navigate to &lt;strong&gt;Socket Mode&lt;/strong&gt; in the sidebar:&lt;/p&gt;
 &lt;ol&gt;
 &lt;li&gt;Toggle &lt;strong&gt;Enable Socket Mode&lt;/strong&gt; to ON&lt;/li&gt;
 &lt;li&gt;Give the app-level token a name (e.g., &amp;ldquo;eric-socket&amp;rdquo;)&lt;/li&gt;
@@ -999,8 +1008,8 @@ data-copied-label="Copied!"
 &lt;li&gt;Save the &lt;strong&gt;App-Level Token&lt;/strong&gt; (&lt;code&gt;xapp-...&lt;/code&gt;) — this is the &lt;code&gt;APP_TOKEN&lt;/code&gt;&lt;/li&gt;
 &lt;/ol&gt;
 &lt;p&gt;Socket Mode lets the bot connect without exposing a public URL, which is ideal for self-hosted deployments behind firewalls.&lt;/p&gt;
-&lt;h2&gt;Step 4: Enable Events&lt;span class="hx:absolute hx:-mt-20" id="step-4-enable-events"&gt;&lt;/span&gt;
-&lt;a href="#step-4-enable-events" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;p&gt;Navigate to &lt;strong&gt;Event Subscriptions&lt;/strong&gt;:&lt;/p&gt;
+&lt;h2&gt;Step 5: Enable Events&lt;span class="hx:absolute hx:-mt-20" id="step-5-enable-events"&gt;&lt;/span&gt;
+&lt;a href="#step-5-enable-events" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;p&gt;Navigate to &lt;strong&gt;Event Subscriptions&lt;/strong&gt;:&lt;/p&gt;
 &lt;ol&gt;
 &lt;li&gt;
 &lt;p&gt;Toggle &lt;strong&gt;Enable Events&lt;/strong&gt; to ON&lt;/p&gt;
@@ -1018,15 +1027,15 @@ data-copied-label="Copied!"
 &lt;p&gt;Click &lt;strong&gt;Save Changes&lt;/strong&gt;&lt;/p&gt;
 &lt;/li&gt;
 &lt;/ol&gt;
-&lt;h2&gt;Step 5: Install to Workspace&lt;span class="hx:absolute hx:-mt-20" id="step-5-install-to-workspace"&gt;&lt;/span&gt;
-&lt;a href="#step-5-install-to-workspace" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;p&gt;Navigate to &lt;strong&gt;Install App&lt;/strong&gt;:&lt;/p&gt;
+&lt;h2&gt;Step 6: Install to Workspace&lt;span class="hx:absolute hx:-mt-20" id="step-6-install-to-workspace"&gt;&lt;/span&gt;
+&lt;a href="#step-6-install-to-workspace" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;p&gt;Navigate to &lt;strong&gt;Install App&lt;/strong&gt;:&lt;/p&gt;
 &lt;ol&gt;
 &lt;li&gt;Click &lt;strong&gt;Install to Workspace&lt;/strong&gt;&lt;/li&gt;
 &lt;li&gt;Review the permissions and approve&lt;/li&gt;
 &lt;li&gt;Copy the &lt;strong&gt;Bot User OAuth Token&lt;/strong&gt; (&lt;code&gt;xoxb-...&lt;/code&gt;) — this is the &lt;code&gt;BOT_TOKEN&lt;/code&gt;&lt;/li&gt;
 &lt;/ol&gt;
-&lt;h2&gt;Step 6: Add Tokens to DjinnBot&lt;span class="hx:absolute hx:-mt-20" id="step-6-add-tokens-to-djinnbot"&gt;&lt;/span&gt;
-&lt;a href="#step-6-add-tokens-to-djinnbot" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;p&gt;Edit your &lt;code&gt;.env&lt;/code&gt; file and add the tokens for each agent:&lt;/p&gt;
+&lt;h2&gt;Step 7: Add Tokens to DjinnBot&lt;span class="hx:absolute hx:-mt-20" id="step-7-add-tokens-to-djinnbot"&gt;&lt;/span&gt;
+&lt;a href="#step-7-add-tokens-to-djinnbot" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;p&gt;Edit your &lt;code&gt;.env&lt;/code&gt; file and add the tokens for each agent:&lt;/p&gt;
 &lt;div class="hextra-code-block hx:relative hx:mt-6 hx:first:mt-0 hx:group/code"&gt;
 &lt;div&gt;&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-bash" data-lang="bash"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="c1"&gt;# Slack channel where agents post pipeline updates&lt;/span&gt;
 &lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nv"&gt;SLACK_CHANNEL_ID&lt;/span&gt;&lt;span class="o"&gt;=&lt;/span&gt;C0123456789
@@ -1067,15 +1076,15 @@ data-copied-label="Copied!"
 &lt;/button&gt;
 &lt;/div&gt;
 &lt;/div&gt;
-&lt;h2&gt;Step 7: Set Up the Channel&lt;span class="hx:absolute hx:-mt-20" id="step-7-set-up-the-channel"&gt;&lt;/span&gt;
-&lt;a href="#step-7-set-up-the-channel" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;ol&gt;
+&lt;h2&gt;Step 8: Set Up the Channel&lt;span class="hx:absolute hx:-mt-20" id="step-8-set-up-the-channel"&gt;&lt;/span&gt;
+&lt;a href="#step-8-set-up-the-channel" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;ol&gt;
 &lt;li&gt;Create a channel for your DjinnBot team (e.g., &lt;code&gt;#djinnbot-dev&lt;/code&gt;)&lt;/li&gt;
 &lt;li&gt;Invite each agent bot to the channel&lt;/li&gt;
 &lt;li&gt;Copy the channel ID (right-click channel name → Copy Link, the ID is the &lt;code&gt;C...&lt;/code&gt; part)&lt;/li&gt;
 &lt;li&gt;Set &lt;code&gt;SLACK_CHANNEL_ID&lt;/code&gt; in &lt;code&gt;.env&lt;/code&gt;&lt;/li&gt;
 &lt;/ol&gt;
-&lt;h2&gt;Step 8: Restart&lt;span class="hx:absolute hx:-mt-20" id="step-8-restart"&gt;&lt;/span&gt;
-&lt;a href="#step-8-restart" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;div class="hextra-code-block hx:relative hx:mt-6 hx:first:mt-0 hx:group/code"&gt;
+&lt;h2&gt;Step 9: Restart&lt;span class="hx:absolute hx:-mt-20" id="step-9-restart"&gt;&lt;/span&gt;
+&lt;a href="#step-9-restart" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;div class="hextra-code-block hx:relative hx:mt-6 hx:first:mt-0 hx:group/code"&gt;
 &lt;div&gt;&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-bash" data-lang="bash"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;docker compose down &lt;span class="o"&gt;&amp;amp;&amp;amp;&lt;/span&gt; docker compose up -d&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;&lt;div class="hextra-code-copy-btn-container hx:opacity-0 hx:transition hx:group-hover/code:opacity-100 hx:flex hx:gap-1 hx:absolute hx:m-[11px] hx:right-0 hx:top-0"&gt;
 &lt;button
 class="hextra-code-copy-btn hx:group/copybtn hx:cursor-pointer hx:transition-all hx:active:opacity-50 hx:bg-primary-700/5 hx:border hx:border-black/5 hx:text-gray-600 hx:hover:text-gray-900 hx:rounded-md hx:p-1.5 hx:dark:bg-primary-300/10 hx:dark:border-white/10 hx:dark:text-gray-400 hx:dark:hover:text-gray-50"
@@ -3669,6 +3678,23 @@ data-copied-label="Copied!"
 &lt;/ul&gt;
 &lt;p&gt;Dependencies are set during project planning (via the planning pipeline) or manually through the dashboard.&lt;/p&gt;</description></item><item><title>Security Model</title><link>https://docs.djinn.bot/docs/advanced/security/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://docs.djinn.bot/docs/advanced/security/</guid><description>
 &lt;p&gt;DjinnBot takes security seriously with container isolation, encrypted secrets, and minimal attack surface.&lt;/p&gt;
+&lt;h2&gt;Authentication&lt;span class="hx:absolute hx:-mt-20" id="authentication"&gt;&lt;/span&gt;
+&lt;a href="#authentication" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;div class="hx:overflow-x-auto hx:mt-6 hx:flex hx:rounded-lg hx:border hx:py-2 hx:ltr:pr-4 hx:rtl:pl-4 hx:contrast-more:border-current hx:contrast-more:dark:border-current hx:border-amber-200 hx:bg-amber-100 hx:text-amber-900 hx:dark:border-amber-200/30 hx:dark:bg-amber-900/30 hx:dark:text-amber-200"&gt;
+&lt;div class="hx:ltr:pl-3 hx:ltr:pr-2 hx:rtl:pr-3 hx:rtl:pl-2"&gt;&lt;svg height=1.2em class="hx:inline-block hx:align-middle" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" aria-hidden="true"&gt;&lt;path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/&gt;&lt;/svg&gt;&lt;/div&gt;
+&lt;div class="hx:w-full hx:min-w-0 hx:leading-7"&gt;
+&lt;div class="hx:mt-6 hx:leading-7 hx:first:mt-0"&gt;&lt;p&gt;&lt;strong&gt;DjinnBot does not currently include built-in authentication.&lt;/strong&gt; The API and dashboard are open to anyone who can reach them on the network. This is fine for local development and private networks, but if you need to expose DjinnBot publicly, you &lt;strong&gt;must&lt;/strong&gt; place it behind an authentication proxy.&lt;/p&gt;
+&lt;p&gt;Recommended options:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;a href="https://oauth2-proxy.github.io/oauth2-proxy/"target="_blank" rel="noopener"&gt;OAuth2 Proxy&lt;/a&gt; — supports Google, GitHub, Azure AD, and dozens of other providers&lt;/li&gt;
+&lt;li&gt;&lt;a href="https://www.authelia.com/"target="_blank" rel="noopener"&gt;Authelia&lt;/a&gt; — self-hosted SSO with 2FA&lt;/li&gt;
+&lt;li&gt;&lt;a href="https://caddyserver.com/"target="_blank" rel="noopener"&gt;Caddy&lt;/a&gt; with &lt;a href="https://github.com/greenpau/caddy-security"target="_blank" rel="noopener"&gt;caddy-security&lt;/a&gt; — simple reverse proxy with built-in auth&lt;/li&gt;
+&lt;li&gt;&lt;a href="https://nginx.org/"target="_blank" rel="noopener"&gt;Nginx&lt;/a&gt; with &lt;code&gt;auth_request&lt;/code&gt; — forward auth to an external provider&lt;/li&gt;
+&lt;li&gt;&lt;a href="https://www.cloudflare.com/products/zero-trust/access/"target="_blank" rel="noopener"&gt;Cloudflare Access&lt;/a&gt; — zero-trust access without a VPN&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;Built-in authentication (user accounts, API keys, RBAC) is on the near-term roadmap.&lt;/p&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;/div&gt;
 &lt;h2&gt;Container Isolation&lt;span class="hx:absolute hx:-mt-20" id="container-isolation"&gt;&lt;/span&gt;
 &lt;a href="#container-isolation" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;p&gt;Every agent runs in its own Docker container. This provides:&lt;/p&gt;
 &lt;ul&gt;
@@ -3983,10 +4009,17 @@ data-copied-label="Copied!"
 &lt;li&gt;&lt;strong&gt;Tagged well&lt;/strong&gt; — keywords that match when agents encounter relevant tasks&lt;/li&gt;
 &lt;li&gt;&lt;strong&gt;Example-rich&lt;/strong&gt; — show concrete examples of commands, code, and output&lt;/li&gt;
 &lt;/ul&gt;</description></item><item><title>MCP Tools</title><link>https://docs.djinn.bot/docs/concepts/mcp-tools/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://docs.djinn.bot/docs/concepts/mcp-tools/</guid><description>
-&lt;p&gt;DjinnBot agents can use external tools through the &lt;a href="https://modelcontextprotocol.io/"target="_blank" rel="noopener"&gt;Model Context Protocol (MCP)&lt;/a&gt;. An &lt;a href="https://github.com/skymoore/mcpo"target="_blank" rel="noopener"&gt;mcpo&lt;/a&gt; proxy converts MCP tool servers into REST/OpenAPI endpoints that agents call like any other tool.&lt;/p&gt;
+&lt;p&gt;DjinnBot agents can use external tools through the &lt;a href="https://modelcontextprotocol.io/"target="_blank" rel="noopener"&gt;Model Context Protocol (MCP)&lt;/a&gt;. An &lt;a href="https://github.com/skymoore/mcpo"target="_blank" rel="noopener"&gt;mcpo&lt;/a&gt; proxy runs MCP tool servers, and DjinnBot converts them into &lt;strong&gt;native agent tools&lt;/strong&gt; at runtime — agents use them exactly like built-in tools with no difference in the interface.&lt;/p&gt;
 &lt;h2&gt;How It Works&lt;span class="hx:absolute hx:-mt-20" id="how-it-works"&gt;&lt;/span&gt;
-&lt;a href="#how-it-works" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;div class="hextra-code-block hx:relative hx:mt-6 hx:first:mt-0 hx:group/code"&gt;
-&lt;div&gt;&lt;pre&gt;&lt;code&gt;Agent Container → HTTP → mcpo Proxy → stdio → MCP Server&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;div class="hextra-code-copy-btn-container hx:opacity-0 hx:transition hx:group-hover/code:opacity-100 hx:flex hx:gap-1 hx:absolute hx:m-[11px] hx:right-0 hx:top-0"&gt;
+&lt;a href="#how-it-works" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;p&gt;At startup, the engine:&lt;/p&gt;
+&lt;ol&gt;
+&lt;li&gt;Reads each MCP server&amp;rsquo;s OpenAPI schema from the mcpo proxy&lt;/li&gt;
+&lt;li&gt;Converts every operation into a &lt;strong&gt;native &lt;code&gt;AgentTool&lt;/code&gt;&lt;/strong&gt; with proper parameter schemas&lt;/li&gt;
+&lt;li&gt;Registers them alongside built-in tools (read, write, bash, etc.)&lt;/li&gt;
+&lt;/ol&gt;
+&lt;p&gt;When an agent calls an MCP tool, the code handles the HTTP request to mcpo internally — the agent never sees URLs, curl commands, or HTTP details. Tool calls appear in the dashboard UI identically to built-in tools via the standard &lt;code&gt;toolStart&lt;/code&gt;/&lt;code&gt;toolEnd&lt;/code&gt; events.&lt;/p&gt;
+&lt;div class="hextra-code-block hx:relative hx:mt-6 hx:first:mt-0 hx:group/code"&gt;
+&lt;div&gt;&lt;pre&gt;&lt;code&gt;Agent calls tool → Engine makes HTTP request → mcpo Proxy → stdio → MCP Server&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;div class="hextra-code-copy-btn-container hx:opacity-0 hx:transition hx:group-hover/code:opacity-100 hx:flex hx:gap-1 hx:absolute hx:m-[11px] hx:right-0 hx:top-0"&gt;
 &lt;button
 class="hextra-code-copy-btn hx:group/copybtn hx:cursor-pointer hx:transition-all hx:active:opacity-50 hx:bg-primary-700/5 hx:border hx:border-black/5 hx:text-gray-600 hx:hover:text-gray-900 hx:rounded-md hx:p-1.5 hx:dark:bg-primary-300/10 hx:dark:border-white/10 hx:dark:text-gray-400 hx:dark:hover:text-gray-50"
 title="Copy code"
@@ -3998,13 +4031,7 @@ data-copied-label="Copied!"
 &lt;/button&gt;
 &lt;/div&gt;
 &lt;/div&gt;
-&lt;ol&gt;
-&lt;li&gt;The mcpo proxy runs as a Docker service (&lt;code&gt;djinnbot-mcpo&lt;/code&gt;)&lt;/li&gt;
-&lt;li&gt;It reads &lt;code&gt;mcp/config.json&lt;/code&gt; to discover configured tool servers&lt;/li&gt;
-&lt;li&gt;Each MCP server is exposed as a set of REST endpoints&lt;/li&gt;
-&lt;li&gt;Agents call these endpoints like any other HTTP tool&lt;/li&gt;
-&lt;li&gt;The proxy handles stdio communication with the actual MCP server&lt;/li&gt;
-&lt;/ol&gt;
+&lt;p&gt;This means adding a new MCP server immediately gives agents new native tools with no code changes.&lt;/p&gt;
 &lt;h2&gt;Default Tools&lt;span class="hx:absolute hx:-mt-20" id="default-tools"&gt;&lt;/span&gt;
 &lt;a href="#default-tools" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;p&gt;DjinnBot ships with these MCP servers pre-configured:&lt;/p&gt;
 &lt;table&gt;
@@ -4130,7 +4157,10 @@ data-copied-label="Copied!"
 &lt;p&gt;See &lt;a href="https://github.com/punkpeye/awesome-mcp-servers"target="_blank" rel="noopener"&gt;awesome-mcp-servers&lt;/a&gt; for a comprehensive list.&lt;/p&gt;</description></item><item><title>Pulse Mode</title><link>https://docs.djinn.bot/docs/concepts/pulse/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://docs.djinn.bot/docs/concepts/pulse/</guid><description>
 &lt;p&gt;Pulse mode lets agents work autonomously on a schedule — checking their inbox, finding tasks, and doing work without human intervention.&lt;/p&gt;
 &lt;h2&gt;How Pulse Works&lt;span class="hx:absolute hx:-mt-20" id="how-pulse-works"&gt;&lt;/span&gt;
-&lt;a href="#how-pulse-works" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;p&gt;When pulse mode is enabled for an agent, the engine wakes them up on a configurable interval (default: every 30 minutes). Each pulse cycle follows a routine:&lt;/p&gt;
+&lt;a href="#how-pulse-works" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;p&gt;When pulse mode is enabled for an agent, the engine wakes them up on a configurable interval (default: every 30 minutes). Each pulse cycle is driven by the agent&amp;rsquo;s &lt;strong&gt;PULSE.md&lt;/strong&gt; file — a fully customizable markdown file that defines the agent&amp;rsquo;s wake-up routine.&lt;/p&gt;
+&lt;p&gt;The default template (&lt;code&gt;agents/_templates/PULSE.md&lt;/code&gt;) provides a general-purpose routine, but each agent can override it with their own &lt;code&gt;PULSE.md&lt;/code&gt; to define entirely different behavior. The file is injected as part of the agent&amp;rsquo;s system prompt during pulse sessions, so whatever instructions you write become the agent&amp;rsquo;s autonomous behavior.&lt;/p&gt;
+&lt;h3&gt;Default Pulse Routine&lt;span class="hx:absolute hx:-mt-20" id="default-pulse-routine"&gt;&lt;/span&gt;
+&lt;a href="#default-pulse-routine" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h3&gt;&lt;p&gt;The default template covers:&lt;/p&gt;
 &lt;ol&gt;
 &lt;li&gt;&lt;strong&gt;Check inbox&lt;/strong&gt; — read messages from other agents&lt;/li&gt;
 &lt;li&gt;&lt;strong&gt;Search memories&lt;/strong&gt; — recall recent context, handoffs, and active work&lt;/li&gt;
@@ -4142,7 +4172,32 @@ data-copied-label="Copied!"
 &lt;li&gt;&lt;strong&gt;Transition the task&lt;/strong&gt; — move it through the kanban board (e.g., to &amp;ldquo;review&amp;rdquo;)&lt;/li&gt;
 &lt;li&gt;&lt;strong&gt;Report&lt;/strong&gt; — message the human via Slack DM if there&amp;rsquo;s something important&lt;/li&gt;
 &lt;/ol&gt;
-&lt;p&gt;Agents only pick up &lt;strong&gt;one task per pulse&lt;/strong&gt; to stay focused.&lt;/p&gt;
+&lt;p&gt;But you can rewrite &lt;code&gt;PULSE.md&lt;/code&gt; to do anything — check monitoring dashboards, run reports, review PRs, triage issues, or follow any custom workflow you define.&lt;/p&gt;
+&lt;h3&gt;Customizing Pulse Behavior&lt;span class="hx:absolute hx:-mt-20" id="customizing-pulse-behavior"&gt;&lt;/span&gt;
+&lt;a href="#customizing-pulse-behavior" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h3&gt;&lt;p&gt;Edit &lt;code&gt;agents/&amp;lt;id&amp;gt;/PULSE.md&lt;/code&gt; to change what an agent does when it wakes up. For example, a QA agent might:&lt;/p&gt;
+&lt;div class="hextra-code-block hx:relative hx:mt-6 hx:first:mt-0 hx:group/code"&gt;
+&lt;div&gt;&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-markdown" data-lang="markdown"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="gh"&gt;# Pulse Routine
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="gu"&gt;### 1. Check for open PRs that need review
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;Search for PRs assigned to you or your team.
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="gu"&gt;### 2. Run regression tests
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;Execute the test suite and report any failures.
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="gu"&gt;### 3. Review recently merged code
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;Check for untested code paths in recent merges.&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;&lt;div class="hextra-code-copy-btn-container hx:opacity-0 hx:transition hx:group-hover/code:opacity-100 hx:flex hx:gap-1 hx:absolute hx:m-[11px] hx:right-0 hx:top-0"&gt;
+&lt;button
+class="hextra-code-copy-btn hx:group/copybtn hx:cursor-pointer hx:transition-all hx:active:opacity-50 hx:bg-primary-700/5 hx:border hx:border-black/5 hx:text-gray-600 hx:hover:text-gray-900 hx:rounded-md hx:p-1.5 hx:dark:bg-primary-300/10 hx:dark:border-white/10 hx:dark:text-gray-400 hx:dark:hover:text-gray-50"
+title="Copy code"
+aria-label="Copy code"
+data-copied-label="Copied!"
+&gt;
+&lt;div class="hextra-copy-icon hx:group-[.copied]/copybtn:hidden hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;div class="hextra-success-icon hx:hidden hx:group-[.copied]/copybtn:block hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;/button&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;p&gt;The engine doesn&amp;rsquo;t hard-code the routine — it&amp;rsquo;s entirely defined by the markdown file you provide.&lt;/p&gt;
 &lt;h2&gt;Configuration&lt;span class="hx:absolute hx:-mt-20" id="configuration"&gt;&lt;/span&gt;
 &lt;a href="#configuration" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;p&gt;Pulse is configured per-agent in &lt;code&gt;config.yml&lt;/code&gt;:&lt;/p&gt;
 &lt;div class="hextra-code-block hx:relative hx:mt-6 hx:first:mt-0 hx:group/code"&gt;
@@ -4353,4 +4408,112 @@ data-copied-label="Copied!"
 &lt;/button&gt;
 &lt;/div&gt;
 &lt;/div&gt;
-&lt;p&gt;The agent-runtime image is built independently from the other services, so you can customize the toolbox without affecting the API server or dashboard.&lt;/p&gt;</description></item></channel></rss>
+&lt;p&gt;The agent-runtime image is built independently from the other services, so you can customize the toolbox without affecting the API server or dashboard.&lt;/p&gt;</description></item><item><title>Secrets Management</title><link>https://docs.djinn.bot/docs/concepts/secrets/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://docs.djinn.bot/docs/concepts/secrets/</guid><description>
+&lt;p&gt;DjinnBot includes a built-in secrets management system for storing sensitive values — API keys, tokens, SSH keys, and other credentials — that agents need during execution.&lt;/p&gt;
+&lt;h2&gt;How It Works&lt;span class="hx:absolute hx:-mt-20" id="how-it-works"&gt;&lt;/span&gt;
+&lt;a href="#how-it-works" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;p&gt;Secrets are stored in PostgreSQL, encrypted at rest with &lt;strong&gt;AES-256-GCM&lt;/strong&gt;. The encryption scheme uses:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;256-bit key derived from the &lt;code&gt;SECRET_ENCRYPTION_KEY&lt;/code&gt; environment variable&lt;/li&gt;
+&lt;li&gt;Random 96-bit nonce per encryption operation&lt;/li&gt;
+&lt;li&gt;128-bit authentication tag (GCM default)&lt;/li&gt;
+&lt;li&gt;Storage format: &lt;code&gt;base64(nonce[12] + tag[16] + ciphertext)&lt;/code&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;Plaintext secret values are &lt;strong&gt;never&lt;/strong&gt; returned by the API to the dashboard or any external client. All list and detail endpoints return masked previews only (e.g., &lt;code&gt;ghp_...abc1&lt;/code&gt;).&lt;/p&gt;
+&lt;h2&gt;Secret Types&lt;span class="hx:absolute hx:-mt-20" id="secret-types"&gt;&lt;/span&gt;
+&lt;a href="#secret-types" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;p&gt;Secrets support different types to help organize credentials:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;API keys&lt;/strong&gt; — third-party service credentials&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Tokens&lt;/strong&gt; — GitHub PATs, OAuth tokens, etc.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;SSH keys&lt;/strong&gt; — for git operations or server access&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Custom&lt;/strong&gt; — any sensitive value&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h2&gt;Agent Access Control&lt;span class="hx:absolute hx:-mt-20" id="agent-access-control"&gt;&lt;/span&gt;
+&lt;a href="#agent-access-control" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;p&gt;Secrets are &lt;strong&gt;not&lt;/strong&gt; globally available to all agents. You explicitly grant each secret to specific agents:&lt;/p&gt;
+&lt;ol&gt;
+&lt;li&gt;Create a secret in the dashboard or via API&lt;/li&gt;
+&lt;li&gt;Grant the secret to one or more agents&lt;/li&gt;
+&lt;li&gt;Only granted agents receive the secret in their container environment&lt;/li&gt;
+&lt;/ol&gt;
+&lt;p&gt;This prevents agents from accessing credentials they don&amp;rsquo;t need.&lt;/p&gt;
+&lt;h2&gt;How Secrets Reach Agents&lt;span class="hx:absolute hx:-mt-20" id="how-secrets-reach-agents"&gt;&lt;/span&gt;
+&lt;a href="#how-secrets-reach-agents" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;p&gt;When the engine spawns an agent container:&lt;/p&gt;
+&lt;ol&gt;
+&lt;li&gt;It calls the internal endpoint &lt;code&gt;GET /v1/secrets/agents/{agent_id}/env&lt;/code&gt;&lt;/li&gt;
+&lt;li&gt;The API decrypts the agent&amp;rsquo;s granted secrets and returns them as an environment variable map&lt;/li&gt;
+&lt;li&gt;The engine injects these as environment variables into the container&lt;/li&gt;
+&lt;/ol&gt;
+&lt;p&gt;This is the &lt;strong&gt;only&lt;/strong&gt; endpoint that returns plaintext values, and it&amp;rsquo;s an internal endpoint called only by the engine — not exposed to the dashboard or external clients.&lt;/p&gt;
+&lt;h2&gt;Managing Secrets&lt;span class="hx:absolute hx:-mt-20" id="managing-secrets"&gt;&lt;/span&gt;
+&lt;a href="#managing-secrets" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;h3&gt;Via Dashboard&lt;span class="hx:absolute hx:-mt-20" id="via-dashboard"&gt;&lt;/span&gt;
+&lt;a href="#via-dashboard" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h3&gt;&lt;ol&gt;
+&lt;li&gt;Go to &lt;strong&gt;Settings&lt;/strong&gt; in the dashboard&lt;/li&gt;
+&lt;li&gt;Navigate to the &lt;strong&gt;Secrets&lt;/strong&gt; section&lt;/li&gt;
+&lt;li&gt;Create, update, or delete secrets&lt;/li&gt;
+&lt;li&gt;Grant or revoke agent access&lt;/li&gt;
+&lt;/ol&gt;
+&lt;h3&gt;Via API&lt;span class="hx:absolute hx:-mt-20" id="via-api"&gt;&lt;/span&gt;
+&lt;a href="#via-api" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h3&gt;&lt;div class="hextra-code-block hx:relative hx:mt-6 hx:first:mt-0 hx:group/code"&gt;
+&lt;div&gt;&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-bash" data-lang="bash"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="c1"&gt;# List secrets (masked, no plaintext)&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;GET /v1/secrets/
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="c1"&gt;# Create a secret&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;POST /v1/secrets/
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="o"&gt;{&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt; &lt;span class="s2"&gt;&amp;#34;name&amp;#34;&lt;/span&gt;: &lt;span class="s2"&gt;&amp;#34;GITHUB_TOKEN&amp;#34;&lt;/span&gt;,
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt; &lt;span class="s2"&gt;&amp;#34;description&amp;#34;&lt;/span&gt;: &lt;span class="s2"&gt;&amp;#34;GitHub PAT for repo access&amp;#34;&lt;/span&gt;,
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt; &lt;span class="s2"&gt;&amp;#34;secret_type&amp;#34;&lt;/span&gt;: &lt;span class="s2"&gt;&amp;#34;token&amp;#34;&lt;/span&gt;,
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt; &lt;span class="s2"&gt;&amp;#34;value&amp;#34;&lt;/span&gt;: &lt;span class="s2"&gt;&amp;#34;ghp_actual_secret_value&amp;#34;&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="o"&gt;}&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="c1"&gt;# Grant to an agent&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;POST /v1/secrets/&lt;span class="o"&gt;{&lt;/span&gt;secret_id&lt;span class="o"&gt;}&lt;/span&gt;/grant/&lt;span class="o"&gt;{&lt;/span&gt;agent_id&lt;span class="o"&gt;}&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="c1"&gt;# Revoke from an agent&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;DELETE /v1/secrets/&lt;span class="o"&gt;{&lt;/span&gt;secret_id&lt;span class="o"&gt;}&lt;/span&gt;/grant/&lt;span class="o"&gt;{&lt;/span&gt;agent_id&lt;span class="o"&gt;}&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="c1"&gt;# List secrets granted to an agent (masked)&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;GET /v1/secrets/agents/&lt;span class="o"&gt;{&lt;/span&gt;agent_id&lt;span class="o"&gt;}&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="c1"&gt;# Delete a secret (and all its grants)&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;DELETE /v1/secrets/&lt;span class="o"&gt;{&lt;/span&gt;secret_id&lt;span class="o"&gt;}&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;&lt;div class="hextra-code-copy-btn-container hx:opacity-0 hx:transition hx:group-hover/code:opacity-100 hx:flex hx:gap-1 hx:absolute hx:m-[11px] hx:right-0 hx:top-0"&gt;
+&lt;button
+class="hextra-code-copy-btn hx:group/copybtn hx:cursor-pointer hx:transition-all hx:active:opacity-50 hx:bg-primary-700/5 hx:border hx:border-black/5 hx:text-gray-600 hx:hover:text-gray-900 hx:rounded-md hx:p-1.5 hx:dark:bg-primary-300/10 hx:dark:border-white/10 hx:dark:text-gray-400 hx:dark:hover:text-gray-50"
+title="Copy code"
+aria-label="Copy code"
+data-copied-label="Copied!"
+&gt;
+&lt;div class="hextra-copy-icon hx:group-[.copied]/copybtn:hidden hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;div class="hextra-success-icon hx:hidden hx:group-[.copied]/copybtn:block hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;/button&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;h2&gt;Encryption Key&lt;span class="hx:absolute hx:-mt-20" id="encryption-key"&gt;&lt;/span&gt;
+&lt;a href="#encryption-key" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;p&gt;The encryption key is configured via the &lt;code&gt;SECRET_ENCRYPTION_KEY&lt;/code&gt; environment variable:&lt;/p&gt;
+&lt;div class="hextra-code-block hx:relative hx:mt-6 hx:first:mt-0 hx:group/code"&gt;
+&lt;div&gt;&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-bash" data-lang="bash"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="c1"&gt;# Generate a strong key&lt;/span&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;python3 -c &lt;span class="s2"&gt;&amp;#34;import secrets; print(secrets.token_hex(32))&amp;#34;&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;&lt;div class="hextra-code-copy-btn-container hx:opacity-0 hx:transition hx:group-hover/code:opacity-100 hx:flex hx:gap-1 hx:absolute hx:m-[11px] hx:right-0 hx:top-0"&gt;
+&lt;button
+class="hextra-code-copy-btn hx:group/copybtn hx:cursor-pointer hx:transition-all hx:active:opacity-50 hx:bg-primary-700/5 hx:border hx:border-black/5 hx:text-gray-600 hx:hover:text-gray-900 hx:rounded-md hx:p-1.5 hx:dark:bg-primary-300/10 hx:dark:border-white/10 hx:dark:text-gray-400 hx:dark:hover:text-gray-50"
+title="Copy code"
+aria-label="Copy code"
+data-copied-label="Copied!"
+&gt;
+&lt;div class="hextra-copy-icon hx:group-[.copied]/copybtn:hidden hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;div class="hextra-success-icon hx:hidden hx:group-[.copied]/copybtn:block hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;/button&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class="hx:overflow-x-auto hx:mt-6 hx:flex hx:rounded-lg hx:border hx:py-2 hx:ltr:pr-4 hx:rtl:pl-4 hx:contrast-more:border-current hx:contrast-more:dark:border-current hx:border-amber-200 hx:bg-amber-100 hx:text-amber-900 hx:dark:border-amber-200/30 hx:dark:bg-amber-900/30 hx:dark:text-amber-200"&gt;
+&lt;div class="hx:ltr:pl-3 hx:ltr:pr-2 hx:rtl:pr-3 hx:rtl:pl-2"&gt;&lt;svg height=1.2em class="hx:inline-block hx:align-middle" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" aria-hidden="true"&gt;&lt;path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/&gt;&lt;/svg&gt;&lt;/div&gt;
+&lt;div class="hx:w-full hx:min-w-0 hx:leading-7"&gt;
+&lt;div class="hx:mt-6 hx:leading-7 hx:first:mt-0"&gt;&lt;strong&gt;Production requirement:&lt;/strong&gt; Without &lt;code&gt;SECRET_ENCRYPTION_KEY&lt;/code&gt; set, the system auto-generates an ephemeral key on first use. This key is lost if the database is reset or the service restarts without persisting it, making all stored secrets &lt;strong&gt;permanently unrecoverable&lt;/strong&gt;. Always set this variable in production.&lt;/div&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;h2&gt;Security Properties&lt;span class="hx:absolute hx:-mt-20" id="security-properties"&gt;&lt;/span&gt;
+&lt;a href="#security-properties" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;ul&gt;
+&lt;li&gt;Secrets are encrypted before touching the database — PostgreSQL never sees plaintext&lt;/li&gt;
+&lt;li&gt;Each encryption uses a unique random nonce — identical secrets produce different ciphertexts&lt;/li&gt;
+&lt;li&gt;GCM authentication tags prevent tampering — any modification is detected on decryption&lt;/li&gt;
+&lt;li&gt;The dashboard and API only expose masked previews — you can verify a secret exists without seeing its value&lt;/li&gt;
+&lt;li&gt;Agent containers receive secrets only at spawn time via environment variables — they&amp;rsquo;re not written to disk inside the container&lt;/li&gt;
+&lt;/ul&gt;</description></item></channel></rss>

@@ -30,11 +30,23 @@ For each agent you want in Slack:
 4. Select your workspace
 5. Click **Create App**
 
+## Step 2: Enable AI Agent Features
+
+Slack has released AI-powered features specifically for bots. Enable these to get the best experience:
+
+1. In your app settings, go to **Features** in the sidebar
+2. Click **Agents & AI Apps**
+3. Toggle **Enable Agent or Assistant** to ON
+4. Under **Agent Settings**:
+   - Enable **Dynamic Prompts** — this allows DjinnBot to provide rich, context-aware responses
+   - Enable **Model Context Protocol** — this allows the agent to use MCP tools natively within Slack's AI framework
+5. Click **Save Changes**
+
 {{< callout type="tip" >}}
-**Slack's AI features:** Slack has recently released AI-powered features for bots including Agents & Assistants. DjinnBot agents use **Socket Mode** which is the recommended approach for internal tools and works within Slack's AI framework. See [Slack's Agents & Assistants documentation](https://api.slack.com/docs/agents-assistants) for the latest on building AI-powered Slack experiences.
+Slack's Agents & Assistants framework is what makes DjinnBot agents feel native in your workspace. With dynamic prompts enabled, agents can provide contextual suggestions and structured responses. With MCP enabled, agents can surface tool results directly in Slack threads. See [Slack's Agents & Assistants documentation](https://api.slack.com/docs/agents-assistants) for the latest on these features.
 {{< /callout >}}
 
-## Step 2: Configure OAuth Permissions
+## Step 3: Configure OAuth Permissions
 
 Navigate to **OAuth & Permissions** and add these **Bot Token Scopes**:
 
@@ -54,7 +66,7 @@ Navigate to **OAuth & Permissions** and add these **Bot Token Scopes**:
 | `reactions:write` | Add emoji reactions |
 | `users:read` | Look up user info |
 
-## Step 3: Enable Socket Mode
+## Step 4: Enable Socket Mode
 
 Navigate to **Socket Mode** in the sidebar:
 
@@ -66,7 +78,7 @@ Navigate to **Socket Mode** in the sidebar:
 
 Socket Mode lets the bot connect without exposing a public URL, which is ideal for self-hosted deployments behind firewalls.
 
-## Step 4: Enable Events
+## Step 5: Enable Events
 
 Navigate to **Event Subscriptions**:
 
@@ -79,7 +91,7 @@ Navigate to **Event Subscriptions**:
 
 3. Click **Save Changes**
 
-## Step 5: Install to Workspace
+## Step 6: Install to Workspace
 
 Navigate to **Install App**:
 
@@ -87,7 +99,7 @@ Navigate to **Install App**:
 2. Review the permissions and approve
 3. Copy the **Bot User OAuth Token** (`xoxb-...`) — this is the `BOT_TOKEN`
 
-## Step 6: Add Tokens to DjinnBot
+## Step 7: Add Tokens to DjinnBot
 
 Edit your `.env` file and add the tokens for each agent:
 
@@ -115,14 +127,14 @@ bot_token: ${SLACK_ERIC_BOT_TOKEN}
 app_token: ${SLACK_ERIC_APP_TOKEN}
 ```
 
-## Step 7: Set Up the Channel
+## Step 8: Set Up the Channel
 
 1. Create a channel for your DjinnBot team (e.g., `#djinnbot-dev`)
 2. Invite each agent bot to the channel
 3. Copy the channel ID (right-click channel name → Copy Link, the ID is the `C...` part)
 4. Set `SLACK_CHANNEL_ID` in `.env`
 
-## Step 8: Restart
+## Step 9: Restart
 
 ```bash
 docker compose down && docker compose up -d
