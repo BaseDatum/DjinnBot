@@ -87,7 +87,7 @@ export function ToolCallCard({ toolName, args, result, isError, durationMs, stat
         </button>
       )}
       {expandedArgs && args && (
-        <pre className="px-3 py-2 text-xs text-zinc-400 font-mono overflow-x-auto border-t border-zinc-800/50 max-h-48 overflow-auto">
+        <pre className="px-3 py-2 text-xs text-zinc-400 font-mono whitespace-pre-wrap break-words border-t border-zinc-800/50 max-h-48 overflow-y-auto">
           {formatJson(args)}
         </pre>
       )}
@@ -102,10 +102,10 @@ export function ToolCallCard({ toolName, args, result, isError, durationMs, stat
         </button>
       )}
       {expandedResult && result && (
-        <pre className={`px-3 py-2 text-xs font-mono overflow-x-auto border-t border-zinc-800/50 max-h-64 overflow-auto ${
+        <pre className={`px-3 py-2 text-xs font-mono whitespace-pre-wrap break-words border-t border-zinc-800/50 max-h-64 overflow-y-auto ${
           isError ? 'text-red-300' : 'text-zinc-400'
         }`}>
-          {result}
+          {formatJson(result)}
         </pre>
       )}
     </div>

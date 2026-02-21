@@ -174,7 +174,7 @@ export function makeLinkWidth(refs: Pick<RenderRefs, 'highlightLinksRef'>) {
   return function linkWidth(link: any): number {
     const sid = resolveId(link.source);
     const tid = resolveId(link.target);
-    return refs.highlightLinksRef.current.has(`${sid}-${tid}`) ? 2.2 : 0.8;
+    return refs.highlightLinksRef.current.has(`${sid}-${tid}`) ? 3.5 : 1.8;
   };
 }
 
@@ -204,7 +204,7 @@ export function makeLinkCanvasObject(refs: Pick<RenderRefs, 'colorsRef' | 'hover
     ctx.moveTo(sx, sy);
     ctx.lineTo(tx, ty);
     ctx.strokeStyle = color;
-    ctx.lineWidth = isHighlighted ? 2.2 / globalScale : 0.8 / globalScale;
+    ctx.lineWidth = isHighlighted ? 3.5 / globalScale : 1.8 / globalScale;
     if (link.type === 'tag') {
       ctx.setLineDash([3, 4]);
     } else {

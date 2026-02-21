@@ -91,8 +91,8 @@ export const ChatMessage = memo(function ChatMessage({
     return (
       <div className="group flex gap-3 justify-end">
         <CopyButton getText={() => message.content || ''} className="self-start mt-1" />
-        <div className="max-w-[80%] rounded-2xl rounded-tr-sm bg-primary text-primary-foreground px-4 py-2">
-          <p className="text-sm whitespace-pre-wrap">{message.content}</p>
+        <div className="max-w-[80%] rounded-2xl rounded-tr-sm bg-primary text-primary-foreground px-4 py-2 overflow-hidden">
+          <p className="text-sm whitespace-pre-wrap break-words overflow-wrap-anywhere">{message.content}</p>
         </div>
         <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted">
           <User className="h-4 w-4" />
@@ -112,7 +112,7 @@ export const ChatMessage = memo(function ChatMessage({
         <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/10">
           <Bot className="h-4 w-4 text-primary" />
         </div>
-        <div className="max-w-[80%] rounded-2xl rounded-tl-sm bg-muted px-4 py-2">
+        <div className="max-w-[80%] rounded-2xl rounded-tl-sm bg-muted px-4 py-2 overflow-hidden">
           {message.model && (
             <div className="flex items-center gap-2 mb-2">
               <span className="font-medium text-xs text-muted-foreground">Assistant</span>
@@ -121,10 +121,10 @@ export const ChatMessage = memo(function ChatMessage({
               </Badge>
             </div>
           )}
-          <div className="text-sm">
+          <div className="text-sm break-words overflow-hidden" style={{ overflowWrap: 'anywhere' }}>
             {isStreaming ? (
               // Plain text during streaming — avoids O(n^2) markdown re-parse per token
-              <p className="whitespace-pre-wrap leading-relaxed">
+              <p className="whitespace-pre-wrap leading-relaxed break-words">
                 {displayContent}
                 <span className="text-primary animate-pulse">&#9610;</span>
               </p>
@@ -149,7 +149,7 @@ export const ChatMessage = memo(function ChatMessage({
         <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-purple-500/10">
           <Brain className={cn("h-4 w-4 text-purple-500", isStreaming && "animate-pulse")} />
         </div>
-        <div className="flex-1 max-w-[80%]">
+        <div className="flex-1 max-w-[80%] overflow-hidden">
           <button
             onClick={() => setThinkingExpanded(!thinkingExpanded)}
             className="flex items-center gap-2 text-xs text-purple-500 hover:text-purple-400 transition-colors"
@@ -187,7 +187,7 @@ export const ChatMessage = memo(function ChatMessage({
     return (
       <div className="group flex gap-3">
         <div className="w-8" /> {/* Spacer for alignment */}
-        <div className="flex-1 max-w-[85%]">
+        <div className="flex-1 max-w-[85%] overflow-hidden">
           <ToolCallCard
             toolName={message.toolName || 'unknown'}
             args={message.args ? JSON.stringify(message.args, null, 2) : undefined}
@@ -233,8 +233,8 @@ export const ChatMessage = memo(function ChatMessage({
         <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-destructive/10">
           <AlertCircle className="h-4 w-4 text-destructive" />
         </div>
-        <div className="max-w-[80%] rounded-2xl rounded-tl-sm bg-destructive/10 border border-destructive/20 px-4 py-2">
-          <p className="text-sm text-destructive">{message.content}</p>
+        <div className="max-w-[80%] rounded-2xl rounded-tl-sm bg-destructive/10 border border-destructive/20 px-4 py-2 overflow-hidden">
+          <p className="text-sm text-destructive break-words" style={{ overflowWrap: 'anywhere' }}>{message.content}</p>
         </div>
         <CopyButton getText={() => message.content || ''} className="self-start mt-1" />
       </div>

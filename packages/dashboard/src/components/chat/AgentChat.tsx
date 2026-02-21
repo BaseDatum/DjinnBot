@@ -456,7 +456,7 @@ export function AgentChat({
                   : 'Session ended'
             }
             disabled={!isReady}
-            className="min-h-[44px] max-h-[160px] resize-none text-base sm:text-sm"
+            className="min-h-[44px] max-h-[50vh] resize-y text-base sm:text-sm"
             rows={1}
           />
           {isResponding ? (
