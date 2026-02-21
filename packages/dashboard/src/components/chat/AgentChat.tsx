@@ -66,6 +66,32 @@ export function AgentChat({
   const abortControllerRef = useRef<AbortController | null>(null);
   const historyLoadedRef = useRef(false);
 
+  // ── Custom top-edge resize for textarea ────────────────────────────────────
+  const [inputHeight, setInputHeight] = useState(44);
+  const inputResizeRef = useRef<{ startY: number; startH: number } | null>(null);
+
+  useEffect(() => {
+    const onMouseMove = (e: MouseEvent) => {
+      if (!inputResizeRef.current) return;
+      // Dragging upward (negative dy) should increase height
+      const dy = inputResizeRef.current.startY - e.clientY;
+      const newH = Math.max(44, Math.min(window.innerHeight * 0.5, inputResizeRef.current.startH + dy));
+      setInputHeight(newH);
+    };
+    const onMouseUp = () => {
+      if (!inputResizeRef.current) return;
+      inputResizeRef.current = null;
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
+    return () => {
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+    };
+  }, []);
+
   // Message queue state — declared before useChatStream so callbacks can reference them.
   const queuedMessageRef = useRef<string | null>(null);
   const [hasQueuedMessage, setHasQueuedMessage] = useState(false);
@@ -439,7 +465,20 @@ export function AgentChat({
       </ScrollArea>
 
       {/* Input */}
-      <div className="border-t p-3 pb-[calc(0.75rem+env(safe-area-inset-bottom,0px))] bg-background shrink-0">
+      <div className="border-t bg-background shrink-0">
+        {/* Top-edge resize handle — drag upward to grow the input */}
+        <div
+          className="h-1.5 cursor-ns-resize group flex items-center justify-center hover:bg-accent/40 transition-colors"
+          onMouseDown={e => {
+            e.preventDefault();
+            inputResizeRef.current = { startY: e.clientY, startH: inputHeight };
+            document.body.style.cursor = 'ns-resize';
+            document.body.style.userSelect = 'none';
+          }}
+        >
+          <div className="w-8 h-0.5 rounded-full bg-muted-foreground/25 group-hover:bg-muted-foreground/50 transition-colors" />
+        </div>
+        <div className="px-3 pb-[calc(0.75rem+env(safe-area-inset-bottom,0px))]">
         <div className="flex gap-2 items-end">
           <Textarea
             ref={inputRef}
@@ -456,7 +495,8 @@ export function AgentChat({
                   : 'Session ended'
             }
             disabled={!isReady}
-            className="min-h-[44px] max-h-[50vh] resize-y text-base sm:text-sm"
+            className="resize-none text-base sm:text-sm"
+            style={{ height: inputHeight, minHeight: 44, maxHeight: '50vh' }}
             rows={1}
           />
           {isResponding ? (
@@ -487,6 +527,7 @@ export function AgentChat({
               : 'Enter to queue \u00B7 \u2318Enter to interrupt \u00B7 Shift+Enter for new line')
             : 'Enter to send \u00B7 Shift+Enter for new line'}
         </p>
+        </div>
       </div>
     </div>
   );

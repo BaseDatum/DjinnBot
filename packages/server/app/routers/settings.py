@@ -1076,9 +1076,15 @@ async def get_provider_models(
         model_id = m.get("id", "")
         if not model_id:
             continue
-        # Prefix with provider unless it already contains a slash (openrouter style)
-        if provider_id != "openrouter" and "/" not in model_id:
+        # Prefix with provider.
+        # For openrouter: IDs arrive as "anthropic/claude-sonnet-4" — prefix
+        # with "openrouter/" so the model resolver knows to route via OpenRouter
+        # instead of trying the upstream provider directly (which would fail
+        # if that provider's API key isn't configured).
+        if "/" not in model_id:
             full_id = f"{provider_id}/{model_id}"
+        elif provider_id == "openrouter":
+            full_id = f"openrouter/{model_id}"
         else:
             full_id = model_id
         normalised.append(

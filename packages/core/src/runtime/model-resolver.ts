@@ -58,50 +58,103 @@ export function inferModelForProvider(provider: string, modelId: string): Model<
   const known = getModels(provider as any);
   if (known.length === 0) return null;
 
-  // Tally (api, baseUrl) pairs across known models
-  const tally = new Map<string, { api: Api; baseUrl: string; count: number }>();
+  // ── Step 1: Try to find the best (api, baseUrl) by matching the model id
+  // against registered siblings.  A provider like "opencode" hosts models from
+  // multiple upstream APIs (Anthropic, OpenAI, Google, …).  Picking the global
+  // majority would route e.g. a new Claude model through openai-completions,
+  // which silently drops tool calls.
+  //
+  // Strategy: find the registered model whose id shares the longest common
+  // prefix with the unknown modelId.  If there's a good prefix match (>= 5
+  // chars, e.g. "claude-" or "gpt-5"), use that model's api + baseUrl.
+  // Otherwise fall back to the global majority.
+
+  let sibling: typeof known[0] | null = null;
+  let longestPrefix = 0;
   for (const m of known) {
-    const key = `${m.api}|${m.baseUrl}`;
-    const entry = tally.get(key);
-    if (entry) {
-      entry.count++;
-    } else {
-      tally.set(key, { api: m.api, baseUrl: m.baseUrl, count: 1 });
+    // Compute common prefix length between the unknown modelId and this known model
+    let shared = 0;
+    const limit = Math.min(modelId.length, m.id.length);
+    while (shared < limit && modelId[shared] === m.id[shared]) shared++;
+    if (shared > longestPrefix) {
+      longestPrefix = shared;
+      sibling = m;
     }
   }
 
-  // Pick the plurality (api, baseUrl) combination
-  let best: { api: Api; baseUrl: string; count: number } = {
-    api: known[0].api,
-    baseUrl: known[0].baseUrl,
-    count: 0,
-  };
-  for (const entry of tally.values()) {
-    if (entry.count > best.count) best = entry;
+  // Require a meaningful prefix match (e.g. "claude-" = 7, "gpt-5" = 5,
+  // "gemini-" = 7) to avoid false positives on short coincidental overlaps.
+  const MIN_PREFIX = 5;
+
+  let bestApi: Api;
+  let bestBaseUrl: string;
+
+  if (sibling && longestPrefix >= MIN_PREFIX) {
+    bestApi = sibling.api;
+    bestBaseUrl = sibling.baseUrl;
+    console.warn(
+      `[ModelResolver] "${provider}/${modelId}" is not in pi-ai's model registry. ` +
+      `Matched sibling "${sibling.id}" (prefix: ${longestPrefix} chars) → ` +
+      `api="${bestApi}" baseUrl="${bestBaseUrl}".`
+    );
+  } else {
+    // ── Step 2: Fall back to the global majority (api, baseUrl)
+    const tally = new Map<string, { api: Api; baseUrl: string; count: number }>();
+    for (const m of known) {
+      const key = `${m.api}|${m.baseUrl}`;
+      const entry = tally.get(key);
+      if (entry) {
+        entry.count++;
+      } else {
+        tally.set(key, { api: m.api, baseUrl: m.baseUrl, count: 1 });
+      }
+    }
+
+    let best: { api: Api; baseUrl: string; count: number } = {
+      api: known[0].api,
+      baseUrl: known[0].baseUrl,
+      count: 0,
+    };
+    for (const entry of tally.values()) {
+      if (entry.count > best.count) best = entry;
+    }
+
+    bestApi = best.api;
+    bestBaseUrl = best.baseUrl;
+    console.warn(
+      `[ModelResolver] "${provider}/${modelId}" is not in pi-ai's model registry. ` +
+      `No sibling match — using majority api="${bestApi}" baseUrl="${bestBaseUrl}".`
+    );
   }
 
-  console.warn(
-    `[ModelResolver] "${provider}/${modelId}" is not in pi-ai's model registry. ` +
-    `Using inferred api="${best.api}" baseUrl="${best.baseUrl}" — ` +
-    `this model may not exist on the provider.`
-  );
+  // Copy additional properties from the sibling when available so the inferred
+  // model inherits capabilities like reasoning, input modalities, context
+  // window size, and max tokens from the closest known model.
+  const siblingProps = sibling && longestPrefix >= MIN_PREFIX ? {
+    reasoning: sibling.reasoning ?? false,
+    input: sibling.input ?? ['text'] as any,
+    contextWindow: sibling.contextWindow ?? 128000,
+    maxTokens: sibling.maxTokens ?? 32768,
+  } : {
+    reasoning: false,
+    input: ['text'] as any,
+    contextWindow: 128000,
+    maxTokens: 32768,
+  };
 
   // opencode.ai requires max_tokens, not max_completion_tokens.
   // Inject a compat override so pi-ai sends the correct field.
   const needsMaxTokensOverride =
-    provider === 'opencode' || best.baseUrl.includes('opencode.ai');
+    provider === 'opencode' || bestBaseUrl.includes('opencode.ai');
 
   return {
     id: modelId,
     name: modelId,
-    api: best.api,
+    api: bestApi,
     provider: provider as any,
-    baseUrl: best.baseUrl,
-    reasoning: false,
-    input: ['text'],
+    baseUrl: bestBaseUrl,
+    ...siblingProps,
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-    contextWindow: 128000,
-    maxTokens: 32768,
     ...(needsMaxTokensOverride
       ? { compat: { maxTokensField: 'max_tokens' as const } }
       : {}),
