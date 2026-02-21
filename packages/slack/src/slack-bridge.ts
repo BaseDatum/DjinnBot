@@ -139,9 +139,10 @@ export class SlackBridge {
 
     // Build per-agent WebClient map for thread creation
     const agentClients = new Map<string, WebClient>();
-    for (const agent of config.agentRegistry.getSlackAgents()) {
-      if (agent.slack) {
-        agentClients.set(agent.id, new WebClient(agent.slack.botToken));
+    for (const agent of config.agentRegistry.getAgentsByChannel('slack')) {
+      const slackCreds = agent.channels.slack;
+      if (slackCreds) {
+        agentClients.set(agent.id, new WebClient(slackCreds.primaryToken));
       }
     }
 
@@ -163,7 +164,7 @@ export class SlackBridge {
    * Start all agent Slack runtimes (Socket Mode connections).
    */
   async start(): Promise<void> {
-    const slackAgents = this.config.agentRegistry.getSlackAgents();
+    const slackAgents = this.config.agentRegistry.getAgentsByChannel('slack');
 
     if (slackAgents.length === 0) {
       console.log('[SlackBridge] No agents with Slack credentials — bridge inactive');
@@ -833,12 +834,12 @@ export class SlackBridge {
     const agentLine = `${emoji} *${agentId}*\n`;
 
     // Use the agent's bot token to send the DM
-    const slackConfig = agent?.slack;
-    if (!slackConfig?.botToken) {
+    const slackCreds = agent?.channels.slack;
+    if (!slackCreds?.primaryToken) {
       throw new Error(`Agent ${agentId} has no Slack bot token configured`);
     }
 
-    const client = new WebClient(slackConfig.botToken);
+    const client = new WebClient(slackCreds.primaryToken);
 
     // Open DM channel with user
     const openResponse = await client.conversations.open({

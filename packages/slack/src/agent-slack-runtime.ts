@@ -12,9 +12,8 @@ import { App } from '@slack/bolt';
 import type { WebClient } from '@slack/web-api';
 import type {
   AgentRegistryEntry,
-  SlackCredentials,
 } from '@djinnbot/core';
-import { parseModelString } from '@djinnbot/core';
+import { parseModelString, toSlackCredentials } from '@djinnbot/core';
 import { SlackStreamer } from './slack-streamer.js';
 import type { SlackSessionPool } from './slack-session-pool.js';
 
@@ -150,9 +149,12 @@ export class AgentSlackRuntime {
     this.config = config;
     this.agent = config.agent;
     this.agentId = config.agent.id;
-    this.botUserId = config.agent.slack?.botUserId;
-
-    const slack = config.agent.slack as SlackCredentials;
+    const slackCreds = config.agent.channels.slack;
+    if (!slackCreds) {
+      throw new Error(`Agent ${config.agent.id} has no Slack channel credentials`);
+    }
+    const slack = toSlackCredentials(slackCreds);
+    this.botUserId = slack.botUserId;
 
     this.app = new App({
       token: slack.botToken,

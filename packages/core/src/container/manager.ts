@@ -25,7 +25,7 @@ export interface ContainerInfo {
   status: 'created' | 'starting' | 'ready' | 'running' | 'stopping' | 'stopped';
 }
 
-const DEFAULT_IMAGE = 'djinnbot/agent-runtime:latest';
+const DEFAULT_IMAGE = process.env.AGENT_RUNTIME_IMAGE || 'ghcr.io/basedatum/djinnbot/agent-runtime:latest';
 const READY_TIMEOUT_MS = 30000;
 
 // Resource defaults — callers can override via ContainerConfig

@@ -165,6 +165,8 @@ services:
       # Internal service-to-service auth token — protects the plaintext secrets /env endpoint.
       # The engine sends this token when fetching secrets and injects it into agent containers.
       - ENGINE_INTERNAL_TOKEN=${ENGINE_INTERNAL_TOKEN:-}
+      # Docker image for agent runtime containers (overridable via dashboard or env)
+      - AGENT_RUNTIME_IMAGE=${AGENT_RUNTIME_IMAGE:-ghcr.io/basedatum/djinnbot/agent-runtime:latest}
     volumes:
       # NOTE: We mount only djinnbot-data to /data. The sandboxes, workspaces, and runs
       # directories are subdirectories within djinnbot-data (/data/sandboxes, etc).

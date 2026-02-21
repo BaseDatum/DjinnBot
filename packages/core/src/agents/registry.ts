@@ -2,7 +2,7 @@
  * AgentRegistry — discovers and loads agents from the agents/ directory.
  *
  * An agent is a directory containing at minimum IDENTITY.md.
- * Optional: SOUL.md, AGENTS.md, config.yml, slack.yml, avatar.png
+ * Optional: SOUL.md, AGENTS.md, config.yml, {channel}.yml, avatar.png
  *
  * Adding an agent = creating a directory. Removing = deleting it.
  * No hardcoded lists anywhere.
@@ -15,9 +15,16 @@ import type {
   AgentRegistryEntry,
   ParsedIdentity,
   AgentRuntimeConfig,
-  SlackCredentials,
+  ChannelCredentials,
 } from './types.js';
 import { DEFAULT_AGENT_CONFIG } from './types.js';
+
+/**
+ * Known channel YAML filenames (without extension).
+ * Each maps to a channel key in AgentRegistryEntry.channels.
+ * Adding a new channel integration = adding an entry here.
+ */
+const KNOWN_CHANNELS = ['slack', 'discord', 'telegram'] as const;
 
 export class AgentRegistry {
   private agents = new Map<string, AgentRegistryEntry>();
@@ -59,9 +66,12 @@ export class AgentRegistry {
           console.log(`[AgentRegistry] Loaded orchestrator`);
         } else {
           this.agents.set(id, agent);
-          const slackStatus = agent.slack ? '(Slack ✓)' : '(no Slack)';
+          const channelNames = Object.keys(agent.channels);
+          const channelStatus = channelNames.length > 0
+            ? `(${channelNames.join(', ')} ✓)`
+            : '(no channels)';
           console.log(
-            `[AgentRegistry] Loaded agent: ${id} — ${agent.identity.name} ${agent.identity.emoji} ${slackStatus}`
+            `[AgentRegistry] Loaded agent: ${id} — ${agent.identity.name} ${agent.identity.emoji} ${channelStatus}`
           );
         }
       } catch (err) {
@@ -90,9 +100,20 @@ export class AgentRegistry {
     return Array.from(this.agents.values());
   }
 
-  /** Get all agents that have Slack credentials */
+  /**
+   * Get all agents that have credentials for a specific channel.
+   * e.g. getAgentsByChannel('slack') returns agents with Slack configured.
+   */
+  getAgentsByChannel(channel: string): AgentRegistryEntry[] {
+    return this.getAll().filter((a) => channel in a.channels);
+  }
+
+  /**
+   * @deprecated Use getAgentsByChannel('slack') instead.
+   * Kept for backward compatibility during migration.
+   */
   getSlackAgents(): AgentRegistryEntry[] {
-    return this.getAll().filter((a) => a.slack !== null);
+    return this.getAgentsByChannel('slack');
   }
 
   /** Get agent IDs */
@@ -112,20 +133,30 @@ export class AgentRegistry {
     dir: string,
     identityContent: string
   ): Promise<AgentRegistryEntry> {
-    // Load optional files in parallel
-    const [soul, agents, decision, configContent, slackContent, avatarExists] =
+    // Load optional core files and all known channel YAML files in parallel
+    const channelLoads = KNOWN_CHANNELS.map((ch) => this.loadFile(join(dir, `${ch}.yml`)));
+
+    const [soul, agents, decision, configContent, avatarExists, ...channelContents] =
       await Promise.all([
         this.loadFile(join(dir, 'SOUL.md')),
         this.loadFile(join(dir, 'AGENTS.md')),
         this.loadFile(join(dir, 'DECISION.md')),
         this.loadFile(join(dir, 'config.yml')),
-        this.loadFile(join(dir, 'slack.yml')),
         this.fileExists(join(dir, 'avatar.png')),
+        ...channelLoads,
       ]);
 
     const identity = this.parseIdentity(identityContent);
     const config = this.parseConfig(configContent);
-    const slack = this.parseSlackCredentials(slackContent);
+
+    // Parse all channel credentials
+    const channels: Record<string, ChannelCredentials> = {};
+    for (let i = 0; i < KNOWN_CHANNELS.length; i++) {
+      const creds = this.parseChannelCredentials(channelContents[i]);
+      if (creds) {
+        channels[KNOWN_CHANNELS[i]] = creds;
+      }
+    }
 
     return {
       id,
@@ -135,7 +166,7 @@ export class AgentRegistry {
       agents: agents || '',
       decision: decision || '',
       config,
-      slack,
+      channels,
       hasAvatar: avatarExists,
     };
   }
@@ -205,31 +236,84 @@ export class AgentRegistry {
   }
 
   /**
-   * Parse slack.yml and resolve env var references.
-   * Returns null if no valid credentials found.
+   * Parse a channel YAML file into generic ChannelCredentials.
+   *
+   * Channel YAML files use a standard two-token layout:
+   *
+   *   # Slack example (slack.yml)
+   *   bot_token: ${SLACK_ERIC_BOT_TOKEN}     → primaryToken
+   *   app_token: ${SLACK_ERIC_APP_TOKEN}     → secondaryToken
+   *   bot_user_id: U0ABC1234                 → extra.bot_user_id
+   *
+   *   # Discord example (discord.yml)
+   *   bot_token: ${DISCORD_ERIC_BOT_TOKEN}   → primaryToken
+   *   app_id: ${DISCORD_ERIC_APP_ID}         → secondaryToken
+   *   guild_id: 123456789012345678           → extra.guild_id
+   *
+   *   # Telegram example (telegram.yml)
+   *   bot_token: ${TELEGRAM_ERIC_BOT_TOKEN}  → primaryToken
+   *   webhook_secret: ${TELEGRAM_ERIC_...}   → secondaryToken (optional)
+   *   allowed_chat_ids: -100123,987654       → extra.allowed_chat_ids
+   *
+   * The first token-like key found becomes primaryToken, the second becomes
+   * secondaryToken.  All remaining keys go into extra.
    */
-  private parseSlackCredentials(
+  private parseChannelCredentials(
     content: string | null
-  ): SlackCredentials | null {
+  ): ChannelCredentials | null {
     if (!content) return null;
 
     try {
       const parsed = parseYaml(content) || {};
 
-      const botToken = this.resolveEnvVar(parsed.bot_token || parsed.botToken);
-      const appToken = this.resolveEnvVar(parsed.app_token || parsed.appToken);
+      // Resolve all keys that look like tokens (contain "token", "key", "secret", "id" suffix)
+      const tokenKeys = ['bot_token', 'botToken', 'token'];
+      const secondaryKeys = ['app_token', 'appToken', 'app_id', 'appId', 'webhook_secret', 'webhookSecret'];
 
-      if (!botToken || !appToken) {
+      let primaryToken: string | undefined;
+      let secondaryToken: string | undefined;
+      const extra: Record<string, string> = {};
+
+      // Find primary token
+      for (const key of tokenKeys) {
+        if (parsed[key]) {
+          primaryToken = this.resolveEnvVar(parsed[key]);
+          break;
+        }
+      }
+
+      // Find secondary token
+      for (const key of secondaryKeys) {
+        if (parsed[key]) {
+          secondaryToken = this.resolveEnvVar(parsed[key]);
+          break;
+        }
+      }
+
+      // Primary token is required — without it, the channel isn't configured
+      if (!primaryToken) {
         return null;
       }
 
+      // Collect remaining keys as extra config
+      const knownKeys = new Set([...tokenKeys, ...secondaryKeys]);
+      for (const [key, value] of Object.entries(parsed)) {
+        if (knownKeys.has(key)) continue;
+        if (typeof value === 'string' && value) {
+          const resolved = this.resolveEnvVar(value);
+          if (resolved) extra[key] = resolved;
+        } else if (value !== null && value !== undefined) {
+          extra[key] = String(value);
+        }
+      }
+
       return {
-        botToken,
-        appToken,
-        botUserId: parsed.bot_user_id || parsed.botUserId || undefined,
+        primaryToken,
+        ...(secondaryToken ? { secondaryToken } : {}),
+        ...(Object.keys(extra).length > 0 ? { extra } : {}),
       };
     } catch {
-      console.warn('[AgentRegistry] Failed to parse slack.yml');
+      console.warn('[AgentRegistry] Failed to parse channel YAML');
       return null;
     }
   }

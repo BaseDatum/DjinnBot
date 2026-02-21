@@ -31,11 +31,39 @@ export interface AgentRuntimeConfig {
   // skillsDisabled removed in V2 — skill access is managed via DB (agent_skills table)
 }
 
-/** Parsed from slack.yml (tokens resolved from env) */
+/**
+ * Generic channel credentials resolved from {channel}.yml files.
+ *
+ * Each channel integration stores two tokens (primary + secondary) and
+ * optional extra key-value config.  The semantic meaning varies by channel:
+ *
+ *   Slack:    primaryToken = botToken (xoxb-…), secondaryToken = appToken (xapp-…)
+ *   Discord:  primaryToken = botToken, secondaryToken = applicationId
+ *   Telegram: primaryToken = botToken, secondaryToken = webhookSecret (optional)
+ */
+export interface ChannelCredentials {
+  primaryToken: string;
+  secondaryToken?: string;
+  extra?: Record<string, string>;
+}
+
+/**
+ * @deprecated Use ChannelCredentials instead.  Kept as a convenience alias
+ * so Slack-specific code can destructure with familiar field names.
+ */
 export interface SlackCredentials {
   botToken: string;
   appToken: string;
   botUserId?: string;
+}
+
+/** Convert generic ChannelCredentials to the Slack-specific shape. */
+export function toSlackCredentials(creds: ChannelCredentials): SlackCredentials {
+  return {
+    botToken: creds.primaryToken,
+    appToken: creds.secondaryToken!,
+    botUserId: creds.extra?.bot_user_id,
+  };
 }
 
 /** Full agent registry entry — everything we know about an agent */
@@ -54,8 +82,11 @@ export interface AgentRegistryEntry {
   decision: string;
   /** Merged config (config.yml + defaults) */
   config: AgentRuntimeConfig;
-  /** Slack credentials (null = no Slack presence) */
-  slack: SlackCredentials | null;
+  /**
+   * Per-channel credentials keyed by channel name (e.g. "slack", "discord", "telegram").
+   * Loaded from {channel}.yml files in the agent directory.
+   */
+  channels: Record<string, ChannelCredentials>;
   /** Whether avatar.png exists */
   hasAvatar: boolean;
 }

@@ -2,7 +2,7 @@ import { createFileRoute, useNavigate } from '@tanstack/react-router';
 import { useState, useEffect } from 'react';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Settings, Cpu, Brain, MessageSquare, Layers, Database, Github, Lock, Zap, Puzzle, Workflow, Shield } from 'lucide-react';
+import { Settings, Cpu, Brain, MessageSquare, Layers, Database, Github, Lock, Zap, Puzzle, Workflow, Shield, Container } from 'lucide-react';
 import { toast } from 'sonner';
 import { ModelProvidersSettings } from '@/components/settings/ModelProvidersSettings';
 import { MemorySearchSettings } from '@/components/settings/MemorySearchSettings';
@@ -30,10 +30,11 @@ interface GlobalSettings {
   pulseIntervalMinutes: number;
   pulseEnabled: boolean;
   userSlackId: string;
+  agentRuntimeImage: string;
 }
 
-type SettingsTab = 'providers' | 'memory' | 'models' | 'slack' | 'github' | 'secrets' | 'auth' | 'skills' | 'mcp' | 'pipelines';
-const VALID_TABS: SettingsTab[] = ['providers', 'memory', 'models', 'slack', 'github', 'secrets', 'auth', 'skills', 'mcp', 'pipelines'];
+type SettingsTab = 'providers' | 'memory' | 'models' | 'runtime' | 'slack' | 'github' | 'secrets' | 'auth' | 'skills' | 'mcp' | 'pipelines';
+const VALID_TABS: SettingsTab[] = ['providers', 'memory', 'models', 'runtime', 'slack', 'github', 'secrets', 'auth', 'skills', 'mcp', 'pipelines'];
 
 export const Route = createFileRoute('/settings')({
   validateSearch: (search: Record<string, unknown>) => ({
@@ -46,6 +47,7 @@ const NAV_ITEMS: NestedSidebarItem[] = [
   { key: 'providers',  label: 'Model Providers', icon: Layers },
   { key: 'memory',     label: 'Memory Search',   icon: Database },
   { key: 'models',     label: 'Default Models',  icon: Cpu },
+  { key: 'runtime',    label: 'Agent Runtime',   icon: Container },
   { key: 'slack',      label: 'Slack',           icon: MessageSquare },
   { key: 'github',     label: 'GitHub App',      icon: Github },
   { key: 'secrets',    label: 'Secrets',         icon: Lock },
@@ -193,6 +195,52 @@ function SettingsPage() {
               </p>
             </div>
             <MemorySearchSettings />
+          </div>
+        )}
+
+        {/* ── Agent Runtime ── */}
+        {activeTab === 'runtime' && (
+          <div className="max-w-5xl mx-auto space-y-6">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h2 className="text-lg font-semibold flex items-center gap-2">
+                  <Container className="h-5 w-5" />
+                  Agent Runtime
+                </h2>
+                <p className="text-sm text-muted-foreground mt-1">
+                  Configure the Docker image used to spawn agent sandbox containers.
+                  Leave blank to use the default GHCR image built by CI.
+                </p>
+              </div>
+              {settingsSaveState === 'saving' && (
+                <span className="text-xs text-muted-foreground animate-pulse shrink-0 mt-1">Saving…</span>
+              )}
+              {settingsSaveState === 'saved' && (
+                <span className="text-xs text-green-500 shrink-0 mt-1">&#x2713; Saved</span>
+              )}
+              {settingsSaveState === 'error' && (
+                <span className="text-xs text-destructive shrink-0 mt-1">Failed to save</span>
+              )}
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="agentRuntimeImage" className="flex items-center gap-2">
+                Agent Runtime Image
+              </Label>
+              <p className="text-xs text-muted-foreground mb-2">
+                Docker image reference for agent containers (e.g.{' '}
+                <code className="bg-muted px-1 py-0.5 rounded text-xs">ghcr.io/basedatum/djinnbot/agent-runtime:latest</code>).
+                When empty, the engine uses the GHCR image built by GitHub Actions.
+                Changes take effect on the next agent execution.
+              </p>
+              <Input
+                id="agentRuntimeImage"
+                value={settings.agentRuntimeImage || ''}
+                onChange={(e) => handleSettingsChange({ ...settings, agentRuntimeImage: e.target.value })}
+                placeholder="ghcr.io/basedatum/djinnbot/agent-runtime:latest"
+                className="max-w-lg font-mono"
+              />
+            </div>
           </div>
         )}
 

@@ -147,6 +147,8 @@ services:
       - MCPO_CONFIG_PATH=/data/mcp/config.json
       - DJINNBOT_API_URL=http://api:8000
       - ENGINE_INTERNAL_TOKEN=${ENGINE_INTERNAL_TOKEN:-}
+      # Docker image for agent runtime containers (overridable via dashboard or env)
+      - AGENT_RUNTIME_IMAGE=${AGENT_RUNTIME_IMAGE:-ghcr.io/basedatum/djinnbot/agent-runtime:${DJINNBOT_VERSION:-latest}}
     volumes:
       - djinnbot-data:/data
       - ./pipelines:/pipelines:ro

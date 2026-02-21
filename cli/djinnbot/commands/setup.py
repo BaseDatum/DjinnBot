@@ -878,12 +878,37 @@ def step_start_stack(
             "[dim]This may take 5-15 minutes on first run (building images)...[/dim]"
         )
         up_cmd.append("--build")
+
+        # Also build the agent-runtime image (spawned dynamically by the engine, not in compose)
+        console.print("[dim]Building agent-runtime image...[/dim]")
+        try:
+            run_cmd(
+                [
+                    *docker,
+                    "build",
+                    "-t",
+                    "djinnbot/agent-runtime:latest",
+                    "-f",
+                    "Dockerfile.agent-runtime",
+                    ".",
+                ],
+                cwd=repo_dir,
+                stream=True,
+                check=False,
+            )
+        except Exception:
+            console.print(
+                "[yellow]Could not build agent-runtime image. "
+                "Agents may fail to start until it is built.[/yellow]\n"
+                "[dim]Build manually: docker build -t djinnbot/agent-runtime:latest "
+                "-f Dockerfile.agent-runtime .[/dim]"
+            )
     else:
         console.print(
             "[bold]Pulling and starting DjinnBot services...[/bold]\n"
             "[dim]Downloading pre-built images...[/dim]"
         )
-        # Pull first for better progress display
+        # Pull compose services
         try:
             run_cmd(
                 [*main_cmd, "pull"],
@@ -893,6 +918,29 @@ def step_start_stack(
             )
         except Exception:
             pass  # Pull failures are retried by up
+
+        # Pull agent-runtime image (spawned dynamically by the engine, not in compose)
+        version = get_env_value(env_path, "DJINNBOT_VERSION") or "latest"
+        agent_image = f"ghcr.io/basedatum/djinnbot/agent-runtime:{version}"
+        console.print(f"[dim]Pulling agent-runtime image ({version})...[/dim]")
+        try:
+            run_cmd(
+                [*docker, "pull", agent_image],
+                stream=True,
+                check=False,
+            )
+            # Tag it as the name the engine expects (djinnbot/agent-runtime:latest)
+            run_cmd(
+                [*docker, "tag", agent_image, "djinnbot/agent-runtime:latest"],
+                check=False,
+            )
+            console.print("[green]Agent-runtime image ready[/green]")
+        except Exception:
+            console.print(
+                "[yellow]Could not pull agent-runtime image. "
+                "Agents may fail to start until it is available.[/yellow]\n"
+                f"[dim]Pull manually: docker pull {agent_image}[/dim]"
+            )
 
     try:
         run_cmd(up_cmd, cwd=repo_dir, stream=True)

@@ -880,7 +880,7 @@ export class ChatSessionManager {
     this.redis = config.redis;
     this.apiBaseUrl = config.apiBaseUrl;
     this.dataPath = config.dataPath;
-    this.containerImage = config.containerImage || 'djinnbot/agent-runtime:latest';
+    this.containerImage = config.containerImage || process.env.AGENT_RUNTIME_IMAGE || 'ghcr.io/basedatum/djinnbot/agent-runtime:latest';
     this.idleTimeoutMs = config.idleTimeoutMs ?? 30 * 60 * 1000;  // 30 minutes
     this.reaperIntervalMs = config.reaperIntervalMs ?? 60 * 1000;  // 1 minute
     this.personaLoader = new PersonaLoader(config.agentsDir ?? process.env.AGENTS_DIR ?? './agents');

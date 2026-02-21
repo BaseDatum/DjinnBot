@@ -492,9 +492,9 @@ async function startGraphRebuildSubscriber(redisUrl: string): Promise<void> {
 // ─── Slack credential sync ────────────────────────────────────────────────────
 
 /**
- * For every agent that has a slack.yml with env var references, attempt to
- * resolve the tokens from process.env and upsert them into the DB via the
- * channels API.
+ * For every agent that has channel YAML files ({channel}.yml) with env var
+ * references, resolve the tokens from process.env and upsert them into the
+ * DB via the channels API.
  *
  * Strategy: read the existing DB state first. Only write a token if:
  *   - the env var is present in process.env, AND
@@ -503,7 +503,7 @@ async function startGraphRebuildSubscriber(redisUrl: string): Promise<void> {
  *
  * This mirrors syncProviderApiKeysToDb() for model providers.
  */
-async function syncSlackCredentialsToDb(): Promise<void> {
+async function syncChannelCredentialsToDb(): Promise<void> {
   const apiBaseUrl = process.env.DJINNBOT_API_URL || 'http://api:8000';
 
   if (!djinnBot) return;
@@ -513,71 +513,64 @@ async function syncSlackCredentialsToDb(): Promise<void> {
   const writes: Promise<void>[] = [];
 
   for (const agent of agents) {
-    // We need the raw env var values even if slack.yml couldn't fully resolve
-    // (e.g. only one of two tokens is set). Read slack.yml directly for the
-    // env var names then resolve each independently.
     const agentId = agent.id;
 
-    // Use the already-resolved slack credentials if available.
-    // If fully resolved (both tokens present), check DB and sync.
-    if (!agent.slack) {
-      // No slack.yml or tokens missing — nothing to sync.
-      continue;
-    }
+    // Iterate over all configured channels for this agent
+    for (const [channel, creds] of Object.entries(agent.channels)) {
+      const { primaryToken, secondaryToken, extra } = creds;
 
-    const { botToken, appToken, botUserId } = agent.slack;
-
-    // Fetch existing DB state for this agent+slack (non-blocking if fails)
-    let existingPrimary: string | null = null;
-    let existingSecondary: string | null = null;
-    try {
-      const res = await authFetch(`${apiBaseUrl}/v1/agents/${agentId}/channels/keys/all`);
-      if (res.ok) {
-        const data = await res.json() as { channels: Record<string, { primaryToken?: string; secondaryToken?: string }> };
-        existingPrimary = data.channels?.slack?.primaryToken ?? null;
-        existingSecondary = data.channels?.slack?.secondaryToken ?? null;
+      // Fetch existing DB state for this agent+channel (non-blocking if fails)
+      let existingPrimary: string | null = null;
+      let existingSecondary: string | null = null;
+      try {
+        const res = await authFetch(`${apiBaseUrl}/v1/agents/${agentId}/channels/keys/all`);
+        if (res.ok) {
+          const data = await res.json() as { channels: Record<string, { primaryToken?: string; secondaryToken?: string }> };
+          existingPrimary = data.channels?.[channel]?.primaryToken ?? null;
+          existingSecondary = data.channels?.[channel]?.secondaryToken ?? null;
+        }
+      } catch {
+        // Non-fatal — proceed with write attempt
       }
-    } catch {
-      // Non-fatal — proceed with write attempt
-    }
 
-    // Only sync tokens that are new or changed
-    const primaryChanged = existingPrimary !== botToken;
-    const secondaryChanged = existingSecondary !== appToken;
+      // Only sync tokens that are new or changed
+      const primaryChanged = existingPrimary !== primaryToken;
+      const secondaryChanged = secondaryToken ? existingSecondary !== secondaryToken : false;
 
-    if (!primaryChanged && !secondaryChanged) {
-      console.log(`[Engine] syncSlackCredentialsToDb: ${agentId}/slack unchanged, skipping`);
-      continue;
-    }
+      if (!primaryChanged && !secondaryChanged) {
+        console.log(`[Engine] syncChannelCredentialsToDb: ${agentId}/${channel} unchanged, skipping`);
+        continue;
+      }
 
-    const body: Record<string, unknown> = { enabled: true };
-    if (primaryChanged) body['primaryToken'] = botToken;
-    if (secondaryChanged) body['secondaryToken'] = appToken;
-    if (botUserId) {
-      body['extraConfig'] = { bot_user_id: botUserId };
-    }
+      const body: Record<string, unknown> = { enabled: true };
+      if (primaryChanged) body['primaryToken'] = primaryToken;
+      if (secondaryChanged && secondaryToken) body['secondaryToken'] = secondaryToken;
+      if (extra && Object.keys(extra).length > 0) {
+        body['extraConfig'] = extra;
+      }
 
-    writes.push(
-      authFetch(`${apiBaseUrl}/v1/agents/${agentId}/channels/slack`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      })
-        .then((r) => {
-          if (r.ok) {
-            console.log(`[Engine] syncSlackCredentialsToDb: synced ${agentId}/slack`);
-          } else {
-            console.warn(`[Engine] syncSlackCredentialsToDb: PUT ${agentId}/slack returned ${r.status}`);
-          }
+      writes.push(
+        authFetch(`${apiBaseUrl}/v1/agents/${agentId}/channels/${channel}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
         })
-        .catch((err) => {
-          console.warn(`[Engine] syncSlackCredentialsToDb: failed for ${agentId}:`, err);
-        }),
-    );
+          .then((r) => {
+            if (r.ok) {
+              console.log(`[Engine] syncChannelCredentialsToDb: synced ${agentId}/${channel}`);
+            } else {
+              console.warn(`[Engine] syncChannelCredentialsToDb: PUT ${agentId}/${channel} returned ${r.status}`);
+            }
+          })
+          .catch((err) => {
+            console.warn(`[Engine] syncChannelCredentialsToDb: failed for ${agentId}/${channel}:`, err);
+          }),
+      );
+    }
   }
 
   await Promise.all(writes);
-  console.log(`[Engine] syncSlackCredentialsToDb: done (${writes.length} agent(s) synced)`);
+  console.log(`[Engine] syncChannelCredentialsToDb: done (${writes.length} agent+channel(s) synced)`);
 }
 
 // PROVIDER_ENV_MAP is imported from constants.ts — the single source of truth.
@@ -716,6 +709,29 @@ async function loadProviderKeysFromDb(): Promise<void> {
 }
 
 /**
+ * Load the agentRuntimeImage setting from the DB and apply it to process.env.
+ * Dashboard-configured values override the docker-compose env var.
+ * Only sets the env var if the DB value is non-empty and differs from the
+ * current value, so docker-compose defaults are preserved when the DB setting
+ * is blank (meaning "use the default").
+ */
+async function loadAgentRuntimeImageFromDb(): Promise<void> {
+  const apiBaseUrl = process.env.DJINNBOT_API_URL || 'http://api:8000';
+  try {
+    const res = await authFetch(`${apiBaseUrl}/v1/settings/`);
+    if (!res.ok) return;
+    const data = await res.json() as { agentRuntimeImage?: string };
+    const dbImage = data.agentRuntimeImage?.trim();
+    if (dbImage) {
+      process.env.AGENT_RUNTIME_IMAGE = dbImage;
+      console.log(`[Engine] loadAgentRuntimeImageFromDb: set AGENT_RUNTIME_IMAGE=${dbImage}`);
+    }
+  } catch (err) {
+    console.warn('[Engine] loadAgentRuntimeImageFromDb: failed (non-fatal):', err);
+  }
+}
+
+/**
  * Main entry point
  */
 async function main(): Promise<void> {
@@ -772,14 +788,18 @@ async function main(): Promise<void> {
     const agentIds = djinnBot.getAgentRegistry().getIds();
     await ensureAgentKeys(agentIds);
 
-    // Sync per-agent Slack credentials from slack.yml env vars into the DB
+    // Sync per-agent channel credentials from {channel}.yml env vars into the DB
     // so the Channels tab in the dashboard can show and update them.
-    await syncSlackCredentialsToDb();
+    await syncChannelCredentialsToDb();
 
     // Load provider config from DB back into process.env so DB-configured
     // values (e.g. qmdr keys set via the Settings UI) are available to the
     // VaultEmbedWatcher subprocess and any engine-side code that reads process.env.
     await loadProviderKeysFromDb();
+
+    // Load agentRuntimeImage from DB settings so dashboard-configured values
+    // override the env var / default without requiring a container restart.
+    await loadAgentRuntimeImageFromDb();
 
     // Load pipelines from YAML files
     console.log('[Engine] Loading pipelines...');
@@ -892,7 +912,7 @@ async function main(): Promise<void> {
         apiBaseUrl: CONFIG.apiUrl || 'http://api:8000',
         dataPath: CONFIG.dataDir,
         agentsDir: CONFIG.agentsDir,
-        containerImage: process.env.CONTAINER_IMAGE,
+        containerImage: process.env.AGENT_RUNTIME_IMAGE,
       });
       
       chatListener = new ChatListener({
