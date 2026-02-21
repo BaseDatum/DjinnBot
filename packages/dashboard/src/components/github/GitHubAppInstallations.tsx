@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { API_BASE } from '@/lib/api';
+import { authFetch } from '@/lib/auth';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -66,13 +67,13 @@ export function GitHubAppInstallations() {
     setLoading(true);
     try {
       // Always fetch setup-status first — it never throws
-      const statusRes = await fetch(`${API_BASE}/github/setup-status`);
+      const statusRes = await authFetch(`${API_BASE}/github/setup-status`);
       const statusData: SetupStatus = await statusRes.json();
       setSetup(statusData);
 
       // Only fetch installations if the App is configured
       if (statusData.configured) {
-        const instRes = await fetch(`${API_BASE}/github/installations`);
+        const instRes = await authFetch(`${API_BASE}/github/installations`);
         if (instRes.ok) {
           setInstallations(await instRes.json());
         }
@@ -113,7 +114,7 @@ export function GitHubAppInstallations() {
     setManualLoading(true);
     setManualResult(null);
     try {
-      const res = await fetch(`${API_BASE}/github/manual-callback`, {
+      const res = await authFetch(`${API_BASE}/github/manual-callback`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ installation_id: id }),

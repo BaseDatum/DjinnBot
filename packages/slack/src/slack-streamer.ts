@@ -123,6 +123,18 @@ export class SlackStreamer {
       return;
     }
 
+    // Channel threads require recipient_user_id for chatStream.
+    // If it's not set, skip streaming and fall back to plain messages.
+    if (!this.options.recipientUserId) {
+      console.warn(
+        '[SlackStreamer] No recipientUserId set — chatStream requires this for channel threads. ' +
+        'Falling back to plain message posting. Set the Slack Recipient User ID in project settings.'
+      );
+      // Leave state as 'idle' so appendText buffers to plainTextBuffer
+      // and stop()/stopWithError() use the plain postMessage fallback.
+      return;
+    }
+
     // Set the typing/loading indicator in the assistant thread if requested
     if (initialStatus) {
       await this.setStatus(initialStatus);
@@ -132,7 +144,7 @@ export class SlackStreamer {
       this.streamer = this.options.client.chatStream({
         channel: this.options.channel,
         thread_ts: this.options.threadTs,
-        ...(this.options.recipientUserId ? { recipient_user_id: this.options.recipientUserId } : {}),
+        recipient_user_id: this.options.recipientUserId,
         ...(this.options.recipientTeamId ? { recipient_team_id: this.options.recipientTeamId } : {}),
         task_display_mode: this.options.taskDisplayMode ?? 'plan',
         buffer_size: this.options.bufferSize ?? 256,

@@ -48,7 +48,8 @@ export class PersonaLoader {
   private async fetchSkillManifest(agentId: string, apiBaseUrl: string): Promise<string> {
     try {
       const url = `${apiBaseUrl}/v1/skills/agents/${agentId}/manifest`;
-      const res = await fetch(url, { signal: AbortSignal.timeout(5000) });
+      const { authFetch } = await import('../api/auth-fetch.js');
+      const res = await authFetch(url, { signal: AbortSignal.timeout(5000) });
       if (!res.ok) {
         console.warn(`[PersonaLoader] Manifest API returned ${res.status} for ${agentId}`);
         return '';
@@ -366,8 +367,36 @@ export class PersonaLoader {
     lines.push('Your bash commands run in an isolated container. You have:');
     lines.push('- Full read/write access to your workspace');
     lines.push('- Network access for installing packages and fetching resources');
-    lines.push('- Python 3, Node.js, and common CLI tools');
+    lines.push('- Python 3, Node.js, Go, Rust, and common CLI tools');
     lines.push('- Installed tools persist across sessions');
+    lines.push('');
+    lines.push('### Headless Browser (Playwright + Chromium)');
+    lines.push('You have a headless Chromium browser available via Playwright for:');
+    lines.push('- Web scraping and data extraction');
+    lines.push('- Testing web UIs (end-to-end tests, visual regression)');
+    lines.push('- Taking screenshots and generating PDFs of web pages');
+    lines.push('- Automating browser interactions');
+    lines.push('');
+    lines.push('**Usage (Node.js):**');
+    lines.push('```javascript');
+    lines.push("const { chromium } = require('playwright');");
+    lines.push('const browser = await chromium.launch();');
+    lines.push('const page = await browser.newPage();');
+    lines.push("await page.goto('https://example.com');");
+    lines.push("await page.screenshot({ path: 'screenshot.png' });");
+    lines.push('await browser.close();');
+    lines.push('```');
+    lines.push('');
+    lines.push('**Usage (CLI):**');
+    lines.push('```bash');
+    lines.push('# Take a screenshot');
+    lines.push('playwright screenshot https://example.com screenshot.png');
+    lines.push('# Generate a PDF');
+    lines.push('playwright pdf https://example.com page.pdf');
+    lines.push('```');
+    lines.push('');
+    lines.push('**Important:** Save all browser artifacts (screenshots, PDFs, traces) to your');
+    lines.push('workspace directory — local files outside the workspace are lost when the session ends.');
 
     return lines.join('\n');
   }

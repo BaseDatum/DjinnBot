@@ -1,3 +1,4 @@
+import { authFetch } from '../api/auth-fetch.js';
 import { Type, type Static } from '@sinclair/typebox';
 import type {
   AgentTool,
@@ -103,7 +104,7 @@ export function createPulseTools(agentId: string, pulseColumns?: string[], apiBa
 
         try {
           const url = `${API_BASE_URL}/v1/agents/${agentId}/projects`;
-          const response = await fetch(url, {
+          const response = await authFetch(url, {
             signal,
           });
 
@@ -200,7 +201,7 @@ export function createPulseTools(agentId: string, pulseColumns?: string[], apiBa
           // Pass agent_id and statuses so the server returns only tasks in
           // this agent's columns that are assigned to them (or unassigned).
           const url = `${API_BASE_URL}/v1/projects/${typedParams.projectId}/ready-tasks?agent_id=${encodeURIComponent(agentId)}&limit=${limit}&statuses=${encodeURIComponent(agentStatuses)}`;
-          const response = await fetch(url, {
+          const response = await authFetch(url, {
             signal,
           });
 
@@ -299,7 +300,7 @@ export function createPulseTools(agentId: string, pulseColumns?: string[], apiBa
             body.pipelineId = typedParams.pipelineId;
           }
 
-          const response = await fetch(url, {
+          const response = await authFetch(url, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
@@ -363,7 +364,7 @@ export function createPulseTools(agentId: string, pulseColumns?: string[], apiBa
         try {
           // 1. Atomically claim the task
           const claimUrl = `${API_BASE_URL}/v1/projects/${projectId}/tasks/${taskId}/claim`;
-          const claimResp = await fetch(claimUrl, {
+          const claimResp = await authFetch(claimUrl, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ agentId }),
@@ -381,7 +382,7 @@ export function createPulseTools(agentId: string, pulseColumns?: string[], apiBa
           let workspaceNote = '';
           try {
             const wsUrl = `${API_BASE_URL}/v1/projects/${projectId}/tasks/${taskId}/workspace`;
-            const wsResp = await fetch(wsUrl, {
+            const wsResp = await authFetch(wsUrl, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ agentId }),
@@ -450,7 +451,7 @@ export function createPulseTools(agentId: string, pulseColumns?: string[], apiBa
         const { projectId, taskId } = params as { projectId: string; taskId: string };
         try {
           const url = `${API_BASE_URL}/v1/projects/${projectId}/tasks/${taskId}/branch`;
-          const response = await fetch(url, { signal });
+          const response = await authFetch(url, { signal });
           const data = (await response.json()) as any;
           if (!response.ok) {
             throw new Error(data.detail || `${response.status} ${response.statusText}`);
@@ -484,7 +485,7 @@ export function createPulseTools(agentId: string, pulseColumns?: string[], apiBa
         const { projectId, taskId } = params as { projectId: string; taskId: string };
         try {
           const url = `${API_BASE_URL}/v1/projects/${projectId}/tasks/${taskId}`;
-          const response = await fetch(url, { signal });
+          const response = await authFetch(url, { signal });
           const data = (await response.json()) as any;
           if (!response.ok) {
             throw new Error(data.detail || `${response.status} ${response.statusText}`);
@@ -531,7 +532,7 @@ export function createPulseTools(agentId: string, pulseColumns?: string[], apiBa
         };
         try {
           const url = `${API_BASE_URL}/v1/projects/${projectId}/tasks/${taskId}/pull-request`;
-          const response = await fetch(url, {
+          const response = await authFetch(url, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ agentId, title, body: body ?? '', draft: draft ?? false }),
@@ -584,7 +585,7 @@ export function createPulseTools(agentId: string, pulseColumns?: string[], apiBa
         const { projectId, taskId, status, note } = params as { projectId: string; taskId: string; status: string; note?: string };
         try {
           const url = `${API_BASE_URL}/v1/projects/${projectId}/tasks/${taskId}/transition`;
-          const response = await fetch(url, {
+          const response = await authFetch(url, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ status, note }),

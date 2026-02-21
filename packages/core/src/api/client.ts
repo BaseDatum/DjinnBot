@@ -1,5 +1,6 @@
 import type { PipelineRun, StepExecution, LoopState, LoopItem } from '../types/state.js';
 import type { Task } from '../types/project.js';
+import { authFetch } from './auth-fetch.js';
 
 export interface ApiClientConfig {
   baseUrl: string;
@@ -64,7 +65,7 @@ export class ApiClient {
     const timeoutId = setTimeout(() => controller.abort(), this.timeout);
 
     try {
-      const response = await fetch(`${this.baseUrl}${path}`, {
+      const response = await authFetch(`${this.baseUrl}${path}`, {
         method,
         headers: {
           'Content-Type': 'application/json',
@@ -261,6 +262,21 @@ export class ApiClient {
       return project?.repository || null;
     } catch (err) {
       console.warn(`[ApiClient] Failed to fetch repository for project ${projectId}:`, err);
+      return null;
+    }
+  }
+
+  async getProjectSlackSettings(projectId: string): Promise<{
+    slack_channel_id: string | null;
+    slack_notify_user_id: string | null;
+  } | null> {
+    try {
+      return await this.request<{
+        slack_channel_id: string | null;
+        slack_notify_user_id: string | null;
+      }>('GET', `/v1/projects/${projectId}/slack`);
+    } catch (err) {
+      console.warn(`[ApiClient] Failed to fetch Slack settings for project ${projectId}:`, err);
       return null;
     }
   }

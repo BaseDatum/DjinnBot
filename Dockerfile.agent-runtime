@@ -177,6 +177,14 @@ RUN ARCH=$(dpkg --print-architecture) && \
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal
 ENV PATH="/root/.cargo/bin:${PATH}"
 
+# Headless Chromium for Playwright browser automation
+# Agents can use this for web scraping, testing, screenshots, PDF generation, etc.
+# --with-deps auto-installs all required system libraries (libnss3, libgbm1, fonts, etc.)
+# We only install Chromium (skip Firefox/WebKit) to save ~800MB of image size.
+RUN npm install -g playwright && \
+    playwright install --with-deps chromium && \
+    rm -rf /var/lib/apt/lists/*
+
 # Install Bun 1.3.6 (for QMDR - 1.3.7+ has sqlite-vec segfault)
 RUN curl -fsSL https://bun.sh/install | bash -s "bun-v1.3.6"
 ENV PATH="/root/.bun/bin:${PATH}"
@@ -230,7 +238,8 @@ RUN echo "=== Agent Runtime Tools ===" && \
     git --version && gh --version | head -1 && \
     rg --version | head -1 && fd --version && bat --version | head -1 && \
     jq --version && yq --version | head -1 && \
-    bun --version && qmd --version 2>/dev/null || echo "qmd: installed" && \
+    bun --version && playwright --version && \
+    qmd --version 2>/dev/null || echo "qmd: installed" && \
     echo "=== All tools verified! ==="
 
 # Use CMD instead of ENTRYPOINT so that manager.ts can provide a Cmd that

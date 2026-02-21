@@ -1,3 +1,4 @@
+import { authFetch } from '../api/auth-fetch.js';
 import { execSync } from 'node:child_process';
 import { existsSync, mkdirSync, rmSync, watch, statSync } from 'node:fs';
 import { join } from 'node:path';
@@ -69,21 +70,47 @@ export class WorkspaceManager {
    * Fetch a git access token from the API for a project.
    * This uses GitHub App installation tokens for authenticated access.
    */
-  async fetchGitToken(projectId: string): Promise<GitTokenResponse | null> {
+  async fetchGitToken(projectId: string, repoUrl?: string): Promise<GitTokenResponse | null> {
+    // 1. Try project-level token (fast path — uses ProjectGitHub DB record)
     try {
-      const response = await fetch(`${API_BASE_URL}/v1/github/projects/${projectId}/git-token`);
-      if (!response.ok) {
-        if (response.status === 404) {
-          // Project not connected to GitHub App - fall back to env token
-          return null;
-        }
+      const response = await authFetch(`${API_BASE_URL}/v1/github/projects/${projectId}/git-token`);
+      if (response.ok) {
+        return await response.json() as GitTokenResponse;
+      }
+      if (response.status !== 404) {
         throw new Error(`Failed to fetch git token: ${response.status}`);
       }
-      return await response.json() as GitTokenResponse;
+      // 404 = no ProjectGitHub record — fall through to repo-level lookup
     } catch (err) {
-      console.warn(`[WorkspaceManager] Failed to fetch git token for ${projectId}:`, err);
-      return null;
+      console.warn(`[WorkspaceManager] Project git-token lookup failed for ${projectId}:`, err);
     }
+
+    // 2. Fall back to repo-level token (resolves installation from GitHub API by repo URL)
+    if (repoUrl && repoUrl.includes('github.com')) {
+      try {
+        const repoParam = encodeURIComponent(repoUrl);
+        const response = await authFetch(`${API_BASE_URL}/v1/github/repo-token?repo=${repoParam}`);
+        if (response.ok) {
+          const data = await response.json() as any;
+          console.log(`[WorkspaceManager] Resolved GitHub App token via repo-token for ${repoUrl} (installation: ${data.installation_id})`);
+          return {
+            token: data.token,
+            expires_at: data.expires_at,
+            installation_id: data.installation_id,
+            repo_url: data.clone_url,
+          };
+        }
+        if (response.status === 404) {
+          console.warn(`[WorkspaceManager] GitHub App not installed on ${repoUrl}`);
+        } else {
+          console.warn(`[WorkspaceManager] repo-token failed: ${response.status}`);
+        }
+      } catch (err) {
+        console.warn(`[WorkspaceManager] repo-token lookup failed for ${repoUrl}:`, err);
+      }
+    }
+
+    return null;
   }
 
   /**
@@ -166,7 +193,7 @@ export class WorkspaceManager {
       console.log(`[WorkspaceManager] Cloning repository: ${repoUrl}`);
       try {
         // Try to get authenticated URL from API (GitHub App)
-        const gitToken = await this.fetchGitToken(projectId);
+        const gitToken = await this.fetchGitToken(projectId, repoUrl);
         let cloneUrl: string;
         
         if (gitToken) {
@@ -175,6 +202,15 @@ export class WorkspaceManager {
         } else {
           // Fall back to env-based credentials
           cloneUrl = this.addCredentials(repoUrl);
+          
+          // Pre-flight: warn if no authentication is available at all
+          if (cloneUrl === repoUrl && repoUrl.startsWith('https://')) {
+            console.warn(
+              `[WorkspaceManager] No authentication available for ${repoUrl}. ` +
+              `Neither a GitHub App installation token nor GITHUB_TOKEN env var is configured. ` +
+              `Clone will only succeed for public repositories.`
+            );
+          }
         }
         
         execSync(`git clone "${cloneUrl}" "${projectPath}"`, { 
@@ -192,6 +228,16 @@ export class WorkspaceManager {
         try {
           rmSync(projectPath, { recursive: true, force: true });
         } catch {}
+        
+        // Provide actionable error message
+        const errMsg = (err as any)?.stderr || (err as Error)?.message || '';
+        if (errMsg.includes('could not read Username') || errMsg.includes('Authentication failed')) {
+          throw new Error(
+            `Failed to clone repository ${repoUrl}: authentication failed. ` +
+            `Install the GitHub App on this repository (Project Settings > GitHub) ` +
+            `or set the GITHUB_TOKEN environment variable.`
+          );
+        }
         throw new Error(`Failed to clone repository: ${repoUrl}`);
       }
     } else {
@@ -388,7 +434,7 @@ export class WorkspaceManager {
     // Pull latest if cloned repo (with GitHub App auth if available)
     if (repoUrl) {
       try {
-        const gitToken = await this.fetchGitToken(projectId);
+        const gitToken = await this.fetchGitToken(projectId, repoUrl);
         if (gitToken) {
           const originalUrl = execSync('git remote get-url origin', { cwd: projectPath, encoding: 'utf8' }).trim();
           try {
@@ -605,7 +651,7 @@ export class WorkspaceManager {
       // Use GitHub App token when available (preferred), fall back to env GITHUB_TOKEN.
       // fetchGitToken requires a projectId; if not provided, fall back to addCredentials.
       let authenticatedUrl: string;
-      const gitToken = projectId ? await this.fetchGitToken(projectId) : null;
+      const gitToken = projectId ? await this.fetchGitToken(projectId, remoteUrl) : null;
       if (gitToken) {
         // Build authenticated URL from the token's pre-built repo URL
         authenticatedUrl = gitToken.repo_url;
@@ -945,7 +991,11 @@ export class WorkspaceManager {
 
     // Pull latest from remote so we have the branch if it was pushed by another agent/pipeline
     try {
-      const gitToken = await this.fetchGitToken(projectId);
+      let remoteUrl: string | undefined;
+      try {
+        remoteUrl = execSync('git remote get-url origin', { cwd: projectPath, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
+      } catch { /* no remote */ }
+      const gitToken = await this.fetchGitToken(projectId, remoteUrl);
       if (gitToken) {
         const originalUrl = execSync('git remote get-url origin', {
           cwd: projectPath, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'],

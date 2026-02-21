@@ -91,6 +91,34 @@ slack_dm("Message content here")
 ```
 Use sparingly — for completed results, urgent blockers, or when human input is required.
 
+## Headless Browser (Playwright + Chromium)
+
+Your container includes a headless Chromium browser via Playwright. Use it for:
+- Web scraping and data extraction
+- Testing web UIs (end-to-end tests, visual regression)
+- Taking screenshots and generating PDFs of web pages
+- Automating browser interactions
+
+**Usage (Node.js):**
+```javascript
+const { chromium } = require('playwright');
+const browser = await chromium.launch();
+const page = await browser.newPage();
+await page.goto('https://example.com');
+await page.screenshot({ path: 'screenshot.png' });
+await browser.close();
+```
+
+**Usage (CLI):**
+```bash
+# Take a screenshot
+playwright screenshot https://example.com screenshot.png
+# Generate a PDF
+playwright pdf https://example.com page.pdf
+```
+
+**Important:** Save all browser artifacts (screenshots, PDFs, traces) to your workspace directory — local files outside the workspace are lost when the session ends.
+
 ## Constraints
 
 - Use `recall` before making decisions that might benefit from past context

@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { API_BASE } from '@/lib/api';
+import { authFetch } from '@/lib/auth';
 import { Button } from '@/components/ui/button';
 import {
   Select,
@@ -29,7 +30,7 @@ export function MergeButton({ runId, disabled = false, onSuccess, className }: M
   const handleMerge = async () => {
     setLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/workspaces/${runId}/git/merge`, {
+      const res = await authFetch(`${API_BASE}/workspaces/${runId}/git/merge`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ strategy }),

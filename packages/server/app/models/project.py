@@ -32,6 +32,14 @@ class Project(Base, TimestampWithCompletedMixin):
     # JSON blob — accumulated context from agent-guided onboarding interview.
     # Structured as: { project_name, goal, repo, open_source, strategy, tech, scope, ... }
     onboarding_context: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # Slack notification settings — where pipeline run updates are posted.
+    # slack_channel_id: Slack channel ID (e.g. C0123456789) for run threads.
+    # slack_notify_user_id: Slack user ID (e.g. U0123456789) set as recipient
+    #   for chatStream (required for channel-thread streaming).
+    slack_channel_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    slack_notify_user_id: Mapped[Optional[str]] = mapped_column(
+        String(64), nullable=True
+    )
 
     # Relationships
     columns: Mapped[list["KanbanColumn"]] = relationship(

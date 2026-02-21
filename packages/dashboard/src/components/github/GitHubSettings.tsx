@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { API_BASE } from '@/lib/api';
+import { authFetch } from '@/lib/auth';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Loader2 } from 'lucide-react';
@@ -37,7 +38,7 @@ export function GitHubSettings({ projectId }: GitHubSettingsProps) {
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch(`${API_BASE}/projects/${projectId}/github/status`);
+      const response = await authFetch(`${API_BASE}/projects/${projectId}/github/status`);
       if (response.ok) {
         const data = await response.json();
         setInstallation(data);

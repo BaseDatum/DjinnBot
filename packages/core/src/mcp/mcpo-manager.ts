@@ -8,6 +8,7 @@
  *  4. Listen for MCP_RESTART_REQUESTED global events and act on them
  */
 
+import { authFetch } from '../api/auth-fetch.js';
 import { mkdir, writeFile, readFile } from 'node:fs/promises';
 import { watch, existsSync } from 'node:fs';
 import { join } from 'node:path';
@@ -101,7 +102,7 @@ export class McpoManager {
 
   private async fetchMcpConfig(): Promise<Record<string, unknown>> {
     try {
-      const res = await fetch(`${this.apiBaseUrl}/v1/mcp/config.json`);
+      const res = await authFetch(`${this.apiBaseUrl}/v1/mcp/config.json`);
       if (!res.ok) {
         console.warn(`[McpoManager] Could not fetch MCP config (${res.status})`);
         return { mcpServers: {} };
@@ -187,10 +188,10 @@ export class McpoManager {
     for (const [serverId, serverConfig] of Object.entries(mcpServers)) {
       try {
         // Try to GET first — if it exists, update the config; if not, create it.
-        const getRes = await fetch(`${this.apiBaseUrl}/v1/mcp/${serverId}`);
+        const getRes = await authFetch(`${this.apiBaseUrl}/v1/mcp/${serverId}`);
         if (getRes.ok) {
           // Server already in DB — update config in case it drifted
-          await fetch(`${this.apiBaseUrl}/v1/mcp/${serverId}`, {
+          await authFetch(`${this.apiBaseUrl}/v1/mcp/${serverId}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ config: serverConfig }),
@@ -202,7 +203,7 @@ export class McpoManager {
             .split('-')
             .map((w: string) => w.charAt(0).toUpperCase() + w.slice(1))
             .join(' ');
-          await fetch(`${this.apiBaseUrl}/v1/mcp/`, {
+          await authFetch(`${this.apiBaseUrl}/v1/mcp/`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -397,7 +398,7 @@ export class McpoManager {
     status: 'configuring' | 'running' | 'error' | 'stopped'
   ): Promise<void> {
     try {
-      await fetch(`${this.apiBaseUrl}/v1/mcp/${serverId}/status`, {
+      await authFetch(`${this.apiBaseUrl}/v1/mcp/${serverId}/status`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status }),
@@ -409,7 +410,7 @@ export class McpoManager {
 
   private async patchServerTools(serverId: string, tools: string[]): Promise<void> {
     try {
-      await fetch(`${this.apiBaseUrl}/v1/mcp/${serverId}/tools`, {
+      await authFetch(`${this.apiBaseUrl}/v1/mcp/${serverId}/tools`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ tools }),

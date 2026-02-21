@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { API_BASE } from '@/lib/api';
+import { authFetch } from '@/lib/auth';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -60,7 +61,7 @@ export function RepositorySettings({ projectId, currentRepoUrl, onUpdate }: Prop
       setInfoLoading(true);
     }
     try {
-      const res = await fetch(`${API_BASE}/projects/${projectId}/repository/status`);
+      const res = await authFetch(`${API_BASE}/projects/${projectId}/repository/status`);
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         throw new Error(body.detail || 'Failed to load repository info');
@@ -84,7 +85,7 @@ export function RepositorySettings({ projectId, currentRepoUrl, onUpdate }: Prop
     setError(null);
     setSuccess(null);
     try {
-      const res = await fetch(`${API_BASE}/projects/${projectId}/repository/status`, {
+      const res = await authFetch(`${API_BASE}/projects/${projectId}/repository/status`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ repoUrl }),
@@ -115,7 +116,7 @@ export function RepositorySettings({ projectId, currentRepoUrl, onUpdate }: Prop
     setError(null);
     setSuccess(null);
     try {
-      const res = await fetch(`${API_BASE}/projects/${projectId}/repository`, {
+      const res = await authFetch(`${API_BASE}/projects/${projectId}/repository`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ repoUrl }),
@@ -126,7 +127,15 @@ export function RepositorySettings({ projectId, currentRepoUrl, onUpdate }: Prop
         throw new Error(body.detail || 'Failed to save repository URL');
       }
       
-      setSuccess('Repository URL saved!');
+      const result = await res.json();
+      
+      if (result.cloned) {
+        setSuccess('Repository saved and cloned automatically!');
+      } else if (result.cloneError) {
+        setSuccess(`Repository URL saved. Auto-clone failed: ${result.cloneError}. You can clone manually below.`);
+      } else {
+        setSuccess('Repository URL saved!');
+      }
       // Invalidate cache so next load fetches fresh data
       repoInfoCache.delete(projectId);
       onUpdate();
@@ -143,7 +152,7 @@ export function RepositorySettings({ projectId, currentRepoUrl, onUpdate }: Prop
       return;
     }
     try {
-      const res = await fetch(`${API_BASE}/projects/${projectId}/repository`, {
+      const res = await authFetch(`${API_BASE}/projects/${projectId}/repository`, {
         method: 'DELETE',
       });
       
@@ -168,7 +177,7 @@ export function RepositorySettings({ projectId, currentRepoUrl, onUpdate }: Prop
     setError(null);
     setSuccess(null);
     try {
-      const res = await fetch(`${API_BASE}/projects/${projectId}/repository/clone`, {
+      const res = await authFetch(`${API_BASE}/projects/${projectId}/repository/clone`, {
         method: 'POST',
       });
       

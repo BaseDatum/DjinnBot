@@ -1,4 +1,6 @@
 import { Redis } from 'ioredis';
+import { authFetch } from '../api/auth-fetch.js';
+import { getAgentApiKey } from '../api/agent-key-manager.js';
 import { ContainerManager, type ContainerConfig } from './manager.js';
 import { CommandSender } from './command-sender.js';
 import { EventReceiver } from './event-receiver.js';
@@ -57,7 +59,7 @@ export class ContainerRunner implements AgentRunner {
       || process.env.DJINNBOT_API_URL
       || 'http://api:8000';
     try {
-      const res = await fetch(`${apiBaseUrl}/v1/settings/providers/keys/all`);
+      const res = await authFetch(`${apiBaseUrl}/v1/settings/providers/keys/all`);
       if (res.ok) {
         const data = await res.json() as { keys: Record<string, string>; extra?: Record<string, string> };
         // Inject primary API keys
@@ -165,8 +167,8 @@ export class ContainerRunner implements AgentRunner {
           // Pass pulse columns so the agent-runtime can scope get_ready_tasks correctly.
           PULSE_COLUMNS: (pulseColumns ?? []).join(','),
           DJINNBOT_API_URL: process.env.DJINNBOT_API_URL || 'http://api:8000',
-          // Internal token for authenticating to the secrets /env endpoint
-          ...(process.env.ENGINE_INTERNAL_TOKEN ? { ENGINE_INTERNAL_TOKEN: process.env.ENGINE_INTERNAL_TOKEN } : {}),
+          // Per-agent API key for authenticating to the DjinnBot API
+          ...(getAgentApiKey(agentId) ? { AGENT_API_KEY: getAgentApiKey(agentId)! } : {}),
           // MCP / mcpo: agent-runtime calls createMcpTools() on each turn using these.
           ...(process.env.MCPO_BASE_URL ? { MCPO_BASE_URL: process.env.MCPO_BASE_URL } : {}),
           ...(process.env.MCPO_API_KEY ? { MCPO_API_KEY: process.env.MCPO_API_KEY } : {}),

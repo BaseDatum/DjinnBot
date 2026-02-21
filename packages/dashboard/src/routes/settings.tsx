@@ -1,14 +1,16 @@
 import { createFileRoute, useNavigate } from '@tanstack/react-router';
 import { useState, useEffect } from 'react';
 import { Label } from '@/components/ui/label';
-import { Settings, Cpu, Brain, MessageSquare, Layers, Database, Github, Lock, Zap, Puzzle, Workflow } from 'lucide-react';
+import { Settings, Cpu, Brain, MessageSquare, Layers, Database, Github, Lock, Zap, Puzzle, Workflow, Shield } from 'lucide-react';
 import { toast } from 'sonner';
 import { ModelProvidersSettings } from '@/components/settings/ModelProvidersSettings';
 import { MemorySearchSettings } from '@/components/settings/MemorySearchSettings';
 import { SecretsSettings } from '@/components/settings/SecretsSettings';
+import { AuthSettings } from '@/components/settings/AuthSettings';
 import { ProviderModelSelector } from '@/components/ui/ProviderModelSelector';
 import { GitHubAppInstallations } from '@/components/github/GitHubAppInstallations';
 import { API_BASE } from '@/lib/api';
+import { authFetch } from '@/lib/auth';
 import { NestedSidebar } from '@/components/layout/NestedSidebar';
 import type { NestedSidebarItem } from '@/components/layout/NestedSidebar';
 import { useAutoSave } from '@/hooks/useAutoSave';
@@ -28,8 +30,8 @@ interface GlobalSettings {
   pulseEnabled: boolean;
 }
 
-type SettingsTab = 'providers' | 'memory' | 'models' | 'github' | 'secrets' | 'skills' | 'mcp' | 'pipelines';
-const VALID_TABS: SettingsTab[] = ['providers', 'memory', 'models', 'github', 'secrets', 'skills', 'mcp', 'pipelines'];
+type SettingsTab = 'providers' | 'memory' | 'models' | 'github' | 'secrets' | 'auth' | 'skills' | 'mcp' | 'pipelines';
+const VALID_TABS: SettingsTab[] = ['providers', 'memory', 'models', 'github', 'secrets', 'auth', 'skills', 'mcp', 'pipelines'];
 
 export const Route = createFileRoute('/settings')({
   validateSearch: (search: Record<string, unknown>) => ({
@@ -44,6 +46,7 @@ const NAV_ITEMS: NestedSidebarItem[] = [
   { key: 'models',     label: 'Default Models',  icon: Cpu },
   { key: 'github',     label: 'GitHub App',      icon: Github },
   { key: 'secrets',    label: 'Secrets',         icon: Lock },
+  { key: 'auth',       label: 'Authentication',  icon: Shield },
   { key: 'skills',     label: 'Skills',          icon: Zap },
   { key: 'mcp',        label: 'MCP Servers',     icon: Puzzle },
   { key: 'pipelines',  label: 'Pipelines',       icon: Workflow },
@@ -61,7 +64,7 @@ function SettingsPage() {
   };
 
   useEffect(() => {
-    fetch(`${API_BASE}/settings/`)
+    authFetch(`${API_BASE}/settings/`)
       .then(res => res.json())
       .then(data => {
         setSettings(data);
@@ -79,7 +82,7 @@ function SettingsPage() {
     value: settingsUserEdited ? settings : null,
     onSave: async (value) => {
       if (!value) return;
-      const res = await fetch(`${API_BASE}/settings/`, {
+      const res = await authFetch(`${API_BASE}/settings/`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(value),
@@ -211,6 +214,22 @@ function SettingsPage() {
               </p>
             </div>
             <SecretsSettings />
+          </div>
+        )}
+
+        {/* ── Authentication ── */}
+        {activeTab === 'auth' && (
+          <div className="max-w-5xl mx-auto space-y-4">
+            <div>
+              <h2 className="text-lg font-semibold flex items-center gap-2">
+                <Shield className="h-5 w-5" />
+                Authentication
+              </h2>
+              <p className="text-sm text-muted-foreground mt-1">
+                Manage two-factor authentication, OIDC providers, and API keys.
+              </p>
+            </div>
+            <AuthSettings />
           </div>
         )}
 

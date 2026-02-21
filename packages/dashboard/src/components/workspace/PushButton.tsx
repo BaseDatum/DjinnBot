@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { API_BASE } from '@/lib/api';
+import { authFetch } from '@/lib/auth';
 import { Button } from '@/components/ui/button';
 import {
   AlertDialog,
@@ -30,7 +31,7 @@ export function PushButton({ runId, disabled = false, onSuccess, className }: Pu
     setShowConfirm(false);
 
     try {
-      const res = await fetch(`${API_BASE}/workspaces/${runId}/git/push`, {
+      const res = await authFetch(`${API_BASE}/workspaces/${runId}/git/push`, {
         method: 'POST',
       });
 

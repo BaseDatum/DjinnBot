@@ -1,6 +1,7 @@
 import { useEffect, useRef, useCallback, useState } from 'react';
 import type { GraphData } from '@/lib/api';
 import { wsBase } from '@/lib/api';
+import { getAccessToken } from '@/lib/auth';
 
 const WS_RECONNECT_BASE_MS = 800;
 const WS_RECONNECT_MAX_MS = 10_000;
@@ -30,7 +31,11 @@ export function useGraphWebSocket({ agentId, enabled = true, onInit, onUpdate }:
     if (!enabledRef.current) return;
     if (wsRef.current?.readyState === WebSocket.OPEN || wsRef.current?.readyState === WebSocket.CONNECTING) return;
 
-    const ws = new WebSocket(`${wsBase()}/v1/memory/vaults/${agentId}/ws`);
+    const token = getAccessToken();
+    const wsUrl = token
+      ? `${wsBase()}/v1/memory/vaults/${agentId}/ws?token=${encodeURIComponent(token)}`
+      : `${wsBase()}/v1/memory/vaults/${agentId}/ws`;
+    const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
 
     ws.addEventListener('open', () => {

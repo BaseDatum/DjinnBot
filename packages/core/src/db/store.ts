@@ -651,6 +651,19 @@ export class Store {
     return row?.repository || null;
   }
 
+  getProjectSlackSettings(projectId: string): {
+    slack_channel_id: string | null;
+    slack_notify_user_id: string | null;
+  } | null {
+    const stmt = this.db.prepare('SELECT slack_channel_id, slack_notify_user_id FROM projects WHERE id = ?');
+    const row = stmt.get(projectId) as any;
+    if (!row) return null;
+    return {
+      slack_channel_id: row.slack_channel_id || null,
+      slack_notify_user_id: row.slack_notify_user_id || null,
+    };
+  }
+
   /**
    * Recompute task readiness after a task's status changes.
    *

@@ -104,6 +104,8 @@ export type {
 
 export { SANDBOX_LIMITS, ResetSandboxResponse };
 
+import { authFetch } from '@/lib/auth';
+
 async function handleResponse(res: Response, fallbackMessage: string): Promise<any> {
   if (!res.ok) {
     const body = await res.json().catch(() => ({ detail: fallbackMessage }));
@@ -113,7 +115,7 @@ async function handleResponse(res: Response, fallbackMessage: string): Promise<a
 }
 
 export async function fetchStatus() {
-  const res = await fetch(`${API_BASE}/status`);
+  const res = await authFetch(`${API_BASE}/status`);
   return handleResponse(res, 'Failed to fetch status');
 }
 
@@ -122,32 +124,32 @@ export async function fetchRuns(params?: { pipeline_id?: string; status?: string
   if (params?.pipeline_id) searchParams.set('pipeline_id', params.pipeline_id);
   if (params?.status) searchParams.set('status', params.status);
   const query = searchParams.toString();
-  const res = await fetch(`${API_BASE}/runs/${query ? '?' + query : ''}`);
+  const res = await authFetch(`${API_BASE}/runs/${query ? '?' + query : ''}`);
   return handleResponse(res, 'Failed to fetch runs');
 }
 
 export async function fetchRun(runId: string) {
-  const res = await fetch(`${API_BASE}/runs/${runId}`);
+  const res = await authFetch(`${API_BASE}/runs/${runId}`);
   return handleResponse(res, 'Failed to fetch run');
 }
 
 export async function fetchRunLogs(runId: string): Promise<any[]> {
-  const res = await fetch(`${API_BASE}/runs/${runId}/logs`);
+  const res = await authFetch(`${API_BASE}/runs/${runId}/logs`);
   return handleResponse(res, 'Failed to fetch run logs');
 }
 
 export async function fetchPipelines() {
-  const res = await fetch(`${API_BASE}/pipelines/`);
+  const res = await authFetch(`${API_BASE}/pipelines/`);
   return handleResponse(res, 'Failed to fetch pipelines');
 }
 
 export async function fetchPipelineRaw(pipelineId: string): Promise<{ pipeline_id: string; yaml: string; file: string }> {
-  const res = await fetch(`${API_BASE}/pipelines/${pipelineId}/raw`);
+  const res = await authFetch(`${API_BASE}/pipelines/${pipelineId}/raw`);
   return handleResponse(res, 'Failed to fetch pipeline YAML');
 }
 
 export async function updatePipeline(pipelineId: string, yamlContent: string) {
-  const res = await fetch(`${API_BASE}/pipelines/${pipelineId}`, {
+  const res = await authFetch(`${API_BASE}/pipelines/${pipelineId}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ yaml_content: yamlContent }),
@@ -156,12 +158,12 @@ export async function updatePipeline(pipelineId: string, yamlContent: string) {
 }
 
 export async function validatePipeline(pipelineId: string) {
-  const res = await fetch(`${API_BASE}/pipelines/${pipelineId}/validate`, { method: 'POST' });
+  const res = await authFetch(`${API_BASE}/pipelines/${pipelineId}/validate`, { method: 'POST' });
   return handleResponse(res, 'Failed to validate pipeline');
 }
 
 export async function startRun(pipelineId: string, task: string, context?: string) {
-  const res = await fetch(`${API_BASE}/runs/`, {
+  const res = await authFetch(`${API_BASE}/runs/`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ pipeline_id: pipelineId, task, context }),
@@ -170,7 +172,7 @@ export async function startRun(pipelineId: string, task: string, context?: strin
 }
 
 export async function cancelRun(runId: string) {
-  const res = await fetch(`${API_BASE}/runs/${runId}/cancel`, {
+  const res = await authFetch(`${API_BASE}/runs/${runId}/cancel`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
   });
@@ -179,7 +181,7 @@ export async function cancelRun(runId: string) {
 }
 
 export async function restartRun(runId: string, context?: string) {
-  const res = await fetch(`${API_BASE}/runs/${runId}/restart`, {
+  const res = await authFetch(`${API_BASE}/runs/${runId}/restart`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ context: context || null }),
@@ -197,13 +199,13 @@ export interface AgentListItem {
 }
 
 export async function fetchAgents(): Promise<AgentListItem[]> {
-  const res = await fetch(`${API_BASE}/agents/`);
+  const res = await authFetch(`${API_BASE}/agents/`);
   const data = await handleResponse(res, 'Failed to fetch agents');
   return Array.isArray(data) ? data : data.agents || [];
 }
 
 export async function fetchAgent(agentId: string) {
-  const res = await fetch(`${API_BASE}/agents/${agentId}`);
+  const res = await authFetch(`${API_BASE}/agents/${agentId}`);
   return handleResponse(res, 'Failed to fetch agent');
 }
 
@@ -217,24 +219,24 @@ export interface MemorySearchResult {
 export async function searchMemory(query: string, agentId?: string, limit: number = 20): Promise<MemorySearchResult[]> {
   const params = new URLSearchParams({ q: query, limit: String(limit) });
   if (agentId) params.set('agent_id', agentId);
-  const res = await fetch(`${API_BASE}/memory/search?${params}`);
+  const res = await authFetch(`${API_BASE}/memory/search?${params}`);
   return handleResponse(res, 'Failed to search memories');
 }
 
 export async function fetchAgentMemory(agentId: string) {
-  const res = await fetch(`${API_BASE}/agents/${agentId}/memory`);
+  const res = await authFetch(`${API_BASE}/agents/${agentId}/memory`);
   return handleResponse(res, 'Failed to fetch agent memory');
 }
 
 export async function fetchMemoryFile(agentId: string, filename: string) {
   const encodedPath = filename.split('/').map(encodeURIComponent).join('/');
-  const res = await fetch(`${API_BASE}/memory/vaults/${agentId}/${encodedPath}`);
+  const res = await authFetch(`${API_BASE}/memory/vaults/${agentId}/${encodedPath}`);
   return handleResponse(res, 'Failed to fetch memory file');
 }
 
 export async function updateMemoryFile(agentId: string, filename: string, content: string) {
   const encodedPath = filename.split('/').map(encodeURIComponent).join('/');
-  const res = await fetch(`${API_BASE}/memory/vaults/${agentId}/${encodedPath}`, {
+  const res = await authFetch(`${API_BASE}/memory/vaults/${agentId}/${encodedPath}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ content }),
@@ -243,7 +245,7 @@ export async function updateMemoryFile(agentId: string, filename: string, conten
 }
 
 export async function createMemoryFile(agentId: string, content: string, filename: string) {
-  const res = await fetch(`${API_BASE}/memory/vaults/${agentId}/files`, {
+  const res = await authFetch(`${API_BASE}/memory/vaults/${agentId}/files`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ content, filename }),
@@ -252,7 +254,7 @@ export async function createMemoryFile(agentId: string, content: string, filenam
 }
 
 export async function restartStep(runId: string, stepId: string, context?: string) {
-  const res = await fetch(`${API_BASE}/runs/${runId}/steps/${stepId}/restart`, {
+  const res = await authFetch(`${API_BASE}/runs/${runId}/steps/${stepId}/restart`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ context: context || null }),
@@ -261,7 +263,7 @@ export async function restartStep(runId: string, stepId: string, context?: strin
 }
 
 export async function updateAgentFile(agentId: string, filename: string, content: string) {
-  const res = await fetch(`${API_BASE}/agents/${agentId}/files/${encodeURIComponent(filename)}`, {
+  const res = await authFetch(`${API_BASE}/agents/${agentId}/files/${encodeURIComponent(filename)}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ content }),
@@ -273,17 +275,17 @@ export async function updateAgentFile(agentId: string, filename: string, content
 
 export async function fetchProjects(status?: string) {
   const query = status ? `?status=${status}` : '';
-  const res = await fetch(`${API_BASE}/projects/${query}`);
+  const res = await authFetch(`${API_BASE}/projects/${query}`);
   return handleResponse(res, 'Failed to fetch projects');
 }
 
 export async function fetchProject(projectId: string) {
-  const res = await fetch(`${API_BASE}/projects/${projectId}`);
+  const res = await authFetch(`${API_BASE}/projects/${projectId}`);
   return handleResponse(res, 'Failed to fetch project');
 }
 
 export async function createProject(data: { name: string; description?: string; repository?: string }) {
-  const res = await fetch(`${API_BASE}/projects/`, {
+  const res = await authFetch(`${API_BASE}/projects/`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
@@ -292,7 +294,7 @@ export async function createProject(data: { name: string; description?: string; 
 }
 
 export async function updateProject(projectId: string, data: Record<string, any>) {
-  const res = await fetch(`${API_BASE}/projects/${projectId}`, {
+  const res = await authFetch(`${API_BASE}/projects/${projectId}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
@@ -301,12 +303,12 @@ export async function updateProject(projectId: string, data: Record<string, any>
 }
 
 export async function deleteProject(projectId: string) {
-  const res = await fetch(`${API_BASE}/projects/${projectId}`, { method: 'DELETE' });
+  const res = await authFetch(`${API_BASE}/projects/${projectId}`, { method: 'DELETE' });
   return handleResponse(res, 'Failed to delete project');
 }
 
 export async function archiveProject(projectId: string) {
-  const res = await fetch(`${API_BASE}/projects/${projectId}/archive`, { method: 'POST' });
+  const res = await authFetch(`${API_BASE}/projects/${projectId}/archive`, { method: 'POST' });
   return handleResponse(res, 'Failed to archive project');
 }
 
@@ -317,12 +319,12 @@ export async function fetchProjectTasks(projectId: string, filters?: { status?: 
   if (filters?.agent) params.set('agent', filters.agent);
   if (filters?.tag) params.set('tag', filters.tag);
   const query = params.toString();
-  const res = await fetch(`${API_BASE}/projects/${projectId}/tasks${query ? '?' + query : ''}`);
+  const res = await authFetch(`${API_BASE}/projects/${projectId}/tasks${query ? '?' + query : ''}`);
   return handleResponse(res, 'Failed to fetch tasks');
 }
 
 export async function fetchTask(projectId: string, taskId: string) {
-  const res = await fetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}`);
+  const res = await authFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}`);
   return handleResponse(res, 'Failed to fetch task');
 }
 
@@ -337,7 +339,7 @@ export async function createTask(projectId: string, data: {
   estimatedHours?: number;
   columnId?: string;
 }) {
-  const res = await fetch(`${API_BASE}/projects/${projectId}/tasks`, {
+  const res = await authFetch(`${API_BASE}/projects/${projectId}/tasks`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
@@ -346,7 +348,7 @@ export async function createTask(projectId: string, data: {
 }
 
 export async function updateTask(projectId: string, taskId: string, data: Record<string, any>) {
-  const res = await fetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}`, {
+  const res = await authFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
@@ -355,12 +357,12 @@ export async function updateTask(projectId: string, taskId: string, data: Record
 }
 
 export async function deleteTask(projectId: string, taskId: string) {
-  const res = await fetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}`, { method: 'DELETE' });
+  const res = await authFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}`, { method: 'DELETE' });
   return handleResponse(res, 'Failed to delete task');
 }
 
 export async function moveTask(projectId: string, taskId: string, columnId: string, position: number = 0) {
-  const res = await fetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/move`, {
+  const res = await authFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/move`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ columnId, position }),
@@ -369,7 +371,7 @@ export async function moveTask(projectId: string, taskId: string, columnId: stri
 }
 
 export async function addDependency(projectId: string, taskId: string, fromTaskId: string, type: string = 'blocks') {
-  const res = await fetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/dependencies`, {
+  const res = await authFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/dependencies`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ fromTaskId, type }),
@@ -378,17 +380,17 @@ export async function addDependency(projectId: string, taskId: string, fromTaskI
 }
 
 export async function removeDependency(projectId: string, taskId: string, depId: string) {
-  const res = await fetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/dependencies/${depId}`, { method: 'DELETE' });
+  const res = await authFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/dependencies/${depId}`, { method: 'DELETE' });
   return handleResponse(res, 'Failed to remove dependency');
 }
 
 export async function fetchDependencyGraph(projectId: string) {
-  const res = await fetch(`${API_BASE}/projects/${projectId}/dependency-graph`);
+  const res = await authFetch(`${API_BASE}/projects/${projectId}/dependency-graph`);
   return handleResponse(res, 'Failed to fetch dependency graph');
 }
 
 export async function fetchWorkflows(projectId: string) {
-  const res = await fetch(`${API_BASE}/projects/${projectId}/workflows`);
+  const res = await authFetch(`${API_BASE}/projects/${projectId}/workflows`);
   return handleResponse(res, 'Failed to fetch workflows');
 }
 
@@ -399,7 +401,7 @@ export async function createWorkflow(projectId: string, data: {
   taskFilter?: Record<string, any>;
   trigger?: string;
 }) {
-  const res = await fetch(`${API_BASE}/projects/${projectId}/workflows`, {
+  const res = await authFetch(`${API_BASE}/projects/${projectId}/workflows`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
@@ -414,7 +416,7 @@ export async function updateWorkflow(projectId: string, workflowId: string, data
   taskFilter?: Record<string, any>;
   trigger?: string;
 }) {
-  const res = await fetch(`${API_BASE}/projects/${projectId}/workflows/${workflowId}`, {
+  const res = await authFetch(`${API_BASE}/projects/${projectId}/workflows/${workflowId}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
@@ -423,7 +425,7 @@ export async function updateWorkflow(projectId: string, workflowId: string, data
 }
 
 export async function importTasks(projectId: string, tasks: any[]) {
-  const res = await fetch(`${API_BASE}/projects/${projectId}/import`, {
+  const res = await authFetch(`${API_BASE}/projects/${projectId}/import`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ tasks }),
@@ -432,7 +434,7 @@ export async function importTasks(projectId: string, tasks: any[]) {
 }
 
 export async function executeTask(projectId: string, taskId: string, data?: { workflowId?: string; pipelineId?: string; context?: string }) {
-  const res = await fetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/execute`, {
+  const res = await authFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/execute`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data || {}),
@@ -441,19 +443,19 @@ export async function executeTask(projectId: string, taskId: string, data?: { wo
 }
 
 export async function executeReadyTasks(projectId: string, maxTasks: number = 5) {
-  const res = await fetch(`${API_BASE}/projects/${projectId}/execute-ready?max_tasks=${maxTasks}`, {
+  const res = await authFetch(`${API_BASE}/projects/${projectId}/execute-ready?max_tasks=${maxTasks}`, {
     method: 'POST',
   });
   return handleResponse(res, 'Failed to execute ready tasks');
 }
 
 export async function fetchReadyTasks(projectId: string) {
-  const res = await fetch(`${API_BASE}/projects/${projectId}/ready-tasks`);
+  const res = await authFetch(`${API_BASE}/projects/${projectId}/ready-tasks`);
   return handleResponse(res, 'Failed to fetch ready tasks');
 }
 
 export async function planProject(projectId: string, data?: { pipelineId?: string; context?: string }) {
-  const res = await fetch(`${API_BASE}/projects/${projectId}/plan`, {
+  const res = await authFetch(`${API_BASE}/projects/${projectId}/plan`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data || {}),
@@ -462,14 +464,14 @@ export async function planProject(projectId: string, data?: { pipelineId?: strin
 }
 
 export async function fetchTimeline(projectId: string, hoursPerDay: number = 8) {
-  const res = await fetch(`${API_BASE}/projects/${projectId}/timeline?hours_per_day=${hoursPerDay}`);
+  const res = await authFetch(`${API_BASE}/projects/${projectId}/timeline?hours_per_day=${hoursPerDay}`);
   return handleResponse(res, 'Failed to fetch timeline');
 }
 
 // ── Run deletion ─────────────────────────────────────────────────────────
 
 export async function deleteRun(runId: string) {
-  const res = await fetch(`${API_BASE}/runs/${runId}`, { method: 'DELETE' });
+  const res = await authFetch(`${API_BASE}/runs/${runId}`, { method: 'DELETE' });
   return handleResponse(res, 'Failed to delete run');
 }
 
@@ -477,7 +479,7 @@ export async function bulkDeleteRuns(params: { status?: string; before?: number 
   const query = new URLSearchParams();
   if (params.status) query.set('status', params.status);
   if (params.before) query.set('before', String(params.before));
-  const res = await fetch(`${API_BASE}/runs/?${query}`, { method: 'DELETE' });
+  const res = await authFetch(`${API_BASE}/runs/?${query}`, { method: 'DELETE' });
   return handleResponse(res, 'Failed to delete runs');
 }
 
@@ -516,33 +518,33 @@ export interface GraphData {
 }
 
 export async function fetchAgentGraph(agentId: string): Promise<GraphData> {
-  const res = await fetch(`${API_BASE}/memory/vaults/${agentId}/graph`);
+  const res = await authFetch(`${API_BASE}/memory/vaults/${agentId}/graph`);
   return handleResponse(res, 'Failed to fetch agent graph');
 }
 
 export async function rebuildAgentGraph(agentId: string) {
-  const res = await fetch(`${API_BASE}/memory/vaults/${agentId}/graph/rebuild`, { method: 'POST' });
+  const res = await authFetch(`${API_BASE}/memory/vaults/${agentId}/graph/rebuild`, { method: 'POST' });
   return handleResponse(res, 'Failed to rebuild graph');
 }
 
 export async function fetchNodeNeighbors(agentId: string, nodeId: string, maxHops: number = 1): Promise<{ nodes: GraphNode[]; edges: GraphEdge[] }> {
-  const res = await fetch(`${API_BASE}/memory/vaults/${agentId}/graph/neighbors/${encodeURIComponent(nodeId)}?max_hops=${maxHops}`);
+  const res = await authFetch(`${API_BASE}/memory/vaults/${agentId}/graph/neighbors/${encodeURIComponent(nodeId)}?max_hops=${maxHops}`);
   return handleResponse(res, 'Failed to fetch node neighbors');
 }
 
 export async function fetchSharedGraph(): Promise<GraphData> {
-  const res = await fetch(`${API_BASE}/memory/vaults/shared/graph`);
+  const res = await authFetch(`${API_BASE}/memory/vaults/shared/graph`);
   return handleResponse(res, 'Failed to fetch shared graph');
 }
 
 export async function fetchVaultFiles(vaultId: string): Promise<any[]> {
-  const res = await fetch(`${API_BASE}/memory/vaults/${vaultId}`);
+  const res = await authFetch(`${API_BASE}/memory/vaults/${vaultId}`);
   return handleResponse(res, 'Failed to fetch vault files');
 }
 
 export async function deleteMemoryFile(agentId: string, filename: string): Promise<{ deleted: boolean }> {
   const encodedPath = filename.split('/').map(encodeURIComponent).join('/');
-  const res = await fetch(`${API_BASE}/agents/${agentId}/memory/${encodedPath}`, {
+  const res = await authFetch(`${API_BASE}/agents/${agentId}/memory/${encodedPath}`, {
     method: 'DELETE',
   });
   return handleResponse(res, 'Failed to delete memory file');
@@ -551,13 +553,13 @@ export async function deleteMemoryFile(agentId: string, filename: string): Promi
 // ── Workspace API ─────────────────────────────────────────────────────────
 
 export async function fetchWorkspaceFiles(runId: string) {
-  const res = await fetch(`${API_BASE}/workspaces/${runId}`);
+  const res = await authFetch(`${API_BASE}/workspaces/${runId}`);
   return handleResponse(res, 'Failed to fetch workspace files');
 }
 
 export async function fetchWorkspaceFile(runId: string, path: string) {
   const encodedPath = path.split('/').map(encodeURIComponent).join('/');
-  const res = await fetch(`${API_BASE}/workspaces/${runId}/${encodedPath}`);
+  const res = await authFetch(`${API_BASE}/workspaces/${runId}/${encodedPath}`);
   return handleResponse(res, 'Failed to fetch file');
 }
 
@@ -582,7 +584,7 @@ export async function fetchGitHistory(runId: string, limit: number = 50, offset:
   total: number;
 }> {
   const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
-  const res = await fetch(`${API_BASE}/workspaces/${runId}/git/history?${params}`);
+  const res = await authFetch(`${API_BASE}/workspaces/${runId}/git/history?${params}`);
   return handleResponse(res, 'Failed to fetch git history');
 }
 
@@ -606,7 +608,7 @@ export interface GitStatus {
 }
 
 export async function fetchGitStatus(runId: string): Promise<GitStatus> {
-  const res = await fetch(`${API_BASE}/workspaces/${runId}/git/status`);
+  const res = await authFetch(`${API_BASE}/workspaces/${runId}/git/status`);
   return handleResponse(res, 'Failed to fetch git status');
 }
 
@@ -628,7 +630,7 @@ export interface CommitDiff {
 }
 
 export async function fetchCommitDiff(runId: string, commitHash: string): Promise<CommitDiff> {
-  const res = await fetch(`${API_BASE}/workspaces/${runId}/git/diff/${commitHash}`);
+  const res = await authFetch(`${API_BASE}/workspaces/${runId}/git/diff/${commitHash}`);
   return handleResponse(res, 'Failed to fetch commit diff');
 }
 
@@ -648,7 +650,7 @@ export interface MergeResponse {
 
 export async function fetchConflictData(runId: string, file: string): Promise<ConflictData> {
   const encodedFile = encodeURIComponent(file);
-  const res = await fetch(`${API_BASE}/workspaces/${runId}/conflicts/${encodedFile}`);
+  const res = await authFetch(`${API_BASE}/workspaces/${runId}/conflicts/${encodedFile}`);
   return handleResponse(res, 'Failed to fetch conflict data');
 }
 
@@ -656,7 +658,7 @@ export async function resolveConflicts(
   runId: string,
   resolutions: Record<string, string> | { strategy: 'ours' | 'theirs'; resolveAll: boolean }
 ): Promise<MergeResponse> {
-  const res = await fetch(`${API_BASE}/workspaces/${runId}/merge`, {
+  const res = await authFetch(`${API_BASE}/workspaces/${runId}/merge`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(resolutions),
@@ -669,7 +671,7 @@ export async function resolveConflicts(
 // Types imported from @/types/sandbox
 
 export async function fetchAgentSandbox(agentId: string): Promise<SandboxInfo> {
-  const res = await fetch(`${API_BASE}/agents/${agentId}/sandbox`);
+  const res = await authFetch(`${API_BASE}/agents/${agentId}/sandbox`);
   return handleResponse(res, 'Failed to fetch sandbox');
 }
 
@@ -680,18 +682,18 @@ export async function fetchAgentSandboxFile(
 ): Promise<SandboxFileContent> {
   const params = new URLSearchParams({ path });
   if (options?.maxSize) params.set('maxSize', String(options.maxSize));
-  const res = await fetch(`${API_BASE}/agents/${agentId}/sandbox/file?${params}`);
+  const res = await authFetch(`${API_BASE}/agents/${agentId}/sandbox/file?${params}`);
   return handleResponse(res, 'Failed to fetch sandbox file');
 }
 
 export async function fetchSandboxTree(agentId: string, path: string = '/'): Promise<FileTree> {
   const params = new URLSearchParams({ path });
-  const res = await fetch(`${API_BASE}/agents/${agentId}/sandbox/tree?${params}`);
+  const res = await authFetch(`${API_BASE}/agents/${agentId}/sandbox/tree?${params}`);
   return handleResponse(res, 'Failed to fetch sandbox tree');
 }
 
 export async function resetAgentSandbox(agentId: string): Promise<ResetSandboxResponse> {
-  const res = await fetch(`${API_BASE}/agents/${agentId}/sandbox/reset`, {
+  const res = await authFetch(`${API_BASE}/agents/${agentId}/sandbox/reset`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ confirm: true }),
@@ -708,12 +710,12 @@ export interface UpdateConfigResponse {
   message: string;
 }
 export async function fetchAgentConfig(agentId: string): Promise<AgentConfig> {
-  const res = await fetch(`${API_BASE}/agents/${agentId}/config`);
+  const res = await authFetch(`${API_BASE}/agents/${agentId}/config`);
   return handleResponse(res, 'Failed to fetch agent config');
 }
 
 export async function updateAgentConfig(agentId: string, config: AgentConfig): Promise<UpdateConfigResponse> {
-  const res = await fetch(`${API_BASE}/agents/${agentId}/config`, {
+  const res = await authFetch(`${API_BASE}/agents/${agentId}/config`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(config),
@@ -735,7 +737,7 @@ export async function fetchAgentInbox(
   if (options?.offset) params.set('offset', String(options.offset));
   if (options?.since) params.set('since', String(options.since));
   const query = params.toString() ? `?${params}` : '';
-  const res = await fetch(`${API_BASE}/agents/${agentId}/inbox${query}`);
+  const res = await authFetch(`${API_BASE}/agents/${agentId}/inbox${query}`);
   return handleResponse(res, 'Failed to fetch inbox');
 }
 
@@ -743,7 +745,7 @@ export async function sendAgentMessage(
   agentId: string,
   payload: SendMessageRequest
 ): Promise<SendMessageResponse> {
-  const res = await fetch(`${API_BASE}/agents/${agentId}/inbox`, {
+  const res = await authFetch(`${API_BASE}/agents/${agentId}/inbox`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
@@ -755,7 +757,7 @@ export async function markAgentMessagesRead(
   agentId: string,
   messageIds: string[]
 ): Promise<MarkReadResponse> {
-  const res = await fetch(`${API_BASE}/agents/${agentId}/inbox/mark-read`, {
+  const res = await authFetch(`${API_BASE}/agents/${agentId}/inbox/mark-read`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ messageIds }),
@@ -764,7 +766,7 @@ export async function markAgentMessagesRead(
 }
 
 export async function clearAgentInbox(agentId: string): Promise<ClearInboxResponse> {
-  const res = await fetch(`${API_BASE}/agents/${agentId}/inbox/clear`, {
+  const res = await authFetch(`${API_BASE}/agents/${agentId}/inbox/clear`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ confirm: true }),
@@ -778,7 +780,7 @@ export async function clearAgentInbox(agentId: string): Promise<ClearInboxRespon
 
 // Types now imported from @/types/lifecycle
 export async function fetchAgentLifecycle(agentId: string): Promise<LifecycleResponse> {
-  const res = await fetch(`${API_BASE}/agents/${agentId}/lifecycle`);
+  const res = await authFetch(`${API_BASE}/agents/${agentId}/lifecycle`);
   return handleResponse(res, 'Failed to fetch lifecycle');
 }
 
@@ -790,7 +792,7 @@ export async function fetchAgentActivity(
   if (options?.limit) params.set('limit', String(options.limit));
   if (options?.since) params.set('since', String(options.since));
   const query = params.toString() ? `?${params}` : '';
-  const res = await fetch(`${API_BASE}/agents/${agentId}/activity${query}`);
+  const res = await authFetch(`${API_BASE}/agents/${agentId}/activity${query}`);
   return handleResponse(res, 'Failed to fetch activity');
 }
 
@@ -826,19 +828,19 @@ export interface CancelQueueItemResponse {
 }
 
 export async function fetchAgentQueue(agentId: string): Promise<QueueResponse> {
-  const res = await fetch(`${API_BASE}/agents/${agentId}/queue`);
+  const res = await authFetch(`${API_BASE}/agents/${agentId}/queue`);
   return handleResponse(res, 'Failed to fetch queue');
 }
 
 export async function cancelQueueItem(agentId: string, itemId: string): Promise<CancelQueueItemResponse> {
-  const res = await fetch(`${API_BASE}/agents/${agentId}/queue/${itemId}`, {
+  const res = await authFetch(`${API_BASE}/agents/${agentId}/queue/${itemId}`, {
     method: 'DELETE',
   });
   return handleResponse(res, 'Failed to cancel queue item');
 }
 
 export async function clearAgentQueue(agentId: string): Promise<ClearQueueResponse> {
-  const res = await fetch(`${API_BASE}/agents/${agentId}/queue/clear`, {
+  const res = await authFetch(`${API_BASE}/agents/${agentId}/queue/clear`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ confirm: true }),
@@ -886,12 +888,12 @@ export interface TriggerPulseResponse {
 }
 
 export async function fetchAgentPulseStatus(agentId: string): Promise<PulseStatusResponse> {
-  const res = await fetch(`${API_BASE}/agents/${agentId}/pulse/status`);
+  const res = await authFetch(`${API_BASE}/agents/${agentId}/pulse/status`);
   return handleResponse(res, 'Failed to fetch pulse status');
 }
 
 export async function triggerAgentPulse(agentId: string): Promise<TriggerPulseResponse> {
-  const res = await fetch(`${API_BASE}/agents/${agentId}/pulse/trigger`, {
+  const res = await authFetch(`${API_BASE}/agents/${agentId}/pulse/trigger`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
   });
@@ -930,7 +932,7 @@ export interface AgentsStatusResponse {
 }
 
 export async function fetchAgentsStatus(): Promise<AgentsStatusResponse> {
-  const res = await fetch(`${API_BASE}/agents/status`);
+  const res = await authFetch(`${API_BASE}/agents/status`);
   return handleResponse(res, 'Failed to fetch agents status');
 }
 
@@ -974,7 +976,7 @@ export async function fetchFileAtCommit(
   commitHash: string,
   filePath: string
 ): Promise<FileAtCommit> {
-  const res = await fetch(
+  const res = await authFetch(
     `${API_BASE}/workspaces/${runId}/git/show/${commitHash}/${filePath}`
   );
   return handleResponse(res, 'Failed to fetch file at commit');
@@ -985,7 +987,7 @@ export async function fetchFileHistory(
   filePath: string,
   limit: number = 20
 ): Promise<FileHistoryResponse> {
-  const res = await fetch(
+  const res = await authFetch(
     `${API_BASE}/workspaces/${runId}/git/file-history/${filePath}?limit=${limit}`
   );
   return handleResponse(res, 'Failed to fetch file history');
@@ -996,7 +998,7 @@ export async function fetchFileHistory(
 import type { SessionList, SessionDetail } from '@/types/session';
 
 export async function fetchAgentSessions(agentId: string, limit = 50): Promise<SessionList> {
-  const res = await fetch(`${API_BASE}/agents/${agentId}/sessions?limit=${limit}`);
+  const res = await authFetch(`${API_BASE}/agents/${agentId}/sessions?limit=${limit}`);
   return handleResponse(res, 'Failed to fetch sessions');
 }
 
@@ -1012,17 +1014,17 @@ export async function fetchAllSessions(params?: {
   if (params?.offset) searchParams.set('offset', String(params.offset));
   if (params?.status) searchParams.set('status', params.status);
   const query = searchParams.toString();
-  const res = await fetch(`${API_BASE}/sessions${query ? '?' + query : ''}`);
+  const res = await authFetch(`${API_BASE}/sessions${query ? '?' + query : ''}`);
   return handleResponse(res, 'Failed to fetch all sessions');
 }
 
 export async function fetchSession(sessionId: string): Promise<SessionDetail> {
-  const res = await fetch(`${API_BASE}/sessions/${sessionId}`);
+  const res = await authFetch(`${API_BASE}/sessions/${sessionId}`);
   return handleResponse(res, 'Failed to fetch session');
 }
 
 export async function stopSession(sessionId: string): Promise<{ session_id: string; status: string; message: string }> {
-  const res = await fetch(`${API_BASE}/sessions/${sessionId}/stop`, {
+  const res = await authFetch(`${API_BASE}/sessions/${sessionId}/stop`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
   });
@@ -1048,7 +1050,7 @@ export async function startChatSession(
   model?: string,
   systemPromptSupplement?: string,
 ): Promise<ChatSessionResponse> {
-  const res = await fetch(`${API_BASE}/agents/${agentId}/chat/start`, {
+  const res = await authFetch(`${API_BASE}/agents/${agentId}/chat/start`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ model, system_prompt_supplement: systemPromptSupplement }),
@@ -1063,7 +1065,7 @@ export async function sendChatMessage(
   signal?: AbortSignal,
   model?: string
 ): Promise<SendChatMessageResponse> {
-  const res = await fetch(`${API_BASE}/agents/${agentId}/chat/${sessionId}/message`, {
+  const res = await authFetch(`${API_BASE}/agents/${agentId}/chat/${sessionId}/message`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ message, model }),
@@ -1077,7 +1079,7 @@ export async function updateChatModel(
   sessionId: string,
   model: string
 ): Promise<{ status: string; model: string }> {
-  const res = await fetch(`${API_BASE}/agents/${agentId}/chat/${sessionId}/model?model=${encodeURIComponent(model)}`, {
+  const res = await authFetch(`${API_BASE}/agents/${agentId}/chat/${sessionId}/model?model=${encodeURIComponent(model)}`, {
     method: 'PATCH',
   });
   return handleResponse(res, 'Failed to update model');
@@ -1103,7 +1105,7 @@ export async function getChatSession(sessionId: string): Promise<{
     completed_at: number | null;
   }>;
 }> {
-  const res = await fetch(`${API_BASE}/chat/sessions/${sessionId}`);
+  const res = await authFetch(`${API_BASE}/chat/sessions/${sessionId}`);
   return handleResponse(res, 'Failed to get chat session');
 }
 
@@ -1126,19 +1128,19 @@ export async function listChatSessions(agentId: string, params?: {
   if (params?.limit) searchParams.set('limit', String(params.limit));
   const query = searchParams.toString();
   
-  const res = await fetch(`${API_BASE}/agents/${agentId}/chat/sessions${query ? '?' + query : ''}`);
+  const res = await authFetch(`${API_BASE}/agents/${agentId}/chat/sessions${query ? '?' + query : ''}`);
   return handleResponse(res, 'Failed to list chat sessions');
 }
 
 export async function stopChatResponse(agentId: string, sessionId: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/agents/${agentId}/chat/${sessionId}/stop`, {
+  const res = await authFetch(`${API_BASE}/agents/${agentId}/chat/${sessionId}/stop`, {
     method: 'POST',
   });
   return handleResponse(res, 'Failed to stop response');
 }
 
 export async function endChatSession(agentId: string, sessionId: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/agents/${agentId}/chat/${sessionId}/end`, {
+  const res = await authFetch(`${API_BASE}/agents/${agentId}/chat/${sessionId}/end`, {
     method: 'POST',
   });
   return handleResponse(res, 'Failed to end session');
@@ -1149,7 +1151,7 @@ export async function restartChatSession(agentId: string, sessionId: string): Pr
   status: string;
   message?: string;
 }> {
-  const res = await fetch(`${API_BASE}/agents/${agentId}/chat/${sessionId}/restart`, {
+  const res = await authFetch(`${API_BASE}/agents/${agentId}/chat/${sessionId}/restart`, {
     method: 'POST',
   });
   return handleResponse(res, 'Failed to restart session');
@@ -1162,7 +1164,7 @@ export async function getChatSessionStatus(agentId: string, sessionId: string): 
   messageCount?: number;
   model?: string;
 }> {
-  const res = await fetch(`${API_BASE}/agents/${agentId}/chat/${sessionId}/status`);
+  const res = await authFetch(`${API_BASE}/agents/${agentId}/chat/${sessionId}/status`);
   return handleResponse(res, 'Failed to get session status');
 }
 
@@ -1233,17 +1235,17 @@ export interface AutoSpreadResult {
 }
 
 export async function fetchPulseTimeline(hours = 24): Promise<PulseTimelineResponse> {
-  const res = await fetch(`${API_BASE}/pulses/timeline?hours=${hours}`);
+  const res = await authFetch(`${API_BASE}/pulses/timeline?hours=${hours}`);
   return handleResponse(res, 'Failed to fetch pulse timeline');
 }
 
 export async function fetchAgentPulseSchedule(agentId: string): Promise<AgentPulseScheduleResponse> {
-  const res = await fetch(`${API_BASE}/pulses/agents/${agentId}/schedule`);
+  const res = await authFetch(`${API_BASE}/pulses/agents/${agentId}/schedule`);
   return handleResponse(res, 'Failed to fetch pulse schedule');
 }
 
 export async function updateAgentPulseSchedule(agentId: string, update: PulseScheduleUpdate): Promise<{ status: string; schedule: PulseScheduleConfig }> {
-  const res = await fetch(`${API_BASE}/pulses/agents/${agentId}/schedule`, {
+  const res = await authFetch(`${API_BASE}/pulses/agents/${agentId}/schedule`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(update),
@@ -1252,7 +1254,7 @@ export async function updateAgentPulseSchedule(agentId: string, update: PulseSch
 }
 
 export async function addOneOffPulse(agentId: string, time: string): Promise<{ status: string; time: string }> {
-  const res = await fetch(`${API_BASE}/pulses/agents/${agentId}/schedule/one-off`, {
+  const res = await authFetch(`${API_BASE}/pulses/agents/${agentId}/schedule/one-off`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ time }),
@@ -1262,14 +1264,14 @@ export async function addOneOffPulse(agentId: string, time: string): Promise<{ s
 
 export async function removeOneOffPulse(agentId: string, timestamp: string): Promise<{ status: string; time: string }> {
   const encodedTimestamp = encodeURIComponent(timestamp);
-  const res = await fetch(`${API_BASE}/pulses/agents/${agentId}/schedule/one-off/${encodedTimestamp}`, {
+  const res = await authFetch(`${API_BASE}/pulses/agents/${agentId}/schedule/one-off/${encodedTimestamp}`, {
     method: 'DELETE',
   });
   return handleResponse(res, 'Failed to remove one-off pulse');
 }
 
 export async function autoSpreadOffsets(): Promise<AutoSpreadResult> {
-  const res = await fetch(`${API_BASE}/pulses/auto-spread`, {
+  const res = await authFetch(`${API_BASE}/pulses/auto-spread`, {
     method: 'POST',
   });
   return handleResponse(res, 'Failed to auto-spread offsets');
@@ -1285,7 +1287,7 @@ export interface ProjectAgent {
 }
 
 export async function fetchProjectAgents(projectId: string): Promise<ProjectAgent[]> {
-  const res = await fetch(`${API_BASE}/projects/${projectId}/agents`);
+  const res = await authFetch(`${API_BASE}/projects/${projectId}/agents`);
   return handleResponse(res, 'Failed to fetch project agents');
 }
 
@@ -1294,7 +1296,7 @@ export async function assignAgentToProject(
   agentId: string,
   role: ProjectAgent['role'],
 ): Promise<ProjectAgent> {
-  const res = await fetch(`${API_BASE}/projects/${projectId}/agents`, {
+  const res = await authFetch(`${API_BASE}/projects/${projectId}/agents`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ agentId, role }),
@@ -1307,7 +1309,7 @@ export async function updateAgentRole(
   agentId: string,
   role: ProjectAgent['role'],
 ): Promise<ProjectAgent> {
-  const res = await fetch(`${API_BASE}/projects/${projectId}/agents/${agentId}`, {
+  const res = await authFetch(`${API_BASE}/projects/${projectId}/agents/${agentId}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ role }),
@@ -1316,7 +1318,7 @@ export async function updateAgentRole(
 }
 
 export async function removeAgentFromProject(projectId: string, agentId: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/projects/${projectId}/agents/${agentId}`, {
+  const res = await authFetch(`${API_BASE}/projects/${projectId}/agents/${agentId}`, {
     method: 'DELETE',
   });
   return handleResponse(res, 'Failed to remove agent');
@@ -1328,7 +1330,7 @@ export async function fetchAgentProjects(agentId: string): Promise<Array<{
   project_status: string;
   role: string;
 }>> {
-  const res = await fetch(`${API_BASE}/agents/${agentId}/projects`);
+  const res = await authFetch(`${API_BASE}/agents/${agentId}/projects`);
   return handleResponse(res, 'Failed to fetch agent projects');
 }
 
@@ -1340,7 +1342,7 @@ export async function fetchTaskBranch(projectId: string, taskId: string): Promis
   branch: string;
   created: boolean;
 }> {
-  const res = await fetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/branch`);
+  const res = await authFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/branch`);
   return handleResponse(res, 'Failed to fetch task branch');
 }
 
@@ -1350,7 +1352,7 @@ export async function claimTask(projectId: string, taskId: string, agentId: stri
   agent_id: string;
   branch: string;
 }> {
-  const res = await fetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/claim`, {
+  const res = await authFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/claim`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ agentId }),
@@ -1364,7 +1366,7 @@ export async function transitionTask(
   status: string,
   note?: string,
 ): Promise<{ status: string; from_status: string; to_status: string }> {
-  const res = await fetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/transition`, {
+  const res = await authFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/transition`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ status, note }),
@@ -1429,19 +1431,19 @@ export async function listOnboardingSessions(
 ): Promise<OnboardingSessionSummary[]> {
   const params = new URLSearchParams({ limit: String(limit) });
   if (status) params.set('status', status);
-  const res = await fetch(`${API_BASE}/onboarding/sessions?${params}`);
+  const res = await authFetch(`${API_BASE}/onboarding/sessions?${params}`);
   return handleResponse(res, 'Failed to list onboarding sessions');
 }
 
 export async function resumeOnboardingSession(sessionId: string): Promise<OnboardingSession> {
-  const res = await fetch(`${API_BASE}/onboarding/sessions/${sessionId}/resume`, {
+  const res = await authFetch(`${API_BASE}/onboarding/sessions/${sessionId}/resume`, {
     method: 'POST',
   });
   return handleResponse(res, 'Failed to resume onboarding session');
 }
 
 export async function createOnboardingSession(model?: string): Promise<OnboardingSession> {
-  const res = await fetch(`${API_BASE}/onboarding/sessions`, {
+  const res = await authFetch(`${API_BASE}/onboarding/sessions`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ model }),
@@ -1450,7 +1452,7 @@ export async function createOnboardingSession(model?: string): Promise<Onboardin
 }
 
 export async function getOnboardingSession(sessionId: string): Promise<OnboardingSession> {
-  const res = await fetch(`${API_BASE}/onboarding/sessions/${sessionId}`);
+  const res = await authFetch(`${API_BASE}/onboarding/sessions/${sessionId}`);
   return handleResponse(res, 'Failed to fetch onboarding session');
 }
 
@@ -1465,7 +1467,7 @@ export async function sendOnboardingMessage(
   userMessageId: string;
   assistantMessageId: string;
 }> {
-  const res = await fetch(`${API_BASE}/onboarding/sessions/${sessionId}/message`, {
+  const res = await authFetch(`${API_BASE}/onboarding/sessions/${sessionId}/message`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ message, model }),
@@ -1486,7 +1488,7 @@ export async function handoffOnboardingAgent(
   newChatSessionId: string;
   phase: string;
 }> {
-  const res = await fetch(`${API_BASE}/onboarding/sessions/${sessionId}/handoff`, {
+  const res = await authFetch(`${API_BASE}/onboarding/sessions/${sessionId}/handoff`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -1507,7 +1509,7 @@ export async function finalizeOnboardingSession(
     context?: Record<string, unknown>;
   },
 ): Promise<{ status: string; sessionId: string; projectId: string; projectName: string }> {
-  const res = await fetch(`${API_BASE}/onboarding/sessions/${sessionId}/finalize`, {
+  const res = await authFetch(`${API_BASE}/onboarding/sessions/${sessionId}/finalize`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -1528,7 +1530,7 @@ export async function finalizeOnboardingSession(
 export async function stopOnboardingSession(
   sessionId: string,
 ): Promise<{ status: string; sessionId: string }> {
-  const res = await fetch(`${API_BASE}/onboarding/sessions/${sessionId}/stop`, {
+  const res = await authFetch(`${API_BASE}/onboarding/sessions/${sessionId}/stop`, {
     method: 'POST',
   });
   return handleResponse(res, 'Failed to stop onboarding session');
@@ -1538,7 +1540,7 @@ export async function stopOnboardingSession(
 export async function abandonOnboardingSession(
   sessionId: string,
 ): Promise<{ status: string; sessionId: string }> {
-  const res = await fetch(`${API_BASE}/onboarding/sessions/${sessionId}/abandon`, {
+  const res = await authFetch(`${API_BASE}/onboarding/sessions/${sessionId}/abandon`, {
     method: 'PATCH',
   });
   return handleResponse(res, 'Failed to abandon onboarding session');
@@ -1548,7 +1550,7 @@ export async function abandonOnboardingSession(
 export async function deleteOnboardingSession(
   sessionId: string,
 ): Promise<{ status: string; sessionId: string }> {
-  const res = await fetch(`${API_BASE}/onboarding/sessions/${sessionId}`, {
+  const res = await authFetch(`${API_BASE}/onboarding/sessions/${sessionId}`, {
     method: 'DELETE',
   });
   return handleResponse(res, 'Failed to delete onboarding session');
@@ -1558,7 +1560,7 @@ export async function updateOnboardingContext(
   sessionId: string,
   contextUpdate: Record<string, unknown>,
 ): Promise<{ status: string; context: Record<string, unknown> }> {
-  const res = await fetch(`${API_BASE}/onboarding/sessions/${sessionId}/context`, {
+  const res = await authFetch(`${API_BASE}/onboarding/sessions/${sessionId}/context`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(contextUpdate),
@@ -1614,17 +1616,17 @@ export interface UpdateSkillPayload {
 // ── Skill library CRUD ────────────────────────────────────────────────────────
 
 export async function fetchSkills(): Promise<Skill[]> {
-  const res = await fetch(`${API_BASE}/skills/`);
+  const res = await authFetch(`${API_BASE}/skills/`);
   return handleResponse(res, 'Failed to fetch skills');
 }
 
 export async function fetchSkill(skillId: string): Promise<Skill> {
-  const res = await fetch(`${API_BASE}/skills/${encodeURIComponent(skillId)}`);
+  const res = await authFetch(`${API_BASE}/skills/${encodeURIComponent(skillId)}`);
   return handleResponse(res, 'Failed to fetch skill');
 }
 
 export async function createSkill(payload: CreateSkillPayload): Promise<Skill> {
-  const res = await fetch(`${API_BASE}/skills/`, {
+  const res = await authFetch(`${API_BASE}/skills/`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
@@ -1633,7 +1635,7 @@ export async function createSkill(payload: CreateSkillPayload): Promise<Skill> {
 }
 
 export async function updateSkill(skillId: string, payload: UpdateSkillPayload): Promise<Skill> {
-  const res = await fetch(`${API_BASE}/skills/${encodeURIComponent(skillId)}`, {
+  const res = await authFetch(`${API_BASE}/skills/${encodeURIComponent(skillId)}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
@@ -1642,12 +1644,12 @@ export async function updateSkill(skillId: string, payload: UpdateSkillPayload):
 }
 
 export async function deleteSkill(skillId: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/skills/${encodeURIComponent(skillId)}`, { method: 'DELETE' });
+  const res = await authFetch(`${API_BASE}/skills/${encodeURIComponent(skillId)}`, { method: 'DELETE' });
   await handleResponse(res, 'Failed to delete skill');
 }
 
 export async function setSkillEnabled(skillId: string, enabled: boolean): Promise<Skill> {
-  const res = await fetch(`${API_BASE}/skills/${encodeURIComponent(skillId)}/enabled?enabled=${enabled}`, {
+  const res = await authFetch(`${API_BASE}/skills/${encodeURIComponent(skillId)}/enabled?enabled=${enabled}`, {
     method: 'PATCH',
   });
   return handleResponse(res, 'Failed to toggle skill');
@@ -1657,13 +1659,13 @@ export async function setSkillEnabled(skillId: string, enabled: boolean): Promis
 
 /** List skills granted to an agent */
 export async function fetchAgentSkills(agentId: string): Promise<GrantedSkill[]> {
-  const res = await fetch(`${API_BASE}/skills/agents/${encodeURIComponent(agentId)}`);
+  const res = await authFetch(`${API_BASE}/skills/agents/${encodeURIComponent(agentId)}`);
   return handleResponse(res, 'Failed to fetch agent skills');
 }
 
 /** Grant an agent access to a skill */
 export async function grantSkillToAgent(agentId: string, skillId: string, grantedBy = 'ui'): Promise<GrantedSkill> {
-  const res = await fetch(
+  const res = await authFetch(
     `${API_BASE}/skills/agents/${encodeURIComponent(agentId)}/${encodeURIComponent(skillId)}/grant`,
     {
       method: 'POST',
@@ -1676,7 +1678,7 @@ export async function grantSkillToAgent(agentId: string, skillId: string, grante
 
 /** Revoke an agent's access to a skill */
 export async function revokeSkillFromAgent(agentId: string, skillId: string): Promise<void> {
-  const res = await fetch(
+  const res = await authFetch(
     `${API_BASE}/skills/agents/${encodeURIComponent(agentId)}/${encodeURIComponent(skillId)}`,
     { method: 'DELETE' },
   );
@@ -1710,7 +1712,7 @@ export interface StartSkillSessionResult {
 }
 
 export async function startSkillGenSession(payload: StartSkillSessionPayload): Promise<StartSkillSessionResult> {
-  const res = await fetch(`${API_BASE}/skills/generate/session`, {
+  const res = await authFetch(`${API_BASE}/skills/generate/session`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
@@ -1735,7 +1737,7 @@ export interface ParseSkillResult {
 }
 
 export async function parseSkill(payload: ParseSkillPayload): Promise<ParseSkillResult> {
-  const res = await fetch(`${API_BASE}/skills/parse`, {
+  const res = await authFetch(`${API_BASE}/skills/parse`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
@@ -1763,7 +1765,7 @@ export interface GitHubImportResult {
 }
 
 export async function importGithubSkills(url: string): Promise<GitHubImportResult> {
-  const res = await fetch(`${API_BASE}/skills/github-import`, {
+  const res = await authFetch(`${API_BASE}/skills/github-import`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ url }),
@@ -1783,7 +1785,7 @@ export interface ExtractSkillResult {
 }
 
 export async function extractSkillFromOutput(text: string): Promise<ExtractSkillResult> {
-  const res = await fetch(`${API_BASE}/skills/extract`, {
+  const res = await authFetch(`${API_BASE}/skills/extract`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ text }),
@@ -1829,7 +1831,7 @@ export interface ModelProvider {
 }
 
 export async function fetchModelProviders(): Promise<ModelProvider[]> {
-  const res = await fetch(`${API_BASE}/settings/providers`);
+  const res = await authFetch(`${API_BASE}/settings/providers`);
   return handleResponse(res, 'Failed to fetch model providers');
 }
 
@@ -1837,7 +1839,7 @@ export async function upsertModelProvider(
   providerId: string,
   config: { enabled: boolean; apiKey?: string; extraConfig?: Record<string, string> }
 ): Promise<ModelProvider> {
-  const res = await fetch(`${API_BASE}/settings/providers/${encodeURIComponent(providerId)}`, {
+  const res = await authFetch(`${API_BASE}/settings/providers/${encodeURIComponent(providerId)}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ providerId, ...config }),
@@ -1846,7 +1848,7 @@ export async function upsertModelProvider(
 }
 
 export async function removeModelProvider(providerId: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/settings/providers/${encodeURIComponent(providerId)}`, {
+  const res = await authFetch(`${API_BASE}/settings/providers/${encodeURIComponent(providerId)}`, {
     method: 'DELETE',
   });
   return handleResponse(res, 'Failed to remove provider');
@@ -1858,7 +1860,7 @@ export async function createCustomProvider(params: {
   baseUrl: string;
   apiKey?: string;
 }): Promise<ModelProvider> {
-  const res = await fetch(`${API_BASE}/settings/providers`, {
+  const res = await authFetch(`${API_BASE}/settings/providers`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(params),
@@ -1875,13 +1877,13 @@ export interface FavoriteModel {
 }
 
 export async function fetchFavorites(): Promise<FavoriteModel[]> {
-  const res = await fetch(`${API_BASE}/settings/favorites`);
+  const res = await authFetch(`${API_BASE}/settings/favorites`);
   const data = await handleResponse(res, 'Failed to fetch favorites');
   return data.favorites as FavoriteModel[];
 }
 
 export async function saveFavorites(favorites: FavoriteModel[]): Promise<void> {
-  const res = await fetch(`${API_BASE}/settings/favorites`, {
+  const res = await authFetch(`${API_BASE}/settings/favorites`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ favorites }),
@@ -1892,7 +1894,7 @@ export async function saveFavorites(favorites: FavoriteModel[]): Promise<void> {
 export async function fetchProviderModels(
   providerId: string,
 ): Promise<{ models: ProviderModel[]; source: 'live' | 'static' }> {
-  const res = await fetch(`${API_BASE}/settings/providers/${providerId}/models`);
+  const res = await authFetch(`${API_BASE}/settings/providers/${providerId}/models`);
   return handleResponse(res, 'Failed to fetch provider models');
 }
 
@@ -1927,7 +1929,7 @@ export interface AgentChannel {
 }
 
 export async function fetchAgentChannels(agentId: string): Promise<AgentChannel[]> {
-  const res = await fetch(`${API_BASE}/agents/${agentId}/channels`);
+  const res = await authFetch(`${API_BASE}/agents/${agentId}/channels`);
   return handleResponse(res, 'Failed to fetch agent channels');
 }
 
@@ -1941,7 +1943,7 @@ export async function upsertAgentChannel(
     extraConfig?: Record<string, string>;
   },
 ): Promise<AgentChannel> {
-  const res = await fetch(`${API_BASE}/agents/${agentId}/channels/${channel}`, {
+  const res = await authFetch(`${API_BASE}/agents/${agentId}/channels/${channel}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(config),
@@ -1950,7 +1952,7 @@ export async function upsertAgentChannel(
 }
 
 export async function removeAgentChannel(agentId: string, channel: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/agents/${agentId}/channels/${channel}`, {
+  const res = await authFetch(`${API_BASE}/agents/${agentId}/channels/${channel}`, {
     method: 'DELETE',
   });
   return handleResponse(res, 'Failed to remove channel configuration');
@@ -1993,12 +1995,12 @@ export interface SecretType {
 }
 
 export async function fetchSecrets(): Promise<SecretItem[]> {
-  const res = await fetch(`${API_BASE}/secrets/`);
+  const res = await authFetch(`${API_BASE}/secrets/`);
   return handleResponse(res, 'Failed to fetch secrets');
 }
 
 export async function createSecret(body: SecretCreate): Promise<SecretItem> {
-  const res = await fetch(`${API_BASE}/secrets/`, {
+  const res = await authFetch(`${API_BASE}/secrets/`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -2007,7 +2009,7 @@ export async function createSecret(body: SecretCreate): Promise<SecretItem> {
 }
 
 export async function updateSecret(secretId: string, body: SecretUpdate): Promise<SecretItem> {
-  const res = await fetch(`${API_BASE}/secrets/${secretId}`, {
+  const res = await authFetch(`${API_BASE}/secrets/${secretId}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -2016,7 +2018,7 @@ export async function updateSecret(secretId: string, body: SecretUpdate): Promis
 }
 
 export async function deleteSecret(secretId: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/secrets/${secretId}`, { method: 'DELETE' });
+  const res = await authFetch(`${API_BASE}/secrets/${secretId}`, { method: 'DELETE' });
   if (res.status !== 204 && !res.ok) {
     const body = await res.json().catch(() => ({ detail: 'Failed to delete secret' }));
     throw new Error(body.detail || `Failed to delete secret (${res.status})`);
@@ -2024,14 +2026,14 @@ export async function deleteSecret(secretId: string): Promise<void> {
 }
 
 export async function grantSecret(secretId: string, agentId: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/secrets/${secretId}/grant/${encodeURIComponent(agentId)}`, {
+  const res = await authFetch(`${API_BASE}/secrets/${secretId}/grant/${encodeURIComponent(agentId)}`, {
     method: 'POST',
   });
   return handleResponse(res, 'Failed to grant secret to agent');
 }
 
 export async function revokeSecret(secretId: string, agentId: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/secrets/${secretId}/grant/${encodeURIComponent(agentId)}`, {
+  const res = await authFetch(`${API_BASE}/secrets/${secretId}/grant/${encodeURIComponent(agentId)}`, {
     method: 'DELETE',
   });
   if (res.status !== 204 && !res.ok) {
@@ -2041,7 +2043,7 @@ export async function revokeSecret(secretId: string, agentId: string): Promise<v
 }
 
 export async function fetchSecretTypes(): Promise<SecretType[]> {
-  const res = await fetch(`${API_BASE}/secrets/types`);
+  const res = await authFetch(`${API_BASE}/secrets/types`);
   const data = await handleResponse(res, 'Failed to fetch secret types');
   return data.types as SecretType[];
 }
@@ -2099,7 +2101,7 @@ export interface McpExtractResult {
 }
 
 export async function fetchMcpServers(): Promise<McpServerItem[]> {
-  const res = await fetch(`${API_BASE}/mcp/`);
+  const res = await authFetch(`${API_BASE}/mcp/`);
   return handleResponse(res, 'Failed to fetch MCP servers');
 }
 
@@ -2109,7 +2111,7 @@ export async function createMcpServer(body: {
   config: Record<string, unknown>;
   enabled?: boolean;
 }): Promise<McpServerItem> {
-  const res = await fetch(`${API_BASE}/mcp/`, {
+  const res = await authFetch(`${API_BASE}/mcp/`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -2126,7 +2128,7 @@ export async function updateMcpServer(
     enabled?: boolean;
   },
 ): Promise<McpServerItem> {
-  const res = await fetch(`${API_BASE}/mcp/${serverId}`, {
+  const res = await authFetch(`${API_BASE}/mcp/${serverId}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -2135,29 +2137,29 @@ export async function updateMcpServer(
 }
 
 export async function deleteMcpServer(serverId: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/mcp/${serverId}`, { method: 'DELETE' });
+  const res = await authFetch(`${API_BASE}/mcp/${serverId}`, { method: 'DELETE' });
   return handleResponse(res, 'Failed to delete MCP server');
 }
 
 export async function setMcpServerEnabled(serverId: string, enabled: boolean): Promise<McpServerItem> {
-  const res = await fetch(`${API_BASE}/mcp/${serverId}/enabled?enabled=${enabled}`, {
+  const res = await authFetch(`${API_BASE}/mcp/${serverId}/enabled?enabled=${enabled}`, {
     method: 'PATCH',
   });
   return handleResponse(res, 'Failed to toggle MCP server');
 }
 
 export async function restartMcpo(): Promise<{ status: string }> {
-  const res = await fetch(`${API_BASE}/mcp/restart`, { method: 'POST' });
+  const res = await authFetch(`${API_BASE}/mcp/restart`, { method: 'POST' });
   return handleResponse(res, 'Failed to restart mcpo');
 }
 
 export async function fetchAgentMcpTools(agentId: string): Promise<McpToolGrant[]> {
-  const res = await fetch(`${API_BASE}/mcp/agents/${agentId}/tools`);
+  const res = await authFetch(`${API_BASE}/mcp/agents/${agentId}/tools`);
   return handleResponse(res, 'Failed to fetch agent MCP tools');
 }
 
 export async function grantMcpServerToAgent(agentId: string, serverId: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/mcp/agents/${agentId}/${serverId}/grant`, {
+  const res = await authFetch(`${API_BASE}/mcp/agents/${agentId}/${serverId}/grant`, {
     method: 'POST',
   });
   return handleResponse(res, 'Failed to grant MCP server to agent');
@@ -2168,7 +2170,7 @@ export async function grantMcpToolToAgent(
   serverId: string,
   toolName: string,
 ): Promise<void> {
-  const res = await fetch(
+  const res = await authFetch(
     `${API_BASE}/mcp/agents/${agentId}/${serverId}/${encodeURIComponent(toolName)}/grant`,
     { method: 'POST' },
   );
@@ -2176,7 +2178,7 @@ export async function grantMcpToolToAgent(
 }
 
 export async function revokeMcpServerFromAgent(agentId: string, serverId: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/mcp/agents/${agentId}/${serverId}`, { method: 'DELETE' });
+  const res = await authFetch(`${API_BASE}/mcp/agents/${agentId}/${serverId}`, { method: 'DELETE' });
   return handleResponse(res, 'Failed to revoke MCP server from agent');
 }
 
@@ -2185,7 +2187,7 @@ export async function revokeMcpToolFromAgent(
   serverId: string,
   toolName: string,
 ): Promise<void> {
-  const res = await fetch(
+  const res = await authFetch(
     `${API_BASE}/mcp/agents/${agentId}/${serverId}/${encodeURIComponent(toolName)}`,
     { method: 'DELETE' },
   );
@@ -2198,7 +2200,7 @@ export async function startMcpConfigSession(body: {
   input: string;
   input_type?: string;
 }): Promise<McpSessionResponse> {
-  const res = await fetch(`${API_BASE}/mcp/configure/session`, {
+  const res = await authFetch(`${API_BASE}/mcp/configure/session`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -2207,7 +2209,7 @@ export async function startMcpConfigSession(body: {
 }
 
 export async function extractMcpConfig(text: string): Promise<McpExtractResult> {
-  const res = await fetch(`${API_BASE}/mcp/extract`, {
+  const res = await authFetch(`${API_BASE}/mcp/extract`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ text }),

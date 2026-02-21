@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { API_BASE } from '@/lib/api';
+import { authFetch } from '@/lib/auth';
 import { X, Check, AlertCircle, Loader2, ChevronLeft, ChevronRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -54,7 +55,7 @@ export function ConflictResolver({ runId, conflicts, onClose, onResolved }: Conf
       const dataMap = new Map<string, ConflictData>();
       
       for (const file of conflicts) {
-        const res = await fetch(`${API_BASE}/workspaces/${runId}/conflicts/${encodeURIComponent(file)}`);
+        const res = await authFetch(`${API_BASE}/workspaces/${runId}/conflicts/${encodeURIComponent(file)}`);
         if (!res.ok) {
           throw new Error(`Failed to fetch conflict data for ${file}`);
         }
@@ -76,7 +77,7 @@ export function ConflictResolver({ runId, conflicts, onClose, onResolved }: Conf
     setError(null);
 
     try {
-      const res = await fetch(`${API_BASE}/workspaces/${runId}/merge`, {
+      const res = await authFetch(`${API_BASE}/workspaces/${runId}/merge`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -121,7 +122,7 @@ export function ConflictResolver({ runId, conflicts, onClose, onResolved }: Conf
         }
       });
 
-      const res = await fetch(`${API_BASE}/workspaces/${runId}/merge`, {
+      const res = await authFetch(`${API_BASE}/workspaces/${runId}/merge`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

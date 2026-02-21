@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { API_BASE } from '@/lib/api';
+import { authFetch } from '@/lib/auth';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -42,7 +43,7 @@ export function WebhookLog({ projectId }: WebhookLogProps) {
 
   async function fetchEvents() {
     try {
-      const response = await fetch(`${API_BASE}/projects/${projectId}/github/webhook-log?limit=50`);
+      const response = await authFetch(`${API_BASE}/projects/${projectId}/github/webhook-log?limit=50`);
       if (!response.ok) throw new Error('Failed to fetch webhook events');
       const data = await response.json();
       setEvents(data);

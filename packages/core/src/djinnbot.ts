@@ -1,3 +1,4 @@
+import { authFetch } from './api/auth-fetch.js';
 import { EventBus } from './events/event-bus.js';
 import { Store } from './db/store.js';
 import { ApiStore } from './db/api-store.js';
@@ -513,7 +514,7 @@ export class DjinnBot {
         }
         try {
           const apiUrl = process.env.DJINNBOT_API_URL || 'http://localhost:8000';
-          const response = await fetch(`${apiUrl}/v1/onboarding/sessions/${onboardingSessionId}/handoff`, {
+          const response = await authFetch(`${apiUrl}/v1/onboarding/sessions/${onboardingSessionId}/handoff`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -751,7 +752,7 @@ export class DjinnBot {
     const apiUrl = process.env.DJINNBOT_API_URL || 'http://api:8000';
     try {
       // Get projects this agent is assigned to
-      const projectsRes = await fetch(`${apiUrl}/v1/agents/${agentId}/projects`);
+      const projectsRes = await authFetch(`${apiUrl}/v1/agents/${agentId}/projects`);
       if (!projectsRes.ok) return [];
       const rawProjects = await projectsRes.json() as any;
       const projects: Array<{ project_id: string; project_name: string; project_status: string }> =
@@ -763,7 +764,7 @@ export class DjinnBot {
         if (p.project_status === 'archived') continue;
         try {
           // Fetch tasks assigned to this agent in non-terminal statuses
-          const tasksRes = await fetch(
+          const tasksRes = await authFetch(
             `${apiUrl}/v1/projects/${p.project_id}/tasks?agent=${encodeURIComponent(agentId)}`
           );
           if (!tasksRes.ok) continue;
@@ -1184,11 +1185,27 @@ Start now.`;
       // Get assigned agents from the pipeline
       const pipeline = this.pipelines.get(run.pipelineId);
       const assignedAgentIds = pipeline?.agents.map(a => a.id) || [];
+
+      // Fetch project-level Slack settings (channel + recipient user)
+      let slackChannelId: string | undefined;
+      let slackNotifyUserId: string | undefined;
+      if (run.projectId && 'getProjectSlackSettings' in this.store) {
+        try {
+          const slackSettings = await (this.store as any).getProjectSlackSettings(run.projectId);
+          slackChannelId = slackSettings?.slack_channel_id || undefined;
+          slackNotifyUserId = slackSettings?.slack_notify_user_id || undefined;
+        } catch {
+          // Non-fatal — fall back to defaults
+        }
+      }
+
       this.slackBridge.subscribeToRun(
         runId,
         run.pipelineId,
         run.taskDescription,
         assignedAgentIds,
+        slackChannelId,
+        slackNotifyUserId,
       );
     }
 

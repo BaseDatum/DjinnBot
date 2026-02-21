@@ -293,6 +293,10 @@ export class ContainerManager {
           NetworkMode: 'djinnbot_djinnbot_default',
           Memory: memoryLimit ?? DEFAULT_MEMORY_LIMIT,
           NanoCpus: (cpuLimit ?? DEFAULT_CPU_LIMIT) * 1e9,
+          // Chromium (Playwright) uses /dev/shm heavily for rendering.
+          // Docker defaults /dev/shm to 64MB which causes SIGBUS crashes on
+          // non-trivial pages. 256MB is sufficient for typical headless usage.
+          ShmSize: 256 * 1024 * 1024,
           AutoRemove: true,
         },
         // Set up unified agent home directory structure with symlinks.

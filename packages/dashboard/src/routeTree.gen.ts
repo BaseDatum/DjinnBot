@@ -9,31 +9,39 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as McpConfigureRouteImport } from './routes/mcp.configure'
-import { Route as McpRouteImport } from './routes/mcp'
-import { Route as MemoryRouteImport } from './routes/memory'
-import { Route as SkillsGenerateRouteImport } from './routes/skills.generate'
 import { Route as SkillsRouteImport } from './routes/skills'
+import { Route as SetupRouteImport } from './routes/setup'
 import { Route as SettingsRouteImport } from './routes/settings'
+import { Route as MemoryRouteImport } from './routes/memory'
+import { Route as McpRouteImport } from './routes/mcp'
+import { Route as LoginRouteImport } from './routes/login'
 import { Route as ChatRouteImport } from './routes/chat'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as RunsIndexRouteImport } from './routes/runs/index'
 import { Route as ProjectsIndexRouteImport } from './routes/projects/index'
 import { Route as PipelinesIndexRouteImport } from './routes/pipelines/index'
 import { Route as AgentsIndexRouteImport } from './routes/agents/index'
+import { Route as SkillsGenerateRouteImport } from './routes/skills.generate'
 import { Route as RunsRunIdRouteImport } from './routes/runs/$runId'
 import { Route as ProjectsProjectIdRouteImport } from './routes/projects/$projectId'
 import { Route as PipelinesPipelineIdRouteImport } from './routes/pipelines/$pipelineId'
+import { Route as McpConfigureRouteImport } from './routes/mcp.configure'
+import { Route as AuthCallbackRouteImport } from './routes/auth/callback'
 import { Route as AgentsAgentIdRouteImport } from './routes/agents/$agentId'
 
-const McpConfigureRoute = McpConfigureRouteImport.update({
-  id: '/mcp/configure',
-  path: '/mcp/configure',
+const SkillsRoute = SkillsRouteImport.update({
+  id: '/skills',
+  path: '/skills',
   getParentRoute: () => rootRouteImport,
 } as any)
-const McpRoute = McpRouteImport.update({
-  id: '/mcp',
-  path: '/mcp',
+const SetupRoute = SetupRouteImport.update({
+  id: '/setup',
+  path: '/setup',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SettingsRoute = SettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
   getParentRoute: () => rootRouteImport,
 } as any)
 const MemoryRoute = MemoryRouteImport.update({
@@ -41,24 +49,19 @@ const MemoryRoute = MemoryRouteImport.update({
   path: '/memory',
   getParentRoute: () => rootRouteImport,
 } as any)
-const SkillsGenerateRoute = SkillsGenerateRouteImport.update({
-  id: '/skills/generate',
-  path: '/skills/generate',
+const McpRoute = McpRouteImport.update({
+  id: '/mcp',
+  path: '/mcp',
   getParentRoute: () => rootRouteImport,
 } as any)
-const SkillsRoute = SkillsRouteImport.update({
-  id: '/skills',
-  path: '/skills',
+const LoginRoute = LoginRouteImport.update({
+  id: '/login',
+  path: '/login',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ChatRoute = ChatRouteImport.update({
   id: '/chat',
   path: '/chat',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const SettingsRoute = SettingsRouteImport.update({
-  id: '/settings',
-  path: '/settings',
   getParentRoute: () => rootRouteImport,
 } as any)
 const IndexRoute = IndexRouteImport.update({
@@ -86,6 +89,11 @@ const AgentsIndexRoute = AgentsIndexRouteImport.update({
   path: '/agents/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const SkillsGenerateRoute = SkillsGenerateRouteImport.update({
+  id: '/generate',
+  path: '/generate',
+  getParentRoute: () => SkillsRoute,
+} as any)
 const RunsRunIdRoute = RunsRunIdRouteImport.update({
   id: '/runs/$runId',
   path: '/runs/$runId',
@@ -101,6 +109,16 @@ const PipelinesPipelineIdRoute = PipelinesPipelineIdRouteImport.update({
   path: '/pipelines/$pipelineId',
   getParentRoute: () => rootRouteImport,
 } as any)
+const McpConfigureRoute = McpConfigureRouteImport.update({
+  id: '/configure',
+  path: '/configure',
+  getParentRoute: () => McpRoute,
+} as any)
+const AuthCallbackRoute = AuthCallbackRouteImport.update({
+  id: '/auth/callback',
+  path: '/auth/callback',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AgentsAgentIdRoute = AgentsAgentIdRouteImport.update({
   id: '/agents/$agentId',
   path: '/agents/$agentId',
@@ -109,17 +127,20 @@ const AgentsAgentIdRoute = AgentsAgentIdRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
-  '/mcp': typeof McpRoute
-  '/mcp/configure': typeof McpConfigureRoute
-  '/memory': typeof MemoryRoute
-  '/skills': typeof SkillsRoute
-  '/skills/generate': typeof SkillsGenerateRoute
-  '/settings': typeof SettingsRoute
   '/chat': typeof ChatRoute
+  '/login': typeof LoginRoute
+  '/mcp': typeof McpRouteWithChildren
+  '/memory': typeof MemoryRoute
+  '/settings': typeof SettingsRoute
+  '/setup': typeof SetupRoute
+  '/skills': typeof SkillsRouteWithChildren
   '/agents/$agentId': typeof AgentsAgentIdRoute
+  '/auth/callback': typeof AuthCallbackRoute
+  '/mcp/configure': typeof McpConfigureRoute
   '/pipelines/$pipelineId': typeof PipelinesPipelineIdRoute
   '/projects/$projectId': typeof ProjectsProjectIdRoute
   '/runs/$runId': typeof RunsRunIdRoute
+  '/skills/generate': typeof SkillsGenerateRoute
   '/agents/': typeof AgentsIndexRoute
   '/pipelines/': typeof PipelinesIndexRoute
   '/projects/': typeof ProjectsIndexRoute
@@ -127,17 +148,20 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
-  '/mcp': typeof McpRoute
-  '/mcp/configure': typeof McpConfigureRoute
-  '/memory': typeof MemoryRoute
-  '/skills': typeof SkillsRoute
-  '/skills/generate': typeof SkillsGenerateRoute
-  '/settings': typeof SettingsRoute
   '/chat': typeof ChatRoute
+  '/login': typeof LoginRoute
+  '/mcp': typeof McpRouteWithChildren
+  '/memory': typeof MemoryRoute
+  '/settings': typeof SettingsRoute
+  '/setup': typeof SetupRoute
+  '/skills': typeof SkillsRouteWithChildren
   '/agents/$agentId': typeof AgentsAgentIdRoute
+  '/auth/callback': typeof AuthCallbackRoute
+  '/mcp/configure': typeof McpConfigureRoute
   '/pipelines/$pipelineId': typeof PipelinesPipelineIdRoute
   '/projects/$projectId': typeof ProjectsProjectIdRoute
   '/runs/$runId': typeof RunsRunIdRoute
+  '/skills/generate': typeof SkillsGenerateRoute
   '/agents': typeof AgentsIndexRoute
   '/pipelines': typeof PipelinesIndexRoute
   '/projects': typeof ProjectsIndexRoute
@@ -146,17 +170,20 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
-  '/mcp': typeof McpRoute
-  '/mcp/configure': typeof McpConfigureRoute
-  '/memory': typeof MemoryRoute
-  '/skills': typeof SkillsRoute
-  '/skills/generate': typeof SkillsGenerateRoute
-  '/settings': typeof SettingsRoute
   '/chat': typeof ChatRoute
+  '/login': typeof LoginRoute
+  '/mcp': typeof McpRouteWithChildren
+  '/memory': typeof MemoryRoute
+  '/settings': typeof SettingsRoute
+  '/setup': typeof SetupRoute
+  '/skills': typeof SkillsRouteWithChildren
   '/agents/$agentId': typeof AgentsAgentIdRoute
+  '/auth/callback': typeof AuthCallbackRoute
+  '/mcp/configure': typeof McpConfigureRoute
   '/pipelines/$pipelineId': typeof PipelinesPipelineIdRoute
   '/projects/$projectId': typeof ProjectsProjectIdRoute
   '/runs/$runId': typeof RunsRunIdRoute
+  '/skills/generate': typeof SkillsGenerateRoute
   '/agents/': typeof AgentsIndexRoute
   '/pipelines/': typeof PipelinesIndexRoute
   '/projects/': typeof ProjectsIndexRoute
@@ -166,17 +193,20 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
-    | '/mcp'
-    | '/mcp/configure'
-    | '/memory'
-    | '/skills'
-    | '/skills/generate'
-    | '/settings'
     | '/chat'
+    | '/login'
+    | '/mcp'
+    | '/memory'
+    | '/settings'
+    | '/setup'
+    | '/skills'
     | '/agents/$agentId'
+    | '/auth/callback'
+    | '/mcp/configure'
     | '/pipelines/$pipelineId'
     | '/projects/$projectId'
     | '/runs/$runId'
+    | '/skills/generate'
     | '/agents/'
     | '/pipelines/'
     | '/projects/'
@@ -184,17 +214,20 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
-    | '/mcp'
-    | '/mcp/configure'
-    | '/memory'
-    | '/skills'
-    | '/skills/generate'
-    | '/settings'
     | '/chat'
+    | '/login'
+    | '/mcp'
+    | '/memory'
+    | '/settings'
+    | '/setup'
+    | '/skills'
     | '/agents/$agentId'
+    | '/auth/callback'
+    | '/mcp/configure'
     | '/pipelines/$pipelineId'
     | '/projects/$projectId'
     | '/runs/$runId'
+    | '/skills/generate'
     | '/agents'
     | '/pipelines'
     | '/projects'
@@ -202,17 +235,20 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/'
-    | '/mcp'
-    | '/mcp/configure'
-    | '/memory'
-    | '/skills'
-    | '/skills/generate'
-    | '/settings'
     | '/chat'
+    | '/login'
+    | '/mcp'
+    | '/memory'
+    | '/settings'
+    | '/setup'
+    | '/skills'
     | '/agents/$agentId'
+    | '/auth/callback'
+    | '/mcp/configure'
     | '/pipelines/$pipelineId'
     | '/projects/$projectId'
     | '/runs/$runId'
+    | '/skills/generate'
     | '/agents/'
     | '/pipelines/'
     | '/projects/'
@@ -221,14 +257,15 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
-  McpRoute: typeof McpRoute
-  McpConfigureRoute: typeof McpConfigureRoute
-  MemoryRoute: typeof MemoryRoute
-  SkillsRoute: typeof SkillsRoute
-  SkillsGenerateRoute: typeof SkillsGenerateRoute
-  SettingsRoute: typeof SettingsRoute
   ChatRoute: typeof ChatRoute
+  LoginRoute: typeof LoginRoute
+  McpRoute: typeof McpRouteWithChildren
+  MemoryRoute: typeof MemoryRoute
+  SettingsRoute: typeof SettingsRoute
+  SetupRoute: typeof SetupRoute
+  SkillsRoute: typeof SkillsRouteWithChildren
   AgentsAgentIdRoute: typeof AgentsAgentIdRoute
+  AuthCallbackRoute: typeof AuthCallbackRoute
   PipelinesPipelineIdRoute: typeof PipelinesPipelineIdRoute
   ProjectsProjectIdRoute: typeof ProjectsProjectIdRoute
   RunsRunIdRoute: typeof RunsRunIdRoute
@@ -240,18 +277,25 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/mcp': {
-      id: '/mcp'
-      path: '/mcp'
-      fullPath: '/mcp'
-      preLoaderRoute: typeof McpRouteImport
+    '/skills': {
+      id: '/skills'
+      path: '/skills'
+      fullPath: '/skills'
+      preLoaderRoute: typeof SkillsRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/mcp/configure': {
-      id: '/mcp/configure'
-      path: '/mcp/configure'
-      fullPath: '/mcp/configure'
-      preLoaderRoute: typeof McpConfigureRouteImport
+    '/setup': {
+      id: '/setup'
+      path: '/setup'
+      fullPath: '/setup'
+      preLoaderRoute: typeof SetupRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/settings': {
+      id: '/settings'
+      path: '/settings'
+      fullPath: '/settings'
+      preLoaderRoute: typeof SettingsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/memory': {
@@ -261,32 +305,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof MemoryRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/mcp': {
+      id: '/mcp'
+      path: '/mcp'
+      fullPath: '/mcp'
+      preLoaderRoute: typeof McpRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/login': {
+      id: '/login'
+      path: '/login'
+      fullPath: '/login'
+      preLoaderRoute: typeof LoginRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/chat': {
       id: '/chat'
       path: '/chat'
       fullPath: '/chat'
       preLoaderRoute: typeof ChatRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/skills': {
-      id: '/skills'
-      path: '/skills'
-      fullPath: '/skills'
-      preLoaderRoute: typeof SkillsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/skills/generate': {
-      id: '/skills/generate'
-      path: '/skills/generate'
-      fullPath: '/skills/generate'
-      preLoaderRoute: typeof SkillsGenerateRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/settings': {
-      id: '/settings'
-      path: '/settings'
-      fullPath: '/settings'
-      preLoaderRoute: typeof SettingsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/': {
@@ -324,6 +361,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AgentsIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/skills/generate': {
+      id: '/skills/generate'
+      path: '/generate'
+      fullPath: '/skills/generate'
+      preLoaderRoute: typeof SkillsGenerateRouteImport
+      parentRoute: typeof SkillsRoute
+    }
     '/runs/$runId': {
       id: '/runs/$runId'
       path: '/runs/$runId'
@@ -345,6 +389,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof PipelinesPipelineIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/mcp/configure': {
+      id: '/mcp/configure'
+      path: '/configure'
+      fullPath: '/mcp/configure'
+      preLoaderRoute: typeof McpConfigureRouteImport
+      parentRoute: typeof McpRoute
+    }
+    '/auth/callback': {
+      id: '/auth/callback'
+      path: '/auth/callback'
+      fullPath: '/auth/callback'
+      preLoaderRoute: typeof AuthCallbackRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/agents/$agentId': {
       id: '/agents/$agentId'
       path: '/agents/$agentId'
@@ -355,16 +413,38 @@ declare module '@tanstack/react-router' {
   }
 }
 
+interface McpRouteChildren {
+  McpConfigureRoute: typeof McpConfigureRoute
+}
+
+const McpRouteChildren: McpRouteChildren = {
+  McpConfigureRoute: McpConfigureRoute,
+}
+
+const McpRouteWithChildren = McpRoute._addFileChildren(McpRouteChildren)
+
+interface SkillsRouteChildren {
+  SkillsGenerateRoute: typeof SkillsGenerateRoute
+}
+
+const SkillsRouteChildren: SkillsRouteChildren = {
+  SkillsGenerateRoute: SkillsGenerateRoute,
+}
+
+const SkillsRouteWithChildren =
+  SkillsRoute._addFileChildren(SkillsRouteChildren)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
-  McpRoute: McpRoute,
-  McpConfigureRoute: McpConfigureRoute,
-  MemoryRoute: MemoryRoute,
-  SkillsRoute: SkillsRoute,
-  SkillsGenerateRoute: SkillsGenerateRoute,
-  SettingsRoute: SettingsRoute,
   ChatRoute: ChatRoute,
+  LoginRoute: LoginRoute,
+  McpRoute: McpRouteWithChildren,
+  MemoryRoute: MemoryRoute,
+  SettingsRoute: SettingsRoute,
+  SetupRoute: SetupRoute,
+  SkillsRoute: SkillsRouteWithChildren,
   AgentsAgentIdRoute: AgentsAgentIdRoute,
+  AuthCallbackRoute: AuthCallbackRoute,
   PipelinesPipelineIdRoute: PipelinesPipelineIdRoute,
   ProjectsProjectIdRoute: ProjectsProjectIdRoute,
   RunsRunIdRoute: RunsRunIdRoute,

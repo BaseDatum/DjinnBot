@@ -13,7 +13,7 @@ import {
   useRef,
   useState,
 } from 'react';
-import { fetchAgents, listChatSessions, endChatSession, startChatSession, restartChatSession, type AgentListItem } from '@/lib/api';
+import { fetchAgents, listChatSessions, endChatSession, startChatSession, restartChatSession, getChatSessionStatus, type AgentListItem } from '@/lib/api';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -68,47 +68,173 @@ function nextPaneId() {
 
 const MAX_VISIBLE = 3;
 
+// ── localStorage persistence ─────────────────────────────────────────────────
+
+const STORAGE_KEY = 'djinnbot:chat_panes';
+const WIDGET_KEY = 'djinnbot:chat_widget_open';
+
+/** Minimal shape we persist — everything else is re-derived on restore. */
+interface PersistedPane {
+  sessionId: string;
+  agentId: string;
+  agentName: string;
+  agentEmoji: string | null;
+  model: string;
+  visible: boolean;
+}
+
+function savePanesToStorage(panes: ChatPane[]) {
+  try {
+    // Only persist panes that have a backend session id
+    const serializable: PersistedPane[] = panes
+      .filter(p => p.sessionId)
+      .map(p => ({
+        sessionId: p.sessionId!,
+        agentId: p.agentId,
+        agentName: p.agentName,
+        agentEmoji: p.agentEmoji,
+        model: p.model,
+        visible: p.visible,
+      }));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(serializable));
+  } catch {
+    // localStorage may be unavailable (private browsing, quota)
+  }
+}
+
+function loadPanesFromStorage(): PersistedPane[] {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed;
+  } catch {
+    return [];
+  }
+}
+
+function clearPanesStorage() {
+  try { localStorage.removeItem(STORAGE_KEY); } catch { /* */ }
+}
+
+function saveWidgetState(open: boolean) {
+  try { localStorage.setItem(WIDGET_KEY, open ? '1' : '0'); } catch { /* */ }
+}
+
+function loadWidgetState(): boolean {
+  try { return localStorage.getItem(WIDGET_KEY) === '1'; } catch { return false; }
+}
+
 // ── Provider ──────────────────────────────────────────────────────────────────
 
 export function ChatSessionProvider({ children }: { children: React.ReactNode }) {
   const [panes, setPanes] = useState<ChatPane[]>([]);
   const [agents, setAgents] = useState<AgentListItem[]>([]);
-  const [widgetOpen, setWidgetOpen] = useState(false);
+  const [widgetOpen, setWidgetOpen] = useState(loadWidgetState);
   const [restored, setRestored] = useState(false);
 
   // Keep a ref so callbacks don't need panes in their dep arrays
   const panesRef = useRef(panes);
   panesRef.current = panes;
 
+  // Persist panes to localStorage on every change (skip the initial empty state
+  // before restore completes — otherwise we'd wipe the saved panes).
+  const restoredRef = useRef(false);
+  useEffect(() => {
+    if (!restoredRef.current) return;
+    savePanesToStorage(panes);
+  }, [panes]);
+
+  // Persist widget open/close state
+  useEffect(() => {
+    saveWidgetState(widgetOpen);
+  }, [widgetOpen]);
+
   // Load agents once
   useEffect(() => {
     fetchAgents().then(setAgents).catch(console.error);
   }, []);
 
-  // Restore active chat sessions on mount (once agents are loaded)
+  // ── Restore: localStorage first, reconcile with backend ───────────────────
+  //
+  // 1. Read persisted panes from localStorage (the sessions the user had open).
+  // 2. For each, check backend status — running → running, anything else → idle.
+  // 3. Also discover any running sessions NOT in localStorage (e.g. started from
+  //    another tab or via the API) and add them as hidden panes.
+  // 4. The result: every session the user had open is restored (even if its
+  //    container was reaped — it shows as idle with a Restart button), plus any
+  //    new running sessions they haven't seen yet.
   useEffect(() => {
     if (agents.length === 0 || restored) return;
 
     const restore = async () => {
       try {
-        // Fetch all running/starting chat sessions across all agents
-        const results = await Promise.allSettled(
+        const persisted = loadPanesFromStorage();
+        const seenSessionIds = new Set<string>();
+
+        // ── Phase 1: reconcile persisted panes with backend status ─────────
+        const reconciledPanes: ChatPane[] = [];
+
+        if (persisted.length > 0) {
+          const statusResults = await Promise.allSettled(
+            persisted.map(p =>
+              getChatSessionStatus(p.agentId, p.sessionId)
+                .then(s => ({ persisted: p, status: s })),
+            ),
+          );
+
+          for (const result of statusResults) {
+            if (result.status !== 'fulfilled') continue;
+            const { persisted: p, status: s } = result.value;
+
+            // Session was deleted or doesn't exist — drop it
+            if (!s.exists) continue;
+
+            seenSessionIds.add(p.sessionId);
+
+            const backendStatus = s.status;
+            let sessionStatus: SessionStatus = 'idle';
+            if (backendStatus === 'running' || backendStatus === 'ready') {
+              sessionStatus = 'running';
+            } else if (backendStatus === 'starting') {
+              sessionStatus = 'starting';
+            }
+            // completed, failed, idle → 'idle' (shows restart button)
+
+            reconciledPanes.push({
+              paneId: nextPaneId(),
+              agentId: p.agentId,
+              agentName: p.agentName,
+              agentEmoji: p.agentEmoji,
+              model: p.model,
+              sessionId: p.sessionId,
+              sessionStatus,
+              visible: p.visible && reconciledPanes.filter(rp => rp.visible).length < MAX_VISIBLE,
+            });
+          }
+        }
+
+        // ── Phase 2: discover running sessions not in localStorage ─────────
+        // (e.g. started from another tab, CLI, or API call)
+        const discoveryResults = await Promise.allSettled(
           agents.map(agent =>
             listChatSessions(agent.id, { limit: 20 }).then(r => ({
               agent,
               sessions: r.sessions.filter(
-                s => s.status === 'running' || s.status === 'starting' || (s.status as string) === 'ready',
+                s => (s.status === 'running' || s.status === 'starting' || (s.status as string) === 'ready')
+                  && !seenSessionIds.has(s.id),
               ),
             })),
           ),
         );
 
-        const newPanes: ChatPane[] = [];
-        for (const result of results) {
+        for (const result of discoveryResults) {
           if (result.status !== 'fulfilled') continue;
           const { agent, sessions } = result.value;
           for (const session of sessions) {
-            newPanes.push({
+            const visibleCount = reconciledPanes.filter(p => p.visible).length;
+            reconciledPanes.push({
               paneId: nextPaneId(),
               agentId: agent.id,
               agentName: agent.name,
@@ -116,17 +242,21 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
               model: session.model,
               sessionId: session.id,
               sessionStatus: 'running',
-              visible: newPanes.length < MAX_VISIBLE,
+              visible: visibleCount < MAX_VISIBLE,
             });
           }
         }
 
-        if (newPanes.length > 0) {
-          setPanes(newPanes);
+        if (reconciledPanes.length > 0) {
+          setPanes(reconciledPanes);
+        } else {
+          // No panes to restore — clear stale localStorage
+          clearPanesStorage();
         }
       } catch (err) {
         console.error('Failed to restore chat sessions:', err);
       } finally {
+        restoredRef.current = true;
         setRestored(true);
       }
     };

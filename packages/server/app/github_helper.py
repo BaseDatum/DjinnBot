@@ -1,5 +1,6 @@
 """GitHub App installation helper functions."""
 
+import json
 import os
 import secrets
 import hashlib
@@ -7,14 +8,27 @@ import hmac
 import time
 from datetime import datetime, timedelta
 from typing import Optional, Dict, List, Tuple
+
 import jwt
 import httpx
+from sqlalchemy import select, update, delete
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db import get_db
+from app.database import AsyncSessionLocal
+from app.models.github import (
+    ProjectGitHub,
+    GitHubInstallationState,
+)
 from app.logging_config import get_logger
-from app.utils import now_ms
+from app.models.base import now_ms
 
 logger = get_logger(__name__)
+
+
+def _row_to_dict(obj) -> dict:
+    """Convert an ORM model instance to a dictionary."""
+    return {c.key: getattr(obj, c.key) for c in obj.__table__.columns}
 
 
 class GitHubHelper:
@@ -38,12 +52,7 @@ class GitHubHelper:
         return self._private_key
 
     def is_configured(self) -> tuple[bool, list[str]]:
-        """Check whether all required env vars and files are present.
-
-        Returns:
-            (ok, missing_items) where missing_items is a list of human-readable
-            descriptions of what is absent.
-        """
+        """Check whether all required env vars and files are present."""
         missing = []
         if not self.app_id:
             missing.append("GITHUB_APP_ID environment variable is not set")
@@ -59,14 +68,7 @@ class GitHubHelper:
         return len(missing) == 0, missing
 
     def generate_jwt(self) -> str:
-        """Generate JWT for GitHub App authentication.
-
-        Returns:
-            str: JWT token valid for 10 minutes
-
-        Raises:
-            RuntimeError: If required env vars or the private key file are missing.
-        """
+        """Generate JWT for GitHub App authentication."""
         ok, missing = self.is_configured()
         if not ok:
             raise RuntimeError(
@@ -77,36 +79,23 @@ class GitHubHelper:
 
         now = int(time.time())
         payload = {
-            "iat": now
-            - 60,  # issued at time, 60 seconds in the past to allow for clock drift
-            "exp": now + 600,  # expiration time (10 minutes maximum)
+            "iat": now - 60,
+            "exp": now + 600,
             "iss": self.app_id,
         }
 
-        # Create JWT using PyJWT
         encoded = jwt.encode(payload, private_key, algorithm="RS256")
-
         logger.debug("JWT generated successfully")
         return encoded
 
     async def get_installation_token(self, installation_id: int) -> Tuple[str, int]:
-        """Get installation access token.
-
-        Args:
-            installation_id: GitHub App installation ID
-
-        Returns:
-            Tuple of (access_token, expires_at_timestamp)
-        """
+        """Get installation access token."""
         logger.debug(
             f"Getting installation token for installation_id={installation_id}"
         )
         jwt_token = self.generate_jwt()
 
         async with httpx.AsyncClient() as client:
-            logger.debug(
-                f"Requesting access token from GitHub API for installation_id={installation_id}"
-            )
             response = await client.post(
                 f"https://api.github.com/app/installations/{installation_id}/access_tokens",
                 headers={
@@ -123,28 +112,13 @@ class GitHubHelper:
             expires_at = datetime.fromisoformat(
                 data["expires_at"].replace("Z", "+00:00")
             )
-
-            logger.debug(
-                f"Successfully obtained installation token for installation_id={installation_id}"
-            )
             return data["token"], int(expires_at.timestamp() * 1000)
 
     async def get_installation_repositories(self, installation_id: int) -> List[Dict]:
-        """Get repositories accessible by an installation.
-
-        Args:
-            installation_id: GitHub App installation ID
-
-        Returns:
-            List of repository dictionaries
-        """
-        logger.debug(
-            f"Fetching installation repositories for installation_id={installation_id}"
-        )
+        """Get repositories accessible by an installation."""
         token, _ = await self.get_installation_token(installation_id)
 
         async with httpx.AsyncClient() as client:
-            logger.debug(f"Calling GitHub API: installation/repositories")
             response = await client.get(
                 "https://api.github.com/installation/repositories",
                 headers={
@@ -158,32 +132,15 @@ class GitHubHelper:
                 raise Exception(f"Failed to get repositories: {response.text}")
 
             data = response.json()
-            repos = data.get("repositories", [])
-            logger.debug(
-                f"Found {len(repos)} repositories for installation_id={installation_id}"
-            )
-            return repos
+            return data.get("repositories", [])
 
     async def get_repository_info(
         self, installation_id: int, owner: str, repo: str
     ) -> Dict:
-        """Get repository information.
-
-        Args:
-            installation_id: GitHub App installation ID
-            owner: Repository owner
-            repo: Repository name
-
-        Returns:
-            Repository information dictionary
-        """
-        logger.debug(
-            f"Fetching repository info: {owner}/{repo} (installation_id={installation_id})"
-        )
+        """Get repository information."""
         token, _ = await self.get_installation_token(installation_id)
 
         async with httpx.AsyncClient() as client:
-            logger.debug(f"Calling GitHub API: repos/{owner}/{repo}")
             response = await client.get(
                 f"https://api.github.com/repos/{owner}/{repo}",
                 headers={
@@ -199,15 +156,7 @@ class GitHubHelper:
             return response.json()
 
     async def verify_webhook_signature(self, payload: bytes, signature: str) -> bool:
-        """Verify webhook signature.
-
-        Args:
-            payload: Raw webhook payload bytes
-            signature: X-Hub-Signature-256 header value
-
-        Returns:
-            True if signature is valid
-        """
+        """Verify webhook signature."""
         if not signature or not signature.startswith("sha256="):
             return False
 
@@ -220,125 +169,110 @@ class GitHubHelper:
 
         return hmac.compare_digest(computed_signature, expected_signature)
 
+    # ─── Database operations using SQLAlchemy ORM ─────────────────────────────
+
     async def create_installation_state(self, project_id: str, user_id: str) -> str:
-        """Create a state token for OAuth flow CSRF protection.
-
-        Args:
-            project_id: Project ID
-            user_id: User ID initiating the installation
-
-        Returns:
-            State token string
-        """
+        """Create a state token for OAuth flow CSRF protection."""
         state_token = secrets.token_urlsafe(32)
         state_id = secrets.token_urlsafe(16)
 
         now = now_ms()
         expires_at = now + (10 * 60 * 1000)  # 10 minutes
 
-        async with get_db() as db:
-            await db.execute(
-                """INSERT INTO github_installation_states 
-                   (id, state_token, project_id, user_id, created_at, expires_at, used)
-                   VALUES (?, ?, ?, ?, ?, ?, 0)""",
-                (state_id, state_token, project_id, user_id, now, expires_at),
+        async with AsyncSessionLocal() as session:
+            state = GitHubInstallationState(
+                id=state_id,
+                state_token=state_token,
+                project_id=project_id,
+                user_id=user_id,
+                created_at=now,
+                expires_at=expires_at,
+                used=0,
             )
-            await db.commit()
+            session.add(state)
+            await session.commit()
 
         return state_token
 
     async def validate_and_consume_state(self, state_token: str) -> Optional[Dict]:
-        """Validate state token and mark as used.
-
-        Args:
-            state_token: State token to validate
-
-        Returns:
-            Dictionary with project_id and user_id if valid, None otherwise
-        """
+        """Validate state token and mark as used."""
         now = now_ms()
 
-        async with get_db() as db:
-            # Get state
-            cursor = await db.execute(
-                """SELECT * FROM github_installation_states 
-                   WHERE state_token = ? AND used = 0 AND expires_at > ?""",
-                (state_token, now),
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                select(GitHubInstallationState).where(
+                    GitHubInstallationState.state_token == state_token,
+                    GitHubInstallationState.used == 0,
+                    GitHubInstallationState.expires_at > now,
+                )
             )
-            row = await cursor.fetchone()
+            state = result.scalar_one_or_none()
 
-            if not row:
+            if not state:
                 return None
 
-            state = dict(row)
+            state.used = 1
+            await session.commit()
 
-            # Mark as used
-            await db.execute(
-                "UPDATE github_installation_states SET used = 1 WHERE id = ?",
-                (state["id"],),
-            )
-            await db.commit()
-
-            return {"project_id": state["project_id"], "user_id": state["user_id"]}
+            return {"project_id": state.project_id, "user_id": state.user_id}
 
     async def cleanup_expired_states(self) -> int:
-        """Clean up expired state tokens.
-
-        Returns:
-            Number of states deleted
-        """
+        """Clean up expired state tokens."""
         now = now_ms()
 
-        async with get_db() as db:
-            cursor = await db.execute(
-                "DELETE FROM github_installation_states WHERE expires_at < ?", (now,)
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                delete(GitHubInstallationState).where(
+                    GitHubInstallationState.expires_at < now
+                )
             )
-            await db.commit()
-            return cursor.rowcount
+            await session.commit()
+            return result.rowcount
 
     async def get_project_github(self, project_id: str) -> Optional[Dict]:
-        """Get GitHub connection for a project.
-
-        Args:
-            project_id: Project ID
-
-        Returns:
-            Project GitHub connection dictionary or None
-        """
+        """Get GitHub connection for a project."""
         logger.debug(f"Looking up GitHub connection for project_id={project_id}")
-        async with get_db() as db:
-            cursor = await db.execute(
-                "SELECT * FROM project_github WHERE project_id = ? AND is_active = 1",
-                (project_id,),
+
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                select(ProjectGitHub).where(
+                    ProjectGitHub.project_id == project_id,
+                    ProjectGitHub.is_active == 1,
+                )
             )
-            row = await cursor.fetchone()
-            result = dict(row) if row else None
-            logger.debug(
-                f"Found GitHub connection for project_id={project_id}: {result is not None}"
-            )
-            return result
+            row = result.scalar_one_or_none()
+            if row:
+                d = _row_to_dict(row)
+                # Callers expect "metadata" key — map from DB column name
+                d["metadata"] = d.pop("github_metadata", "{}")
+                logger.debug(
+                    f"Found GitHub connection for project_id={project_id}: True"
+                )
+                return d
+            logger.debug(f"Found GitHub connection for project_id={project_id}: False")
+            return None
 
     async def get_projects_by_installation(self, installation_id: int) -> List[Dict]:
-        """Get all projects connected to an installation.
-
-        Args:
-            installation_id: GitHub App installation ID
-
-        Returns:
-            List of project GitHub connection dictionaries
-        """
+        """Get all projects connected to an installation."""
         logger.debug(f"Looking up projects for installation_id={installation_id}")
-        async with get_db() as db:
-            cursor = await db.execute(
-                "SELECT * FROM project_github WHERE installation_id = ? AND is_active = 1",
-                (installation_id,),
+
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                select(ProjectGitHub).where(
+                    ProjectGitHub.installation_id == installation_id,
+                    ProjectGitHub.is_active == 1,
+                )
             )
-            rows = await cursor.fetchall()
-            result = [dict(row) for row in rows]
+            rows = result.scalars().all()
+            results = []
+            for row in rows:
+                d = _row_to_dict(row)
+                d["metadata"] = d.pop("github_metadata", "{}")
+                results.append(d)
             logger.debug(
-                f"Found {len(result)} projects for installation_id={installation_id}"
+                f"Found {len(results)} projects for installation_id={installation_id}"
             )
-            return result
+            return results
 
     async def connect_project_to_repository(
         self,
@@ -350,106 +284,87 @@ class GitHubHelper:
         connected_by: str,
         metadata: Optional[Dict] = None,
     ) -> Dict:
-        """Connect a project to a GitHub repository.
-
-        Args:
-            project_id: Project ID
-            installation_id: GitHub App installation ID
-            repo_owner: Repository owner
-            repo_name: Repository name
-            default_branch: Default branch name
-            connected_by: User ID who connected
-            metadata: Optional metadata dictionary
-
-        Returns:
-            Project GitHub connection dictionary
-        """
-        import json
-
+        """Connect a project to a GitHub repository (upsert)."""
         connection_id = secrets.token_urlsafe(16)
         repo_full_name = f"{repo_owner}/{repo_name}"
         now = now_ms()
         metadata_json = json.dumps(metadata or {})
 
-        async with get_db() as db:
-            # Upsert - replace existing connection if any
-            await db.execute(
-                """INSERT INTO project_github 
-                   (id, project_id, installation_id, repo_owner, repo_name, repo_full_name, 
-                    default_branch, connected_at, connected_by, is_active, metadata)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
-                   ON CONFLICT(project_id) DO UPDATE SET
-                     installation_id = excluded.installation_id,
-                     repo_owner = excluded.repo_owner,
-                     repo_name = excluded.repo_name,
-                     repo_full_name = excluded.repo_full_name,
-                     default_branch = excluded.default_branch,
-                     connected_at = excluded.connected_at,
-                     connected_by = excluded.connected_by,
-                     is_active = 1,
-                     metadata = excluded.metadata""",
-                (
-                    connection_id,
-                    project_id,
-                    installation_id,
-                    repo_owner,
-                    repo_name,
-                    repo_full_name,
-                    default_branch,
-                    now,
-                    connected_by,
-                    metadata_json,
-                ),
+        async with AsyncSessionLocal() as session:
+            # PostgreSQL upsert
+            stmt = (
+                pg_insert(ProjectGitHub)
+                .values(
+                    id=connection_id,
+                    project_id=project_id,
+                    installation_id=installation_id,
+                    repo_owner=repo_owner,
+                    repo_name=repo_name,
+                    repo_full_name=repo_full_name,
+                    default_branch=default_branch,
+                    connected_at=now,
+                    connected_by=connected_by,
+                    is_active=1,
+                    github_metadata=metadata_json,
+                )
+                .on_conflict_do_update(
+                    index_elements=["project_id"],
+                    set_={
+                        "installation_id": installation_id,
+                        "repo_owner": repo_owner,
+                        "repo_name": repo_name,
+                        "repo_full_name": repo_full_name,
+                        "default_branch": default_branch,
+                        "connected_at": now,
+                        "connected_by": connected_by,
+                        "is_active": 1,
+                        "github_metadata": metadata_json,
+                    },
+                )
             )
-            await db.commit()
+            await session.execute(stmt)
+            await session.commit()
 
             # Return the connection
-            cursor = await db.execute(
-                "SELECT * FROM project_github WHERE project_id = ?", (project_id,)
+            result = await session.execute(
+                select(ProjectGitHub).where(ProjectGitHub.project_id == project_id)
             )
-            row = await cursor.fetchone()
-            return dict(row)
+            row = result.scalar_one()
+            d = _row_to_dict(row)
+            d["metadata"] = d.pop("github_metadata", "{}")
+            return d
 
     async def disconnect_project(self, project_id: str) -> None:
-        """Disconnect a project from GitHub.
-
-        Args:
-            project_id: Project ID
-        """
-        async with get_db() as db:
-            await db.execute(
-                "UPDATE project_github SET is_active = 0 WHERE project_id = ?",
-                (project_id,),
+        """Disconnect a project from GitHub."""
+        async with AsyncSessionLocal() as session:
+            await session.execute(
+                update(ProjectGitHub)
+                .where(ProjectGitHub.project_id == project_id)
+                .values(is_active=0)
             )
-            await db.commit()
+            await session.commit()
 
     async def update_last_push(self, project_id: str) -> None:
-        """Update last push timestamp for a project.
-
-        Args:
-            project_id: Project ID
-        """
+        """Update last push timestamp for a project."""
         now = now_ms()
-        async with get_db() as db:
-            await db.execute(
-                "UPDATE project_github SET last_push_at = ? WHERE project_id = ?",
-                (now, project_id),
+        async with AsyncSessionLocal() as session:
+            await session.execute(
+                update(ProjectGitHub)
+                .where(ProjectGitHub.project_id == project_id)
+                .values(last_push_at=now)
             )
-            await db.commit()
+            await session.commit()
 
     async def update_last_sync(self, project_id: str) -> None:
-        """Update last sync timestamp for a project.
-
-        Args:
-            project_id: Project ID
-        """
+        """Update last sync timestamp for a project."""
         now = now_ms()
-        async with get_db() as db:
-            await db.execute(
-                "UPDATE project_github SET last_sync_at = ? WHERE project_id = ?",
-                (now, project_id),
+        async with AsyncSessionLocal() as session:
+            await session.execute(
+                update(ProjectGitHub)
+                .where(ProjectGitHub.project_id == project_id)
+                .values(last_sync_at=now)
             )
-            await db.commit()
+            await session.commit()
 
     async def create_pull_request(
         self,
@@ -460,26 +375,7 @@ class GitHubHelper:
         body: str = "",
         draft: bool = False,
     ) -> Dict:
-        """Create a GitHub pull request for a task branch.
-
-        Uses the project's GitHub App installation token so no personal
-        access token is required.
-
-        Args:
-            project_id: DjinnBot project ID (used to look up the installation).
-            head_branch: Source branch (e.g. "feat/task_abc123-implement-oauth").
-            base_branch: Target branch (default "main").
-            title: PR title.
-            body: PR description (markdown).
-            draft: Whether to create as a draft PR.
-
-        Returns:
-            Dict with keys: pr_number, pr_url, title, state, draft.
-
-        Raises:
-            ValueError: If the project has no GitHub connection.
-            httpx.HTTPStatusError: On GitHub API error.
-        """
+        """Create a GitHub pull request for a task branch."""
         connection = await self.get_project_github(project_id)
         if not connection:
             raise ValueError(f"Project {project_id} is not connected to GitHub")

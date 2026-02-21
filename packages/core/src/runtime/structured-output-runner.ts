@@ -5,6 +5,7 @@
  * Used for pipeline steps that have outputSchema configured.
  * Falls back to tool_use approach when response_format is not supported.
  */
+import { authFetch } from '../api/auth-fetch.js';
 import { PROVIDER_ENV_MAP } from '../constants.js';
 
 export interface StructuredOutputConfig {
@@ -103,7 +104,7 @@ export class StructuredOutputRunner {
     if (!apiBaseUrl) return;
 
     try {
-      const res = await fetch(`${apiBaseUrl}/v1/settings/providers/keys/all`);
+      const res = await authFetch(`${apiBaseUrl}/v1/settings/providers/keys/all`);
       if (res.ok) {
         const data = await res.json() as { keys: Record<string, string> };
         for (const [providerId, apiKey] of Object.entries(data.keys ?? {})) {

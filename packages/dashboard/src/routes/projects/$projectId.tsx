@@ -22,6 +22,7 @@ import { TaskDetailPanel } from '@/components/projects/TaskDetailPanel';
 import { PlanDialog } from '@/components/projects/PlanDialog';
 import { TeamPanel } from '@/components/projects/TeamPanel';
 import { RepositorySettings } from '@/components/projects/RepositorySettings';
+import { SlackSettings } from '@/components/projects/SlackSettings';
 import { ProjectActivityFeed, type ActivityEntry } from '@/components/projects/ProjectActivityFeed';
 import { DependencyGraph } from '@/components/DependencyGraph';
 import { GanttChart } from '@/components/GanttChart';
@@ -400,10 +401,16 @@ function ProjectBoardPage() {
 
         {view === 'settings' && (
           <div className="flex-1 p-4 md:px-6 overflow-auto">
-            <div className="max-w-2xl mx-auto">
+            <div className="max-w-2xl mx-auto space-y-6">
               <RepositorySettings
                 projectId={projectId}
                 currentRepoUrl={project.repository}
+                onUpdate={loadProject}
+              />
+              <SlackSettings
+                projectId={projectId}
+                currentChannelId={project.slack_channel_id}
+                currentNotifyUserId={project.slack_notify_user_id}
                 onUpdate={loadProject}
               />
             </div>

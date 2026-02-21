@@ -1,3 +1,4 @@
+import { authFetch } from '../api/auth-fetch.js';
 import { Agent } from '@mariozechner/pi-agent-core';
 import { registerBuiltInApiProviders } from '@mariozechner/pi-ai';
 import type { AssistantMessage, TextContent } from '@mariozechner/pi-ai';
@@ -121,7 +122,7 @@ export class PiMonoRunner implements AgentRunner {
 
     if (apiBaseUrl) {
       try {
-        const res = await fetch(`${apiBaseUrl}/v1/settings/providers/keys/all`);
+        const res = await authFetch(`${apiBaseUrl}/v1/settings/providers/keys/all`);
         if (res.ok) {
           const data = await res.json() as { keys: Record<string, string>; extra?: Record<string, string> };
           const keys = data.keys ?? {};

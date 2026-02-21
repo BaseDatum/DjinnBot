@@ -62,7 +62,12 @@ services:
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - MCPO_BASE_URL=http://djinnbot-mcpo:8000
       # Internal service-to-service auth token — protects the plaintext secrets /env endpoint
+      # and acts as a first-class API key for engine/agent-runtime when auth is enabled.
       - ENGINE_INTERNAL_TOKEN=${ENGINE_INTERNAL_TOKEN:-}
+      # Authentication
+      - AUTH_ENABLED=${AUTH_ENABLED:-false}
+      - AUTH_SECRET_KEY=${AUTH_SECRET_KEY:-}
+      - AUTH_TOTP_ISSUER=${AUTH_TOTP_ISSUER:-DjinnBot}
     volumes:
       # NOTE: We mount only djinnbot-data to /data. The sandboxes, workspaces, and runs
       # directories are subdirectories within djinnbot-data (/data/sandboxes, etc).

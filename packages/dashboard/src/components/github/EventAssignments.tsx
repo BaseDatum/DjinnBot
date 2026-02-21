@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { API_BASE } from '@/lib/api';
+import { authFetch } from '@/lib/auth';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -84,7 +85,7 @@ export function EventAssignments({ projectId }: EventAssignmentsProps) {
   async function fetchAssignments() {
     setLoading(true);
     try {
-      const response = await fetch(`${API_BASE}/projects/${projectId}/github/assignments`);
+      const response = await authFetch(`${API_BASE}/projects/${projectId}/github/assignments`);
       if (!response.ok) throw new Error('Failed to fetch assignments');
       const data = await response.json();
       setAssignments(data);
@@ -98,7 +99,7 @@ export function EventAssignments({ projectId }: EventAssignmentsProps) {
 
   async function fetchAgents() {
     try {
-      const response = await fetch(`${API_BASE}/projects/${projectId}/agents`);
+      const response = await authFetch(`${API_BASE}/projects/${projectId}/agents`);
       if (!response.ok) throw new Error('Failed to fetch agents');
       const data = await response.json();
       setAgents(data);
@@ -112,7 +113,7 @@ export function EventAssignments({ projectId }: EventAssignmentsProps) {
     if (!confirm('Delete this assignment?')) return;
 
     try {
-      const response = await fetch(`${API_BASE}/projects/${projectId}/github/assignments/${assignmentId}`, {
+      const response = await authFetch(`${API_BASE}/projects/${projectId}/github/assignments/${assignmentId}`, {
         method: 'DELETE',
       });
       if (!response.ok) throw new Error('Failed to delete assignment');
@@ -127,7 +128,7 @@ export function EventAssignments({ projectId }: EventAssignmentsProps) {
 
   async function toggleAutoRespond(assignment: EventAssignment) {
     try {
-      const response = await fetch(`${API_BASE}/projects/${projectId}/github/assignments/${assignment.id}`, {
+      const response = await authFetch(`${API_BASE}/projects/${projectId}/github/assignments/${assignment.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ autoRespond: !assignment.autoRespond }),

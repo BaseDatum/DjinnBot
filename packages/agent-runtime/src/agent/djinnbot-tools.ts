@@ -1,3 +1,4 @@
+import { authFetch } from '../api/auth-fetch.js';
 import { Type, type Static } from '@sinclair/typebox';
 import type { AgentTool, AgentToolResult, AgentToolUpdateCallback } from '@mariozechner/pi-agent-core';
 import type { RedisPublisher } from '../redis/publisher.js';
@@ -742,7 +743,7 @@ export function createDjinnBotTools(config: DjinnBotToolsConfig): AgentTool[] {
           return { content: [{ type: 'text', text: 'No onboarding session ID available — context not updated.' }], details: {} };
         }
         try {
-          const response = await fetch(
+          const response = await authFetch(
             `${apiBase}/v1/onboarding/sessions/${onboardingSessionId}/context`,
             {
               method: 'PATCH',
@@ -796,7 +797,7 @@ export function createDjinnBotTools(config: DjinnBotToolsConfig): AgentTool[] {
         }
 
         try {
-          const response = await fetch(
+          const response = await authFetch(
             `${apiBase}/v1/onboarding/sessions/${onboardingSessionId}/handoff`,
             {
               method: 'POST',
@@ -857,7 +858,7 @@ export function createDjinnBotTools(config: DjinnBotToolsConfig): AgentTool[] {
         try {
           const url = new URL(`${apiBase}/v1/github/repo-token`);
           url.searchParams.set('repo', repo);
-          const response = await fetch(url.toString(), { signal: signal ?? undefined });
+          const response = await authFetch(url.toString(), { signal: signal ?? undefined });
 
           if (!response.ok) {
             const body = await response.json().catch(() => ({ detail: response.statusText })) as { detail?: string };
@@ -938,7 +939,7 @@ export function createDjinnBotTools(config: DjinnBotToolsConfig): AgentTool[] {
         const apiBase = config.apiBaseUrl || process.env.DJINNBOT_API_URL || 'http://api:8000';
 
         try {
-          const res = await fetch(
+          const res = await authFetch(
             `${apiBase}/v1/skills/agents/${agentId}/${encodeURIComponent(p.name)}/content`,
             { signal: signal ?? undefined },
           );
@@ -1013,7 +1014,7 @@ export function createDjinnBotTools(config: DjinnBotToolsConfig): AgentTool[] {
 
         try {
           // 1. Create the skill in the library
-          const createRes = await fetch(`${apiBase}/v1/skills/`, {
+          const createRes = await authFetch(`${apiBase}/v1/skills/`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -1035,7 +1036,7 @@ export function createDjinnBotTools(config: DjinnBotToolsConfig): AgentTool[] {
           const skill = await createRes.json() as { id: string; scope: string };
 
           // 2. Auto-grant access to the creating agent
-          const grantRes = await fetch(
+          const grantRes = await authFetch(
             `${apiBase}/v1/skills/agents/${agentId}/${encodeURIComponent(skill.id)}/grant`,
             {
               method: 'POST',
@@ -1088,7 +1089,7 @@ export function createDjinnBotTools(config: DjinnBotToolsConfig): AgentTool[] {
           || 'http://api:8000';
         try {
           const url = `${apiBase}/v1/agents/${agentId}/projects`;
-          const response = await fetch(url, { signal });
+          const response = await authFetch(url, { signal });
           if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
           const raw = (await response.json()) as any;
           const rawList: any[] = Array.isArray(raw) ? raw : (raw.projects || []);
@@ -1146,7 +1147,7 @@ export function createDjinnBotTools(config: DjinnBotToolsConfig): AgentTool[] {
         try {
           const limit = p.limit || 5;
           const url = `${apiBase}/v1/projects/${p.projectId}/ready-tasks?agent_id=${encodeURIComponent(agentId)}&limit=${limit}&statuses=${encodeURIComponent(statuses)}`;
-          const response = await fetch(url, { signal });
+          const response = await authFetch(url, { signal });
           if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
           const raw = (await response.json()) as any;
           const tasks: any[] = Array.isArray(raw) ? raw : (raw.tasks || []);
@@ -1209,7 +1210,7 @@ export function createDjinnBotTools(config: DjinnBotToolsConfig): AgentTool[] {
           || 'http://api:8000';
         try {
           const claimUrl = `${apiBase}/v1/projects/${projectId}/tasks/${taskId}/claim`;
-          const claimResp = await fetch(claimUrl, {
+          const claimResp = await authFetch(claimUrl, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ agentId }),
@@ -1223,7 +1224,7 @@ export function createDjinnBotTools(config: DjinnBotToolsConfig): AgentTool[] {
           let workspaceNote = '';
           try {
             const wsUrl = `${apiBase}/v1/projects/${projectId}/tasks/${taskId}/workspace`;
-            const wsResp = await fetch(wsUrl, {
+            const wsResp = await authFetch(wsUrl, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ agentId }),
@@ -1290,7 +1291,7 @@ export function createDjinnBotTools(config: DjinnBotToolsConfig): AgentTool[] {
           || 'http://api:8000';
         try {
           const url = `${apiBase}/v1/projects/${projectId}/tasks/${taskId}`;
-          const response = await fetch(url, { signal });
+          const response = await authFetch(url, { signal });
           const data = (await response.json()) as any;
           if (!response.ok) throw new Error(data.detail || `${response.status} ${response.statusText}`);
           const meta = data.metadata || {};
@@ -1337,7 +1338,7 @@ export function createDjinnBotTools(config: DjinnBotToolsConfig): AgentTool[] {
           || 'http://api:8000';
         try {
           const url = `${apiBase}/v1/projects/${projectId}/tasks/${taskId}/pull-request`;
-          const response = await fetch(url, {
+          const response = await authFetch(url, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ agentId, title, body: body ?? '', draft: draft ?? false }),
@@ -1383,7 +1384,7 @@ export function createDjinnBotTools(config: DjinnBotToolsConfig): AgentTool[] {
           || 'http://api:8000';
         try {
           const url = `${apiBase}/v1/projects/${projectId}/tasks/${taskId}/transition`;
-          const response = await fetch(url, {
+          const response = await authFetch(url, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ status, note }),
@@ -1420,7 +1421,7 @@ export function createDjinnBotTools(config: DjinnBotToolsConfig): AgentTool[] {
           const url = `${apiBase}/v1/projects/${p.projectId}/tasks/${p.taskId}/execute`;
           const body: any = {};
           if (p.pipelineId) body.pipelineId = p.pipelineId;
-          const response = await fetch(url, {
+          const response = await authFetch(url, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(body),
@@ -1508,7 +1509,7 @@ export function createDjinnBotTools(config: DjinnBotToolsConfig): AgentTool[] {
         const scope = p.scope ?? 'global';
 
         try {
-          const createRes = await fetch(`${apiBase}/v1/skills/`, {
+          const createRes = await authFetch(`${apiBase}/v1/skills/`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -1530,7 +1531,7 @@ export function createDjinnBotTools(config: DjinnBotToolsConfig): AgentTool[] {
           const skill = await createRes.json() as { id: string; scope: string };
 
           // Auto-grant access to creating agent
-          await fetch(
+          await authFetch(
             `${apiBase}/v1/skills/agents/${agentId}/${encodeURIComponent(skill.id)}/grant`,
             {
               method: 'POST',
@@ -1594,7 +1595,7 @@ export function createDjinnBotTools(config: DjinnBotToolsConfig): AgentTool[] {
           if (internalToken) {
             headers['Authorization'] = `Bearer ${internalToken}`;
           }
-          const res = await fetch(
+          const res = await authFetch(
             `${apiBase}/v1/secrets/agents/${encodeURIComponent(agentId)}/env`,
             { signal: signal ?? undefined, headers },
           );

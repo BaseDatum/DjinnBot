@@ -5,6 +5,8 @@
  * maintain a long-lived container that processes multiple user messages.
  */
 import { Redis } from 'ioredis';
+import { authFetch } from '../api/auth-fetch.js';
+import { getAgentApiKey } from '../api/agent-key-manager.js';
 import { ContainerManager, type ContainerConfig } from '../container/manager.js';
 import { CommandSender } from '../container/command-sender.js';
 import { EventReceiver } from '../container/event-receiver.js';
@@ -924,7 +926,7 @@ export class ChatSessionManager {
 
     // Overlay with DB-stored keys and extra env vars (these take precedence over local env)
     try {
-      const res = await fetch(`${this.apiBaseUrl}/v1/settings/providers/keys/all`);
+      const res = await authFetch(`${this.apiBaseUrl}/v1/settings/providers/keys/all`);
       if (res.ok) {
         const data = await res.json() as { keys: Record<string, string>; extra?: Record<string, string> };
         // Primary API keys
@@ -958,12 +960,7 @@ export class ChatSessionManager {
    */
   private async fetchAgentSecretEnvVars(agentId: string): Promise<Record<string, string>> {
     try {
-      const headers: Record<string, string> = {};
-      const internalToken = process.env.ENGINE_INTERNAL_TOKEN;
-      if (internalToken) {
-        headers['Authorization'] = `Bearer ${internalToken}`;
-      }
-      const res = await fetch(`${this.apiBaseUrl}/v1/secrets/agents/${encodeURIComponent(agentId)}/env`, { headers });
+      const res = await authFetch(`${this.apiBaseUrl}/v1/secrets/agents/${encodeURIComponent(agentId)}/env`);
       if (res.ok) {
         const data = await res.json() as { agent_id: string; env: Record<string, string> };
         return data.env ?? {};
@@ -1101,8 +1098,8 @@ export class ChatSessionManager {
           ...(sessionType === 'onboarding' && onboardingSessionId
             ? { ONBOARDING_SESSION_ID: onboardingSessionId }
             : {}),
-          // Internal token for authenticating to the secrets /env endpoint
-          ...(process.env.ENGINE_INTERNAL_TOKEN ? { ENGINE_INTERNAL_TOKEN: process.env.ENGINE_INTERNAL_TOKEN } : {}),
+          // Per-agent API key for authenticating to the DjinnBot API
+          ...(getAgentApiKey(agentId) ? { AGENT_API_KEY: getAgentApiKey(agentId)! } : {}),
           // MCP / mcpo: inject base URL and API key so agents can call tools directly.
           // These are only set if the engine has mcpo configured.
           ...(process.env.MCPO_BASE_URL ? { MCPO_BASE_URL: process.env.MCPO_BASE_URL } : {}),
@@ -1180,7 +1177,7 @@ export class ChatSessionManager {
     created_at: number;
   }>> {
     try {
-      const res = await fetch(`${this.apiBaseUrl}/v1/chat/sessions/${sessionId}`);
+      const res = await authFetch(`${this.apiBaseUrl}/v1/chat/sessions/${sessionId}`);
       if (!res.ok) {
         if (res.status === 404) return [];  // New session, no history
         throw new Error(`API returned ${res.status}`);
@@ -1355,7 +1352,7 @@ export class ChatSessionManager {
   async recoverOrphanedSessions(): Promise<void> {
     console.log('[ChatSessionManager] Checking for orphaned sessions from previous run...');
     try {
-      const res = await fetch(`${this.apiBaseUrl}/v1/internal/chat/sessions?status=running&status=starting&limit=50`);
+      const res = await authFetch(`${this.apiBaseUrl}/v1/internal/chat/sessions?status=running&status=starting&limit=50`);
       if (!res.ok) {
         console.warn(`[ChatSessionManager] Orphan recovery: API returned ${res.status}`);
         return;
@@ -1714,7 +1711,7 @@ export class ChatSessionManager {
 
             console.log(`[ChatSessionManager] Completing message ${msgId} via ${completeUrl.includes('onboarding') ? 'onboarding' : 'chat'} endpoint (result=${result.length} chars, thinking=${thinking.length} chars, tools=${toolCalls?.length ?? 0})`);
 
-            fetch(completeUrl, {
+            authFetch(completeUrl, {
               method: 'PATCH',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
@@ -1795,7 +1792,7 @@ export class ChatSessionManager {
       console.warn(`[ChatSessionManager] Could not extract onboarding session ID from ${chatSessionId}`);
       return;
     }
-    await fetch(`${this.apiBaseUrl}/v1/onboarding/internal/sessions/${onboardingSessionId}/status`, {
+    await authFetch(`${this.apiBaseUrl}/v1/onboarding/internal/sessions/${onboardingSessionId}/status`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ status, chat_session_id: chatSessionId }),
@@ -1816,7 +1813,7 @@ export class ChatSessionManager {
    */
   private async ensureSessionInDb(sessionId: string, agentId: string, model: string): Promise<void> {
     try {
-      await fetch(`${this.apiBaseUrl}/v1/internal/chat/sessions/${sessionId}/ensure`, {
+      await authFetch(`${this.apiBaseUrl}/v1/internal/chat/sessions/${sessionId}/ensure`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ agent_id: agentId, model, status: 'starting' }),
@@ -1835,7 +1832,7 @@ export class ChatSessionManager {
       const body: any = { status };
       if (error) body.error = error;
       
-      await fetch(`${this.apiBaseUrl}/v1/chat/sessions/${sessionId}`, {
+      await authFetch(`${this.apiBaseUrl}/v1/chat/sessions/${sessionId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
@@ -1850,7 +1847,7 @@ export class ChatSessionManager {
    */
   private async updateSessionContainer(sessionId: string, containerId: string, status: string): Promise<void> {
     try {
-      await fetch(`${this.apiBaseUrl}/v1/internal/chat/sessions/${sessionId}/container`, {
+      await authFetch(`${this.apiBaseUrl}/v1/internal/chat/sessions/${sessionId}/container`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ container_id: containerId, status }),

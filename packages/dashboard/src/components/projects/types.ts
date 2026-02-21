@@ -78,6 +78,8 @@ export interface Project {
   status: string;
   repository?: string;
   default_pipeline_id?: string;
+  slack_channel_id?: string;
+  slack_notify_user_id?: string;
   columns: Column[];
   tasks: Task[];
   dependencies: Dependency[];

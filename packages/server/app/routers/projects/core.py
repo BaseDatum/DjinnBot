@@ -110,6 +110,8 @@ async def list_projects(
                 "status": p.status,
                 "repository": p.repository,
                 "default_pipeline_id": p.default_pipeline_id,
+                "slack_channel_id": p.slack_channel_id,
+                "slack_notify_user_id": p.slack_notify_user_id,
                 "created_at": p.created_at,
                 "updated_at": p.updated_at,
                 "task_counts": task_counts,
@@ -181,6 +183,8 @@ async def get_project(
         "status": project.status,
         "repository": project.repository,
         "default_pipeline_id": project.default_pipeline_id,
+        "slack_channel_id": project.slack_channel_id,
+        "slack_notify_user_id": project.slack_notify_user_id,
         "onboarding_context": project.onboarding_context,
         "created_at": project.created_at,
         "updated_at": project.updated_at,
@@ -271,3 +275,69 @@ async def archive_project(
     await session.commit()
 
     return {"status": "archived"}
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# SLACK NOTIFICATION SETTINGS
+# ══════════════════════════════════════════════════════════════════════════
+
+
+from pydantic import BaseModel
+
+
+class SlackSettingsRequest(BaseModel):
+    slack_channel_id: Optional[str] = None
+    slack_notify_user_id: Optional[str] = None
+
+
+@router.get("/{project_id}/slack")
+async def get_project_slack_settings(
+    project_id: str, session: AsyncSession = Depends(get_async_session)
+):
+    """Get Slack notification settings for a project."""
+    project = await get_project_or_404(session, project_id)
+    return {
+        "slack_channel_id": project.slack_channel_id,
+        "slack_notify_user_id": project.slack_notify_user_id,
+    }
+
+
+@router.put("/{project_id}/slack")
+async def update_project_slack_settings(
+    project_id: str,
+    req: SlackSettingsRequest,
+    session: AsyncSession = Depends(get_async_session),
+):
+    """Set or update Slack notification settings for a project.
+
+    - slack_channel_id: Slack channel where pipeline run threads are posted.
+    - slack_notify_user_id: Slack user ID used as recipient_user_id for
+      chatStream (required for streaming updates in channel threads).
+
+    Pass null/empty string to clear a field.
+    """
+    project = await get_project_or_404(session, project_id)
+    now = now_ms()
+
+    if req.slack_channel_id is not None:
+        project.slack_channel_id = req.slack_channel_id or None
+    if req.slack_notify_user_id is not None:
+        project.slack_notify_user_id = req.slack_notify_user_id or None
+    project.updated_at = now
+
+    await session.commit()
+
+    await _publish_event(
+        "PROJECT_SLACK_UPDATED",
+        {
+            "projectId": project_id,
+            "slackChannelId": project.slack_channel_id,
+            "slackNotifyUserId": project.slack_notify_user_id,
+        },
+    )
+
+    return {
+        "status": "updated",
+        "slack_channel_id": project.slack_channel_id,
+        "slack_notify_user_id": project.slack_notify_user_id,
+    }

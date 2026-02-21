@@ -43,6 +43,7 @@ from app.routers import (
 from app.routers import channels
 from app.routers import secrets
 from app.routers import mcp
+from app.routers import auth as auth_router
 
 
 async def _handle_task_run_event(run_id: str, event_type: str):
@@ -408,6 +409,19 @@ async def lifespan(app: FastAPI):
     # Initialize logging first
     setup_logging()
 
+    # Validate auth configuration
+    from app.auth.config import auth_settings
+
+    try:
+        auth_settings.validate()
+        if auth_settings.enabled:
+            logger.info("Authentication is ENABLED")
+        else:
+            logger.warning("Authentication is DISABLED (AUTH_ENABLED=false)")
+    except RuntimeError as e:
+        logger.critical(f"Auth configuration error: {e}")
+        raise
+
     redis_url = os.getenv("REDIS_URL", "redis://localhost:6379")
 
     # Initialize Redis with retry/reconnect settings
@@ -445,9 +459,9 @@ async def lifespan(app: FastAPI):
     # Validate GitHub App configuration (non-blocking)
     try:
         from app.routers.github import _validate_github_config
-        from app.database import get_async_session
+        from app.database import AsyncSessionLocal
 
-        async with get_async_session() as session:
+        async with AsyncSessionLocal() as session:
             validation_result = await _validate_github_config(session)
         if validation_result["healthy"]:
             logger.info(f"GitHub App: {validation_result['message']}")
@@ -512,6 +526,13 @@ else:
     _cors_origins = [o.strip() for o in _cors_origins_env.split(",") if o.strip()]
     _cors_credentials = True
 
+# Auth middleware — must be added BEFORE CORS so that CORS wraps it.
+# Starlette middleware order is LIFO: last-added runs outermost.
+# We need CORS to run first (outermost) so 401 responses still get CORS headers.
+from app.auth.middleware import AuthMiddleware
+
+app.add_middleware(AuthMiddleware)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_origins,
@@ -544,6 +565,7 @@ async def global_exception_handler(request: Request, exc: Exception):
     )
 
 
+app.include_router(auth_router.router, prefix="/v1/auth", tags=["auth"])
 app.include_router(pipelines.router, prefix="/v1/pipelines", tags=["pipelines"])
 app.include_router(runs.router, prefix="/v1/runs", tags=["runs"])
 app.include_router(steps.router, prefix="/v1/steps", tags=["steps"])

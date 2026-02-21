@@ -230,6 +230,13 @@ export class ApiStore {
     return this.client.getProjectRepository(projectId);
   }
 
+  async getProjectSlackSettings(projectId: string): Promise<{
+    slack_channel_id: string | null;
+    slack_notify_user_id: string | null;
+  } | null> {
+    return this.client.getProjectSlackSettings(projectId);
+  }
+
   // Stub methods for compatibility
   close(): void {
     console.log('[ApiStore] Close called (no-op for API store)');

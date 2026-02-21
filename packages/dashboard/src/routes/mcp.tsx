@@ -1,3 +1,4 @@
+import { getAccessToken } from '@/lib/auth';
 import { createFileRoute } from '@tanstack/react-router';
 import { useState, useEffect, useRef } from 'react';
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/components/ui/card';
@@ -267,7 +268,11 @@ function LogPanel({ onClose }: { onClose: () => void }) {
   const esRef = useRef<EventSource | null>(null);
 
   useEffect(() => {
-    const es = new EventSource(`${API_BASE}/mcp/logs/stream`);
+    const token = getAccessToken();
+    const sseUrl = token
+      ? `${API_BASE}/mcp/logs/stream?token=${encodeURIComponent(token)}`
+      : `${API_BASE}/mcp/logs/stream`;
+    const es = new EventSource(sseUrl);
     esRef.current = es;
 
     es.addEventListener('connected', () => setConnected(true));

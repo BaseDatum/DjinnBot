@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { API_BASE } from '@/lib/api';
+import { authFetch } from '@/lib/auth';
 import CodeMirror from '@uiw/react-codemirror';
 import { githubDark } from '@uiw/codemirror-theme-github';
 import { javascript } from '@codemirror/lang-javascript';
@@ -83,7 +84,7 @@ export function FileViewer({ runId, path, content: initialContent, commitHash: i
 
   const loadFileHistory = async () => {
     try {
-      const response = await fetch(`${API_BASE}/workspaces/${runId}/git/file-history/${path}`);
+      const response = await authFetch(`${API_BASE}/workspaces/${runId}/git/file-history/${path}`);
       if (!response.ok) {
         console.error('Failed to load file history');
         return;
@@ -98,7 +99,7 @@ export function FileViewer({ runId, path, content: initialContent, commitHash: i
   const loadFileAtCommit = async (commitHash: string) => {
     setLoading(true);
     try {
-      const response = await fetch(`${API_BASE}/workspaces/${runId}/git/show/${commitHash}/${path}`);
+      const response = await authFetch(`${API_BASE}/workspaces/${runId}/git/show/${commitHash}/${path}`);
       if (!response.ok) {
         const error = await response.json();
         throw new Error(error.detail || 'Failed to load file');

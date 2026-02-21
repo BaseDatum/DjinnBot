@@ -1,4 +1,5 @@
 import type { Redis } from 'ioredis';
+import { authFetch } from '../api/auth-fetch.js';
 
 export interface SessionData {
   id: string; // runId
@@ -33,7 +34,7 @@ export class SessionPersister {
 
   async createSession(data: SessionData): Promise<void> {
     try {
-      const response = await fetch(`${this.apiBaseUrl}/v1/internal/sessions`, {
+      const response = await authFetch(`${this.apiBaseUrl}/v1/internal/sessions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
@@ -57,7 +58,7 @@ export class SessionPersister {
 
   async updateStatus(sessionId: string, status: string): Promise<void> {
     try {
-      const response = await fetch(`${this.apiBaseUrl}/v1/internal/sessions/${sessionId}/status`, {
+      const response = await authFetch(`${this.apiBaseUrl}/v1/internal/sessions/${sessionId}/status`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status }),
@@ -81,7 +82,7 @@ export class SessionPersister {
 
   async addEvent(sessionId: string, event: SessionEvent): Promise<void> {
     try {
-      const response = await fetch(`${this.apiBaseUrl}/v1/internal/sessions/${sessionId}/events`, {
+      const response = await authFetch(`${this.apiBaseUrl}/v1/internal/sessions/${sessionId}/events`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(event),
@@ -117,7 +118,7 @@ export class SessionPersister {
     error?: string
   ): Promise<void> {
     try {
-      const response = await fetch(`${this.apiBaseUrl}/v1/internal/sessions/${sessionId}/complete`, {
+      const response = await authFetch(`${this.apiBaseUrl}/v1/internal/sessions/${sessionId}/complete`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ output, success, error }),

@@ -131,6 +131,8 @@ export class SlackBridge {
   private stepStartTimes = new Map<string, number>();
   private pendingEvents = new Map<string, PipelineEvent[]>();
   private threadReady = new Map<string, boolean>();
+  /** Per-run Slack user ID for chatStream recipient (from project settings). */
+  private runNotifyUserIds = new Map<string, string>();
 
   constructor(config: SlackBridgeConfig) {
     this.config = config;
@@ -413,14 +415,27 @@ export class SlackBridge {
   /**
    * Subscribe to pipeline events for a specific run.
    * Routes events to the appropriate agent's Slack runtime.
+   *
+   * @param slackChannelId  Optional project-level Slack channel override.
+   *   When provided, the run thread is created in this channel instead of
+   *   the global defaultChannelId.
+   * @param slackNotifyUserId  Optional Slack user ID set as recipient_user_id
+   *   for chatStream streaming in channel threads.
    */
   subscribeToRun(
     runId: string,
     pipelineId: string,
     taskDescription: string,
-    assignedAgentIds: string[]
+    assignedAgentIds: string[],
+    slackChannelId?: string,
+    slackNotifyUserId?: string,
   ): void {
     if (this.eventSubscriptions.has(runId)) return;
+
+    // Store the notify user ID so handlePipelineEvent can pass it to startStepStream
+    if (slackNotifyUserId) {
+      this.runNotifyUserIds.set(runId, slackNotifyUserId);
+    }
 
     // Initialize pending queue — events arrive before thread is ready
     this.pendingEvents.set(runId, []);
@@ -449,6 +464,7 @@ export class SlackBridge {
         pipelineId,
         taskDescription,
         assignedAgents,
+        channelId: slackChannelId,
       })
       .then(async () => {
         this.threadReady.set(runId, true);
@@ -504,11 +520,13 @@ export class SlackBridge {
 
         // Start a live streaming message for this step
         try {
+          const recipientUserId = this.runNotifyUserIds.get(event.runId);
           const streamer = await runtime.startStepStream(
             event.runId,
             event.stepId,
             thread.channelId,
             thread.threadTs,
+            recipientUserId,
           );
           // Set the typing indicator
           await streamer.setStatus(`${agentName} is working on ${event.stepId}...`);
@@ -759,6 +777,7 @@ export class SlackBridge {
     // Clean up tracking state
     this.pendingEvents.delete(runId);
     this.threadReady.delete(runId);
+    this.runNotifyUserIds.delete(runId);
     for (const key of this.thinkingBuffers.keys()) {
       if (key.startsWith(runId + ':')) this.thinkingBuffers.delete(key);
     }

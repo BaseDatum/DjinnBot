@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
+import { getAccessToken } from '@/lib/auth';
 
 interface UseSSEOptions<T> {
   url: string;
@@ -59,9 +60,14 @@ export function useSSE<T>({
 
     try {
       const since = getSinceParamRef.current?.() ?? '0-0';
-      const fullUrl = since && since !== '0-0'
+      let fullUrl = since && since !== '0-0'
         ? `${url}${url.includes('?') ? '&' : '?'}since=${encodeURIComponent(since)}`
         : url;
+      // EventSource doesn't support custom headers — pass token as query param
+      const token = getAccessToken();
+      if (token) {
+        fullUrl += `${fullUrl.includes('?') ? '&' : '?'}token=${encodeURIComponent(token)}`;
+      }
       const es = new EventSource(fullUrl);
       eventSourceRef.current = es;
 

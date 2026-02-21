@@ -21,6 +21,8 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { PROVIDER_ENV_MAP } from './constants.js';
 import { parseModelString } from './runtime/model-resolver.js';
+import { authFetch } from './api/auth-fetch.js';
+import { ensureAgentKeys } from './api/agent-key-manager.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -529,7 +531,7 @@ async function syncSlackCredentialsToDb(): Promise<void> {
     let existingPrimary: string | null = null;
     let existingSecondary: string | null = null;
     try {
-      const res = await fetch(`${apiBaseUrl}/v1/agents/${agentId}/channels/keys/all`);
+      const res = await authFetch(`${apiBaseUrl}/v1/agents/${agentId}/channels/keys/all`);
       if (res.ok) {
         const data = await res.json() as { channels: Record<string, { primaryToken?: string; secondaryToken?: string }> };
         existingPrimary = data.channels?.slack?.primaryToken ?? null;
@@ -556,7 +558,7 @@ async function syncSlackCredentialsToDb(): Promise<void> {
     }
 
     writes.push(
-      fetch(`${apiBaseUrl}/v1/agents/${agentId}/channels/slack`, {
+      authFetch(`${apiBaseUrl}/v1/agents/${agentId}/channels/slack`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
@@ -615,7 +617,7 @@ async function syncProviderApiKeysToDb(): Promise<void> {
   let existingKeys: Record<string, string> = {};
   let existingExtra: Record<string, string> = {};
   try {
-    const res = await fetch(`${apiBaseUrl}/v1/settings/providers/keys/all`);
+    const res = await authFetch(`${apiBaseUrl}/v1/settings/providers/keys/all`);
     if (res.ok) {
       const data = await res.json() as { keys: Record<string, string>; extra?: Record<string, string> };
       existingKeys = data.keys ?? {};
@@ -645,7 +647,7 @@ async function syncProviderApiKeysToDb(): Promise<void> {
     if (existingKeys[providerId] === envKey && extraUnchanged) continue;
 
     writes.push(
-      fetch(`${apiBaseUrl}/v1/settings/providers/${providerId}`, {
+      authFetch(`${apiBaseUrl}/v1/settings/providers/${providerId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -688,7 +690,7 @@ async function syncProviderApiKeysToDb(): Promise<void> {
 async function loadProviderKeysFromDb(): Promise<void> {
   const apiBaseUrl = process.env.DJINNBOT_API_URL || 'http://api:8000';
   try {
-    const res = await fetch(`${apiBaseUrl}/v1/settings/providers/keys/all`);
+    const res = await authFetch(`${apiBaseUrl}/v1/settings/providers/keys/all`);
     if (!res.ok) return;
     const data = await res.json() as { keys: Record<string, string>; extra?: Record<string, string> };
 
@@ -763,6 +765,11 @@ async function main(): Promise<void> {
     // (which has no access to these env vars) can reflect them in the UI
     // and inject them into agent containers.
     await syncProviderApiKeysToDb();
+
+    // Ensure each agent has a unique API key for authenticated API access.
+    // Keys are cached in memory and injected into agent containers as AGENT_API_KEY.
+    const agentIds = djinnBot.getAgentRegistry().getIds();
+    await ensureAgentKeys(agentIds);
 
     // Sync per-agent Slack credentials from slack.yml env vars into the DB
     // so the Channels tab in the dashboard can show and update them.
@@ -951,7 +958,7 @@ async function main(): Promise<void> {
       console.log('[Engine] Checking for orphaned chat sessions...');
       try {
         const apiUrl = process.env.DJINNBOT_API_URL || 'http://api:8000';
-        const response = await fetch(`${apiUrl}/v1/internal/chat/sessions?status=starting&status=running&limit=100`);
+        const response = await authFetch(`${apiUrl}/v1/internal/chat/sessions?status=starting&status=running&limit=100`);
         if (response.ok) {
           const data = await response.json() as { sessions?: Array<{ id: string }> };
           const orphans = (data.sessions ?? []).filter(
@@ -961,7 +968,7 @@ async function main(): Promise<void> {
             console.log(`[Engine] Found ${orphans.length} orphaned chat session(s), marking as failed...`);
             for (const s of orphans) {
               try {
-                await fetch(`${apiUrl}/v1/chat/sessions/${s.id}`, {
+                await authFetch(`${apiUrl}/v1/chat/sessions/${s.id}`, {
                   method: 'PATCH',
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({ status: 'failed', error: 'Engine restarted — session lost' }),
