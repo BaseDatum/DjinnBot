@@ -1,12 +1,13 @@
 import { Agent } from '@mariozechner/pi-agent-core';
 import { registerBuiltInApiProviders, registerApiProvider, streamOpenAICompletions } from '@mariozechner/pi-ai';
-import type { AssistantMessage } from '@mariozechner/pi-ai';
+import type { AssistantMessage, ImageContent, TextContent } from '@mariozechner/pi-ai';
 import type { AgentEvent, AgentTool, AgentMessage } from '@mariozechner/pi-agent-core';
 import type { RedisPublisher } from '../redis/publisher.js';
 import { createDjinnBotTools } from './djinnbot-tools.js';
 import { createContainerTools } from './tools.js';
 import { createMcpTools } from './mcp-tools.js';
 import { parseModelString, CUSTOM_PROVIDER_API } from '@djinnbot/core';
+import { buildAttachmentBlocks, type AttachmentMeta } from './attachments.js';
 
 export interface StepResult {
   output?: string;
@@ -32,6 +33,8 @@ export interface ContainerAgentRunnerOptions {
   runId?: string;
   /** Path to agents directory — used by skill tools. Defaults to AGENTS_DIR env var. */
   agentsDir?: string;
+  /** Extended thinking level. When set (and not 'off'), the Agent requests reasoning tokens. */
+  thinkingLevel?: string;
 }
 
 let initialized = false;
@@ -336,7 +339,7 @@ export class ContainerAgentRunner {
    * Messages should be in chronological order as plain {role, content} objects.
    * Only seeds if no persistent agent exists yet (i.e., fresh container start).
    */
-  seedHistory(systemPrompt: string, history: Array<{ role: string; content: string }>): void {
+  seedHistory(systemPrompt: string, history: Array<{ role: string; content: string; attachments?: AttachmentMeta[] }>): void {
     if (this.persistentAgent) {
       console.log(`[AgentRunner] seedHistory: agent already initialized, skipping`);
       return;
@@ -351,13 +354,30 @@ export class ContainerAgentRunner {
     // when replaying stored history. The runtime behavior is correct because the
     // Anthropic/OpenRouter providers only inspect role + content when sending
     // historical context back to the API.
+    //
+    // NOTE: Attachment data (images, documents) from previous turns is NOT
+    // re-injected here.  Re-fetching and base64-encoding images for every
+    // session restart would be extremely expensive.  Instead, the user message
+    // text is replayed as-is — the model sees "[user attached photo.jpg]" in
+    // the text but not the actual image bytes.  The model still has the
+    // conversation continuity it needs; only the very latest turn (which
+    // goes through runStep with live attachments) gets full multimodal content.
     const messages: AgentMessage[] = history
       .filter(m => m.role === 'user' || m.role === 'assistant')
       .map(m => {
         if (m.role === 'user') {
+          // If the message had attachments, prepend a note so the model
+          // knows files were present even though we're not re-injecting them.
+          let content: string = m.content;
+          if (m.attachments && m.attachments.length > 0) {
+            const fileList = m.attachments
+              .map(a => `${a.filename} (${a.mimeType})`)
+              .join(', ');
+            content = `[User attached files: ${fileList}]\n${m.content}`;
+          }
           return {
             role: 'user' as const,
-            content: m.content,
+            content,
             timestamp: Date.now(),
           };
         }
@@ -382,22 +402,24 @@ export class ContainerAgentRunner {
         })()
       : undefined;
 
+    const thinkingLevel = this.options.thinkingLevel;
     this.persistentAgent = new Agent({
       initialState: {
         systemPrompt,
         model,
         tools: [],   // Tools are injected via getTools() on first runStep
         messages,
+        ...(thinkingLevel && thinkingLevel !== 'off' ? { thinkingLevel: thinkingLevel as any } : {}),
       },
       ...(isCustomProvider ? {
         getApiKey: async () => customApiKey,
       } : {}),
     });
     this.persistentSystemPrompt = systemPrompt;
-    console.log(`[AgentRunner] Seeded persistent agent with ${messages.length} historical messages`);
+    console.log(`[AgentRunner] Seeded persistent agent with ${messages.length} historical messages (thinkingLevel: ${thinkingLevel || 'off'})`);
   }
 
-  async runStep(requestId: string, systemPrompt: string, userPrompt: string): Promise<StepResult> {
+  async runStep(requestId: string, systemPrompt: string, userPrompt: string, attachments?: AttachmentMeta[]): Promise<StepResult> {
     // Update mutable ref — all tool closures and the subscription read this
     this.requestIdRef.current = requestId;
     this.stepCompleted = false;
@@ -432,12 +454,14 @@ export class ContainerAgentRunner {
           this.unsubscribeAgent = null;
         }
 
+        const thinkingLevel = this.options.thinkingLevel;
         this.persistentAgent = new Agent({
           initialState: {
             systemPrompt,
             model,
             tools,
             messages: [],
+            ...(thinkingLevel && thinkingLevel !== 'off' ? { thinkingLevel: thinkingLevel as any } : {}),
           },
           ...(isCustomProvider ? {
             getApiKey: async () => customApiKey,
@@ -467,8 +491,38 @@ export class ContainerAgentRunner {
       }, timeoutMs);
 
       try {
-        // Run the agent
-        await agent.prompt(userPrompt);
+        // Run the agent — with multimodal content if attachments are present
+        if (attachments && attachments.length > 0) {
+          const apiBaseUrl = process.env.DJINNBOT_API_URL || 'http://api:8000';
+          console.log(`[AgentRunner] Building content blocks for ${attachments.length} attachment(s)`);
+          const attachmentBlocks = await buildAttachmentBlocks(attachments, apiBaseUrl);
+
+          // Separate images from text blocks
+          const imageBlocks = attachmentBlocks.filter((b): b is ImageContent => b.type === 'image');
+          const textBlocks = attachmentBlocks.filter((b): b is TextContent => b.type === 'text');
+
+          if (imageBlocks.length > 0 && textBlocks.length === 0) {
+            // Images only — use the convenience overload
+            await agent.prompt(userPrompt, imageBlocks);
+          } else {
+            // Mixed content or text-only — build a full UserMessage
+            const contentParts: (TextContent | ImageContent)[] = [
+              // Images first (Anthropic recommends images before text)
+              ...imageBlocks,
+              // Then document text blocks
+              ...textBlocks,
+              // User's message text last
+              { type: 'text', text: userPrompt },
+            ];
+            await agent.prompt({
+              role: 'user' as const,
+              content: contentParts,
+              timestamp: Date.now(),
+            });
+          }
+        } else {
+          await agent.prompt(userPrompt);
+        }
         await agent.waitForIdle();
         clearTimeout(timeoutId);
       } catch (err) {

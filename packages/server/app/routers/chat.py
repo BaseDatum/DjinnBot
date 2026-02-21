@@ -40,6 +40,9 @@ class StartChatRequest(BaseModel):
     # Optional text appended to the agent's system prompt (after their persona).
     # Use this to inject project context, onboarding summaries, etc.
     system_prompt_supplement: Optional[str] = None
+    # Extended thinking level for the model ('minimal'|'low'|'medium'|'high'|'xhigh').
+    # When set, the agent runtime requests reasoning/thinking tokens from the model.
+    thinking_level: Optional[str] = None
 
 
 class SendMessageRequest(BaseModel):
@@ -47,6 +50,9 @@ class SendMessageRequest(BaseModel):
 
     message: str
     model: Optional[str] = None  # Override model for this message
+    attachment_ids: Optional[list[str]] = (
+        None  # File attachment IDs from upload endpoint
+    )
 
 
 class ChatSessionResponse(BaseModel):
@@ -113,6 +119,8 @@ async def start_chat_session(
         }
         if request and request.system_prompt_supplement:
             payload["system_prompt_supplement"] = request.system_prompt_supplement
+        if request and request.thinking_level:
+            payload["thinking_level"] = request.thinking_level
 
         await dependencies.redis_client.xadd(
             "djinnbot:events:chat_sessions",
@@ -189,21 +197,52 @@ async def send_chat_message(
     user_msg_id = gen_id("msg_")
     assistant_msg_id = gen_id("msg_")
 
+    # ── Resolve attachment metadata if provided ───────────────────────────
+    attachment_metas = []
+    if request.attachment_ids:
+        from app.models.chat import ChatAttachment, ALLOWED_IMAGE_TYPES
+
+        att_result = await db.execute(
+            select(ChatAttachment).where(
+                ChatAttachment.id.in_(request.attachment_ids),
+                ChatAttachment.session_id == session_id,
+            )
+        )
+        found_atts = {a.id: a for a in att_result.scalars().all()}
+
+        for att_id in request.attachment_ids:
+            att = found_atts.get(att_id)
+            if not att:
+                raise HTTPException(
+                    400, f"Attachment {att_id} not found in this session"
+                )
+            attachment_metas.append(
+                {
+                    "id": att.id,
+                    "filename": att.filename,
+                    "mimeType": att.mime_type,
+                    "sizeBytes": att.size_bytes,
+                    "isImage": att.mime_type in ALLOWED_IMAGE_TYPES,
+                    "estimatedTokens": att.estimated_tokens,
+                }
+            )
+
     # 1. Publish to Redis FIRST — zero DB latency before the container starts
     #    generating tokens.
     command_channel = f"djinnbot:chat:sessions:{session_id}:commands"
     try:
+        payload = {
+            "type": "message",
+            "content": request.message,
+            "model": model,
+            "message_id": assistant_msg_id,
+            "timestamp": now,
+        }
+        if attachment_metas:
+            payload["attachments"] = attachment_metas
         await dependencies.redis_client.publish(
             command_channel,
-            json.dumps(
-                {
-                    "type": "message",
-                    "content": request.message,
-                    "model": model,
-                    "message_id": assistant_msg_id,
-                    "timestamp": now,
-                }
-            ),
+            json.dumps(payload),
         )
         logger.debug(f"send_chat_message: published to {command_channel}")
     except Exception as e:
@@ -220,6 +259,7 @@ async def send_chat_message(
         content=request.message,
         model=model,
         now=now,
+        attachment_ids=request.attachment_ids,
     )
 
     return {
@@ -237,6 +277,7 @@ async def _persist_chat_messages(
     content: str,
     model: str,
     now: int,
+    attachment_ids: list[str] | None = None,
 ) -> None:
     """Persist user and assistant placeholder messages to the database.
 
@@ -252,6 +293,7 @@ async def _persist_chat_messages(
                     session_id=session_id,
                     role="user",
                     content=content,
+                    attachments=json.dumps(attachment_ids) if attachment_ids else None,
                     created_at=now,
                     completed_at=now,
                 )

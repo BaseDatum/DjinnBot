@@ -48,6 +48,8 @@ class Skill(Base):
         String(16), nullable=False, default="global"
     )  # 'global' | 'agent'
     owner_agent_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    # True when the skill has companion files on disk at SKILLS_DIR/{id}/
+    has_files: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_by: Mapped[str] = mapped_column(String(128), nullable=False, default="ui")
     created_at: Mapped[int] = mapped_column(BigInteger, nullable=False)
     updated_at: Mapped[int] = mapped_column(BigInteger, nullable=False)

@@ -302,7 +302,7 @@ export function FloatingChatWidget() {
       let sessionId: string;
       let model = spawnModel;
       if (spawnSessionId === '__new__') {
-        const result = await startChatSession(spawnAgentId, spawnModel);
+        const result = await startChatSession(spawnAgentId, spawnModel, undefined, spawnThinkingLevel);
         sessionId = result.sessionId;
       } else {
         const session = await getChatSession(spawnSessionId);

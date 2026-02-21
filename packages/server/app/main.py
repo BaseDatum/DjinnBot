@@ -43,6 +43,7 @@ from app.routers import (
 from app.routers import channels
 from app.routers import secrets
 from app.routers import mcp
+from app.routers import attachments
 from app.routers import auth as auth_router
 
 
@@ -474,6 +475,29 @@ async def lifespan(app: FastAPI):
         logger.warning(f"Could not validate GitHub App configuration: {e}")
         logger.warning("GitHub integration features will be unavailable")
 
+    # Auto-import skills from SKILLS_DIR into the database
+    try:
+        from app.routers.skills import sync_skills_from_disk
+
+        result = await sync_skills_from_disk()
+        if result["created"]:
+            logger.info(f"Skills auto-imported: {', '.join(result['created'])}")
+        if result["updated"]:
+            logger.info(f"Skills updated from disk: {', '.join(result['updated'])}")
+        if result["errors"]:
+            for err in result["errors"]:
+                logger.warning(f"Skill import error: {err}")
+        total = (
+            len(result["created"]) + len(result["updated"]) + len(result["unchanged"])
+        )
+        if total > 0:
+            logger.info(
+                f"Skills disk sync complete: {len(result['created'])} created, "
+                f"{len(result['updated'])} updated, {len(result['unchanged'])} unchanged"
+            )
+    except Exception as e:
+        logger.warning(f"Could not auto-import skills from disk: {e}")
+
     # Start background run completion listener
     listener_task = asyncio.create_task(_run_completion_listener())
     logger.info("Started run completion listener")
@@ -586,6 +610,7 @@ app.include_router(github_webhooks.router, prefix="/v1/webhooks", tags=["webhook
 app.include_router(sessions.router, prefix="/v1", tags=["sessions"])
 app.include_router(chat.router, prefix="/v1", tags=["chat"])
 app.include_router(chat_sessions.router, prefix="/v1", tags=["chat-sessions"])
+app.include_router(attachments.router, prefix="/v1", tags=["attachments"])
 app.include_router(pulses.router, prefix="/v1/pulses", tags=["pulses"])
 app.include_router(onboarding.router, prefix="/v1/onboarding", tags=["onboarding"])
 app.include_router(skills.router, prefix="/v1/skills", tags=["skills"])

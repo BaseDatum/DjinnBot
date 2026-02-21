@@ -21,6 +21,30 @@ import type { Model, Api } from '@mariozechner/pi-ai';
 import { PROVIDER_ENV_MAP, isProviderConfigured } from '../constants.js';
 
 /**
+ * Providers whose modern models are known to support vision (image input).
+ *
+ * pi-ai's static registry may lag behind and list some models with
+ * input:["text"] only.  The openai-completions provider silently strips
+ * image_url blocks when model.input doesn't include "image", so we
+ * force-enable vision for these providers to prevent attachments from
+ * being silently dropped.
+ */
+const VISION_CAPABLE_PROVIDERS = new Set([
+  'xai', 'openai', 'anthropic', 'google', 'opencode',
+]);
+
+/**
+ * Ensure a model from a vision-capable provider includes "image" in its
+ * input array.  Returns the model as-is if it already supports images,
+ * or a shallow copy with the corrected input array.
+ */
+function maybeEnableVision<T extends Api>(model: Model<T>): Model<T> {
+  if (!VISION_CAPABLE_PROVIDERS.has(model.provider as string)) return model;
+  if (model.input.includes('image')) return model;
+  return { ...model, input: ['text', 'image'] as any };
+}
+
+/**
  * Create a pass-through Model object that routes via OpenRouter.
  * Used for bare model ids, openrouter/-prefixed strings, and totally unknown
  * providers as a best-effort fallback.
@@ -141,6 +165,15 @@ export function inferModelForProvider(provider: string, modelId: string): Model<
     contextWindow: 128000,
     maxTokens: 32768,
   };
+
+  // Ensure vision support for providers whose recent models accept images.
+  // pi-ai's static registry may list older model entries with input:["text"]
+  // only, causing image content blocks to be silently stripped in the
+  // openai-completions provider's convertMessages(). Override the input
+  // array for providers where we know modern models support vision.
+  if (VISION_CAPABLE_PROVIDERS.has(provider) && !siblingProps.input.includes('image')) {
+    siblingProps.input = ['text', 'image'] as any;
+  }
 
   // opencode.ai requires max_tokens, not max_completion_tokens.
   // Inject a compat override so pi-ai sends the correct field.
@@ -339,7 +372,7 @@ export function parseModelString(modelString: string): Model<Api> {
   // Try pi-ai's static registry first
   const registered = getModel(provider as any, modelId as any);
   if (registered !== undefined) {
-    return registered;
+    return maybeEnableVision(registered);
   }
 
   // Not in registry — infer from the provider's known models if possible

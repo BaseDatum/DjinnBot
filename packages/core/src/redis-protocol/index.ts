@@ -4,8 +4,8 @@ export type { ChannelName } from "./channels.js";
 export { baseMessageSchema } from "./types.js";
 export type { BaseMessage } from "./types.js";
 
-export { agentStepCommandSchema } from "./types.js";
-export type { AgentStepCommand } from "./types.js";
+export { agentStepCommandSchema, attachmentMetaSchema } from "./types.js";
+export type { AgentStepCommand, AttachmentMeta } from "./types.js";
 
 export { toolCommandSchema } from "./types.js";
 export type { ToolCommand } from "./types.js";

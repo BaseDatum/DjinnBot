@@ -934,6 +934,11 @@ def step_configure_ssl(
     set_env_value(env_path, "BIND_HOST", "127.0.0.1")
     set_env_value(env_path, "TRAEFIK_ENABLED", "true")
 
+    # The dashboard origin is always https://<domain> regardless of routing mode.
+    # CORS must allow this origin so the browser can call the API.
+    dashboard_origin = f"https://{domain}"
+    set_env_value(env_path, "CORS_ORIGINS", dashboard_origin)
+
     if routing_mode == "subdomain":
         set_env_value(env_path, "API_DOMAIN", api_domain)
         set_env_value(env_path, "VITE_API_URL", f"https://{api_domain}")
@@ -1462,13 +1467,23 @@ def step_verify_deployment(
 
     if ssl_enabled and domain:
         dashboard_url = f"https://{domain}"
-        api_url = f"{vite_api_url}/v1/status" if vite_api_url else f"https://{domain}/v1/status"
+        api_url = (
+            f"{vite_api_url}/v1/status"
+            if vite_api_url
+            else f"https://{domain}/v1/status"
+        )
     elif use_proxy:
         dashboard_url = f"http://{ip}"
-        api_url = f"{vite_api_url}/v1/status" if vite_api_url else f"http://{ip}/v1/status"
+        api_url = (
+            f"{vite_api_url}/v1/status" if vite_api_url else f"http://{ip}/v1/status"
+        )
     else:
         dashboard_url = f"http://{ip}:{dash_port}"
-        api_url = f"{vite_api_url}/v1/status" if vite_api_url else f"http://{ip}:{api_port}/v1/status"
+        api_url = (
+            f"{vite_api_url}/v1/status"
+            if vite_api_url
+            else f"http://{ip}:{api_port}/v1/status"
+        )
 
     # Check dashboard
     console.print(f"[dim]Checking dashboard at {dashboard_url} ...[/dim]")
@@ -1897,23 +1912,30 @@ def setup(
             ssl_enabled = False
             console.print("[yellow]SSL setup skipped. Continuing without SSL.[/yellow]")
 
-    # ── Configure proxy / VITE_API_URL for the resolved mode ────────
+    # ── Configure proxy / VITE_API_URL / CORS for the resolved mode ──
     if ssl_enabled and domain:
-        # SSL already configured VITE_API_URL and BIND_HOST in step_configure_ssl
+        # SSL already configured VITE_API_URL, BIND_HOST, and CORS_ORIGINS
+        # in step_configure_ssl.
         pass
     elif use_proxy:
-        # Pre-built without SSL — HTTP-only Traefik on port 80
+        # Pre-built without SSL — HTTP-only Traefik on port 80.
+        # Dashboard and API share the same origin (http://ip),
+        # so wildcard CORS is fine.
         set_env_value(env_path, "BIND_HOST", "127.0.0.1")
-        # VITE_API_URL is injected at container startup (runtime config),
-        # so it works for both pre-built and build-from-source images.
         set_env_value(env_path, "VITE_API_URL", f"http://{ip}")
+        set_env_value(env_path, "CORS_ORIGINS", f"http://{ip}")
         _write_compose_override(repo_dir, domain=None, ssl=False)
         _setup_proxy_network()
         _write_proxy_compose(repo_dir, ssl=False)
     else:
-        # Build from source, no proxy — direct port access
+        # Build from source, no proxy — direct port access.
+        # Dashboard (:3000) and API (:8000) are on different ports = different
+        # origins, so CORS must explicitly allow the dashboard origin.
         api_port = get_env_value(env_path, "API_PORT") or "8000"
+        dash_port = get_env_value(env_path, "DASHBOARD_PORT") or "3000"
+        dashboard_origin = f"http://{ip}:{dash_port}"
         set_env_value(env_path, "VITE_API_URL", f"http://{ip}:{api_port}")
+        set_env_value(env_path, "CORS_ORIGINS", dashboard_origin)
         set_env_value(env_path, "BIND_HOST", "0.0.0.0")
 
     # ── Set COMPOSE_FILE for pre-built images ───────────────────────

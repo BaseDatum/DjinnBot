@@ -50,6 +50,15 @@ export interface SlackSessionPoolConfig {
   defaultModel: string;
 }
 
+export interface SlackAttachmentMeta {
+  id: string;
+  filename: string;
+  mimeType: string;
+  sizeBytes: number;
+  isImage: boolean;
+  estimatedTokens?: number;
+}
+
 export interface SendMessageOptions {
   agentId: string;
   channelId: string;
@@ -67,6 +76,8 @@ export interface SendMessageOptions {
   messageId?: string;
   /** Model override for this session */
   model?: string;
+  /** File attachments (already uploaded to DjinnBot storage) */
+  attachments?: SlackAttachmentMeta[];
 }
 
 // ─── Pool ─────────────────────────────────────────────────────────────────────
@@ -102,6 +113,7 @@ export class SlackSessionPool {
         opts.message,
         opts.model ?? this.config.defaultModel,
         opts.messageId,
+        opts.attachments,
       );
       return existing.sessionId;
     }
@@ -268,6 +280,7 @@ export class SlackSessionPool {
       opts.message,
       opts.model ?? this.config.defaultModel,
       opts.messageId,
+      opts.attachments,
     );
   }
 

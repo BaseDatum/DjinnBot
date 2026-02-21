@@ -131,6 +131,8 @@ export class ChatListener {
             systemPromptSupplement: data.system_prompt_supplement || undefined,
             // Skill-gen sessions override the persona system prompt entirely.
             systemPromptOverride: data.system_prompt_override || undefined,
+            // Extended thinking level chosen in the dashboard chat UI.
+            thinkingLevel: data.thinking_level || undefined,
           });
           break;
           

@@ -46,6 +46,12 @@ export interface ChatSessionConfig {
    * Format matches the DB history format: { role, content, created_at }.
    */
   externalHistory?: Array<{ role: string; content: string; created_at: number }>;
+  /**
+   * Extended thinking level for the model. When set to a value other than 'off',
+   * the agent runtime requests reasoning/thinking tokens from the model.
+   * Values: 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'
+   */
+  thinkingLevel?: string;
 }
 
 interface ToolCall {
@@ -955,6 +961,26 @@ export class ChatSessionManager {
   }
 
   /**
+   * Fetch the current agentRuntimeImage from the settings API.
+   * Falls back to the constructor-provided image (or env/default) on failure.
+   */
+  private async fetchRuntimeImage(): Promise<string> {
+    try {
+      const res = await authFetch(`${this.apiBaseUrl}/v1/settings/`);
+      if (res.ok) {
+        const data = await res.json() as { agentRuntimeImage?: string };
+        const dbImage = data.agentRuntimeImage?.trim();
+        if (dbImage) {
+          return dbImage;
+        }
+      }
+    } catch (err) {
+      console.warn('[ChatSessionManager] Failed to fetch runtime image from settings:', err);
+    }
+    return this.containerImage;
+  }
+
+  /**
    * Fetch all secrets granted to *agentId* and return env var name → plaintext value.
    * Non-fatal: logs and returns an empty map if unavailable.
    */
@@ -975,7 +1001,7 @@ export class ChatSessionManager {
    * Start a new chat session - creates and starts a container.
    */
   async startSession(config: ChatSessionConfig): Promise<void> {
-    const { sessionId, agentId, model, sessionType, onboardingSessionId, greetingMessageId, systemPromptSupplement, systemPromptOverride, externalHistory } = config;
+    const { sessionId, agentId, model, sessionType, onboardingSessionId, greetingMessageId, systemPromptSupplement, systemPromptOverride, externalHistory, thinkingLevel } = config;
     
     const sessionTypeTag = sessionType === 'onboarding'
       ? ` [ONBOARDING, onbId=${onboardingSessionId ?? 'unknown'}${greetingMessageId ? `, greetingMsg=${greetingMessageId}` : ''}]`
@@ -1079,14 +1105,18 @@ export class ChatSessionManager {
       }
 
       // Fetch all provider API keys from settings (DB + env vars)
-      const providerEnvVars = await this.fetchProviderEnvVars();
+      // and the current runtime image (may have been changed via dashboard)
+      const [providerEnvVars, runtimeImage] = await Promise.all([
+        this.fetchProviderEnvVars(),
+        this.fetchRuntimeImage(),
+      ]);
 
       // Create container config
       const containerConfig: ContainerConfig = {
         runId: sessionId,  // Use sessionId as runId for container
         agentId,
         workspacePath: `${this.dataPath}/workspaces/${agentId}`,
-        image: this.containerImage,
+        image: runtimeImage,
         env: {
           AGENT_MODEL: model,
           // Inject all configured provider API keys as their canonical env var names
@@ -1100,6 +1130,8 @@ export class ChatSessionManager {
             : {}),
           // Per-agent API key for authenticating to the DjinnBot API
           ...(getAgentApiKey(agentId) ? { AGENT_API_KEY: getAgentApiKey(agentId)! } : {}),
+          // Extended thinking level — passed through to the agent runtime's Agent constructor.
+          ...(thinkingLevel && thinkingLevel !== 'off' ? { AGENT_THINKING_LEVEL: thinkingLevel } : {}),
           // MCP / mcpo: inject base URL and API key so agents can call tools directly.
           // These are only set if the engine has mcpo configured.
           ...(process.env.MCPO_BASE_URL ? { MCPO_BASE_URL: process.env.MCPO_BASE_URL } : {}),
@@ -1175,6 +1207,7 @@ export class ChatSessionManager {
     role: string;
     content: string;
     created_at: number;
+    attachments?: string[];
   }>> {
     try {
       const res = await authFetch(`${this.apiBaseUrl}/v1/chat/sessions/${sessionId}`);
@@ -1183,10 +1216,17 @@ export class ChatSessionManager {
         throw new Error(`API returned ${res.status}`);
       }
       const data = await res.json() as {
-        messages?: Array<{ role: string; content: string; created_at: number; completed_at?: number | null }>;
+        messages?: Array<{ role: string; content: string; created_at: number; completed_at?: number | null; attachments?: string[] | null }>;
       };
       // Only include messages with actual content (skip empty assistant placeholders)
-      return (data.messages ?? []).filter(m => m.content && m.content.trim().length > 0);
+      return (data.messages ?? [])
+        .filter(m => m.content && m.content.trim().length > 0)
+        .map(m => ({
+          role: m.role,
+          content: m.content,
+          created_at: m.created_at,
+          ...(m.attachments ? { attachments: m.attachments } : {}),
+        }));
     } catch (err) {
       console.warn(`[ChatSessionManager] fetchChatHistory failed for ${sessionId}:`, err);
       return [];
@@ -1195,8 +1235,18 @@ export class ChatSessionManager {
 
   /**
    * Send a message in a chat session.
+   *
+   * @param attachments  Optional attachment metadata from the chat API.
+   *   Forwarded to the container via the agentStep command so the runner
+   *   can fetch file content and build multimodal content blocks.
    */
-  async sendMessage(sessionId: string, message: string, model?: string, messageId?: string): Promise<void> {
+  async sendMessage(
+    sessionId: string,
+    message: string,
+    model?: string,
+    messageId?: string,
+    attachments?: Array<{ id: string; filename: string; mimeType: string; sizeBytes: number; isImage: boolean; estimatedTokens?: number }>,
+  ): Promise<void> {
     const session = this.activeSessions.get(sessionId);
     
     if (!session) {
@@ -1207,7 +1257,7 @@ export class ChatSessionManager {
       throw new Error(`Session ${sessionId} not ready (status: ${session.status})`);
     }
     
-    console.log(`[ChatSessionManager] Sending message to session ${sessionId}`);
+    console.log(`[ChatSessionManager] Sending message to session ${sessionId}${attachments?.length ? ` with ${attachments.length} attachment(s)` : ''}`);
     
     // Update model if changed
     if (model && model !== session.model) {
@@ -1246,6 +1296,7 @@ export class ChatSessionManager {
     // flat-text history here would break multi-turn context.
     await this.commandSender.sendAgentStep(sessionId, message, {
       // model is set via AGENT_MODEL env var on container creation
+      ...(attachments?.length ? { attachments } : {}),
     });
   }
 
@@ -1458,7 +1509,7 @@ export class ChatSessionManager {
         console.log(`[ChatSessionManager] Received command for ${sessionId}:`, cmd.type);
         
         if (cmd.type === 'message') {
-          await this.sendMessage(sessionId, cmd.content, cmd.model, cmd.message_id);
+          await this.sendMessage(sessionId, cmd.content, cmd.model, cmd.message_id, cmd.attachments);
         } else if (cmd.type === 'stop') {
           await this.stopSession(sessionId);
         } else if (cmd.type === 'update_model') {

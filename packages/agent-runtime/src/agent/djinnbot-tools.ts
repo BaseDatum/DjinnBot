@@ -922,12 +922,16 @@ export function createDjinnBotTools(config: DjinnBotToolsConfig): AgentTool[] {
     // === Skills ===
 
     // load_skill — gated content retrieval via API (access-controlled)
+    // Supports loading the main SKILL.md or companion sub-files (templates, references).
     {
       name: 'load_skill',
-      description: 'Load the full instructions for a named skill. Use when you need detailed guidance for a specific capability listed in your SKILLS manifest.',
+      description: 'Load skill instructions or companion files. Without a file param, loads the main SKILL.md. With file param, loads a specific sub-file (e.g. "references/css-patterns.md", "templates/architecture.html"). The main skill instructions list available sub-files.',
       label: 'load_skill',
       parameters: Type.Object({
         name: Type.String({ description: 'Skill name exactly as shown in the SKILLS manifest' }),
+        file: Type.Optional(Type.String({
+          description: 'Optional sub-file path within the skill directory (e.g. "references/css-patterns.md", "templates/architecture.html"). Omit to load the main SKILL.md.',
+        })),
       }),
       execute: async (
         _toolCallId: string,
@@ -935,17 +939,20 @@ export function createDjinnBotTools(config: DjinnBotToolsConfig): AgentTool[] {
         signal?: AbortSignal,
         _onUpdate?: AgentToolUpdateCallback<VoidDetails>
       ): Promise<AgentToolResult<VoidDetails>> => {
-        const p = params as { name: string };
+        const p = params as { name: string; file?: string };
         const apiBase = config.apiBaseUrl || process.env.DJINNBOT_API_URL || 'http://api:8000';
 
         try {
-          const res = await authFetch(
-            `${apiBase}/v1/skills/agents/${agentId}/${encodeURIComponent(p.name)}/content`,
-            { signal: signal ?? undefined },
-          );
+          let url = `${apiBase}/v1/skills/agents/${agentId}/${encodeURIComponent(p.name)}/content`;
+          if (p.file) {
+            url += `?file=${encodeURIComponent(p.file)}`;
+          }
+
+          const res = await authFetch(url, { signal: signal ?? undefined });
           if (res.status === 404) {
+            const target = p.file ? `File "${p.file}" in skill "${p.name}"` : `Skill "${p.name}"`;
             return {
-              content: [{ type: 'text', text: `Skill "${p.name}" not found. Available skills are listed in your SKILLS manifest.` }],
+              content: [{ type: 'text', text: `${target} not found. Available skills are listed in your SKILLS manifest.` }],
               details: {},
             };
           }
@@ -967,9 +974,23 @@ export function createDjinnBotTools(config: DjinnBotToolsConfig): AgentTool[] {
               details: {},
             };
           }
-          const data = await res.json() as { id: string; description: string; content: string };
+          const data = await res.json() as { id: string; description: string; content: string; file?: string; has_files?: boolean };
+
+          if (p.file) {
+            // Sub-file response
+            return {
+              content: [{ type: 'text', text: `# SKILL FILE: ${data.id}/${data.file}\n\n${data.content}` }],
+              details: {},
+            };
+          }
+
+          // Main skill response — append file listing hint if skill has companion files
+          let text = `# SKILL: ${data.id}\n_${data.description}_\n\n${data.content}`;
+          if (data.has_files) {
+            text += `\n\n---\n_This skill has companion files. Use \`load_skill("${data.id}", file="<path>")\` to load templates, references, or examples._`;
+          }
           return {
-            content: [{ type: 'text', text: `# SKILL: ${data.id}\n_${data.description}_\n\n${data.content}` }],
+            content: [{ type: 'text', text }],
             details: {},
           };
         } catch (err) {

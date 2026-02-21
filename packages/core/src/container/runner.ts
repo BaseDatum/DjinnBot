@@ -86,6 +86,29 @@ export class ContainerRunner implements AgentRunner {
   }
 
   /**
+   * Fetch the current agentRuntimeImage from the settings API.
+   * Falls back to the constructor-provided image (or env/default) on failure.
+   */
+  private async fetchRuntimeImage(): Promise<string> {
+    const apiBaseUrl = this.config.apiBaseUrl
+      || process.env.DJINNBOT_API_URL
+      || 'http://api:8000';
+    try {
+      const res = await authFetch(`${apiBaseUrl}/v1/settings/`);
+      if (res.ok) {
+        const data = await res.json() as { agentRuntimeImage?: string };
+        const dbImage = data.agentRuntimeImage?.trim();
+        if (dbImage) {
+          return dbImage;
+        }
+      }
+    } catch (err) {
+      console.warn('[ContainerRunner] Failed to fetch runtime image from settings:', err);
+    }
+    return this.config.image || process.env.AGENT_RUNTIME_IMAGE || 'ghcr.io/basedatum/djinnbot/agent-runtime:latest';
+  }
+
+  /**
    * Extract the base URL for the model from the collected provider env vars.
    * Returns undefined if the model isn't a custom provider or if no base URL
    * is configured — in which case enrichNetworkError is a no-op.
@@ -147,8 +170,13 @@ export class ContainerRunner implements AgentRunner {
       // 1. Create container
       console.log(`[ContainerRunner] Creating container for run ${runId} (agent: ${agentId})`);
       
-      // Fetch all provider API keys (DB + env vars)
-      providerEnvVars = await this.fetchProviderEnvVars();
+      // Fetch all provider API keys (DB + env vars) and the current
+      // runtime image (may have been changed via dashboard since engine start)
+      const [fetchedProviderEnvVars, runtimeImage] = await Promise.all([
+        this.fetchProviderEnvVars(),
+        this.fetchRuntimeImage(),
+      ]);
+      providerEnvVars = fetchedProviderEnvVars;
 
       const containerConfig: ContainerConfig = {
         runId,
@@ -159,7 +187,7 @@ export class ContainerRunner implements AgentRunner {
         runWorkspacePath: runWorkspacePath ?? (runId.startsWith('run_') ? `${dataPath}/runs/${runId}` : undefined),
         // The project's main repo — only present for project-associated runs.
         projectWorkspacePath,
-        image: this.config.image,
+        image: runtimeImage,
         env: {
           AGENT_MODEL: model,
           // All configured provider API keys injected by their canonical env var names

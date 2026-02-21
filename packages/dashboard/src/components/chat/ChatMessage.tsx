@@ -2,7 +2,8 @@ import { useState, useCallback, memo } from 'react';
 import { MarkdownRenderer } from '@/components/MarkdownRenderer';
 import { ToolCallCard } from '@/components/ToolCallCard';
 import { Badge } from '@/components/ui/badge';
-import { Brain, ChevronDown, ChevronRight, User, Bot, AlertCircle, Info, Copy, Check } from 'lucide-react';
+import { Brain, ChevronDown, ChevronRight, User, Bot, AlertCircle, Info, Copy, Check, Paperclip } from 'lucide-react';
+import { getAttachmentContentUrl } from '@/lib/api';
 import { cn } from '@/lib/utils';
 
 // ── Copy button helper ────────────────────────────────────────────────────────
@@ -61,6 +62,8 @@ export interface ChatMessageData {
   model?: string;
   thinking?: string;
   toolCalls?: any[];
+  /** Attachment IDs for user messages (from upload) */
+  attachments?: string[];
 }
 
 interface ChatMessageProps {
@@ -88,10 +91,27 @@ export const ChatMessage = memo(function ChatMessage({
   
   // User message
   if (message.type === 'user') {
+    const hasAttachments = message.attachments && message.attachments.length > 0;
     return (
       <div className="group flex gap-3 justify-end">
         <CopyButton getText={() => message.content || ''} className="self-start mt-1" />
         <div className="max-w-[80%] rounded-2xl rounded-tr-sm bg-primary text-primary-foreground px-4 py-2 overflow-hidden">
+          {hasAttachments && (
+            <div className="flex flex-wrap gap-1 mb-1.5">
+              {message.attachments!.map(attId => (
+                <a
+                  key={attId}
+                  href={getAttachmentContentUrl(attId)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 text-xs bg-white/15 hover:bg-white/25 rounded px-1.5 py-0.5 transition-colors"
+                >
+                  <Paperclip className="h-3 w-3" />
+                  <span className="truncate max-w-[120px]">{attId}</span>
+                </a>
+              ))}
+            </div>
+          )}
           <p className="text-sm whitespace-pre-wrap break-words overflow-wrap-anywhere">{message.content}</p>
         </div>
         <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted">

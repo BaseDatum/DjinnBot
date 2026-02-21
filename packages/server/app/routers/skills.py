@@ -17,6 +17,7 @@ Endpoints:
     POST   /v1/skills/agents/{agent_id}/{skill_id}/grant   grant access
     DELETE /v1/skills/agents/{agent_id}/{skill_id}         revoke access
     GET    /v1/skills/agents/{agent_id}/{skill_id}/content gated content load
+    GET    /v1/skills/agents/{agent_id}/{skill_id}/files   list sub-files for a skill
 
   Skill generation helpers (unchanged from V1):
     POST   /v1/skills/generate/session
@@ -28,8 +29,9 @@ Endpoints:
 import json
 import os
 import re
+from pathlib import Path
 from typing import Optional
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Query
 from pydantic import BaseModel
 from sqlalchemy import select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -40,6 +42,12 @@ from app.models.skill import Skill, AgentSkill
 from app.utils import now_ms
 
 router = APIRouter()
+
+# ── Skills directory (filesystem companion files) ─────────────────────────────
+# Skills with has_files=True store companion files (templates, references, etc.)
+# on disk at SKILLS_DIR/{skill_id}/. The main SKILL.md content lives in the DB;
+# sub-files are only on disk.
+SKILLS_DIR = Path(os.environ.get("SKILLS_DIR", "/skills"))
 
 
 # ── Pydantic models ────────────────────────────────────────────────────────────
@@ -53,6 +61,7 @@ class SkillResponse(BaseModel):
     enabled: bool
     scope: str  # 'global' | 'agent'
     owner_agent_id: Optional[str] = None
+    has_files: bool = False
     created_by: str
     created_at: int
     updated_at: int
@@ -90,6 +99,7 @@ class CreateSkillRequest(BaseModel):
     enabled: bool = True
     scope: str = "global"
     owner_agent_id: Optional[str] = None
+    has_files: bool = False
 
 
 class UpdateSkillRequest(BaseModel):
@@ -119,26 +129,155 @@ def _row_to_response(skill: Skill) -> SkillResponse:
         enabled=skill.enabled,
         scope=skill.scope,
         owner_agent_id=skill.owner_agent_id,
+        has_files=skill.has_files,
         created_by=skill.created_by,
         created_at=skill.created_at,
         updated_at=skill.updated_at,
     )
 
 
-def _build_manifest_text(skills: list[ManifestEntry]) -> str:
+def _build_manifest_text(
+    skills: list[ManifestEntry], skill_ids_with_files: set[str] | None = None
+) -> str:
     if not skills:
         return ""
+    skill_ids_with_files = skill_ids_with_files or set()
     lines = [f"- **{s.id}**: {s.description}" for s in skills]
-    return "\n".join(
-        [
-            "# SKILLS",
-            "",
-            'You have specialized skills available. Call `load_skill("name")` to load full',
-            "instructions for a skill when you need it. Skills are loaded on demand.",
-            "",
-            *lines,
-        ]
-    )
+    skill_id_set = {s.id for s in skills}
+
+    sections = [
+        "# SKILLS",
+        "",
+        'You have specialized skills available. Call `load_skill("name")` to load full',
+        "instructions for a skill when you need it. Skills are loaded on demand.",
+        'Some skills include sub-files (templates, references). Use `load_skill("name", file="path")`',
+        "to load a specific sub-file. The main skill instructions will list available files.",
+        "",
+        *lines,
+    ]
+
+    # Add hints for specific well-known skills
+    hints: list[str] = []
+    if "visual-explainer" in skill_id_set:
+        hints.append(
+            "**Visual Explainer:** When explaining complex systems, architectures, data comparisons, "
+            "workflows, or anything that would benefit from a visual diagram or styled presentation, "
+            "load the `visual-explainer` skill and generate an interactive HTML visualization. "
+            "Don't default to ASCII art or plain markdown tables when a visual would be clearer."
+        )
+    if hints:
+        sections.extend(["", "## Skill Hints", "", *hints])
+
+    return "\n".join(sections)
+
+
+# ── Auto-import from SKILLS_DIR ───────────────────────────────────────────────
+
+
+async def sync_skills_from_disk() -> dict:
+    """
+    Scan SKILLS_DIR for skill subdirectories and upsert them into the DB.
+
+    Each subdirectory must contain a SKILL.md with valid frontmatter.
+    Skills are created if missing, updated if the content has changed.
+    Skills that exist in the DB but not on disk are left untouched (they
+    may have been created via the UI or API).
+
+    Called on server startup from the lifespan function.
+    Returns a summary dict: { created: [...], updated: [...], unchanged: [...], errors: [...] }
+    """
+    from app.database import AsyncSessionLocal
+
+    summary: dict[str, list[str]] = {
+        "created": [],
+        "updated": [],
+        "unchanged": [],
+        "errors": [],
+    }
+
+    if not SKILLS_DIR.is_dir():
+        return summary
+
+    for entry in sorted(SKILLS_DIR.iterdir()):
+        if not entry.is_dir():
+            continue
+        skill_file = entry / "SKILL.md"
+        if not skill_file.is_file():
+            continue
+
+        slug = entry.name
+        try:
+            raw = skill_file.read_text(encoding="utf-8")
+        except Exception as e:
+            summary["errors"].append(f"{slug}: failed to read SKILL.md: {e}")
+            continue
+
+        valid, error, fm = _validate_skill_markdown(raw)
+        if not valid:
+            summary["errors"].append(f"{slug}: invalid SKILL.md: {error}")
+            continue
+
+        _, body = _parse_frontmatter(raw)
+        name = str(fm.get("name", "")) or slug
+        description = str(fm.get("description", ""))
+        tags = fm.get("tags") or [name]
+        enabled = fm.get("enabled", True)
+
+        # Check for companion files (anything besides SKILL.md and hidden files)
+        has_files = any(
+            p.is_file() and p.name != "SKILL.md" and not p.name.startswith(".")
+            for p in entry.rglob("*")
+        )
+
+        async with AsyncSessionLocal() as db:
+            existing = await db.get(Skill, _slug(name))
+            now = now_ms()
+
+            if existing:
+                # Update if content or metadata changed
+                changed = False
+                if existing.content != body:
+                    existing.content = body
+                    changed = True
+                if existing.description != description:
+                    existing.description = description
+                    changed = True
+                if existing.tags != json.dumps(tags):
+                    existing.tags = json.dumps(tags)
+                    changed = True
+                if existing.has_files != has_files:
+                    existing.has_files = has_files
+                    changed = True
+                if existing.enabled != enabled:
+                    existing.enabled = enabled
+                    changed = True
+
+                if changed:
+                    existing.updated_at = now
+                    await db.commit()
+                    summary["updated"].append(slug)
+                else:
+                    summary["unchanged"].append(slug)
+            else:
+                # Create new skill
+                skill = Skill(
+                    id=_slug(name),
+                    description=description,
+                    tags=json.dumps(tags),
+                    content=body,
+                    enabled=enabled,
+                    scope="global",
+                    owner_agent_id=None,
+                    has_files=has_files,
+                    created_by="disk-sync",
+                    created_at=now,
+                    updated_at=now,
+                )
+                db.add(skill)
+                await db.commit()
+                summary["created"].append(slug)
+
+    return summary
 
 
 # ── Skill library CRUD ────────────────────────────────────────────────────────
@@ -176,6 +315,7 @@ async def create_skill(
         enabled=req.enabled,
         scope=req.scope,
         owner_agent_id=req.owner_agent_id,
+        has_files=req.has_files,
         created_by=created_by,
         created_at=now,
         updated_at=now,
@@ -312,6 +452,7 @@ async def get_agent_manifest(
     # Deduplicate by id: first-seen wins (agent-owned already sorted first)
     seen: set[str] = set()
     entries: list[ManifestEntry] = []
+    files_set: set[str] = set()
     for _grant, skill in rows:
         if skill.id not in seen:
             seen.add(skill.id)
@@ -322,10 +463,12 @@ async def get_agent_manifest(
                     tags=json.loads(skill.tags) if skill.tags else [],
                 )
             )
+            if skill.has_files:
+                files_set.add(skill.id)
 
     return ManifestResponse(
         skills=entries,
-        manifest_text=_build_manifest_text(entries),
+        manifest_text=_build_manifest_text(entries, files_set),
     )
 
 
@@ -396,49 +539,174 @@ async def revoke_skill_from_agent(
     return {"revoked": sid, "agent_id": agent_id}
 
 
-@router.get("/agents/{agent_id}/{skill_id}/content")
-async def get_skill_content_for_agent(
-    agent_id: str,
-    skill_id: str,
-    db: AsyncSession = Depends(get_async_session),
-) -> dict:
-    """
-    Gated content endpoint used by the agent load_skill tool.
-
-    Returns 403 if the agent has no active grant.
-    Returns 404 if the skill doesn't exist.
-    Returns 503 if the skill is globally disabled.
-    """
-    sid = _slug(skill_id)
-    skill = await db.get(Skill, sid)
+def _validate_skill_access(
+    skill: Skill | None, sid: str, grant: AgentSkill | None, agent_id: str
+) -> None:
+    """Common access-control checks for gated skill endpoints."""
     if not skill:
         raise HTTPException(status_code=404, detail=f"Skill '{sid}' not found")
-
     if not skill.enabled:
         raise HTTPException(
             status_code=503, detail=f"Skill '{sid}' is currently disabled"
         )
-
-    result = await db.execute(
-        select(AgentSkill).where(
-            AgentSkill.agent_id == agent_id,
-            AgentSkill.skill_id == sid,
-            AgentSkill.granted == True,
-        )
-    )
-    grant = result.scalar_one_or_none()
     if not grant:
         raise HTTPException(
             status_code=403,
             detail=f"Agent '{agent_id}' does not have access to skill '{sid}'",
         )
 
+
+async def _get_skill_and_grant(
+    db: AsyncSession, agent_id: str, skill_id: str
+) -> tuple[Skill | None, AgentSkill | None]:
+    """Fetch skill and grant in one go."""
+    sid = _slug(skill_id)
+    skill = await db.get(Skill, sid)
+    grant = None
+    if skill:
+        result = await db.execute(
+            select(AgentSkill).where(
+                AgentSkill.agent_id == agent_id,
+                AgentSkill.skill_id == sid,
+                AgentSkill.granted == True,
+            )
+        )
+        grant = result.scalar_one_or_none()
+    return skill, grant
+
+
+def _safe_skill_subpath(skill_id: str, file_path: str) -> Path:
+    """
+    Resolve a sub-file path within a skill directory with path traversal protection.
+    Returns the absolute path or raises HTTPException on invalid paths.
+    """
+    # Reject obvious traversal attempts
+    if ".." in file_path or file_path.startswith("/"):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid file path: must be a relative path without '..'",
+        )
+
+    skill_dir = SKILLS_DIR / skill_id
+    resolved = (skill_dir / file_path).resolve()
+
+    # Ensure the resolved path is still within the skill directory
+    if not str(resolved).startswith(str(skill_dir.resolve())):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid file path: path traversal detected",
+        )
+
+    return resolved
+
+
+@router.get("/agents/{agent_id}/{skill_id}/content")
+async def get_skill_content_for_agent(
+    agent_id: str,
+    skill_id: str,
+    file: Optional[str] = Query(
+        None,
+        description=(
+            "Optional sub-file path within the skill directory "
+            "(e.g. 'references/css-patterns.md', 'templates/architecture.html'). "
+            "Omit to load the main SKILL.md content."
+        ),
+    ),
+    db: AsyncSession = Depends(get_async_session),
+) -> dict:
+    """
+    Gated content endpoint used by the agent load_skill tool.
+
+    When ``file`` is omitted, returns the main SKILL.md content from the DB.
+    When ``file`` is provided, reads the sub-file from disk at SKILLS_DIR/{skill_id}/{file}.
+
+    Returns 403 if the agent has no active grant.
+    Returns 404 if the skill or file doesn't exist.
+    Returns 503 if the skill is globally disabled.
+    """
+    sid = _slug(skill_id)
+    skill, grant = await _get_skill_and_grant(db, agent_id, skill_id)
+    _validate_skill_access(skill, sid, grant, agent_id)
+    assert skill is not None  # for type checker — _validate_skill_access raises on None
+
+    # Sub-file request: read from disk
+    if file:
+        if not skill.has_files:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Skill '{sid}' does not have companion files on disk",
+            )
+
+        resolved = _safe_skill_subpath(sid, file)
+        if not resolved.is_file():
+            raise HTTPException(
+                status_code=404,
+                detail=f"File '{file}' not found in skill '{sid}'",
+            )
+
+        try:
+            content = resolved.read_text(encoding="utf-8")
+        except Exception as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Error reading file '{file}': {e}",
+            )
+
+        return {
+            "id": skill.id,
+            "description": skill.description,
+            "file": file,
+            "content": content,
+        }
+
+    # Default: return main SKILL.md content from DB
     return {
         "id": skill.id,
         "description": skill.description,
         "content": skill.content,
         "tags": json.loads(skill.tags) if skill.tags else [],
+        "has_files": skill.has_files,
     }
+
+
+@router.get("/agents/{agent_id}/{skill_id}/files")
+async def list_skill_files_for_agent(
+    agent_id: str,
+    skill_id: str,
+    db: AsyncSession = Depends(get_async_session),
+) -> dict:
+    """
+    List companion files available for a skill.
+
+    Returns a flat list of relative file paths (excluding SKILL.md itself).
+    Access-controlled: agent must have an active grant.
+    """
+    sid = _slug(skill_id)
+    skill, grant = await _get_skill_and_grant(db, agent_id, skill_id)
+    _validate_skill_access(skill, sid, grant, agent_id)
+    assert skill is not None
+
+    if not skill.has_files:
+        return {"id": sid, "files": []}
+
+    skill_dir = SKILLS_DIR / sid
+    if not skill_dir.is_dir():
+        return {"id": sid, "files": []}
+
+    files: list[str] = []
+    for p in sorted(skill_dir.rglob("*")):
+        if not p.is_file():
+            continue
+        rel = str(p.relative_to(skill_dir))
+        # Exclude the main SKILL.md — that's loaded via the content endpoint
+        if rel == "SKILL.md":
+            continue
+        # Exclude hidden files and common non-skill files
+        if any(part.startswith(".") for part in p.parts):
+            continue
+        files.append(rel)
+
+    return {"id": sid, "files": files}
 
 
 # ── Skill generation helpers (unchanged logic from V1) ────────────────────────
@@ -739,6 +1007,7 @@ class GitHubImportedSkill(BaseModel):
     description: str
     tags: list[str]
     enabled: bool
+    has_files: bool = False
     name_conflict: bool
     valid: bool
     error: Optional[str] = None
@@ -773,6 +1042,61 @@ def _parse_to_imported_skill(
         valid=valid,
         error=error if not valid else None,
     )
+
+
+async def _download_skill_companion_files(
+    client: httpx.AsyncClient,
+    owner: str,
+    repo: str,
+    skill_dir_in_repo: str,
+    skill_slug: str,
+    tree_entries: list[dict],
+) -> bool:
+    """
+    Download companion files (templates, references, etc.) for a skill from GitHub.
+
+    Scans the repo tree for files in the same directory as the SKILL.md (excluding
+    SKILL.md itself), downloads them, and writes to SKILLS_DIR/{skill_slug}/.
+
+    Returns True if any companion files were downloaded.
+    """
+    # Find all files in the same directory as the SKILL.md
+    prefix = skill_dir_in_repo + "/" if skill_dir_in_repo else ""
+    companion_paths = [
+        entry["path"]
+        for entry in tree_entries
+        if entry.get("type") == "blob"
+        and entry["path"].startswith(prefix)
+        and not entry["path"].endswith("SKILL.md")
+        and not any(part.startswith(".") for part in entry["path"].split("/"))
+    ]
+
+    if not companion_paths:
+        return False
+
+    skill_dir = SKILLS_DIR / skill_slug
+    downloaded = 0
+
+    for file_path in companion_paths:
+        # Relative path within the skill directory
+        rel_path = file_path[len(prefix) :] if prefix else file_path
+        raw_url = f"{_GH_RAW_BASE}/{owner}/{repo}/HEAD/{file_path}"
+
+        try:
+            resp = await client.get(
+                raw_url, headers={"User-Agent": "Djinnbot-SkillImporter/1.0"}
+            )
+            resp.raise_for_status()
+
+            dest = skill_dir / rel_path
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_text(resp.text, encoding="utf-8")
+            downloaded += 1
+        except Exception as e:
+            print(f"[SkillImport] Failed to download {file_path}: {e}")
+            continue
+
+    return downloaded > 0
 
 
 class GitHubImportRequest(BaseModel):
@@ -857,6 +1181,8 @@ async def github_import(
                 status_code=404, detail=f"No SKILL.md files found in {repo_full}"
             )
 
+        all_tree_entries = tree_data.get("tree", [])
+
         skills: list[GitHubImportedSkill] = []
         for path in skill_paths:
             raw_url = f"{_GH_RAW_BASE}/{owner}/{repo}/HEAD/{path}"
@@ -865,9 +1191,29 @@ async def github_import(
                     raw_url, headers={"User-Agent": "Djinnbot-SkillImporter/1.0"}
                 )
                 r.raise_for_status()
-                skills.append(
-                    _parse_to_imported_skill(r.text, path, raw_url, existing_ids)
+                imported = _parse_to_imported_skill(r.text, path, raw_url, existing_ids)
+
+                # Download companion files to SKILLS_DIR/{slug}/
+                skill_dir_in_repo = "/".join(
+                    path.split("/")[:-1]
+                )  # e.g. "prompts" from "prompts/SKILL.md" or "" from "SKILL.md"
+                has_companion = await _download_skill_companion_files(
+                    client,
+                    owner,
+                    repo,
+                    skill_dir_in_repo,
+                    imported.name,
+                    all_tree_entries,
                 )
+                imported.has_files = has_companion
+
+                # Also write the SKILL.md itself to disk for completeness
+                if has_companion:
+                    skill_dir = SKILLS_DIR / imported.name
+                    skill_dir.mkdir(parents=True, exist_ok=True)
+                    (skill_dir / "SKILL.md").write_text(r.text, encoding="utf-8")
+
+                skills.append(imported)
             except Exception:
                 skills.append(
                     GitHubImportedSkill(

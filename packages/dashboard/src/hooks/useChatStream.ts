@@ -116,6 +116,7 @@ export interface DbMessage {
   model?: string | null;
   thinking?: string | null;
   tool_calls?: any[] | null;
+  attachments?: string[] | null;
   created_at: number;
   completed_at?: number | null;
 }
@@ -801,6 +802,7 @@ export function useChatStream({
           content: msg.content,
           timestamp: msg.created_at,
           model: msg.model || undefined,
+          attachments: msg.attachments || undefined,
         });
       }
       return result;

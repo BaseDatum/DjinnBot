@@ -20,7 +20,9 @@ import {
   stopChatResponse,
   getChatSession,
   restartChatSession,
+  uploadChatAttachment,
 } from '@/lib/api';
+import { FileUploadZone, AttachmentChip, type PendingAttachment } from './FileUploadZone';
 import {
   Send,
   Loader2,
@@ -29,6 +31,7 @@ import {
   AlertCircle,
   StopCircle,
   RotateCcw,
+  Paperclip,
 } from 'lucide-react';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -61,6 +64,8 @@ export function AgentChat({
   const [sessionStatus, setSessionStatus] = useState<SessionStatus>(initialSessionStatus);
   const [isResponding, setIsResponding] = useState(false);
   const [inputValue, setInputValue] = useState('');
+  const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
+  const fileInputRef2 = useRef<HTMLInputElement>(null);
 
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -199,6 +204,12 @@ export function AgentChat({
 
   /** Send a message to the agent immediately (not queued). */
   const sendMessageDirect = async (userMessage: string) => {
+    // Collect and clear pending attachments
+    const attachmentIds = pendingAttachments
+      .filter(a => !a.uploading && !a.error)
+      .map(a => a.id);
+    setPendingAttachments([]);
+
     // Remove queued bubble if this was auto-sent from queue
     setMessages(prev => prev.filter(m => !m.id.startsWith('queued_')));
     setIsResponding(true);
@@ -208,12 +219,20 @@ export function AgentChat({
       type: 'user',
       content: userMessage,
       timestamp: Date.now(),
+      attachments: attachmentIds.length > 0 ? attachmentIds : undefined,
     }]);
 
     abortControllerRef.current = new AbortController();
 
     try {
-      await sendChatMessage(agentId, sessionId, userMessage, abortControllerRef.current.signal);
+      await sendChatMessage(
+        agentId,
+        sessionId,
+        userMessage,
+        abortControllerRef.current.signal,
+        undefined,
+        attachmentIds.length > 0 ? attachmentIds : undefined,
+      );
     } catch (error) {
       if (error instanceof Error && error.name === 'AbortError') {
         setIsResponding(false);
@@ -465,6 +484,13 @@ export function AgentChat({
       </ScrollArea>
 
       {/* Input */}
+      <FileUploadZone
+        agentId={agentId}
+        sessionId={sessionId}
+        disabled={!isReady}
+        attachments={pendingAttachments}
+        onAttachmentsChange={setPendingAttachments}
+      >
       <div className="border-t bg-background shrink-0">
         {/* Top-edge resize handle — drag upward to grow the input */}
         <div
@@ -479,7 +505,74 @@ export function AgentChat({
           <div className="w-8 h-0.5 rounded-full bg-muted-foreground/25 group-hover:bg-muted-foreground/50 transition-colors" />
         </div>
         <div className="px-3 pb-[calc(0.75rem+env(safe-area-inset-bottom,0px))]">
+        {/* Pending attachment chips */}
+        {pendingAttachments.length > 0 && (
+          <div className="flex flex-wrap gap-1.5 pt-2 pb-1.5">
+            {pendingAttachments.map(att => (
+              <AttachmentChip
+                key={att.id}
+                attachment={att}
+                onRemove={(id) => setPendingAttachments(prev => prev.filter(a => a.id !== id))}
+              />
+            ))}
+          </div>
+        )}
         <div className="flex gap-2 items-end">
+          <button
+            onClick={() => fileInputRef2.current?.click()}
+            disabled={!isReady}
+            className="p-2 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50 self-end mb-[5px]"
+            title="Attach file"
+            type="button"
+          >
+            <Paperclip className="h-4 w-4" />
+          </button>
+          <input
+            ref={fileInputRef2}
+            type="file"
+            multiple
+            className="hidden"
+            accept=".jpg,.jpeg,.png,.gif,.webp,.pdf,.txt,.md,.csv,.json,.py,.js,.ts,.html,.css,.xml,.yaml,.yml"
+            onChange={async e => {
+              if (!e.target.files?.length) return;
+              const files = Array.from(e.target.files);
+              e.target.value = ''; // Reset immediately so same file can be re-selected
+
+              for (const file of files) {
+                const placeholderId = `uploading_${Date.now()}_${file.name}`;
+                setPendingAttachments(prev => [...prev, {
+                  id: placeholderId,
+                  filename: file.name,
+                  mimeType: file.type || 'application/octet-stream',
+                  sizeBytes: file.size,
+                  isImage: file.type.startsWith('image/'),
+                  estimatedTokens: null,
+                  uploading: true,
+                }]);
+                try {
+                  const result = await uploadChatAttachment(agentId, sessionId, file);
+                  setPendingAttachments(prev =>
+                    prev.map(a => a.id === placeholderId ? {
+                      id: result.id,
+                      filename: result.filename,
+                      mimeType: result.mimeType,
+                      sizeBytes: result.sizeBytes,
+                      isImage: result.isImage,
+                      estimatedTokens: result.estimatedTokens,
+                    } : a)
+                  );
+                } catch (err) {
+                  setPendingAttachments(prev =>
+                    prev.map(a => a.id === placeholderId ? {
+                      ...a,
+                      uploading: false,
+                      error: err instanceof Error ? err.message : 'Upload failed',
+                    } : a)
+                  );
+                }
+              }
+            }}
+          />
           <Textarea
             ref={inputRef}
             value={inputValue}
@@ -529,6 +622,7 @@ export function AgentChat({
         </p>
         </div>
       </div>
+      </FileUploadZone>
     </div>
   );
 }

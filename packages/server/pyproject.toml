@@ -23,6 +23,7 @@ dependencies = [
     # Auth
     "bcrypt>=4.1.0",
     "pyotp>=2.9.0",
+    "python-multipart>=0.0.22",
 ]
 
 [project.optional-dependencies]

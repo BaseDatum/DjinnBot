@@ -565,6 +565,7 @@ export class AgentSlackRuntime {
     userName: string,
     source: 'dm' | 'channel_thread',
     threadTsForPool?: string,
+    slackFiles?: Array<{ id: string; name: string; mimetype: string; url_private_download?: string; size?: number }>,
   ): Promise<void> {
     const pool = this.config.sessionPool;
     if (!pool) {
@@ -585,6 +586,50 @@ export class AgentSlackRuntime {
       taskDisplayMode: 'plan',
     });
 
+    // ── Download Slack files and re-upload to DjinnBot storage ──────────────
+    let attachments: Array<{ id: string; filename: string; mimeType: string; sizeBytes: number; isImage: boolean; estimatedTokens?: number }> | undefined;
+    if (slackFiles && slackFiles.length > 0) {
+      const apiBaseUrl = process.env.DJINNBOT_API_URL || 'http://api:8000';
+      attachments = [];
+      for (const sf of slackFiles) {
+        if (!sf.url_private_download) continue;
+        try {
+          // Download from Slack using bot token
+          const dlRes = await fetch(sf.url_private_download, {
+            headers: { Authorization: `Bearer ${this.client.token}` },
+          });
+          if (!dlRes.ok) {
+            console.warn(`[${this.agentId}] Failed to download Slack file ${sf.name}: ${dlRes.status}`);
+            continue;
+          }
+          const buffer = Buffer.from(await dlRes.arrayBuffer());
+
+          // Re-upload to DjinnBot storage via internal API
+          const formData = new FormData();
+          formData.append('file', new Blob([buffer]), sf.name);
+          const sessionIdForUpload = `slack_${this.agentId}_${channelId}`;
+          const uploadRes = await fetch(
+            `${apiBaseUrl}/v1/internal/chat/attachments/upload-bytes?session_id=${encodeURIComponent(sessionIdForUpload)}&filename=${encodeURIComponent(sf.name)}&mime_type=${encodeURIComponent(sf.mimetype)}`,
+            { method: 'POST', body: formData },
+          );
+          if (uploadRes.ok) {
+            const result = await uploadRes.json() as { id: string; filename: string; mimeType: string; sizeBytes: number };
+            attachments.push({
+              id: result.id,
+              filename: result.filename,
+              mimeType: result.mimeType,
+              sizeBytes: result.sizeBytes,
+              isImage: result.mimeType.startsWith('image/'),
+            });
+            console.log(`[${this.agentId}] Re-uploaded Slack file ${sf.name} as ${result.id}`);
+          }
+        } catch (err) {
+          console.warn(`[${this.agentId}] Failed to process Slack file ${sf.name}:`, err);
+        }
+      }
+      if (attachments.length === 0) attachments = undefined;
+    }
+
     // pool.sendMessage() now returns the sessionId synchronously (pre-registered),
     // then does the actual cold-start async. This means we can register the streamer
     // immediately — before the container even starts — so output hooks can find it
@@ -603,6 +648,7 @@ export class AgentSlackRuntime {
         // opencode-specific model (those aren't reachable inside containers).
         // Fall back to defaultSlackDecisionModel or a reliable OpenRouter default.
         model: this.resolveSlackModel(),
+      attachments,
     });
 
     // Register streamer immediately by sessionId — cold-start is running in background
@@ -817,6 +863,7 @@ export class AgentSlackRuntime {
         userName,
         'channel_thread',
         replyThreadTs,
+        (event as any).files,
       );
       return;
     }
@@ -882,6 +929,7 @@ export class AgentSlackRuntime {
         userName,
         'dm',
         undefined, // No pool threadTs for DMs — uses channel as identity
+        msg.files,
       );
       return;
     }
@@ -949,6 +997,7 @@ export class AgentSlackRuntime {
         userName,
         'dm',
         undefined,        // Pool key for DMs is just channel-based
+        msg.files,
       );
       return;
     }
@@ -1155,6 +1204,7 @@ export class AgentSlackRuntime {
         userName,
         'channel_thread',
         msg.thread_ts,
+        msg.files,
       );
       return;
     }

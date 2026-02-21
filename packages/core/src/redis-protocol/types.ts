@@ -15,12 +15,24 @@ export type BaseMessage = z.infer<typeof baseMessageSchema>;
 // Command Messages (Engine → Container)
 // ============================================================================
 
+export const attachmentMetaSchema = z.object({
+  id: z.string(),
+  filename: z.string(),
+  mimeType: z.string(),
+  sizeBytes: z.number(),
+  isImage: z.boolean(),
+  estimatedTokens: z.number().optional(),
+});
+
+export type AttachmentMeta = z.infer<typeof attachmentMetaSchema>;
+
 export const agentStepCommandSchema = baseMessageSchema.extend({
   type: z.literal("agentStep"),
   requestId: z.string(),
   prompt: z.string(),
   tools: z.array(z.string()).default([]),
   maxSteps: z.number().default(100),
+  attachments: z.array(attachmentMetaSchema).optional(),
 });
 
 export type AgentStepCommand = z.infer<typeof agentStepCommandSchema>;

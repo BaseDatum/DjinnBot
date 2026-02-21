@@ -54,6 +54,7 @@ services:
       - DJINN_DATA_PATH=/data
       - PIPELINES_DIR=/pipelines
       - AGENTS_DIR=/agents
+      - SKILLS_DIR=/skills
       - SANDBOXES_DIR=/data/sandboxes
       - WORKSPACES_DIR=/data/workspaces
       - SHARED_RUNS_DIR=/data/runs
@@ -68,10 +69,12 @@ services:
       - AUTH_ENABLED=${AUTH_ENABLED:-false}
       - AUTH_SECRET_KEY=${AUTH_SECRET_KEY:-}
       - AUTH_TOTP_ISSUER=${AUTH_TOTP_ISSUER:-DjinnBot}
+      - CORS_ORIGINS=${CORS_ORIGINS:-*}
     volumes:
       - djinnbot-data:/data
       - ./pipelines:/pipelines
       - ./agents:/agents
+      - ./skills:/skills:ro
       - ./secrets:/data/secrets:ro
     networks:
       - djinnbot_default
@@ -100,6 +103,7 @@ services:
       - DATA_DIR=/data
       - PIPELINES_DIR=/pipelines
       - AGENTS_DIR=/agents
+      - SKILLS_DIR=/skills
       - VAULTS_DIR=/data/vaults
       - MOCK_RUNNER=${MOCK_RUNNER:-false}
       - USE_CONTAINER_RUNNER=${USE_CONTAINER_RUNNER:-true}
@@ -153,6 +157,7 @@ services:
       - djinnbot-data:/data
       - ./pipelines:/pipelines:ro
       - ./agents:/agents:ro
+      - ./skills:/skills:ro
       - ./mcp:/data/mcp
       - /var/run/docker.sock:/var/run/docker.sock
     networks:

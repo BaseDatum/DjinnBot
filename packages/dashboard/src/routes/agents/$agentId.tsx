@@ -17,6 +17,7 @@ import {
   Zap,
   Radio,
   Plug,
+  ChevronRight,
 } from 'lucide-react';
 import { ProviderModelSelector } from '@/components/ui/ProviderModelSelector';
 import { useState, useEffect, useCallback } from 'react';
@@ -35,6 +36,7 @@ import { AgentProjectsTab } from '@/components/agents/AgentProjectsTab';
 import { AgentPulseTab } from '@/components/agents/AgentPulseTab';
 import { AgentSkillsTab } from '@/components/skills/AgentSkillsTab';
 import { AgentChannelsTab } from '@/components/channels/AgentChannelsTab';
+import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '@/components/ui/collapsible';
 import { NestedSidebar } from '@/components/layout/NestedSidebar';
 import type { NestedSidebarItem } from '@/components/layout/NestedSidebar';
 import type { AgentConfig } from '@/types/config';
@@ -91,6 +93,7 @@ function AgentDetailPage() {
   const [editedFiles, setEditedFiles] = useState<Record<string, string>>({});
   const [originalFiles, setOriginalFiles] = useState<Record<string, string>>({});
   const [saveStatus, setSaveStatus] = useState<Record<string, 'idle' | 'saving' | 'saved' | 'error'>>({});
+  const [openPersonaFiles, setOpenPersonaFiles] = useState<Record<string, boolean>>({});
 
   // Settings state
   const [config, setConfig] = useState<AgentConfig>({ model: '', thinkingModel: '' });
@@ -259,49 +262,61 @@ function AgentDetailPage() {
             {agent.persona_files.map((pf) => {
               const hasChanges = editedFiles[pf] !== originalFiles[pf];
               const status = saveStatus[pf] || 'idle';
+              const isOpen = openPersonaFiles[pf] ?? false;
 
               return (
-                <Card key={pf}>
-                  <CardHeader className="pb-2">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        <CardTitle className="text-sm font-mono">{pf}</CardTitle>
-                        {hasChanges && status !== 'saving' && (
-                          <Badge variant="outline" className="text-xs text-yellow-500 border-yellow-500/30">
-                            Unsaved changes
-                          </Badge>
-                        )}
+                <Collapsible
+                  key={pf}
+                  open={isOpen}
+                  onOpenChange={(open) => setOpenPersonaFiles(prev => ({ ...prev, [pf]: open }))}
+                >
+                  <Card>
+                    <CardHeader className="pb-2">
+                      <div className="flex items-center justify-between">
+                        <CollapsibleTrigger asChild>
+                          <button className="flex items-center gap-2 group cursor-pointer text-left">
+                            <ChevronRight className={`h-4 w-4 text-muted-foreground transition-transform duration-200 ${isOpen ? 'rotate-90' : ''}`} />
+                            <CardTitle className="text-sm font-mono group-hover:underline">{pf}</CardTitle>
+                            {hasChanges && status !== 'saving' && (
+                              <Badge variant="outline" className="text-xs text-yellow-500 border-yellow-500/30">
+                                Unsaved changes
+                              </Badge>
+                            )}
+                          </button>
+                        </CollapsibleTrigger>
+                        <div className="flex items-center gap-2">
+                          {status === 'saving' && (
+                            <span className="text-sm text-muted-foreground animate-pulse">Saving...</span>
+                          )}
+                          {status === 'saved' && (
+                            <span className="text-sm text-green-500">Saved</span>
+                          )}
+                          {status === 'error' && (
+                            <span className="text-sm text-destructive">Error saving</span>
+                          )}
+                          <Button
+                            size="sm"
+                            onClick={() => handleSaveFile(pf)}
+                            disabled={!hasChanges || status === 'saving'}
+                            variant={hasChanges ? 'default' : 'outline'}
+                          >
+                            Save
+                          </Button>
+                        </div>
                       </div>
-                      <div className="flex items-center gap-2">
-                        {status === 'saving' && (
-                          <span className="text-sm text-muted-foreground animate-pulse">Saving...</span>
-                        )}
-                        {status === 'saved' && (
-                          <span className="text-sm text-green-500">✓ Saved</span>
-                        )}
-                        {status === 'error' && (
-                          <span className="text-sm text-destructive">Error saving</span>
-                        )}
-                        <Button
-                          size="sm"
-                          onClick={() => handleSaveFile(pf)}
-                          disabled={!hasChanges || status === 'saving'}
-                          variant={hasChanges ? 'default' : 'outline'}
-                        >
-                          Save
-                        </Button>
-                      </div>
-                    </div>
-                  </CardHeader>
-                  <CardContent>
-                    <textarea
-                      value={editedFiles[pf] || ''}
-                      onChange={(e) => setEditedFiles(prev => ({ ...prev, [pf]: e.target.value }))}
-                      className="w-full h-64 rounded-md border bg-background px-3 py-2 text-sm font-mono placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring resize-y"
-                      spellCheck={false}
-                    />
-                  </CardContent>
-                </Card>
+                    </CardHeader>
+                    <CollapsibleContent>
+                      <CardContent>
+                        <textarea
+                          value={editedFiles[pf] || ''}
+                          onChange={(e) => setEditedFiles(prev => ({ ...prev, [pf]: e.target.value }))}
+                          className="w-full h-64 rounded-md border bg-background px-3 py-2 text-sm font-mono placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring resize-y"
+                          spellCheck={false}
+                        />
+                      </CardContent>
+                    </CollapsibleContent>
+                  </Card>
+                </Collapsible>
               );
             })}
             {agent.persona_files.length === 0 && (

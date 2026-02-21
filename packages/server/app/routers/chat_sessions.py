@@ -59,6 +59,7 @@ class ChatMessageResponse(BaseModel):
     model: Optional[str]
     thinking: Optional[str]
     tool_calls: Optional[List[dict]]
+    attachments: Optional[List[str]] = None  # Attachment IDs for user messages
     created_at: int
     completed_at: Optional[int]
 
@@ -182,6 +183,7 @@ async def get_chat_session(
                 model=m.model,
                 thinking=m.thinking,
                 tool_calls=json.loads(m.tool_calls) if m.tool_calls else None,
+                attachments=json.loads(m.attachments) if m.attachments else None,
                 created_at=m.created_at,
                 completed_at=m.completed_at,
             )

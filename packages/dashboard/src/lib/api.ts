@@ -1073,11 +1073,16 @@ export async function startChatSession(
   agentId: string,
   model?: string,
   systemPromptSupplement?: string,
+  thinkingLevel?: string,
 ): Promise<ChatSessionResponse> {
   const res = await authFetch(`${API_BASE}/agents/${agentId}/chat/start`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model, system_prompt_supplement: systemPromptSupplement }),
+    body: JSON.stringify({
+      model,
+      system_prompt_supplement: systemPromptSupplement,
+      thinking_level: thinkingLevel && thinkingLevel !== 'off' ? thinkingLevel : undefined,
+    }),
   });
   return handleResponse(res, 'Failed to start chat session');
 }
@@ -1087,15 +1092,50 @@ export async function sendChatMessage(
   sessionId: string,
   message: string,
   signal?: AbortSignal,
-  model?: string
+  model?: string,
+  attachmentIds?: string[],
 ): Promise<SendChatMessageResponse> {
+  const body: Record<string, unknown> = { message, model };
+  if (attachmentIds?.length) body.attachment_ids = attachmentIds;
   const res = await authFetch(`${API_BASE}/agents/${agentId}/chat/${sessionId}/message`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ message, model }),
+    body: JSON.stringify(body),
     signal,
   });
   return handleResponse(res, 'Failed to send message');
+}
+
+// ── Chat Attachment API ──────────────────────────────────────────────────
+
+export interface ChatAttachmentResponse {
+  id: string;
+  filename: string;
+  mimeType: string;
+  sizeBytes: number;
+  processingStatus: string;
+  estimatedTokens: number | null;
+  isImage: boolean;
+  createdAt: number;
+}
+
+export async function uploadChatAttachment(
+  agentId: string,
+  sessionId: string,
+  file: File,
+): Promise<ChatAttachmentResponse> {
+  const formData = new FormData();
+  formData.append('file', file);
+  const res = await authFetch(`${API_BASE}/agents/${agentId}/chat/${sessionId}/upload`, {
+    method: 'POST',
+    body: formData,
+    // Do NOT set Content-Type — browser sets it with boundary automatically
+  });
+  return handleResponse(res, 'Failed to upload attachment');
+}
+
+export function getAttachmentContentUrl(attachmentId: string): string {
+  return `${API_BASE}/chat/attachments/${attachmentId}/content`;
 }
 
 export async function updateChatModel(
@@ -1603,6 +1643,7 @@ export interface Skill {
   enabled: boolean;
   scope: 'global' | 'agent';
   owner_agent_id?: string;
+  has_files: boolean;
   created_by: string;
   created_at: number;
   updated_at: number;
@@ -1628,6 +1669,7 @@ export interface CreateSkillPayload {
   enabled?: boolean;
   scope?: 'global' | 'agent';
   owner_agent_id?: string;
+  has_files?: boolean;
 }
 
 export interface UpdateSkillPayload {

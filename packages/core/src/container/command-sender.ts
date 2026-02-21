@@ -4,6 +4,7 @@ import {
   channels,
   createTimestamp,
   type AgentStepCommand,
+  type AttachmentMeta,
   type ToolCommand,
   type ShutdownCommand,
   type AbortCommand,
@@ -23,6 +24,7 @@ export class CommandSender {
       requestId?: string;
       tools?: string[];
       maxSteps?: number;
+      attachments?: AttachmentMeta[];
     } = {}
   ): Promise<string> {
     const requestId = options.requestId ?? this.generateRequestId();
@@ -34,6 +36,7 @@ export class CommandSender {
       tools: options.tools ?? [],
       maxSteps: options.maxSteps ?? 100,
       timestamp: createTimestamp(),
+      ...(options.attachments?.length ? { attachments: options.attachments } : {}),
     };
 
     const channel = channels.command(runId);

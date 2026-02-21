@@ -53,7 +53,7 @@ from app.models.github import (
     GitHubAgentTrigger,
 )
 from app.models.session import Session, SessionEvent
-from app.models.chat import ChatSession, ChatMessage
+from app.models.chat import ChatSession, ChatMessage, ChatAttachment
 from app.models.settings import ModelProvider, GlobalSetting, AgentChannelCredential
 from app.models.skill import Skill, AgentSkill
 from app.models.secret import Secret, AgentSecretGrant
@@ -99,6 +99,7 @@ __all__ = [
     "GitHubAgentTrigger",
     "ChatSession",
     "ChatMessage",
+    "ChatAttachment",
     "OnboardingSession",
     "OnboardingMessage",
     "ModelProvider",

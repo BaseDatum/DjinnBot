@@ -30,6 +30,7 @@ async function main(): Promise<void> {
     sharedPath: process.env.CLAWVAULT_SHARED || process.env.SHARED_PATH || '/home/agent/clawvault/shared',
     model: process.env.AGENT_MODEL,
     agentsDir: process.env.AGENTS_DIR,
+    thinkingLevel: process.env.AGENT_THINKING_LEVEL,
   });
 
   // Seed conversation history if provided (chat session resume).
@@ -112,6 +113,7 @@ async function main(): Promise<void> {
           cmd.requestId,
           agentSystemPrompt,  // systemPrompt — from persona, used on first turn
           cmd.prompt,         // userPrompt  — the new message for this turn
+          cmd.attachments,    // optional file attachments (images, documents)
         );
 
         // Publish step end event

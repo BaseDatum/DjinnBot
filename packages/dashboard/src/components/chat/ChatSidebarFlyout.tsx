@@ -78,7 +78,7 @@ function useSpawnForm() {
       let sessionId: string;
       let resolvedModel = model;
       if (sessionChoice === '__new__') {
-        const result = await startChatSession(agentId, model);
+        const result = await startChatSession(agentId, model, undefined, thinkingLevel);
         sessionId = result.sessionId;
       } else {
         const session = await getChatSession(sessionChoice);
