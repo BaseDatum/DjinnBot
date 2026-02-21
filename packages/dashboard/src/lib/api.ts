@@ -1,17 +1,41 @@
-// __API_URL__ is injected at build time from the VITE_API_URL env var.
-// Examples:
-//   "http://localhost:8000"  → direct API access (Docker / dev without nginx)
-//   ""                       → relative paths, proxied by nginx (legacy fallback)
+// API URL resolution (runtime → build-time → relative fallback):
+//
+// 1. Runtime config: window.__RUNTIME_CONFIG__.API_URL
+//    Set by entrypoint.sh at container startup from the VITE_API_URL env var.
+//    Allows changing the API URL without rebuilding the image — just restart
+//    the container with a new VITE_API_URL value.
+//
+// 2. Build-time config: __API_URL__
+//    Baked in by Vite from VITE_API_URL at `npm run build` / `docker build`.
+//    Used as fallback for local dev or when runtime config isn't set.
+//
+// 3. Empty string → relative paths, proxied by nginx/Traefik.
+//
 // The /v1 path prefix is appended here; callers never include it.
-export const API_BASE = `${__API_URL__}/v1`;
+
+/** Resolve the API origin, preferring runtime config over build-time. */
+function resolveApiUrl(): string {
+  // Runtime config takes precedence (set at container startup, no rebuild needed)
+  const runtimeUrl =
+    typeof window !== 'undefined' &&
+    (window as any).__RUNTIME_CONFIG__?.API_URL;
+  if (runtimeUrl) return runtimeUrl;
+
+  // Fall back to build-time value (baked in by Vite)
+  return __API_URL__;
+}
+
+const _resolvedApiUrl = resolveApiUrl();
+
+export const API_BASE = `${_resolvedApiUrl}/v1`;
 
 /**
  * Convert an API base URL (http/https) to a WebSocket base URL (ws/wss).
- * When API_BASE is relative (empty __API_URL__) we fall back to window.location.host.
+ * When API_BASE is relative (empty URL) we fall back to window.location.host.
  */
 export function wsBase(): string {
-  if (__API_URL__) {
-    return __API_URL__.replace(/^http/, 'ws');
+  if (_resolvedApiUrl) {
+    return _resolvedApiUrl.replace(/^http/, 'ws');
   }
   const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
   return `${protocol}://${window.location.host}`;

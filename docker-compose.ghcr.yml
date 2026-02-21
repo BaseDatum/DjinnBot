@@ -193,6 +193,10 @@ services:
   dashboard:
     image: ghcr.io/basedatum/djinnbot/dashboard:${DJINNBOT_VERSION:-latest}
     container_name: djinnbot-dashboard
+    environment:
+      # Runtime API URL injection — no rebuild needed for custom domains.
+      # The entrypoint.sh script writes this into config.js at container startup.
+      - VITE_API_URL=${VITE_API_URL:-http://localhost:8000}
     ports:
       - "${BIND_HOST:-127.0.0.1}:${DASHBOARD_PORT:-3000}:80"
     networks:

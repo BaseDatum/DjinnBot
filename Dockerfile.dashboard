@@ -30,4 +30,10 @@ RUN npm run build -w @djinnbot/dashboard
 FROM nginx:alpine
 COPY --from=builder /build/packages/dashboard/dist /usr/share/nginx/html
 COPY packages/dashboard/nginx.conf /etc/nginx/conf.d/default.conf
+COPY packages/dashboard/entrypoint.sh /docker-entrypoint.sh
+RUN chmod +x /docker-entrypoint.sh
 EXPOSE 80
+
+# Inject runtime config (VITE_API_URL) at container startup — no rebuild needed
+# for custom domains. See packages/dashboard/entrypoint.sh for details.
+ENTRYPOINT ["/docker-entrypoint.sh"]

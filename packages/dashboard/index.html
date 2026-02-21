@@ -4,6 +4,12 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>DjinnBot Dashboard</title>
+    <!--
+      Runtime config: injected by entrypoint.sh at container startup.
+      Sets window.__RUNTIME_CONFIG__.API_URL from the VITE_API_URL env var.
+      Falls back gracefully to build-time value if missing (dev / local).
+    -->
+    <script src="/config.js"></script>
     <script>
       (function() {
         var t = localStorage.getItem('djinnbot-theme');
