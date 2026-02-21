@@ -432,10 +432,26 @@ export class SlackBridge {
   ): void {
     if (this.eventSubscriptions.has(runId)) return;
 
-    // Store the notify user ID so handlePipelineEvent can pass it to startStepStream
-    if (slackNotifyUserId) {
-      this.runNotifyUserIds.set(runId, slackNotifyUserId);
+    // ── Guard: require project-level Slack config ────────────────────────
+    // Both channel and user must be explicitly set on the project.
+    // Without them we skip Slack entirely rather than falling back to the
+    // global defaultChannelId — that channel is for interactive DMs, not
+    // pipeline run output.
+    if (!slackChannelId || !slackNotifyUserId) {
+      const missing = [
+        !slackChannelId && 'slack_channel_id',
+        !slackNotifyUserId && 'slack_notify_user_id',
+      ].filter(Boolean).join(', ');
+      console.warn(
+        `[SlackBridge] Skipping Slack thread for run ${runId}: ` +
+        `project is missing ${missing}. ` +
+        `Configure Slack settings in Project Settings > Slack Notifications.`
+      );
+      return;
     }
+
+    // Store the notify user ID so handlePipelineEvent can pass it to startStepStream
+    this.runNotifyUserIds.set(runId, slackNotifyUserId);
 
     // Initialize pending queue — events arrive before thread is ready
     this.pendingEvents.set(runId, []);
