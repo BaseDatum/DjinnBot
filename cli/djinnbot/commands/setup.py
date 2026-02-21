@@ -10,6 +10,7 @@ Designed to be idempotent — safe to re-run.
 import os
 import re
 import secrets
+import signal
 import shutil
 import socket
 import subprocess
@@ -25,6 +26,20 @@ from rich.table import Table
 from rich import box
 
 console = Console()
+
+
+def _handle_interrupt(signum, frame):
+    """Handle Ctrl+C cleanly at any point during setup."""
+    console.print("\n\n[yellow]Setup interrupted.[/yellow]")
+    console.print(
+        "[dim]No changes have been made to running services.\n"
+        "Re-run setup anytime: djinn setup[/dim]"
+    )
+    sys.exit(130)
+
+
+# Install the handler immediately on import so it's active for the entire setup
+signal.signal(signal.SIGINT, _handle_interrupt)
 
 # Keys that must be generated for the app to work
 REQUIRED_SECRETS = {
@@ -490,68 +505,90 @@ def step_detect_ip(env_path: Path) -> str:
 
 
 def step_provider_key(env_path: Path) -> Optional[str]:
-    """Prompt for the first model provider API key."""
-    console.print(Panel("[bold]Step 6: Model Provider[/bold]"))
+    """Prompt for model provider API keys. OpenRouter is required."""
+    console.print(Panel("[bold]Model Provider[/bold]"))
 
+    # ── OpenRouter (required) ───────────────────────────────────────
     console.print(
-        "DjinnBot needs an LLM API key for agents to function.\n"
-        "OpenRouter is recommended — it gives access to all major models\n"
-        "(Claude, GPT, Gemini, etc.) with a single key.\n"
+        "[bold]An OpenRouter API key is required.[/bold]\n\n"
+        "DjinnBot uses OpenRouter for:\n"
+        "  - Semantic memory (embeddings via text-embedding-3-small)\n"
+        "  - Query reranking (via gpt-4o-mini)\n"
+        "  - Access to all major LLM models (Claude, GPT, Gemini, etc.)\n\n"
+        "Get a key at: [cyan]https://openrouter.ai/keys[/cyan]\n"
     )
 
+    existing_key = get_env_value(env_path, "OPENROUTER_API_KEY")
+    if existing_key:
+        console.print(
+            f"[green]OpenRouter key already set in .env[/green] [dim]({existing_key[:8]}...)[/dim]"
+        )
+        change = typer.confirm("Replace existing key?", default=False)
+        if not change:
+            console.print("[dim]Keeping existing key[/dim]")
+            return "openrouter"
+
+    openrouter_key = typer.prompt(
+        "Enter your OpenRouter API key",
+        hide_input=True,
+    )
+
+    if not openrouter_key or not openrouter_key.strip():
+        console.print(
+            "[yellow]No key provided. The semantic memory system will not work "
+            "without an OpenRouter key.[/yellow]\n"
+            "[dim]Add one later: djinn provider set-key openrouter[/dim]"
+        )
+        return None
+
+    openrouter_key = openrouter_key.strip()
+    set_env_value(env_path, "OPENROUTER_API_KEY", openrouter_key)
+    console.print("[green]OPENROUTER_API_KEY written to .env[/green]")
+
+    # ── Additional provider (optional) ──────────────────────────────
+    console.print(
+        "\n[dim]OpenRouter already provides access to all major models.\n"
+        "You can optionally add a direct API key for another provider\n"
+        "if you prefer direct access (lower latency, no OpenRouter markup).[/dim]\n"
+    )
+
+    add_extra = typer.confirm("Add another provider API key?", default=False)
+    if not add_extra:
+        return "openrouter"
+
+    # Show providers (skip OpenRouter since we already have it)
+    extra_providers = [p for p in SUPPORTED_PROVIDERS if p[0] != "openrouter"]
     table = Table(box=box.SIMPLE, show_header=True, header_style="bold cyan")
     table.add_column("#", style="dim", width=3)
     table.add_column("Provider")
     table.add_column("Description")
-    for i, (pid, name, desc) in enumerate(SUPPORTED_PROVIDERS, 1):
+    for i, (pid, name, desc) in enumerate(extra_providers, 1):
         table.add_row(str(i), name, desc)
     console.print(table)
 
-    console.print("")
-    choice = typer.prompt(
-        "Select a provider (number)",
-        default="1",
-    )
+    choice = typer.prompt("Select a provider (number)", default="1")
 
     try:
         idx = int(choice) - 1
-        if idx < 0 or idx >= len(SUPPORTED_PROVIDERS):
+        if idx < 0 or idx >= len(extra_providers):
             raise ValueError
-        provider_id, provider_name, _ = SUPPORTED_PROVIDERS[idx]
+        provider_id, provider_name, _ = extra_providers[idx]
     except (ValueError, IndexError):
-        console.print("[yellow]Invalid choice, defaulting to OpenRouter[/yellow]")
-        provider_id, provider_name = "openrouter", "OpenRouter"
+        console.print("[yellow]Invalid choice, skipping[/yellow]")
+        return "openrouter"
 
-    console.print(f"\nSelected: [bold]{provider_name}[/bold]")
-
-    api_key = typer.prompt(
+    extra_key = typer.prompt(
         f"Enter your {provider_name} API key",
         hide_input=True,
     )
 
-    if not api_key or not api_key.strip():
-        console.print(
-            "[yellow]No key provided. You can add one later via the dashboard "
-            "or: djinn provider set-key[/yellow]"
-        )
-        return None
+    if extra_key and extra_key.strip():
+        env_key = PROVIDER_ENV_KEYS.get(provider_id)
+        if env_key:
+            set_env_value(env_path, env_key, extra_key.strip())
+            console.print(f"[green]{env_key} written to .env[/green]")
 
-    api_key = api_key.strip()
-
-    # Write to .env for engine/QMDR bootstrap
-    env_key = PROVIDER_ENV_KEYS.get(provider_id)
-    if env_key:
-        set_env_value(env_path, env_key, api_key)
-        console.print(f"[green]{env_key} written to .env[/green]")
-
-    # For OpenRouter, it's also used by QMDR for embeddings/search
-    if provider_id == "openrouter":
-        console.print(
-            "[dim]This key will also power the semantic memory system "
-            "(embeddings via text-embedding-3-small)[/dim]"
-        )
-
-    return provider_id
+    return "openrouter"
 
 
 def step_ask_ssl(ip: str) -> bool:

@@ -409,7 +409,7 @@ install_cli() {
     # Method 1: Try existing pipx
     if command -v pipx &>/dev/null; then
         info "Installing via pipx..."
-        if pipx install djinn-bot-cli --force 2>/dev/null; then
+        if pipx install --force djinn-bot-cli 2>/dev/null; then
             success "djinn-bot-cli installed via pipx"
             _verify_djinn_in_path
             return
@@ -437,13 +437,13 @@ install_cli() {
         return
     fi
 
-    warn "pip install failed. Trying to install pipx as fallback..."
+    warn "pip install failed. Installing pipx as fallback..."
 
     # Method 3: Install pipx, then install via pipx
     _install_pipx
     if command -v pipx &>/dev/null; then
-        info "Retrying with pipx..."
-        if pipx install djinn-bot-cli --force 2>/dev/null; then
+        info "Retrying install with pipx..."
+        if pipx install --force djinn-bot-cli 2>/dev/null; then
             success "djinn-bot-cli installed via pipx"
             _verify_djinn_in_path
             return
@@ -533,6 +533,12 @@ _verify_djinn_in_path() {
 # ── Main ────────────────────────────────────────────────────────────────────
 
 main() {
+    # When piped (curl | bash), stdin is the pipe, not the terminal.
+    # Reopen stdin from /dev/tty so interactive prompts work.
+    if [ ! -t 0 ]; then
+        exec < /dev/tty
+    fi
+
     echo ""
     echo -e "${BOLD}${CYAN}"
     cat << 'BANNER'
