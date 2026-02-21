@@ -17,7 +17,9 @@ WORKDIR /app
 FROM base AS builder
 
 # Copy dependency files first (for caching)
-COPY packages/server/pyproject.toml packages/server/uv.lock* packages/server/README.md ./
+COPY packages/server/pyproject.toml packages/server/uv.lock* ./
+# Create empty README.md (referenced in pyproject.toml but not needed at runtime)
+RUN touch README.md
 
 # Copy application code
 COPY packages/server/app/ app/

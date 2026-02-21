@@ -15,7 +15,7 @@ COPY packages/dashboard/package.json ./packages/dashboard/
 
 # Install all deps (with rollup native binary for musl/alpine)
 RUN npm install
-RUN npm install @rollup/rollup-linux-arm64-musl 2>/dev/null || true
+RUN npm install @rollup/rollup-linux-x64-musl @rollup/rollup-linux-arm64-musl 2>/dev/null || true
 
 # Copy dashboard source
 COPY packages/dashboard ./packages/dashboard
