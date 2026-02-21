@@ -1,6 +1,6 @@
 [project]
 name = "djinn-bot-cli"
-version = "0.2.6"
+version = "0.2.7"
 description = "Python CLI for djinnbot"
 readme = "README.md"
 requires-python = ">=3.11"
