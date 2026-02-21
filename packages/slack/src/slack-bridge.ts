@@ -262,8 +262,9 @@ export class SlackBridge {
    * makes that failure loud rather than silently dropping all output.
    */
   private routeSessionChunk(sessionId: string, chunk: string): void {
-    // Onboarding sessions (onb_*) are never routed through Slack — skip silently.
-    if (sessionId.startsWith('onb_')) return;
+    // Only Slack-originated sessions (slack_*) are routed through Slack.
+    // All other sessions (onb_*, chat_*, etc.) are silently ignored.
+    if (!sessionId.startsWith('slack_')) return;
 
     const location = this.findRuntimeForSession(sessionId);
     if (!location) {

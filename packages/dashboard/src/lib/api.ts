@@ -1144,6 +1144,17 @@ export async function endChatSession(agentId: string, sessionId: string): Promis
   return handleResponse(res, 'Failed to end session');
 }
 
+export async function restartChatSession(agentId: string, sessionId: string): Promise<{
+  sessionId: string;
+  status: string;
+  message?: string;
+}> {
+  const res = await fetch(`${API_BASE}/agents/${agentId}/chat/${sessionId}/restart`, {
+    method: 'POST',
+  });
+  return handleResponse(res, 'Failed to restart session');
+}
+
 export async function getChatSessionStatus(agentId: string, sessionId: string): Promise<{
   sessionId: string;
   status: string;

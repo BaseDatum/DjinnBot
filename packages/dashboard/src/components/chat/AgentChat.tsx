@@ -19,6 +19,7 @@ import {
   sendChatMessage,
   stopChatResponse,
   getChatSession,
+  restartChatSession,
 } from '@/lib/api';
 import {
   Send,
@@ -27,6 +28,7 @@ import {
   WifiOff,
   AlertCircle,
   StopCircle,
+  RotateCcw,
 } from 'lucide-react';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -64,13 +66,29 @@ export function AgentChat({
   const abortControllerRef = useRef<AbortController | null>(null);
   const historyLoadedRef = useRef(false);
 
-  // ── Streaming via shared hook ──────────────────────────────────────────────
+  // Message queue state — declared before useChatStream so callbacks can reference them.
+  const queuedMessageRef = useRef<string | null>(null);
+  const [hasQueuedMessage, setHasQueuedMessage] = useState(false);
+  // Ref to sendMessageDirect so the onTurnEnd callback can call it without stale closure.
+  const sendMessageDirectRef = useRef<((msg: string) => Promise<void>) | null>(null);
 
   const chatStream = useChatStream({
     sessionId,
     enabled: sessionStatus !== 'idle' && sessionStatus !== 'stopping',
     onTurnEnd: useCallback(() => {
       setIsResponding(false);
+
+      // Auto-send any queued message
+      if (queuedMessageRef.current) {
+        const queued = queuedMessageRef.current;
+        queuedMessageRef.current = null;
+        setHasQueuedMessage(false);
+
+        // Send after a brief delay to let the turn_end settle
+        setTimeout(() => {
+          sendMessageDirectRef.current?.(queued);
+        }, 50);
+      }
     }, []),
     onSessionComplete: useCallback(() => {
       setIsResponding(false);
@@ -120,8 +138,10 @@ export function AgentChat({
       .then(data => {
         const loaded = expandDbMessages(data.messages);
         setMessagesFromDb(loaded);
-        // Now release any queued SSE events
-        markHistoryLoaded();
+        // Build a set of DB message IDs so markHistoryLoaded can skip
+        // replayed structural SSE events that duplicate DB content.
+        const dbIds = new Set(data.messages.map((m: { id: string }) => m.id));
+        markHistoryLoaded(dbIds);
 
         const status = data.status as string;
         if (status === 'running' || status === 'ready') {
@@ -151,10 +171,10 @@ export function AgentChat({
 
   // ── Messaging ──────────────────────────────────────────────────────────────
 
-  const sendMessage = async () => {
-    if (!inputValue.trim() || isResponding || sessionStatus !== 'running') return;
-    const userMessage = inputValue.trim();
-    setInputValue('');
+  /** Send a message to the agent immediately (not queued). */
+  const sendMessageDirect = async (userMessage: string) => {
+    // Remove queued bubble if this was auto-sent from queue
+    setMessages(prev => prev.filter(m => !m.id.startsWith('queued_')));
     setIsResponding(true);
 
     setMessages(prev => [...prev, {
@@ -184,6 +204,62 @@ export function AgentChat({
     }
   };
 
+  // Keep the ref current so the onTurnEnd callback can call it
+  sendMessageDirectRef.current = sendMessageDirect;
+
+  /** Queue a message to be sent when the current turn ends. */
+  const queueMessage = (userMessage: string) => {
+    queuedMessageRef.current = userMessage;
+    setHasQueuedMessage(true);
+
+    // Show the queued message as a user bubble immediately
+    setMessages(prev => {
+      // Remove any previous queued bubble
+      const filtered = prev.filter(m => !m.id.startsWith('queued_'));
+      return [...filtered, {
+        id: `queued_${Date.now()}`,
+        type: 'user' as const,
+        content: userMessage,
+        timestamp: Date.now(),
+      }];
+    });
+  };
+
+  /** Interrupt current generation and send the new message. */
+  const interruptAndSend = async (userMessage: string) => {
+    // Clear any queued message
+    queuedMessageRef.current = null;
+    setHasQueuedMessage(false);
+    // Remove queued bubble if present
+    setMessages(prev => prev.filter(m => !m.id.startsWith('queued_')));
+
+    // Stop current generation
+    abortControllerRef.current?.abort();
+    abortControllerRef.current = null;
+    stopChatResponse(agentId, sessionId).catch(console.error);
+    setIsResponding(false);
+
+    // Brief delay to let the abort propagate
+    await new Promise(resolve => setTimeout(resolve, 100));
+
+    // Send the new message
+    await sendMessageDirect(userMessage);
+  };
+
+  /** Primary send handler — routes to direct send, queue, or no-op based on state. */
+  const sendMessage = async () => {
+    if (!inputValue.trim() || sessionStatus !== 'running') return;
+    const userMessage = inputValue.trim();
+    setInputValue('');
+
+    if (!isResponding) {
+      await sendMessageDirect(userMessage);
+    } else {
+      // Queue the message — it will be sent when the current turn ends
+      queueMessage(userMessage);
+    }
+  };
+
   const handleStopResponse = () => {
     abortControllerRef.current?.abort();
     abortControllerRef.current = null;
@@ -194,7 +270,48 @@ export function AgentChat({
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      sendMessage();
+
+      if (e.metaKey || e.ctrlKey) {
+        // Cmd/Ctrl+Enter — interrupt generation and send immediately
+        if (inputValue.trim() && sessionStatus === 'running') {
+          const msg = inputValue.trim();
+          setInputValue('');
+          if (isResponding) {
+            interruptAndSend(msg);
+          } else {
+            sendMessageDirect(msg);
+          }
+        }
+      } else {
+        // Enter — normal send or queue
+        sendMessage();
+      }
+    }
+  };
+
+  // ── Session restart ───────────────────────────────────────────────────────
+
+  const [isRestarting, setIsRestarting] = useState(false);
+
+  const handleRestart = async () => {
+    if (isRestarting) return;
+    setIsRestarting(true);
+    try {
+      await restartChatSession(agentId, sessionId);
+      setSessionStatus('starting');
+      // Reset history gate so the session reloads when the new container is ready
+      historyLoadedRef.current = false;
+      chatStream.resetStreamCursor();
+    } catch (err) {
+      console.error('Failed to restart session:', err);
+      setMessages(prev => [...prev, {
+        id: `error_restart_${Date.now()}`,
+        type: 'error',
+        content: `Failed to restart session: ${err instanceof Error ? err.message : 'Unknown error'}`,
+        timestamp: Date.now(),
+      }]);
+    } finally {
+      setIsRestarting(false);
     }
   };
 
@@ -254,7 +371,22 @@ export function AgentChat({
           </span>
         )}
         {sessionStatus === 'idle' && (
-          <span className="text-xs text-muted-foreground ml-auto">Session ended</span>
+          <div className="flex items-center gap-2 ml-auto">
+            <span className="text-xs text-muted-foreground">Session ended</span>
+            <button
+              onClick={handleRestart}
+              disabled={isRestarting}
+              className="flex items-center gap-1 text-xs text-primary hover:text-primary/80 transition-colors px-2 py-0.5 rounded hover:bg-accent disabled:opacity-50"
+              title="Restart session with a new container"
+            >
+              {isRestarting ? (
+                <Loader2 className="h-3 w-3 animate-spin" />
+              ) : (
+                <RotateCcw className="h-3 w-3" />
+              )}
+              Restart
+            </button>
+          </div>
         )}
         {isResponding && (
           <span className="text-xs text-muted-foreground ml-auto flex items-center gap-1">
@@ -316,12 +448,14 @@ export function AgentChat({
             onKeyDown={handleKeyDown}
             placeholder={
               isReady
-                ? `Message ${agentName}\u2026`
+                ? (isResponding
+                  ? `Type to queue or \u2318Enter to interrupt\u2026`
+                  : `Message ${agentName}\u2026`)
                 : sessionStatus === 'starting'
                   ? 'Waiting for session to start\u2026'
                   : 'Session ended'
             }
-            disabled={!isReady || isResponding}
+            disabled={!isReady}
             className="min-h-[44px] max-h-[160px] resize-none text-base sm:text-sm"
             rows={1}
           />
@@ -348,7 +482,9 @@ export function AgentChat({
         </div>
         <p className="text-[10px] text-muted-foreground mt-1.5">
           {isResponding
-            ? 'Click the red button to stop generation'
+            ? (hasQueuedMessage
+              ? 'Message queued \u2014 will send when agent finishes'
+              : 'Enter to queue \u00B7 \u2318Enter to interrupt \u00B7 Shift+Enter for new line')
             : 'Enter to send \u00B7 Shift+Enter for new line'}
         </p>
       </div>

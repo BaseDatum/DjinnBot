@@ -344,6 +344,83 @@ async def stop_chat_response(
     }
 
 
+@router.post("/agents/{agent_id}/chat/{session_id}/restart")
+async def restart_chat_session(
+    agent_id: str,
+    session_id: str,
+    db: AsyncSession = Depends(get_async_session),
+):
+    """
+    Restart a chat session whose container was reaped or that ended.
+
+    This spins up a new container for an existing session, preserving all
+    message history. The new container will load the conversation history
+    from the database and resume where it left off.
+
+    Only sessions in terminal states (completed, failed, idle) can be restarted.
+    """
+    logger.info(f"restart_chat_session: session={session_id}")
+
+    if not dependencies.redis_client:
+        raise HTTPException(status_code=503, detail="Redis not available")
+
+    # Get session from database
+    result = await db.execute(select(ChatSession).where(ChatSession.id == session_id))
+    session = result.scalar_one_or_none()
+
+    if not session:
+        raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
+
+    if session.agent_id != agent_id:
+        raise HTTPException(
+            status_code=400, detail="Session does not belong to this agent"
+        )
+
+    # Only allow restart from terminal states
+    if session.status in ("running", "starting", "ready"):
+        return ChatSessionResponse(
+            sessionId=session_id,
+            status=session.status,
+            message="Session is already active.",
+        )
+
+    # Reset session state
+    now = now_ms()
+    session.status = "starting"
+    session.completed_at = None
+    session.error = None
+    session.container_id = None
+    session.last_activity_at = now
+    await db.commit()
+
+    # Signal Engine to start a new container via Redis stream
+    try:
+        await dependencies.redis_client.xadd(
+            "djinnbot:events:chat_sessions",
+            {
+                "event": "chat:start",
+                "session_id": session_id,
+                "agent_id": agent_id,
+                "model": session.model,
+            },
+        )
+        logger.info(f"restart_chat_session: published start signal for {session_id}")
+    except Exception as e:
+        logger.error(f"Failed to publish chat:start signal for restart: {e}")
+        session.status = "failed"
+        session.error = f"Failed to restart container: {str(e)}"
+        await db.commit()
+        raise HTTPException(
+            status_code=500, detail=f"Failed to restart session: {str(e)}"
+        )
+
+    return ChatSessionResponse(
+        sessionId=session_id,
+        status="starting",
+        message="Chat session restarting. Container will be ready shortly.",
+    )
+
+
 @router.post("/agents/{agent_id}/chat/{session_id}/end")
 async def end_chat_session(
     agent_id: str,

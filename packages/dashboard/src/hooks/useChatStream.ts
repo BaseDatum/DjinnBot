@@ -102,8 +102,11 @@ export interface UseChatStreamReturn {
   /**
    * Signal that initial history has been loaded from the DB. Any SSE events
    * that arrived before this call are replayed in order.
+   * @param dbMessageIds  Optional set of DB message IDs — replayed structural
+   *   events already represented in these IDs will be skipped to prevent
+   *   duplicate/reordered messages on page refresh.
    */
-  markHistoryLoaded: () => void;
+  markHistoryLoaded: (dbMessageIds?: Set<string>) => void;
 }
 
 export interface DbMessage {
@@ -659,13 +662,44 @@ export function useChatStream({
   );
 
   // ── markHistoryLoaded: replay queued events ───────────────────────────────
-  const markHistoryLoaded = useCallback(() => {
+  /**
+   * @param dbMessageIds  Optional set of message IDs loaded from the DB.
+   *   When provided, queued SSE events whose content is already represented
+   *   in these messages are skipped — preventing the duplicate/reordered
+   *   messages that previously appeared on page refresh.
+   */
+  const markHistoryLoaded = useCallback((dbMessageIds?: Set<string>) => {
     if (historyLoadedRef.current) return;
     historyLoadedRef.current = true;
-    // Replay any events that arrived while we were loading history
+
+    // Replay any events that arrived while we were loading history.
+    // Filter out structural replay events (from XRANGE) that the DB already
+    // has — these are the events that cause duplication on refresh.
     const queued = eventQueueRef.current;
     eventQueueRef.current = [];
+
+    // Structural events that get replayed via XRANGE and would duplicate
+    // messages already loaded from the DB.
+    const REPLAY_STRUCTURAL = new Set([
+      'tool_start', 'tool_end', 'step_start', 'step_end',
+      'turn_end', 'container_ready', 'session_complete', 'response_aborted',
+    ]);
+
     for (const event of queued) {
+      // Always process live events (no stream_id means it came from pub/sub, not XRANGE)
+      if (!event.stream_id) {
+        processEvent(event);
+        continue;
+      }
+
+      // Skip structural replay events when we already have DB messages —
+      // the DB is the source of truth for committed content.
+      if (dbMessageIds && dbMessageIds.size > 0 && REPLAY_STRUCTURAL.has(event.type)) {
+        // Update the cursor so subsequent reconnects start from here
+        lastStreamIdRef.current = event.stream_id;
+        continue;
+      }
+
       processEvent(event);
     }
   }, [processEvent]);

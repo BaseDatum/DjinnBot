@@ -1,9 +1,52 @@
-import { useState, memo } from 'react';
+import { useState, useCallback, memo } from 'react';
 import { MarkdownRenderer } from '@/components/MarkdownRenderer';
 import { ToolCallCard } from '@/components/ToolCallCard';
 import { Badge } from '@/components/ui/badge';
-import { Brain, ChevronDown, ChevronRight, User, Bot, AlertCircle, Info } from 'lucide-react';
+import { Brain, ChevronDown, ChevronRight, User, Bot, AlertCircle, Info, Copy, Check } from 'lucide-react';
 import { cn } from '@/lib/utils';
+
+// ── Copy button helper ────────────────────────────────────────────────────────
+
+function CopyButton({ getText, className }: { getText: () => string; className?: string }) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = useCallback(async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      await navigator.clipboard.writeText(getText());
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // Fallback for non-secure contexts
+      const ta = document.createElement('textarea');
+      ta.value = getText();
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    }
+  }, [getText]);
+
+  return (
+    <button
+      onClick={handleCopy}
+      className={cn(
+        'opacity-0 group-hover:opacity-100 transition-opacity',
+        'p-1 rounded hover:bg-black/10 dark:hover:bg-white/10',
+        'text-muted-foreground hover:text-foreground',
+        className,
+      )}
+      title={copied ? 'Copied!' : 'Copy message'}
+      aria-label="Copy message content"
+    >
+      {copied ? <Check className="h-3.5 w-3.5 text-green-500" /> : <Copy className="h-3.5 w-3.5" />}
+    </button>
+  );
+}
 
 export interface ChatMessageData {
   id: string;
@@ -46,7 +89,8 @@ export const ChatMessage = memo(function ChatMessage({
   // User message
   if (message.type === 'user') {
     return (
-      <div className="flex gap-3 justify-end">
+      <div className="group flex gap-3 justify-end">
+        <CopyButton getText={() => message.content || ''} className="self-start mt-1" />
         <div className="max-w-[80%] rounded-2xl rounded-tr-sm bg-primary text-primary-foreground px-4 py-2">
           <p className="text-sm whitespace-pre-wrap">{message.content}</p>
         </div>
@@ -64,7 +108,7 @@ export const ChatMessage = memo(function ChatMessage({
       : (message.content || '');
 
     return (
-      <div className="flex gap-3">
+      <div className="group flex gap-3">
         <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/10">
           <Bot className="h-4 w-4 text-primary" />
         </div>
@@ -89,6 +133,7 @@ export const ChatMessage = memo(function ChatMessage({
             )}
           </div>
         </div>
+        {!isStreaming && <CopyButton getText={() => displayContent} className="self-start mt-1" />}
       </div>
     );
   }
@@ -100,7 +145,7 @@ export const ChatMessage = memo(function ChatMessage({
       : (message.content || '');
 
     return (
-      <div className="flex gap-3">
+      <div className="group flex gap-3">
         <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-purple-500/10">
           <Brain className={cn("h-4 w-4 text-purple-500", isStreaming && "animate-pulse")} />
         </div>
@@ -132,6 +177,7 @@ export const ChatMessage = memo(function ChatMessage({
             </div>
           )}
         </div>
+        {!isStreaming && displayContent && <CopyButton getText={() => displayContent} className="self-start mt-0.5" />}
       </div>
     );
   }
@@ -139,7 +185,7 @@ export const ChatMessage = memo(function ChatMessage({
   // Tool call
   if (message.type === 'tool_call') {
     return (
-      <div className="flex gap-3">
+      <div className="group flex gap-3">
         <div className="w-8" /> {/* Spacer for alignment */}
         <div className="flex-1 max-w-[85%]">
           <ToolCallCard
@@ -151,6 +197,17 @@ export const ChatMessage = memo(function ChatMessage({
             status={isStreaming ? 'running' : (message.result ? (message.isError ? 'error' : 'complete') : 'running')}
           />
         </div>
+        {!isStreaming && message.result && (
+          <CopyButton
+            getText={() => {
+              const parts = [`Tool: ${message.toolName || 'unknown'}`];
+              if (message.args) parts.push(`Args: ${JSON.stringify(message.args, null, 2)}`);
+              if (message.result) parts.push(`Result: ${message.result}`);
+              return parts.join('\n');
+            }}
+            className="self-start mt-1"
+          />
+        )}
       </div>
     );
   }
@@ -172,13 +229,14 @@ export const ChatMessage = memo(function ChatMessage({
   // Error message
   if (message.type === 'error') {
     return (
-      <div className="flex gap-3">
+      <div className="group flex gap-3">
         <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-destructive/10">
           <AlertCircle className="h-4 w-4 text-destructive" />
         </div>
         <div className="max-w-[80%] rounded-2xl rounded-tl-sm bg-destructive/10 border border-destructive/20 px-4 py-2">
           <p className="text-sm text-destructive">{message.content}</p>
         </div>
+        <CopyButton getText={() => message.content || ''} className="self-start mt-1" />
       </div>
     );
   }

@@ -13,7 +13,7 @@ import {
   useRef,
   useState,
 } from 'react';
-import { fetchAgents, listChatSessions, endChatSession, startChatSession, type AgentListItem } from '@/lib/api';
+import { fetchAgents, listChatSessions, endChatSession, startChatSession, restartChatSession, type AgentListItem } from '@/lib/api';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -48,6 +48,8 @@ interface ChatSessionContextValue {
   setPaneSessionId: (paneId: string, sessionId: string) => void;
   /** Update session status */
   setPaneStatus: (paneId: string, status: SessionStatus) => void;
+  /** Restart a session whose container was reaped */
+  restartPane: (paneId: string) => void;
   /** Whether the floating widget is open */
   widgetOpen: boolean;
   setWidgetOpen: (open: boolean) => void;
@@ -244,6 +246,37 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
     );
   }, []);
 
+  const restartPane = useCallback((paneId: string) => {
+    const pane = panesRef.current.find(p => p.paneId === paneId);
+    if (!pane || !pane.sessionId) return;
+    if (pane.sessionStatus !== 'idle') return; // Only restart ended sessions
+
+    // Optimistically update to starting
+    setPanes(prev =>
+      prev.map(p =>
+        p.paneId === paneId ? { ...p, sessionStatus: 'starting' } : p,
+      ),
+    );
+
+    restartChatSession(pane.agentId, pane.sessionId)
+      .then(() => {
+        setPanes(prev =>
+          prev.map(p =>
+            p.paneId === paneId ? { ...p, sessionStatus: 'starting' } : p,
+          ),
+        );
+      })
+      .catch(err => {
+        console.error('Failed to restart session:', err);
+        // Revert to idle on failure
+        setPanes(prev =>
+          prev.map(p =>
+            p.paneId === paneId ? { ...p, sessionStatus: 'idle' } : p,
+          ),
+        );
+      });
+  }, []);
+
   return (
     <ChatSessionContext.Provider
       value={{
@@ -255,6 +288,7 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
         hidePane,
         setPaneSessionId,
         setPaneStatus,
+        restartPane,
         widgetOpen,
         setWidgetOpen,
         restored,
