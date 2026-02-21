@@ -341,11 +341,64 @@ _install_python_macos() {
 }
 
 _ensure_pip() {
-    if "$PYTHON" -m pip --version &>/dev/null 2>&1; then return; fi
-    info "Installing pip..."
-    "$PYTHON" -m ensurepip --upgrade 2>/dev/null \
-        || curl -fsSL https://bootstrap.pypa.io/get-pip.py | "$PYTHON" - 2>/dev/null \
-        || warn "Could not install pip. You may need to install it manually."
+    if "$PYTHON" -m pip --version &>/dev/null 2>&1; then
+        success "pip available: $($PYTHON -m pip --version 2>&1)"
+        return
+    fi
+
+    info "pip not found. Installing..."
+
+    # Method 1: Install pip via system package manager (most reliable on Debian/Ubuntu)
+    case "$OS" in
+        linux)
+            case "$DISTRO" in
+                ubuntu|debian|pop|linuxmint|elementary|zorin)
+                    info "Trying apt: python3-pip + python3-venv..."
+                    $SUDO apt-get update -qq 2>/dev/null
+                    $SUDO apt-get install -y -qq python3-pip python3-venv 2>/dev/null
+                    ;;
+                centos|rhel|rocky|almalinux|ol|fedora|amzn)
+                    local pkg_mgr="yum"; command -v dnf &>/dev/null && pkg_mgr="dnf"
+                    info "Trying $pkg_mgr: python3-pip..."
+                    $SUDO $pkg_mgr install -y -q python3-pip 2>/dev/null
+                    ;;
+                arch|manjaro)
+                    info "Trying pacman: python-pip..."
+                    $SUDO pacman -Sy --noconfirm python-pip 2>/dev/null
+                    ;;
+            esac
+            ;;
+    esac
+
+    if "$PYTHON" -m pip --version &>/dev/null 2>&1; then
+        success "pip installed via package manager"
+        return
+    fi
+
+    # Method 2: ensurepip (bundled with Python but stripped on some distros)
+    info "Trying ensurepip..."
+    "$PYTHON" -m ensurepip --upgrade 2>/dev/null
+    if "$PYTHON" -m pip --version &>/dev/null 2>&1; then
+        success "pip installed via ensurepip"
+        return
+    fi
+
+    # Method 3: get-pip.py (last resort, always works if Python is functional)
+    info "Trying get-pip.py..."
+    curl -fsSL https://bootstrap.pypa.io/get-pip.py -o /tmp/get-pip.py
+    "$PYTHON" /tmp/get-pip.py --user 2>/dev/null \
+        || $SUDO "$PYTHON" /tmp/get-pip.py 2>/dev/null
+    rm -f /tmp/get-pip.py
+
+    if "$PYTHON" -m pip --version &>/dev/null 2>&1; then
+        success "pip installed via get-pip.py"
+        return
+    fi
+
+    fatal "Could not install pip. Please install it manually:
+    $PYTHON -m ensurepip --upgrade
+  or:
+    curl -fsSL https://bootstrap.pypa.io/get-pip.py | $PYTHON -"
 }
 
 # ── Install djinn-bot-cli ──────────────────────────────────────────────────
@@ -353,6 +406,7 @@ _ensure_pip() {
 install_cli() {
     step "Installing djinn-bot-cli"
 
+    # Method 1: Try existing pipx
     if command -v pipx &>/dev/null; then
         info "Installing via pipx..."
         if pipx install djinn-bot-cli --force 2>/dev/null; then
@@ -360,16 +414,97 @@ install_cli() {
             _verify_djinn_in_path
             return
         fi
+        warn "pipx install failed, trying pip..."
     fi
 
+    # Method 2: Try pip (--user, then global, then sudo)
     info "Installing via pip..."
-    "$PYTHON" -m pip install --user --upgrade --quiet djinn-bot-cli 2>/dev/null \
-        || "$PYTHON" -m pip install --upgrade --quiet djinn-bot-cli 2>/dev/null \
-        || $SUDO "$PYTHON" -m pip install --upgrade --quiet djinn-bot-cli 2>/dev/null \
-        || fatal "Failed to install djinn-bot-cli. Try: pip install djinn-bot-cli"
+    if "$PYTHON" -m pip install --user --upgrade --quiet djinn-bot-cli 2>/dev/null; then
+        success "djinn-bot-cli installed via pip --user"
+        _verify_djinn_in_path
+        return
+    fi
 
-    success "djinn-bot-cli installed"
-    _verify_djinn_in_path
+    if "$PYTHON" -m pip install --upgrade --quiet djinn-bot-cli 2>/dev/null; then
+        success "djinn-bot-cli installed via pip"
+        _verify_djinn_in_path
+        return
+    fi
+
+    if $SUDO "$PYTHON" -m pip install --upgrade --quiet djinn-bot-cli 2>/dev/null; then
+        success "djinn-bot-cli installed via sudo pip"
+        _verify_djinn_in_path
+        return
+    fi
+
+    warn "pip install failed. Trying to install pipx as fallback..."
+
+    # Method 3: Install pipx, then install via pipx
+    _install_pipx
+    if command -v pipx &>/dev/null; then
+        info "Retrying with pipx..."
+        if pipx install djinn-bot-cli --force 2>/dev/null; then
+            success "djinn-bot-cli installed via pipx"
+            _verify_djinn_in_path
+            return
+        fi
+    fi
+
+    fatal "Failed to install djinn-bot-cli. Try manually:\n  pipx install djinn-bot-cli\n  or: pip install djinn-bot-cli"
+}
+
+_install_pipx() {
+    if command -v pipx &>/dev/null; then return; fi
+
+    info "Installing pipx..."
+
+    # Try pip first (most portable)
+    "$PYTHON" -m pip install --user --quiet pipx 2>/dev/null && {
+        # Ensure pipx's bin dir is in PATH
+        "$PYTHON" -m pipx ensurepath 2>/dev/null || true
+        export PATH="$HOME/.local/bin:$PATH"
+        if command -v pipx &>/dev/null; then
+            success "pipx installed via pip"
+            return
+        fi
+    }
+
+    # Try system package manager
+    case "$OS" in
+        linux)
+            case "$DISTRO" in
+                ubuntu|debian|pop|linuxmint|elementary|zorin)
+                    $SUDO apt-get install -y -qq pipx 2>/dev/null && {
+                        pipx ensurepath 2>/dev/null || true
+                        export PATH="$HOME/.local/bin:$PATH"
+                    }
+                    ;;
+                centos|rhel|rocky|almalinux|ol|fedora|amzn)
+                    local pkg_mgr="yum"; command -v dnf &>/dev/null && pkg_mgr="dnf"
+                    $SUDO $pkg_mgr install -y -q pipx 2>/dev/null && {
+                        pipx ensurepath 2>/dev/null || true
+                        export PATH="$HOME/.local/bin:$PATH"
+                    }
+                    ;;
+                arch|manjaro)
+                    $SUDO pacman -Sy --noconfirm python-pipx 2>/dev/null && {
+                        pipx ensurepath 2>/dev/null || true
+                        export PATH="$HOME/.local/bin:$PATH"
+                    }
+                    ;;
+            esac
+            ;;
+        macos)
+            if command -v brew &>/dev/null; then
+                brew install pipx 2>/dev/null && {
+                    pipx ensurepath 2>/dev/null || true
+                }
+            fi
+            ;;
+    esac
+
+    command -v pipx &>/dev/null && success "pipx installed" \
+        || warn "Could not install pipx"
 }
 
 _verify_djinn_in_path() {

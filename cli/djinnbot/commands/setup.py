@@ -554,21 +554,37 @@ def step_provider_key(env_path: Path) -> Optional[str]:
     return provider_id
 
 
-def step_ask_ssl() -> bool:
-    """Ask if the user wants SSL setup."""
-    console.print(Panel("[bold]Step 7: SSL/TLS Configuration[/bold]"))
+def step_ask_ssl(ip: str) -> bool:
+    """Ask if the user wants SSL setup. Gates on having a domain first."""
+    console.print(Panel("[bold]SSL/TLS Configuration[/bold]"))
 
     console.print(
         "[bold]SSL is strongly recommended for production deployments.[/bold]\n\n"
-        "With SSL enabled, DjinnBot will:\n"
+        "SSL requires a domain name with a DNS A record pointing to this\n"
+        f"server's public IP address ({ip}).\n\n"
+        "For example, if you own [cyan]example.com[/cyan], you would create:\n"
+        f"  [cyan]djinn.example.com[/cyan]  A  [cyan]{ip}[/cyan]\n\n"
+        "You need access to your domain's DNS settings to do this.\n"
+    )
+
+    has_domain = typer.confirm(
+        "Do you have a domain name pointed at this server?",
+        default=False,
+    )
+
+    if not has_domain:
+        console.print(
+            "\n[dim]No problem — you can set up SSL later by re-running: "
+            "djinn setup[/dim]\n"
+            "[dim]DjinnBot will work over plain HTTP in the meantime.[/dim]"
+        )
+        return False
+
+    console.print(
+        "\nWith SSL enabled, DjinnBot will:\n"
         "  - Serve the dashboard and API over HTTPS\n"
         "  - Automatically obtain and renew certificates via Let's Encrypt\n"
         "  - Redirect all HTTP traffic to HTTPS\n"
-        "  - Use Traefik as a reverse proxy (separate Docker stack)\n\n"
-        "[bold]Requirements:[/bold]\n"
-        "  - A domain name pointing to this server (A record)\n"
-        "  - Ports 80 and 443 accessible from the internet\n"
-        "  - Access to your domain's DNS provider to create the A record\n"
     )
 
     return typer.confirm("Set up SSL with automatic certificates?", default=True)
@@ -1074,7 +1090,7 @@ def setup(
     use_proxy = image_mode == "prebuilt"
 
     if not skip_ssl:
-        ssl_enabled = step_ask_ssl()
+        ssl_enabled = step_ask_ssl(ip)
     use_proxy = use_proxy or ssl_enabled
 
     # ── Step 6: Port check ──────────────────────────────────────────
