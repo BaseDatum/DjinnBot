@@ -747,6 +747,39 @@ export async function updateAgentConfig(agentId: string, config: AgentConfig): P
   return handleResponse(res, 'Failed to update agent config');
 }
 
+// ── Work Ledger / Coordination API ────────────────────────────────────────
+
+export interface WorkLockEntry {
+  key: string;
+  sessionId: string;
+  description: string;
+  acquiredAt: number;
+  ttlSeconds: number;
+  remainingSeconds: number;
+}
+
+export interface WorkLedgerResponse {
+  agentId: string;
+  locks: WorkLockEntry[];
+  count: number;
+}
+
+export async function fetchAgentWorkLedger(agentId: string): Promise<WorkLedgerResponse> {
+  const res = await authFetch(`${API_BASE}/agents/${agentId}/work-ledger`);
+  return handleResponse(res, 'Failed to fetch work ledger');
+}
+
+export interface WakeStatsResponse {
+  agentId: string;
+  wakesToday: number;
+  date: string;
+}
+
+export async function fetchAgentWakeStats(agentId: string): Promise<WakeStatsResponse> {
+  const res = await authFetch(`${API_BASE}/agents/${agentId}/wake-stats`);
+  return handleResponse(res, 'Failed to fetch wake stats');
+}
+
 // ── Inbox API ─────────────────────────────────────────────────────────────
 
 // Types now imported from @/types/inbox

@@ -25,6 +25,17 @@ const MessageAgentParamsSchema = Type.Object({
 });
 type MessageAgentParams = Static<typeof MessageAgentParamsSchema>;
 
+const WakeAgentParamsSchema = Type.Object({
+  to: Type.String({ description: 'Agent ID to wake immediately' }),
+  message: Type.String({ description: 'Message explaining why they need to wake up now' }),
+  reason: Type.Union([
+    Type.Literal('user_request'),
+    Type.Literal('blocker'),
+    Type.Literal('critical_finding'),
+  ], { description: 'Why this warrants an immediate wake-up (not just a normal inbox message)' }),
+});
+type WakeAgentParams = Static<typeof WakeAgentParamsSchema>;
+
 const SlackDmParamsSchema = Type.Object({
   message: Type.String({ description: 'Message to send' }),
   urgent: Type.Optional(Type.Boolean({ default: false })),
@@ -53,11 +64,18 @@ export interface MessagingToolsConfig {
 export function createMessagingTools(config: MessagingToolsConfig): AgentTool[] {
   const { publisher, requestIdRef, vaultPath } = config;
 
+  // Per-session rate limit for wake_agent (max 3 per session)
+  let wakeCount = 0;
+  const MAX_WAKES_PER_SESSION = 3;
+
   return [
-    // === Messaging (Fire-and-forget via Redis) ===
+    // === message_agent — Normal inbox delivery (checked on next pulse) ===
     {
       name: 'message_agent',
-      description: 'Send a message to another agent',
+      description:
+        'Send a message to another agent\'s inbox. They will see it on their next scheduled pulse. ' +
+        'Use for: status updates, FYI messages, non-blocking review requests, general collaboration. ' +
+        'For truly urgent things that need immediate attention, use wake_agent instead.',
       label: 'message_agent',
       parameters: MessageAgentParamsSchema,
       execute: async (
@@ -76,7 +94,71 @@ export function createMessagingTools(config: MessagingToolsConfig): AgentTool[] 
           messageType: p.type || 'info',
         };
         await publisher.publishEvent(event as any);
-        return { content: [{ type: 'text', text: `Message sent to ${p.to}` }], details: {} };
+        return {
+          content: [{
+            type: 'text',
+            text: `Message sent to ${p.to}'s inbox. They'll see it on their next pulse wake-up.`,
+          }],
+          details: {},
+        };
+      },
+    },
+
+    // === wake_agent — Immediate wake with message (triggers pulse NOW) ===
+    {
+      name: 'wake_agent',
+      description:
+        'Immediately wake another agent by triggering a pulse session with your message. ' +
+        'This is EXPENSIVE — it spins up a container and runs an LLM session. ' +
+        'Only use when: (1) a user explicitly requested something be done now, ' +
+        '(2) you are blocked and need the other agent to unblock you immediately, or ' +
+        '(3) you found a critical issue that needs immediate attention. ' +
+        'Rate limited to 3 calls per session. For non-urgent communication, use message_agent instead.',
+      label: 'wake_agent',
+      parameters: WakeAgentParamsSchema,
+      execute: async (
+        _toolCallId: string,
+        params: unknown,
+        _signal?: AbortSignal,
+        _onUpdate?: AgentToolUpdateCallback<VoidDetails>
+      ): Promise<AgentToolResult<VoidDetails>> => {
+        const p = params as WakeAgentParams;
+
+        // Enforce per-session rate limit
+        if (wakeCount >= MAX_WAKES_PER_SESSION) {
+          return {
+            content: [{
+              type: 'text',
+              text:
+                `Rate limit reached: you have already used wake_agent ${MAX_WAKES_PER_SESSION} times this session. ` +
+                `Use message_agent to send a normal inbox message instead.`,
+            }],
+            details: {},
+          };
+        }
+
+        wakeCount++;
+
+        // Send as urgent agentMessage — the engine-side handler publishes a wake notification
+        const event: Omit<AgentMessageEvent, 'timestamp'> = {
+          type: 'agentMessage',
+          requestId: requestIdRef.current,
+          to: p.to,
+          message: `[WAKE: ${p.reason}] ${p.message}`,
+          priority: 'urgent',
+          messageType: p.reason === 'blocker' ? 'unblock' : p.reason === 'user_request' ? 'help_request' : 'info',
+        };
+        await publisher.publishEvent(event as any);
+        return {
+          content: [{
+            type: 'text',
+            text:
+              `Wake signal sent to ${p.to} (reason: ${p.reason}). ` +
+              `They will be woken immediately if not already active and within their wake budget. ` +
+              `(${MAX_WAKES_PER_SESSION - wakeCount} wake calls remaining this session)`,
+          }],
+          details: {},
+        };
       },
     },
 

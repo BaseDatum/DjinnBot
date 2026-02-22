@@ -19,6 +19,7 @@ import {
   Plug,
   ChevronRight,
   Wrench,
+  GitMerge,
 } from 'lucide-react';
 import { ProviderModelSelector } from '@/components/ui/ProviderModelSelector';
 import { useState, useEffect, useCallback } from 'react';
@@ -38,6 +39,7 @@ import { AgentPulseTab } from '@/components/agents/AgentPulseTab';
 import { AgentSkillsTab } from '@/components/skills/AgentSkillsTab';
 import { AgentChannelsTab } from '@/components/channels/AgentChannelsTab';
 import { BuiltInToolsTab } from '@/components/agents/BuiltInToolsTab';
+import { AgentCoordinationTab } from '@/components/agents/AgentCoordinationTab';
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '@/components/ui/collapsible';
 import { NestedSidebar } from '@/components/layout/NestedSidebar';
 import type { NestedSidebarItem } from '@/components/layout/NestedSidebar';
@@ -65,9 +67,9 @@ interface MemoryFile {
   preview: string | null;
 }
 
-type TabKey = 'persona' | 'projects' | 'memory' | 'graph' | 'inbox' | 'activity' | 'sessions' | 'sandbox' | 'pulse' | 'channels' | 'settings' | 'skills' | 'tools';
+type TabKey = 'persona' | 'projects' | 'memory' | 'graph' | 'inbox' | 'activity' | 'sessions' | 'sandbox' | 'pulse' | 'coordination' | 'channels' | 'settings' | 'skills' | 'tools';
 
-const VALID_TABS: TabKey[] = ['persona', 'projects', 'memory', 'graph', 'inbox', 'activity', 'sessions', 'sandbox', 'pulse', 'channels', 'settings', 'skills', 'tools'];
+const VALID_TABS: TabKey[] = ['persona', 'projects', 'memory', 'graph', 'inbox', 'activity', 'sessions', 'sandbox', 'pulse', 'coordination', 'channels', 'settings', 'skills', 'tools'];
 
 export const Route = createFileRoute('/agents/$agentId')({
   validateSearch: (search: Record<string, unknown>) => ({
@@ -167,6 +169,7 @@ function AgentDetailPage() {
     { key: 'skills', label: 'Skills', icon: Zap },
     { key: 'tools', label: 'Tools', icon: Wrench },
     { key: 'pulse', label: 'Pulse', icon: Radio },
+    { key: 'coordination', label: 'Coordination', icon: GitMerge },
     { key: 'channels', label: 'Channels', icon: Plug },
     { key: 'settings', label: 'Settings', icon: Settings },
   ];
@@ -524,6 +527,17 @@ function AgentDetailPage() {
               agentId={agentId}
               config={config}
               onConfigChange={setConfig}
+            />
+          </div>
+        )}
+
+        {/* Coordination Tab */}
+        {activeTab === 'coordination' && (
+          <div className="max-w-5xl mx-auto">
+            <AgentCoordinationTab
+              agentId={agentId}
+              config={config}
+              onConfigChange={handleConfigChange}
             />
           </div>
         )}

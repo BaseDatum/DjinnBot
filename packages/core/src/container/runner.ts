@@ -19,6 +19,10 @@ export interface ContainerRunnerConfig {
   onThinkingChunk?: (agentId: string, runId: string, stepId: string, chunk: string) => void;
   onToolCallStart?: (agentId: string, runId: string, stepId: string, toolName: string, toolCallId: string, args: Record<string, unknown>) => void;
   onToolCallEnd?: (agentId: string, runId: string, stepId: string, toolName: string, toolCallId: string, result: string, isError: boolean, durationMs: number) => void;
+  /** Called when an agent sends a message to another agent via the message_agent tool. */
+  onMessageAgent?: (agentId: string, runId: string, stepId: string, to: string, message: string, priority: string, messageType: string) => Promise<string>;
+  /** Called when an agent sends a Slack DM to the user via the slack_dm tool. */
+  onSlackDm?: (agentId: string, runId: string, stepId: string, message: string, urgent: boolean) => Promise<string>;
 }
 
 /**
@@ -333,6 +337,25 @@ export class ContainerRunner implements AgentRunner {
 
             case 'thinking':
               this.config.onThinkingChunk?.(agentId, runId, stepId, msg.thinking);
+              break;
+
+            case 'agentMessage':
+              // Route inter-agent messages to the inbox so they're not lost
+              if (this.config.onMessageAgent) {
+                this.config.onMessageAgent(
+                  agentId, runId, stepId,
+                  msg.to, msg.message, msg.priority, msg.messageType
+                ).catch(err => console.error(`[ContainerRunner] Failed to route agentMessage:`, err));
+              }
+              break;
+
+            case 'slackDm':
+              if (this.config.onSlackDm) {
+                this.config.onSlackDm(
+                  agentId, runId, stepId,
+                  msg.message, msg.urgent
+                ).catch(err => console.error(`[ContainerRunner] Failed to route slackDm:`, err));
+              }
               break;
           }
         });

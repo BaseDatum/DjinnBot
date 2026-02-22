@@ -97,6 +97,20 @@ export class AgentInbox {
     return id ?? '';
   }
 
+  /**
+   * Publish a wake notification to trigger an immediate pulse for the target agent.
+   * Used when a high/urgent priority message is sent.
+   */
+  async publishWake(agentId: string, from: string, priority: string, messageType: string, messageId: string): Promise<void> {
+    const channel = `djinnbot:agent:${agentId}:wake`;
+    const payload = JSON.stringify({ from, priority, messageType, messageId, timestamp: Date.now() });
+    try {
+      await this.redis.publish(channel, payload);
+    } catch (err) {
+      console.error(`[AgentInbox] Failed to publish wake for ${agentId}:`, err);
+    }
+  }
+
   async getUnread(agentId: string): Promise<InboxMessage[]> {
     const lastReadId = await this.redis.get(this.getLastReadKey(agentId));
     const startId = lastReadId ? this.incrementMessageId(lastReadId) : '0';

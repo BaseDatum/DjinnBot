@@ -1,5 +1,6 @@
 import type { AgentTool } from '@mariozechner/pi-agent-core';
 import type { RedisPublisher } from '../redis/publisher.js';
+import type { RedisClient } from '../redis/client.js';
 import type { RequestIdRef } from './runner.js';
 import { createStepControlTools } from './djinnbot-tools/step-control.js';
 import { createMemoryTools } from './djinnbot-tools/memory.js';
@@ -14,12 +15,17 @@ import { createPulseTasksTools } from './djinnbot-tools/pulse-tasks.js';
 import { createSecretsTools } from './djinnbot-tools/secrets.js';
 import { createSlackTools } from './djinnbot-tools/slack.js';
 import { createSpawnExecutorTools } from './djinnbot-tools/spawn-executor.js';
+import { createWorkLedgerTools } from './djinnbot-tools/work-ledger.js';
 
 export interface DjinnBotToolsConfig {
   publisher: RedisPublisher;
+  /** Redis client for direct operations (work ledger, coordination). */
+  redis: RedisClient;
   /** Mutable ref — tools read `.current` at call time, no need to recreate tools per turn. */
   requestIdRef: RequestIdRef;
   agentId: string;
+  /** Session ID for this container instance — used by work ledger for lock ownership. */
+  sessionId: string;
   vaultPath: string;
   sharedPath: string;
   /** Absolute path to the agents directory — used for skill registry. */
@@ -57,7 +63,7 @@ export interface DjinnBotToolsConfig {
 
 export function createDjinnBotTools(config: DjinnBotToolsConfig): AgentTool[] {
   const {
-    publisher, requestIdRef, agentId, vaultPath, sharedPath,
+    publisher, redis, requestIdRef, agentId, sessionId, vaultPath, sharedPath,
     onComplete, onFail, apiBaseUrl, pulseColumns,
     isOnboardingSession = false,
   } = config;
@@ -70,6 +76,8 @@ export function createDjinnBotTools(config: DjinnBotToolsConfig): AgentTool[] {
     ...createMemoryGraphTools({ publisher, agentId, vaultPath }),
 
     ...createMessagingTools({ publisher, requestIdRef, vaultPath }),
+
+    ...createWorkLedgerTools({ redis, agentId, sessionId }),
 
     ...createResearchTools(),
 

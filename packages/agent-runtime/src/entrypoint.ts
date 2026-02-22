@@ -24,6 +24,7 @@ async function main(): Promise<void> {
   // Create agent runner with mounted paths
   const runner = new ContainerAgentRunner({
     publisher,
+    redis,
     agentId: process.env.AGENT_ID || 'unknown',
     workspacePath: config.workspacePath,
     vaultPath: process.env.CLAWVAULT_PERSONAL || process.env.VAULT_PATH || '/home/agent/clawvault/personal',
