@@ -439,7 +439,7 @@ async def cancel_run(run_id: str, session: AsyncSession = Depends(get_async_sess
 @router.post("/{run_id}/restart")
 async def restart_run(
     run_id: str,
-    req: RestartRunRequest,
+    req: RestartRunRequest | None = None,
     session: AsyncSession = Depends(get_async_session),
 ):
     """Restart an entire run from scratch."""
@@ -469,7 +469,7 @@ async def restart_run(
             started_at=None,
             completed_at=None,
             retry_count=0,
-            human_context=req.context,
+            human_context=req.context if req else None,
         )
     )
 
@@ -477,7 +477,7 @@ async def restart_run(
     run.status = "pending"
     run.updated_at = now
     run.completed_at = None
-    run.human_context = req.context
+    run.human_context = req.context if req else None
 
     await session.flush()
 
@@ -644,7 +644,7 @@ async def resume_run(run_id: str, session: AsyncSession = Depends(get_async_sess
 async def restart_step(
     run_id: str,
     step_id: str,
-    req: RestartStepRequest,
+    req: RestartStepRequest | None = None,
     session: AsyncSession = Depends(get_async_session),
 ):
     """Restart a specific step with optional human context."""
@@ -680,7 +680,7 @@ async def restart_step(
     step.error = None
     step.started_at = None
     step.completed_at = None
-    step.human_context = req.context
+    step.human_context = req.context if req else None
 
     # Update run status to running if it was completed or failed
     if run.status in ("completed", "failed"):
