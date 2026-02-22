@@ -20,8 +20,15 @@ COPY packages/dashboard/package.json ./packages/dashboard/
 # Install all deps then force-install rollup musl binary for current arch.
 # npm has a known bug with optional deps (npm/cli#4828) - the separate
 # --force install ensures the native binary actually lands in node_modules.
+# Only install the binary matching the target arch to avoid --force corrupting
+# other binaries (vite was being unlinked on arm64 when both were installed).
+ARG TARGETARCH
 RUN npm install && \
-    npm install --force @rollup/rollup-linux-x64-musl @rollup/rollup-linux-arm64-musl 2>/dev/null; \
+    if [ "${TARGETARCH}" = "arm64" ]; then \
+      npm install --force @rollup/rollup-linux-arm64-musl 2>/dev/null; \
+    else \
+      npm install --force @rollup/rollup-linux-x64-musl 2>/dev/null; \
+    fi; \
     ls node_modules/@rollup/ || true
 
 # Copy dashboard source
