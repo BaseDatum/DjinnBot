@@ -34,6 +34,22 @@ const VISION_CAPABLE_PROVIDERS = new Set([
 ]);
 
 /**
+ * Detect whether a model id refers to a reasoning/thinking model based on
+ * naming conventions used by major providers.  When `inferModelForProvider`
+ * copies capabilities from a sibling that predates reasoning support, this
+ * heuristic ensures the inferred model still gets `reasoning: true` so that
+ * pi-agent-core requests thinking tokens and emits `thinking_delta` events.
+ *
+ * Known patterns:
+ *  - xAI: grok-*-reasoning, grok-*-fast-reasoning
+ *  - OpenAI: o1*, o3*, o4*
+ *  - Google: gemini-*-thinking*
+ *  - DeepSeek: deepseek-reasoner, deepseek-*-r1*
+ */
+const REASONING_MODEL_PATTERN =
+  /[-/]reasoning|^o[134]-|[-/]thinking|[-/]reasoner$|[-/]r1/i;
+
+/**
  * Ensure a model from a vision-capable provider includes "image" in its
  * input array.  Returns the model as-is if it already supports images,
  * or a shallow copy with the corrected input array.
@@ -173,6 +189,17 @@ export function inferModelForProvider(provider: string, modelId: string): Model<
   // array for providers where we know modern models support vision.
   if (VISION_CAPABLE_PROVIDERS.has(provider) && !siblingProps.input.includes('image')) {
     siblingProps.input = ['text', 'image'] as any;
+  }
+
+  // Force reasoning: true when the model id indicates it supports reasoning.
+  // Sibling models that predate reasoning will have reasoning: false, causing
+  // pi-agent-core to skip thinking tokens entirely (GitHub issue #2).
+  if (!siblingProps.reasoning && REASONING_MODEL_PATTERN.test(modelId)) {
+    siblingProps.reasoning = true;
+    console.info(
+      `[ModelResolver] Forcing reasoning: true for "${provider}/${modelId}" ` +
+      `(model id matches reasoning pattern).`,
+    );
   }
 
   // opencode.ai requires max_tokens, not max_completion_tokens.
