@@ -71,6 +71,7 @@ services:
       - AUTH_TOTP_ISSUER=${AUTH_TOTP_ISSUER:-DjinnBot}
       - SECRET_ENCRYPTION_KEY=${SECRET_ENCRYPTION_KEY:-}
       - CORS_ORIGINS=${CORS_ORIGINS:-*}
+      - DJINNBOT_VERSION=${DJINNBOT_VERSION:-latest}
     volumes:
       - djinnbot-data:/data
       - ./pipelines:/pipelines
@@ -161,6 +162,9 @@ services:
       - ./skills:/skills:ro
       - ./mcp:/data/mcp
       - /var/run/docker.sock:/var/run/docker.sock
+      # Compose files mounted for self-update (engine runs docker compose from /compose)
+      - ./docker-compose.ghcr.yml:/compose/docker-compose.ghcr.yml:ro
+      - ./.env:/compose/.env
     networks:
       - djinnbot_default
     depends_on:

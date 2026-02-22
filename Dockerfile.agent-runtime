@@ -219,6 +219,10 @@ RUN test -f /app/node_modules/.bin/clawvault && \
 # but will be REPLACED by a symlink at container startup (see manager.ts Cmd)
 RUN mkdir -p /workspace /vault /shared /home/agent
 
+# Version injected at build time by CI (git tag)
+ARG BUILD_VERSION=dev
+ENV DJINNBOT_BUILD_VERSION=${BUILD_VERSION}
+
 # Environment
 ENV NODE_ENV=production
 ENV WORKSPACE_PATH=/workspace

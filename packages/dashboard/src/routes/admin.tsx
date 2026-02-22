@@ -88,11 +88,14 @@ function AdminPage() {
   const [users, setUsers] = useState<UserItem[]>([]);
   const [pendingItems, setPendingItems] = useState<PendingItem[]>([]);
   const [loading, setLoading] = useState(true);
-  const [sharedProviders, setSharedProviders] = useState<Array<{id: string; adminUserId: string; providerId: string; targetUserId: string | null; createdAt: number}>>([]);
+  const [sharedProviders, setSharedProviders] = useState<Array<{id: string; adminUserId: string; providerId: string; targetUserId: string | null; createdAt: number; expiresAt?: number | null; allowedModels?: string[] | null; dailyLimit?: number | null}>>([]);
   const [runtimeImage, setRuntimeImage] = useState('');
   const [runtimeSaving, setRuntimeSaving] = useState(false);
   const [newShareProvider, setNewShareProvider] = useState('');
   const [newShareUser, setNewShareUser] = useState('');
+  const [newShareExpiry, setNewShareExpiry] = useState('');
+  const [newShareModels, setNewShareModels] = useState('');
+  const [newShareDailyLimit, setNewShareDailyLimit] = useState('');
   const [sharingLoading, setShareLoading] = useState(false);
   const [providerOptions, setProviderOptions] = useState<ComboboxOption[]>([]);
   const [userOptions, setUserOptions] = useState<ComboboxOption[]>([]);
@@ -645,17 +648,56 @@ function AdminPage() {
                     searchPlaceholder="Search by name or email..."
                   />
                 </div>
+              </div>
+              <div className="flex gap-2 items-end">
+                <div className="flex-1 space-y-1">
+                  <Label className="text-xs">Expires</Label>
+                  <Input
+                    type="date"
+                    value={newShareExpiry}
+                    onChange={(e) => setNewShareExpiry(e.target.value)}
+                    className="h-8 text-xs"
+                  />
+                </div>
+                <div className="flex-1 space-y-1">
+                  <Label className="text-xs">Allowed Models</Label>
+                  <Input
+                    type="text"
+                    value={newShareModels}
+                    onChange={(e) => setNewShareModels(e.target.value)}
+                    placeholder="e.g. claude-sonnet-4, gpt-4o"
+                    className="h-8 text-xs font-mono"
+                  />
+                </div>
+                <div className="w-24 space-y-1">
+                  <Label className="text-xs">Daily Limit</Label>
+                  <Input
+                    type="number"
+                    value={newShareDailyLimit}
+                    onChange={(e) => setNewShareDailyLimit(e.target.value)}
+                    placeholder="No limit"
+                    className="h-8 text-xs"
+                  />
+                </div>
                 <Button
                   size="sm"
                   disabled={!newShareProvider.trim()}
                   onClick={async () => {
                     try {
+                      const expiresAt = newShareExpiry ? new Date(newShareExpiry).getTime() : null;
+                      const allowedModels = newShareModels.trim()
+                        ? newShareModels.split(',').map(m => m.trim()).filter(Boolean)
+                        : null;
+                      const dailyLimit = newShareDailyLimit ? parseInt(newShareDailyLimit, 10) : null;
                       const res = await authFetch(`${API_BASE}/admin/shared-providers`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
                           providerId: newShareProvider.trim(),
                           targetUserId: newShareUser.trim() || null,
+                          expiresAt,
+                          allowedModels,
+                          dailyLimit: dailyLimit && !isNaN(dailyLimit) ? dailyLimit : null,
                         }),
                       });
                       if (!res.ok) {
@@ -666,6 +708,9 @@ function AdminPage() {
                       setSharedProviders((prev) => [data, ...prev]);
                       setNewShareProvider('');
                       setNewShareUser('');
+                      setNewShareExpiry('');
+                      setNewShareModels('');
+                      setNewShareDailyLimit('');
                       toast.success('Provider shared');
                     } catch (err: any) {
                       toast.error(err?.message || 'Failed to share');
@@ -688,10 +733,11 @@ function AdminPage() {
             ) : (
               <div className="border rounded-lg overflow-hidden">
                 <table className="w-full text-sm">
-                  <thead className="bg-muted/50">
+                   <thead className="bg-muted/50">
                     <tr>
                       <th className="text-left px-4 py-2 font-medium">Provider</th>
                       <th className="text-left px-4 py-2 font-medium">Target</th>
+                      <th className="text-left px-4 py-2 font-medium">Restrictions</th>
                       <th className="text-right px-4 py-2 font-medium">Actions</th>
                     </tr>
                   </thead>
@@ -701,14 +747,36 @@ function AdminPage() {
                       const targetLabel = sp.targetUserId
                         ? userOptions.find((u) => u.value === sp.targetUserId)?.label ?? sp.targetUserId
                         : null;
+                      const isExpired = sp.expiresAt && sp.expiresAt < Date.now();
                       return (
-                      <tr key={sp.id} className="hover:bg-muted/30">
+                      <tr key={sp.id} className={`hover:bg-muted/30 ${isExpired ? 'opacity-50' : ''}`}>
                         <td className="px-4 py-2 text-xs">
                           <span className="font-medium">{providerLabel}</span>
                           <span className="text-muted-foreground ml-1 font-mono">({sp.providerId})</span>
                         </td>
                         <td className="px-4 py-2 text-xs">
                           {targetLabel || <span className="text-blue-500">All users</span>}
+                        </td>
+                        <td className="px-4 py-2 text-xs space-y-0.5">
+                          {isExpired && (
+                            <span className="text-red-500 font-medium">Expired</span>
+                          )}
+                          {sp.expiresAt && !isExpired && (
+                            <div className="text-muted-foreground">
+                              Expires {new Date(sp.expiresAt).toLocaleDateString()}
+                            </div>
+                          )}
+                          {sp.allowedModels && sp.allowedModels.length > 0 && (
+                            <div className="text-muted-foreground">
+                              {sp.allowedModels.length} model{sp.allowedModels.length !== 1 ? 's' : ''}
+                            </div>
+                          )}
+                          {sp.dailyLimit && (
+                            <div className="text-muted-foreground">{sp.dailyLimit}/day</div>
+                          )}
+                          {!sp.expiresAt && !sp.allowedModels?.length && !sp.dailyLimit && (
+                            <span className="text-muted-foreground">None</span>
+                          )}
                         </td>
                         <td className="px-4 py-2 text-right">
                           <button

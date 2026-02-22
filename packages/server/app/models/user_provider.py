@@ -12,6 +12,7 @@ from sqlalchemy import (
     String,
     Text,
     Boolean,
+    Integer,
     BigInteger,
     Index,
     ForeignKey,
@@ -91,6 +92,12 @@ class AdminSharedProvider(Base):
         nullable=True,
     )
     created_at: Mapped[int] = mapped_column(BigInteger, nullable=False)
+
+    # Granularity controls (all optional — NULL = no restriction)
+    expires_at: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
+    # JSON array of model IDs, e.g. '["claude-sonnet-4", "claude-haiku-3-5"]'
+    allowed_models: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    daily_limit: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
 
 
 class UserSecretGrant(Base):

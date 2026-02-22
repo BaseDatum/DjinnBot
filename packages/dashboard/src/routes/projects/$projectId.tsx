@@ -24,6 +24,7 @@ import { TeamPanel } from '@/components/projects/TeamPanel';
 import { RepositorySettings } from '@/components/projects/RepositorySettings';
 import { SlackSettings } from '@/components/projects/SlackSettings';
 import { KeyUserSettings } from '@/components/projects/KeyUserSettings';
+import { VisionSettings } from '@/components/projects/VisionSettings';
 import { ProjectActivityFeed, type ActivityEntry } from '@/components/projects/ProjectActivityFeed';
 import { DependencyGraph } from '@/components/DependencyGraph';
 import { GanttChart } from '@/components/GanttChart';
@@ -403,6 +404,11 @@ function ProjectBoardPage() {
         {view === 'settings' && (
           <div className="flex-1 p-4 md:px-6 overflow-auto">
             <div className="max-w-2xl mx-auto space-y-6">
+              <VisionSettings
+                projectId={projectId}
+                currentVision={project.vision ?? null}
+                onUpdate={loadProject}
+              />
               <RepositorySettings
                 projectId={projectId}
                 currentRepoUrl={project.repository}

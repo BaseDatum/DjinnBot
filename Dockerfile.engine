@@ -146,6 +146,16 @@ ENV PATH="${GOPATH}/bin:${PATH}"
 # Detect architecture for downloads
 ARG TARGETARCH
 
+# Install Docker CLI + Compose plugin (for self-update via Docker socket)
+RUN install -m 0755 -d /etc/apt/keyrings && \
+    curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc && \
+    chmod a+r /etc/apt/keyrings/docker.asc && \
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian bookworm stable" | \
+      tee /etc/apt/sources.list.d/docker.list > /dev/null && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends docker-ce-cli docker-compose-plugin && \
+    rm -rf /var/lib/apt/lists/*
+
 # Install GitHub CLI (gh)
 RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg && \
     chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg && \
@@ -286,6 +296,8 @@ RUN echo "=== Core Languages ===" && \
     dust --version && \
     yq --version && \
     jq --version && \
+    docker --version && \
+    docker compose version && \
     echo "=== Network Tools ===" && \
     curl --version | head -1 && \
     wget --version | head -1 && \
@@ -296,6 +308,10 @@ RUN echo "=== Core Languages ===" && \
     sqlite3 --version && \
     convert --version | head -1 && \
     echo "=== All tools verified! ==="
+
+# Version injected at build time by CI (git tag)
+ARG BUILD_VERSION=dev
+ENV DJINNBOT_BUILD_VERSION=${BUILD_VERSION}
 
 ENV NODE_ENV=production
 ENV REDIS_URL=redis://localhost:6379

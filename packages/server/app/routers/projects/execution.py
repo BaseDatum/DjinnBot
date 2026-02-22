@@ -23,6 +23,7 @@ from app import dependencies
 from app.utils import now_ms, gen_id
 from app.logging_config import get_logger
 from app.github_helper import github_helper
+from app.auth.dependencies import get_current_user, AuthUser
 from ._common import (
     get_project_or_404,
     get_task_or_404,
@@ -44,6 +45,8 @@ class ExecuteTaskRequest(BaseModel):
     workflowId: Optional[str] = None  # Override the task's assigned workflow
     pipelineId: Optional[str] = None  # Direct pipeline override
     context: Optional[str] = None  # Additional context for the run
+    modelOverride: Optional[str] = None  # Override agent/pipeline model for this run
+    keyUserId: Optional[str] = None  # Override whose API keys to use (user ID)
 
 
 class ClaimTaskRequest(BaseModel):
@@ -95,6 +98,8 @@ async def _execute_single_task(
     task: Task,
     pipeline_id: str,
     context: Optional[str] = None,
+    initiated_by_user_id: Optional[str] = None,
+    model_override: Optional[str] = None,
 ) -> dict:
     """Execute a single task by creating a run and updating task status.
 
@@ -124,6 +129,8 @@ async def _execute_single_task(
         status="pending",
         outputs="{}",
         human_context=context,
+        initiated_by_user_id=initiated_by_user_id,
+        model_override=model_override,
         created_at=now,
         updated_at=now,
     )
@@ -429,6 +436,7 @@ async def execute_task(
     task_id: str,
     req: ExecuteTaskRequest,
     session: AsyncSession = Depends(get_async_session),
+    user: AuthUser = Depends(get_current_user),
 ):
     """Execute a task by starting a pipeline run for it."""
     logger.debug(
@@ -490,9 +498,19 @@ async def execute_task(
             status_code=404, detail=f"Pipeline '{pipeline_id}' not found"
         )
 
+    # Determine who initiated this run: explicit keyUserId override > current user > None
+    # Engine/service callers (pulse tools) have is_service=True and store None.
+    initiated_by = req.keyUserId or (user.id if not user.is_service else None)
+
     # Execute the task using shared helper
     result = await _execute_single_task(
-        session, project_id, task, pipeline_id, req.context
+        session,
+        project_id,
+        task,
+        pipeline_id,
+        req.context,
+        initiated_by_user_id=initiated_by,
+        model_override=req.modelOverride,
     )
 
     return {"status": "executing", **result}
@@ -503,6 +521,7 @@ async def execute_ready_tasks(
     project_id: str,
     max_tasks: int = 5,
     session: AsyncSession = Depends(get_async_session),
+    user: AuthUser = Depends(get_current_user),
 ):
     """Execute all ready tasks in a project (up to max_tasks).
 
@@ -608,9 +627,15 @@ async def execute_ready_tasks(
             continue
 
         # Execute the task using shared helper
+        initiated_by = user.id if not user.is_service else None
         try:
             result = await _execute_single_task(
-                session, project_id, task, pipeline_id, context=None
+                session,
+                project_id,
+                task,
+                pipeline_id,
+                context=None,
+                initiated_by_user_id=initiated_by,
             )
             executed.append(result)
 

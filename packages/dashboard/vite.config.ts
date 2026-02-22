@@ -17,5 +17,6 @@ export default defineConfig({
   // Defaults to empty string so relative paths work for local dev without nginx.
   define: {
     __API_URL__: JSON.stringify(process.env.VITE_API_URL ?? ''),
+    __APP_VERSION__: JSON.stringify(process.env.VITE_APP_VERSION ?? 'dev'),
   },
 });

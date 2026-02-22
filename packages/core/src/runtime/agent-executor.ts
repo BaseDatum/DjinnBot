@@ -37,6 +37,8 @@ export interface AgentExecutorConfig {
   apiBaseUrl?: string;
   /** Lookup the default model from an agent's config.yml (via AgentRegistry). */
   getAgentDefaultModel?: (agentId: string) => string | undefined;
+  /** Lookup a run-level model override (set via dashboard task execution). */
+  getRunModelOverride?: (runId: string) => string | undefined | Promise<string | undefined>;
 }
 
 // Abstract interface for running agent sessions
@@ -108,6 +110,7 @@ export class AgentExecutor {
   private lifecycleTracker?: AgentLifecycleTracker;
   private sessionPersister?: import('../sessions/session-persister.js').SessionPersister;
   private getAgentDefaultModel?: (agentId: string) => string | undefined;
+  private getRunModelOverride?: AgentExecutorConfig['getRunModelOverride'];
 
   constructor(config: AgentExecutorConfig) {
     this.eventBus = config.eventBus;
@@ -129,6 +132,7 @@ export class AgentExecutor {
     this.lifecycleTracker = config.lifecycleTracker;
     this.sessionPersister = config.sessionPersister;
     this.getAgentDefaultModel = config.getAgentDefaultModel;
+    this.getRunModelOverride = config.getRunModelOverride;
     
     // Initialize structured output runner
     this.structuredRunner = new StructuredOutputRunner({
@@ -180,8 +184,10 @@ export class AgentExecutor {
     agentConfig: AgentConfig,
     pipeline: PipelineConfig,
     agentId: string,
+    runModelOverride?: string,
   ): string {
     return (
+      runModelOverride ??
       stepConfig.model ??
       agentConfig.model ??
       pipeline.defaults.model ??
@@ -427,6 +433,11 @@ export class AgentExecutor {
         });
       }
 
+      // Resolve userId and model override early — needed by both structured output
+      // and normal agent paths for per-user provider key resolution and model selection.
+      const userId = this.getRunUserId ? await this.getRunUserId(runId) : undefined;
+      const runModelOverride = this.getRunModelOverride ? await this.getRunModelOverride(runId) : undefined;
+
       // Check if this step uses structured output
       if (stepConfig.outputSchema) {
         console.log(`[AgentExecutor] Using structured output for step ${stepId}`);
@@ -444,12 +455,13 @@ export class AgentExecutor {
         const result = await this.structuredRunner.run({
           runId,
           stepId: stepConfig.id,
-          model: this.resolveStepModel(stepConfig, agentConfig, pipeline, agentId),
+          model: this.resolveStepModel(stepConfig, agentConfig, pipeline, agentId, runModelOverride),
           systemPrompt,
           userPrompt,
           outputSchema: stepConfig.outputSchema,
           outputMethod: stepConfig.outputMethod,
           timeout: (stepConfig.timeoutSeconds ?? pipeline.defaults.timeoutSeconds ?? 300) * 1000,
+          userId,
         });
 
         console.log(`[AgentExecutor] Structured output result: success=${result.success}, hasData=${!!result.data}, error=${result.error || 'none'}`);
@@ -515,9 +527,9 @@ export class AgentExecutor {
       const workspacesDir = process.env.WORKSPACES_DIR || '/data/workspaces';
       workspacePath = `${workspacesDir}/${agentId}`;
 
-      // Get projectId and userId once — used for workspace setup and per-user key resolution
+      // Get projectId — used for workspace setup. userId is already resolved above
+      // (before the structured output check) for per-user key resolution.
       const projectId = this.getRunProjectId ? await this.getRunProjectId(runId) : undefined;
-      const userId = this.getRunUserId ? await this.getRunUserId(runId) : undefined;
 
       if (this.workspaceManager) {
         try {
@@ -596,7 +608,7 @@ export class AgentExecutor {
           runId,
           stepId,
           agentId,
-          model: this.resolveStepModel(stepConfig, agentConfig, pipeline, agentId),
+          model: this.resolveStepModel(stepConfig, agentConfig, pipeline, agentId, runModelOverride),
           thinkingLevel: agentConfig.thinkingLevel,
           systemPrompt,
           userPrompt,

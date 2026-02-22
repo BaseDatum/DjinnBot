@@ -207,6 +207,25 @@ export function FloatingChatWidget() {
     };
   }, []);
 
+  // Re-clamp FAB position on mount and whenever the viewport is resized so the
+  // button never ends up outside the visible area (e.g. after a window resize or
+  // when a previously-saved position is loaded on a different screen size).
+  useEffect(() => {
+    const reclaim = () => {
+      const pos = fabPosRef.current;
+      if (!pos) return;
+      const clamped = clamp(pos.x, pos.y);
+      if (clamped.x !== pos.x || clamped.y !== pos.y) {
+        fabPosRef.current = clamped;
+        setFabPos(clamped);
+        try { localStorage.setItem(FAB_POSITION_KEY, JSON.stringify(clamped)); } catch {}
+      }
+    };
+    reclaim(); // run once after first render when fabRef is populated
+    window.addEventListener('resize', reclaim);
+    return () => window.removeEventListener('resize', reclaim);
+  }, [clamp]);
+
   // Attach global mouse listeners once on mount so they are always active during a drag.
   // This avoids the previous bug where the useEffect only ran after isDragging became true
   // (which required a 500 ms long-press), meaning quick drags never saved their position.
@@ -344,31 +363,42 @@ export function FloatingChatWidget() {
     const fabH = fabEl ? fabEl.offsetHeight : 44;
     const fabW = fabEl ? fabEl.offsetWidth : 120;
 
-    const spaceBelow = window.innerHeight - (fabPos.y + fabH);
-    const spaceAbove = fabPos.y;
+    const MARGIN = 8; // minimum gap from every viewport edge
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+
+    const dW = drawerSize.w;
+    // Effective drawer height — never taller than the viewport (minus margins).
+    const dH = Math.min(drawerSize.h, vh - MARGIN * 2);
+
+    const spaceBelow = vh - (fabPos.y + fabH) - GAP - MARGIN;
+    const spaceAbove = fabPos.y - GAP - MARGIN;
 
     let top: number | 'auto' = 'auto';
     let bottom: number | 'auto' = 'auto';
 
-    const dW = drawerSize.w;
-    const dH = drawerSize.h;
-
-    if (spaceBelow >= dH + GAP || spaceBelow >= spaceAbove) {
-      // Open below
-      top = fabPos.y + fabH + GAP;
+    if (spaceBelow >= dH || spaceBelow >= spaceAbove) {
+      // Open below — clamp so the bottom edge doesn't leave the viewport
+      top = Math.min(fabPos.y + fabH + GAP, vh - dH - MARGIN);
     } else {
-      // Open above
-      bottom = window.innerHeight - fabPos.y + GAP;
+      // Open above — clamp so the top edge doesn't leave the viewport
+      const rawBottom = vh - fabPos.y + GAP;
+      bottom = Math.min(rawBottom, vh - MARGIN);
+      // Ensure the drawer doesn't clip above the top edge either
+      const impliedTop = vh - bottom - dH;
+      if (impliedTop < MARGIN) {
+        bottom = vh - MARGIN - dH;
+      }
     }
 
     // Horizontal: try to align left edge of drawer with left edge of FAB,
     // then clamp so drawer doesn't overflow either side.
     let left = fabPos.x;
     // If FAB is in the right half, right-align instead for a cleaner look
-    if (fabPos.x + fabW / 2 > window.innerWidth / 2) {
+    if (fabPos.x + fabW / 2 > vw / 2) {
       left = fabPos.x + fabW - dW;
     }
-    left = Math.max(8, Math.min(window.innerWidth - dW - 8, left));
+    left = Math.max(MARGIN, Math.min(vw - dW - MARGIN, left));
 
     return {
       position: 'fixed',
@@ -377,8 +407,8 @@ export function FloatingChatWidget() {
       bottom: bottom !== 'auto' ? bottom : 'auto',
       left,
       right: 'auto',
-      maxHeight: Math.min(dH, window.innerHeight - 16),
-      height: Math.min(dH, window.innerHeight - 16),
+      maxHeight: dH,
+      height: dH,
     };
   };
 

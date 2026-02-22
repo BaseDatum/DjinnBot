@@ -40,6 +40,11 @@ class Project(Base, TimestampWithCompletedMixin):
     slack_notify_user_id: Mapped[Optional[str]] = mapped_column(
         String(64), nullable=True
     )
+    # Project vision — a living markdown document that describes the project's
+    # goals, architecture, constraints, and current priorities.  Editable by users
+    # at any time in the dashboard; agents read it before starting work via
+    # the get_project_vision tool.
+    vision: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     # Multi-user: DjinnBot user whose API keys are used for automated runs
     # (pipeline steps, pulse sessions) in this project. When NULL, the system
     # falls back to instance-level keys.

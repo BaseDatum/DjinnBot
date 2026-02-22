@@ -18,6 +18,11 @@ const GetReadyTasksParamsSchema = Type.Object({
 });
 type GetReadyTasksParams = Static<typeof GetReadyTasksParamsSchema>;
 
+const GetProjectVisionParamsSchema = Type.Object({
+  projectId: Type.String({ description: 'Project ID to get the vision for' }),
+});
+type GetProjectVisionParams = Static<typeof GetProjectVisionParamsSchema>;
+
 // ── Types ──────────────────────────────────────────────────────────────────
 
 interface VoidDetails {}
@@ -148,6 +153,52 @@ export function createPulseProjectsTools(config: PulseProjectsToolsConfig): Agen
           };
         } catch (err) {
           return { content: [{ type: 'text', text: `Error fetching ready tasks: ${err instanceof Error ? err.message : String(err)}` }], details: {} };
+        }
+      },
+    },
+
+    {
+      name: 'get_project_vision',
+      description:
+        'Get the project vision document — a living markdown document maintained by the project ' +
+        'owner that describes the project\'s goals, architecture, constraints, and current priorities. ' +
+        'ALWAYS call this before starting work on a project to ensure your work aligns with the ' +
+        'project\'s direction. The vision may be updated at any time by the user.',
+      label: 'get_project_vision',
+      parameters: GetProjectVisionParamsSchema,
+      execute: async (
+        _toolCallId: string,
+        params: unknown,
+        signal?: AbortSignal,
+      ): Promise<AgentToolResult<VoidDetails>> => {
+        const p = params as GetProjectVisionParams;
+        const apiBase = getApiBase();
+        try {
+          const url = `${apiBase}/v1/projects/${p.projectId}/vision`;
+          const response = await authFetch(url, { signal });
+          if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+          const data = (await response.json()) as any;
+          const vision = data.vision || '';
+
+          if (!vision) {
+            return {
+              content: [{
+                type: 'text',
+                text: 'No project vision has been set for this project. Proceed using the task descriptions and your best judgment.',
+              }],
+              details: {},
+            };
+          }
+
+          return {
+            content: [{
+              type: 'text',
+              text: `## Project Vision\n\n${vision}`,
+            }],
+            details: {},
+          };
+        } catch (err) {
+          return { content: [{ type: 'text', text: `Error fetching project vision: ${err instanceof Error ? err.message : String(err)}` }], details: {} };
         }
       },
     },

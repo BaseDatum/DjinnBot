@@ -9,6 +9,7 @@ import {
   Play,
   CheckCircle2,
   Zap,
+  Key,
 } from 'lucide-react';
 import {
   fetchTask,
@@ -23,6 +24,9 @@ import {
 import { PRIORITY_COLORS } from './constants';
 import type { Task, TaskDetail, Pipeline } from './types';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
+import { useAuth } from '@/hooks/useAuth';
+import { API_BASE } from '@/lib/api';
+import { authFetch } from '@/lib/auth';
 
 interface TaskDetailPanelProps {
   task: Task;
@@ -52,6 +56,10 @@ export function TaskDetailPanel({
   const [selectedPipeline, setSelectedPipeline] = useState<string>('');
   const [projectDefaultPipeline, setProjectDefaultPipeline] = useState<string>('');
   const [confirmAction, setConfirmAction] = useState<{ title: string; desc: string; action: () => void } | null>(null);
+  const [keyUserOverride, setKeyUserOverride] = useState<string>('');
+  const [modelOverride, setModelOverride] = useState<string>('');
+  const [userOptions, setUserOptions] = useState<Array<{ value: string; label: string }>>([]);
+  const { user } = useAuth();
 
   useEffect(() => {
     setLoading(true);
@@ -84,6 +92,25 @@ export function TaskDetailPanel({
       setProjectDefaultPipeline(p.default_pipeline_id || '');
     }).catch(() => {});
   }, [projectId]);
+
+  // Load user options for key user selector
+  useEffect(() => {
+    if (!user) return;
+    const options: Array<{ value: string; label: string }> = [
+      { value: '', label: 'Project default' },
+      { value: user.id, label: `Use my keys (${user.displayName || user.email || 'me'})` },
+    ];
+    if (user.isAdmin) {
+      authFetch(`${API_BASE}/admin/users`).then(r => r.json()).then((users: any[]) => {
+        const extra = users
+          .filter(u => u.id !== user.id)
+          .map(u => ({ value: u.id, label: u.displayName || u.email }));
+        setUserOptions([...options, ...extra]);
+      }).catch(() => setUserOptions(options));
+    } else {
+      setUserOptions(options);
+    }
+  }, [user]);
 
   const handleSave = async () => {
     setSaving(true);
@@ -148,7 +175,11 @@ export function TaskDetailPanel({
   const handleExecute = async () => {
     setExecuting(true);
     try {
-      await executeTask(projectId, task.id, selectedPipeline ? { pipelineId: selectedPipeline } : undefined);
+      const execData: Record<string, string> = {};
+      if (selectedPipeline) execData.pipelineId = selectedPipeline;
+      if (modelOverride) execData.modelOverride = modelOverride;
+      if (keyUserOverride) execData.keyUserId = keyUserOverride;
+      await executeTask(projectId, task.id, Object.keys(execData).length > 0 ? execData : undefined);
       onUpdated();
       // Refresh detail
       const updated = await fetchTask(projectId, task.id);
@@ -268,22 +299,50 @@ export function TaskDetailPanel({
 
             {/* Execute */}
             {detail && ['ready', 'backlog', 'planning'].includes(detail.status) && (
-              <div className="border rounded-lg p-3 bg-muted/30">
-                <label className="text-xs text-muted-foreground block mb-2">Execute Task</label>
-                <select
-                  value={selectedPipeline}
-                  onChange={(e) => setSelectedPipeline(e.target.value)}
-                  className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs mb-2"
-                >
-                  <option value="">
-                    Use project default{projectDefaultPipeline ? ` (${pipelines.find(p => p.id === projectDefaultPipeline)?.name || projectDefaultPipeline})` : ''}
-                  </option>
-                  {pipelines.map((p: Pipeline) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name || p.id}{p.id === projectDefaultPipeline ? ' ⭐' : ''}
+              <div className="border rounded-lg p-3 bg-muted/30 space-y-2">
+                <label className="text-xs text-muted-foreground block">Execute Task</label>
+                <div>
+                  <label className="text-[10px] text-muted-foreground block mb-0.5">Pipeline</label>
+                  <select
+                    value={selectedPipeline}
+                    onChange={(e) => setSelectedPipeline(e.target.value)}
+                    className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs"
+                  >
+                    <option value="">
+                      Use project default{projectDefaultPipeline ? ` (${pipelines.find(p => p.id === projectDefaultPipeline)?.name || projectDefaultPipeline})` : ''}
                     </option>
-                  ))}
-                </select>
+                    {pipelines.map((p: Pipeline) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name || p.id}{p.id === projectDefaultPipeline ? ' *' : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-[10px] text-muted-foreground flex items-center gap-1 mb-0.5">
+                    <Key className="h-2.5 w-2.5" />
+                    API Keys
+                  </label>
+                  <select
+                    value={keyUserOverride}
+                    onChange={(e) => setKeyUserOverride(e.target.value)}
+                    className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs"
+                  >
+                    {userOptions.map(opt => (
+                      <option key={opt.value} value={opt.value}>{opt.label}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-[10px] text-muted-foreground block mb-0.5">Model Override</label>
+                  <input
+                    type="text"
+                    value={modelOverride}
+                    onChange={(e) => setModelOverride(e.target.value)}
+                    placeholder="e.g. anthropic/claude-sonnet-4 (leave empty for default)"
+                    className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs font-mono"
+                  />
+                </div>
                 <Button
                   size="sm"
                   onClick={handleExecute}

@@ -967,15 +967,24 @@ async def get_all_provider_keys(
     user_providers = {row.provider_id: row for row in result.scalars().all()}
 
     # 2. Load admin-shared provider grants for this user (specific + broadcast)
+    #    Filter out expired shares.
+    from app.utils import now_ms as _now_ms
+
+    _now = _now_ms()
     result = await session.execute(
         select(AdminSharedProvider).where(
             or_(
                 AdminSharedProvider.target_user_id == user_id,
                 AdminSharedProvider.target_user_id == None,  # broadcast
-            )
+            ),
+            or_(
+                AdminSharedProvider.expires_at == None,
+                AdminSharedProvider.expires_at > _now,
+            ),
         )
     )
-    shared_provider_ids = {row.provider_id for row in result.scalars().all()}
+    shared_rows = list(result.scalars().all())
+    shared_provider_ids = {row.provider_id for row in shared_rows}
 
     # 3. Load instance-level provider configs (needed for admin-shared keys)
     result = await session.execute(select(ModelProvider))
@@ -1018,7 +1027,16 @@ async def get_all_provider_keys(
 
         # Priority 3: NOTHING — strict mode, no instance fallback
 
-    return {"keys": keys, "extra": extra}
+    # Build model restriction map from shared grants that have allowed_models set
+    model_restrictions: Dict[str, list] = {}
+    for share in shared_rows:
+        if share.allowed_models and share.provider_id in keys:
+            try:
+                model_restrictions[share.provider_id] = json.loads(share.allowed_models)
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+    return {"keys": keys, "extra": extra, "model_restrictions": model_restrictions}
 
 
 # Providers with a live /v1/models endpoint (OpenAI-compatible).

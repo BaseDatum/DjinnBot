@@ -187,6 +187,7 @@ async def get_project(
         "slack_notify_user_id": project.slack_notify_user_id,
         "key_user_id": project.key_user_id,
         "onboarding_context": project.onboarding_context,
+        "vision": project.vision,
         "created_at": project.created_at,
         "updated_at": project.updated_at,
         "completed_at": project.completed_at,
@@ -379,3 +380,51 @@ async def set_project_key_user(
     project.updated_at = now_ms()
     await session.commit()
     return {"status": "updated", "key_user_id": project.key_user_id}
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# PROJECT VISION (living markdown document)
+# ══════════════════════════════════════════════════════════════════════════
+
+
+class VisionRequest(BaseModel):
+    vision: str
+
+
+@router.get("/{project_id}/vision")
+async def get_project_vision(
+    project_id: str, session: AsyncSession = Depends(get_async_session)
+):
+    """Get the project vision document.
+
+    Returns the markdown vision text that describes the project's goals,
+    architecture, constraints, and current priorities.  Agents call this
+    before starting work to align with the project's direction.
+    """
+    project = await get_project_or_404(session, project_id)
+    return {"vision": project.vision or ""}
+
+
+@router.put("/{project_id}/vision")
+async def update_project_vision(
+    project_id: str,
+    req: VisionRequest,
+    session: AsyncSession = Depends(get_async_session),
+):
+    """Set or update the project vision document.
+
+    The vision is a living markdown document editable by the project owner
+    at any time.  Agents read it via the get_project_vision tool before
+    starting work on tasks.
+    """
+    project = await get_project_or_404(session, project_id)
+    project.vision = req.vision or None
+    project.updated_at = now_ms()
+    await session.commit()
+
+    await _publish_event(
+        "PROJECT_VISION_UPDATED",
+        {"projectId": project_id},
+    )
+
+    return {"status": "updated"}

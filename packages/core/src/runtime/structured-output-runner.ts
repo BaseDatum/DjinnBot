@@ -31,6 +31,8 @@ export interface StructuredOutputOptions {
   outputMethod?: 'response_format' | 'tool_use';
   timeout?: number;
   temperature?: number;
+  /** DjinnBot user ID for per-user provider key resolution. */
+  userId?: string;
 }
 
 export interface StructuredOutputResult {
@@ -124,8 +126,10 @@ export class StructuredOutputRunner {
    * Run a structured output request using response_format (default) or tool_use fallback.
    */
   async run(options: StructuredOutputOptions): Promise<StructuredOutputResult> {
-    // Inject DB-stored API keys into process.env before resolving model/key
-    await this.injectProviderApiKeys();
+    // Inject DB-stored API keys into process.env before resolving model/key.
+    // Pass userId so per-user key resolution is applied when the run is scoped
+    // to a specific user.
+    await this.injectProviderApiKeys(options.userId);
 
     const method = options.outputMethod || 'response_format';
     

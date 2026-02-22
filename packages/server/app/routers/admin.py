@@ -84,6 +84,10 @@ class ShareProviderRequest(BaseModel):
     providerId: str
     # NULL = share with all users (broadcast)
     targetUserId: Optional[str] = None
+    # Granularity controls
+    expiresAt: Optional[int] = None  # Unix ms timestamp — NULL = never expires
+    allowedModels: Optional[list] = None  # e.g. ["claude-sonnet-4", "claude-haiku-3-5"]
+    dailyLimit: Optional[int] = None  # Max requests per day — NULL = unlimited
 
 
 class SharedProviderResponse(BaseModel):
@@ -92,6 +96,9 @@ class SharedProviderResponse(BaseModel):
     providerId: str
     targetUserId: Optional[str]
     createdAt: int
+    expiresAt: Optional[int] = None
+    allowedModels: Optional[list] = None
+    dailyLimit: Optional[int] = None
 
 
 class PendingApprovalItem(BaseModel):
@@ -248,6 +255,8 @@ async def list_shared_providers(
     result = await session.execute(
         select(AdminSharedProvider).order_by(AdminSharedProvider.created_at.desc())
     )
+    import json as _json
+
     return [
         SharedProviderResponse(
             id=row.id,
@@ -255,6 +264,11 @@ async def list_shared_providers(
             providerId=row.provider_id,
             targetUserId=row.target_user_id,
             createdAt=row.created_at,
+            expiresAt=row.expires_at,
+            allowedModels=_json.loads(row.allowed_models)
+            if row.allowed_models
+            else None,
+            dailyLimit=row.daily_limit,
         )
         for row in result.scalars().all()
     ]
@@ -292,6 +306,8 @@ async def share_provider(
             detail="This provider is already shared with this user/broadcast",
         )
 
+    import json as _json
+
     now = now_ms()
     share = AdminSharedProvider(
         id=_gen_id("asp"),
@@ -299,6 +315,9 @@ async def share_provider(
         provider_id=body.providerId,
         target_user_id=body.targetUserId,
         created_at=now,
+        expires_at=body.expiresAt,
+        allowed_models=_json.dumps(body.allowedModels) if body.allowedModels else None,
+        daily_limit=body.dailyLimit,
     )
     session.add(share)
     await session.commit()
@@ -314,6 +333,11 @@ async def share_provider(
         providerId=share.provider_id,
         targetUserId=share.target_user_id,
         createdAt=share.created_at,
+        expiresAt=share.expires_at,
+        allowedModels=_json.loads(share.allowed_models)
+        if share.allowed_models
+        else None,
+        dailyLimit=share.daily_limit,
     )
 
 

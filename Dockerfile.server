@@ -33,6 +33,10 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # Final stage
 FROM python:3.13-slim AS runtime
 
+# Version injected at build time by CI (git tag)
+ARG BUILD_VERSION=dev
+ENV DJINNBOT_BUILD_VERSION=${BUILD_VERSION}
+
 # Install curl for healthcheck and git for repository operations
 RUN apt-get update && apt-get install -y --no-install-recommends curl git && rm -rf /var/lib/apt/lists/*
 

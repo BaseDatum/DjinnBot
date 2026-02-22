@@ -184,6 +184,29 @@ export class ContainerRunner implements AgentRunner {
       ]);
       providerEnvVars = fetchedProviderEnvVars;
 
+      // Record key resolution metadata on the run (non-blocking)
+      const resolvedProviders = Object.keys(providerEnvVars)
+        .filter(k => k.endsWith('_API_KEY') || k.endsWith('_TOKEN'))
+        .map(k => {
+          // Reverse-map env var to provider id for readability
+          for (const [pid, env] of Object.entries(ContainerRunner.PROVIDER_ENV_MAP)) {
+            if (env === k) return pid;
+          }
+          return k;
+        });
+      const apiBase = this.config.apiBaseUrl || process.env.DJINNBOT_API_URL || 'http://api:8000';
+      authFetch(`${apiBase}/v1/runs/${runId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          key_resolution: JSON.stringify({
+            userId: userId ?? null,
+            source: userId ? 'executing_user' : 'system',
+            resolvedProviders,
+          }),
+        }),
+      }).catch(() => {}); // Non-fatal — don't block container creation
+
       const containerConfig: ContainerConfig = {
         runId,
         agentId,

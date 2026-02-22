@@ -261,6 +261,111 @@ async function listenForGlobalEvents(): Promise<void> {
 }
 
 /**
+ * Perform a system update: pull new images and recreate containers.
+ *
+ * The engine container has /var/run/docker.sock mounted and the Docker CLI
+ * installed (see Dockerfile.engine).  The compose file and .env are bind-
+ * mounted at /compose inside the container (see docker-compose.ghcr.yml).
+ *
+ * Steps mirror the CLI `djinn update` command:
+ *   1. Pull compose service images (`docker compose pull`)
+ *   2. Pull the agent-runtime image (spawned dynamically, not in compose)
+ *   3. Recreate all containers (`docker compose up -d --force-recreate`)
+ *
+ * The engine container itself will be replaced during step 3 — Docker
+ * handles this gracefully.
+ */
+async function handleSystemUpdate(targetVersion: string): Promise<void> {
+  const composeDir = '/compose';
+  const agentRuntimeImage = `ghcr.io/basedatum/djinnbot/agent-runtime:${targetVersion}`;
+
+  // Publish progress via Redis
+  const publishProgress = async (stage: string, message: string, error?: boolean) => {
+    if (opsRedis) {
+      const event = {
+        type: 'SYSTEM_UPDATE_PROGRESS',
+        stage,
+        message,
+        error: !!error,
+        timestamp: Date.now(),
+      };
+      await opsRedis.xadd('djinnbot:events:global', { data: JSON.stringify(event) }).catch(() => {});
+    }
+    if (error) {
+      console.error(`[Engine] Update ${stage}: ${message}`);
+    } else {
+      console.log(`[Engine] Update ${stage}: ${message}`);
+    }
+  };
+
+  try {
+    // Step 0: Update DJINNBOT_VERSION in .env if target is a specific version
+    if (targetVersion !== 'latest') {
+      const { readFile, writeFile } = await import('node:fs/promises');
+      const envPath = `${composeDir}/.env`;
+      try {
+        let envContent = await readFile(envPath, 'utf-8');
+        // Replace or add DJINNBOT_VERSION
+        if (/^DJINNBOT_VERSION=/m.test(envContent)) {
+          envContent = envContent.replace(
+            /^DJINNBOT_VERSION=.*$/m,
+            `DJINNBOT_VERSION=${targetVersion}`
+          );
+        } else {
+          envContent += `\nDJINNBOT_VERSION=${targetVersion}\n`;
+        }
+        await writeFile(envPath, envContent);
+        await publishProgress('env', `Set DJINNBOT_VERSION=${targetVersion}`);
+      } catch (err) {
+        await publishProgress('env', `Could not update .env: ${err}`, true);
+        // Non-fatal — compose may still use the default
+      }
+    }
+
+    // Step 1: Pull compose images
+    // The compose file is docker-compose.ghcr.yml (not the default name),
+    // and the project name must match the host's compose project so the
+    // engine finds the correct running containers.
+    const composeArgs = [
+      'compose',
+      '-f', `${composeDir}/docker-compose.ghcr.yml`,
+      '--env-file', `${composeDir}/.env`,
+    ];
+    await publishProgress('pull', 'Pulling compose service images...');
+    await execFileAsync('docker', [...composeArgs, 'pull'], {
+      cwd: composeDir,
+      timeout: 300_000, // 5 min
+    });
+    await publishProgress('pull', 'Compose images pulled');
+
+    // Step 2: Pull agent-runtime image (not in compose)
+    await publishProgress('pull-runtime', `Pulling agent-runtime: ${agentRuntimeImage}`);
+    try {
+      await execFileAsync('docker', ['pull', agentRuntimeImage], { timeout: 300_000 });
+      await publishProgress('pull-runtime', 'Agent-runtime image pulled');
+    } catch (err) {
+      await publishProgress('pull-runtime', `Agent-runtime pull failed (non-fatal): ${err}`, true);
+    }
+
+    // Step 3: Recreate containers
+    await publishProgress('recreate', 'Recreating containers...');
+    // Use spawn instead of execFile for this — the engine container will die mid-execution
+    // but the new one will start. Fire-and-forget with a short delay to let the progress
+    // event propagate.
+    const { spawn } = await import('node:child_process');
+    spawn('docker', [...composeArgs, 'up', '-d', '--force-recreate'], {
+      cwd: composeDir,
+      stdio: 'ignore',
+      detached: true,
+    }).unref();
+
+    await publishProgress('recreate', 'Container recreation started — system will restart momentarily');
+  } catch (err) {
+    await publishProgress('error', `Update failed: ${err}`, true);
+  }
+}
+
+/**
  * Handle a global event
  */
 async function handleGlobalEvent(event: { type: string; agentId?: string; [key: string]: any }): Promise<void> {
@@ -337,6 +442,16 @@ async function handleGlobalEvent(event: { type: string; agentId?: string; [key: 
         );
       }
       break;
+
+    // ── System update ──────────────────────────────────────────────────────
+    case 'SYSTEM_UPDATE_REQUESTED': {
+      const targetVersion = event.targetVersion || 'latest';
+      console.log(`[Engine] System update requested → ${targetVersion}`);
+      handleSystemUpdate(targetVersion).catch((err) =>
+        console.error('[Engine] System update failed:', err)
+      );
+      break;
+    }
 
     // Informational events from API - engine doesn't need to process these
     case 'PROJECT_CREATED':
@@ -878,6 +993,20 @@ async function main(): Promise<void> {
         (globalSettings as any).userSlackId || undefined
       );
       console.log('[Engine] Slack bridge started');
+    }
+
+    // Publish engine version to Redis so the API can report it
+    {
+      const engineVersion = process.env.DJINNBOT_BUILD_VERSION || 'dev';
+      console.log(`[Engine] Version: ${engineVersion}`);
+      const versionClient = new Redis(CONFIG.redisUrl);
+      try {
+        await versionClient.set('djinnbot:engine:version', engineVersion);
+      } catch (e) {
+        console.warn('[Engine] Failed to publish version to Redis:', e);
+      } finally {
+        versionClient.disconnect();
+      }
     }
 
     // Initialize Redis client for listening

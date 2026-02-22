@@ -47,7 +47,7 @@ def upgrade() -> None:
         sa.Column("smtp_port", sa.BigInteger(), nullable=False, server_default="587"),
         sa.Column("smtp_username", sa.String(256), nullable=False, server_default=""),
         sa.Column("smtp_password", sa.Text(), nullable=False, server_default=""),
-        sa.Column("smtp_use_tls", sa.Boolean(), nullable=False, server_default="1"),
+        sa.Column("smtp_use_tls", sa.Boolean(), nullable=False, server_default="true"),
         sa.Column("from_email", sa.String(320), nullable=False, server_default=""),
         sa.Column(
             "from_name", sa.String(256), nullable=False, server_default="DjinnBot"

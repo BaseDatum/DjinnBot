@@ -20,7 +20,7 @@ from typing import Optional, List, Any
 from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from sqlalchemy import select, desc
+from sqlalchemy import select, desc, and_, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_async_session
@@ -78,6 +78,10 @@ class HandoffRequest(BaseModel):
     context_update: Optional[dict] = None
     # Short summary the next agent will be greeted with
     summary: Optional[str] = None
+    # The agent making the request — used as an idempotency guard.
+    # If the current agent has already changed (handoff already succeeded),
+    # a retry is detected and the endpoint returns 200 with status=already_handed_off.
+    from_agent_id: Optional[str] = None
 
 
 class FinalizeRequest(BaseModel):
@@ -288,6 +292,160 @@ async def _stop_agent_container(chat_session_id: str, agent_id: str) -> None:
         )
     except Exception as e:
         logger.warning(f"Failed to stop agent container {chat_session_id}: {e}")
+
+
+# ============================================================================
+# Shared finalization helpers (used by both handoff-to-done and /finalize)
+# ============================================================================
+
+
+async def _create_project_with_columns(
+    db: AsyncSession,
+    project_name: str,
+    description: str,
+    repository: Optional[str],
+    accumulated_ctx: dict,
+    now: int,
+) -> str:
+    """Create a Project row and its default kanban columns. Returns project_id."""
+    project_id = gen_id("proj_")
+    project = Project(
+        id=project_id,
+        name=project_name,
+        description=description if isinstance(description, str) else "",
+        status="active",
+        repository=repository if isinstance(repository, str) else None,
+        onboarding_context=json.dumps(accumulated_ctx),
+        created_at=now,
+        updated_at=now,
+    )
+    db.add(project)
+    await db.flush()
+
+    for col_def in DEFAULT_COLUMNS:
+        col = KanbanColumn(
+            id=gen_id("col_"),
+            project_id=project_id,
+            name=col_def["name"],
+            position=col_def["position"],
+            wip_limit=col_def.get("wip_limit"),
+            task_statuses=json.dumps(col_def["task_statuses"]),
+        )
+        db.add(col)
+
+    return project_id
+
+
+async def _trigger_planning_pipeline(
+    db: AsyncSession,
+    project_id: str,
+    project_name: str,
+    description: str,
+    accumulated_ctx: dict,
+    session_id: str,
+    now: int,
+) -> Optional[str]:
+    """Create a planning Run and dispatch it via Redis. Returns run_id or None."""
+    planning_run_id: Optional[str] = None
+    try:
+        planning_run_id = str(uuid.uuid4())
+        finn_planning_context: Optional[str] = accumulated_ctx.get("planning_context")  # type: ignore
+
+        if finn_planning_context:
+            task_desc = f"Plan project: {project_name}\n\n{finn_planning_context}"
+            additional_context_str = finn_planning_context
+        else:
+            ctx_parts = [f"Plan project: {project_name}"]
+            for key, label in [
+                ("goal", "Goal"),
+                ("target_customer", "Target customer"),
+                ("v1_scope", "V1 scope"),
+                ("tech_preferences", "Tech preferences"),
+                ("timeline", "Timeline"),
+                ("architecture_summary", "Architecture"),
+            ]:
+                if accumulated_ctx.get(key):
+                    ctx_parts.append(f"{label}: {accumulated_ctx[key]}")
+            if description:
+                ctx_parts.append(f"\n{description}")
+            task_desc = "\n".join(ctx_parts)
+            additional_context_str = json.dumps(accumulated_ctx)
+
+        human_context = json.dumps(
+            {
+                "project_id": project_id,
+                "project_name": project_name,
+                "project_description": description
+                if isinstance(description, str)
+                else "",
+                "additional_context": additional_context_str,
+                "planning_run": True,
+                "onboarding_session_id": session_id,
+            }
+        )
+
+        planning_run = Run(
+            id=planning_run_id,
+            pipeline_id="planning",
+            task_description=task_desc,
+            status="pending",
+            outputs="{}",
+            human_context=human_context,
+            created_at=now,
+            updated_at=now,
+        )
+        db.add(planning_run)
+        await db.commit()
+
+        if dependencies.redis_client:
+            await dependencies.redis_client.xadd(
+                "djinnbot:events:new_runs",
+                {"run_id": planning_run_id, "pipeline_id": "planning"},
+            )
+        logger.info(
+            f"Planning pipeline triggered: run={planning_run_id}, project={project_id}"
+        )
+    except Exception as e:
+        logger.warning(
+            f"Failed to trigger planning pipeline for project {project_id}: {e}"
+        )
+
+    return planning_run_id
+
+
+async def _publish_completion_events(
+    session_id: str,
+    project_id: str,
+    project_name: str,
+    planning_run_id: Optional[str],
+    now: int,
+) -> None:
+    """Broadcast PROJECT_CREATED + ONBOARDING_COMPLETED to dashboard SSE."""
+    if not dependencies.redis_client:
+        return
+    try:
+        for event_data in [
+            {
+                "type": "PROJECT_CREATED",
+                "projectId": project_id,
+                "name": project_name,
+                "timestamp": now,
+            },
+            {
+                "type": "ONBOARDING_COMPLETED",
+                "sessionId": session_id,
+                "projectId": project_id,
+                "projectName": project_name,
+                "planningRunId": planning_run_id,
+                "timestamp": now,
+            },
+        ]:
+            await dependencies.redis_client.xadd(
+                "djinnbot:events:global",
+                {"data": json.dumps(event_data)},
+            )
+    except Exception as e:
+        logger.warning(f"Failed to publish onboarding events: {e}")
 
 
 # ============================================================================
@@ -514,6 +672,22 @@ async def resume_onboarding_session(
     if prev_chat_session_id:
         await _stop_agent_container(prev_chat_session_id, onb.current_agent_id)
 
+    # Clean up stale empty assistant placeholders from the previous run.
+    # If the old container was killed before completing its greeting, the
+    # placeholder row lingers with empty content. If the old container is
+    # still alive briefly, it might complete the stale placeholder AFTER
+    # we create a new one — causing a ghost message at the wrong position.
+    # Deleting them here prevents both issues.
+    await db.execute(
+        delete(OnboardingMessage).where(
+            and_(
+                OnboardingMessage.session_id == session_id,
+                OnboardingMessage.role == "assistant",
+                OnboardingMessage.content == "",
+            )
+        )
+    )
+
     # Pre-create a greeting message placeholder for the agent's opening turn.
     # The engine sets currentMessageId from this before firing the proactive step,
     # ensuring the greeting is persisted via /internal/chat/messages/{id}/complete.
@@ -638,6 +812,8 @@ async def send_onboarding_message(
     db.add(user_msg)
 
     # Create a placeholder for the assistant reply (same pattern as chat.py)
+    # Use now+1 so the assistant placeholder always sorts AFTER the user message.
+    # Without this, ORDER BY created_at returns them in undefined order on refresh.
     assistant_msg_id = gen_id("ombm_")
     assistant_msg = OnboardingMessage(
         id=assistant_msg_id,
@@ -647,7 +823,7 @@ async def send_onboarding_message(
         agent_id=onb.current_agent_id,
         agent_name=AGENT_META.get(onb.current_agent_id, {}).get("name"),
         agent_emoji=AGENT_META.get(onb.current_agent_id, {}).get("emoji"),
-        created_at=now,
+        created_at=now + 1,
     )
     db.add(assistant_msg)
 
@@ -704,6 +880,20 @@ async def handoff_onboarding_agent(
     if onb.status != "active":
         raise HTTPException(status_code=400, detail="Session is not active")
 
+    # Idempotency guard: if from_agent_id is provided, verify it still matches
+    # the current agent. If it doesn't, this is a retry of an already-completed
+    # handoff — return success without side effects to prevent double-handoff.
+    if req.from_agent_id and onb.current_agent_id != req.from_agent_id:
+        logger.info(
+            f"Handoff idempotency: session {session_id} already moved from "
+            f"{req.from_agent_id} to {onb.current_agent_id}, skipping duplicate"
+        )
+        return {
+            "status": "already_handed_off",
+            "sessionId": session_id,
+            "currentAgent": onb.current_agent_id,
+        }
+
     now = now_ms()
     prev_agent_id = onb.current_agent_id
     prev_chat_session_id = onb.chat_session_id
@@ -757,32 +947,10 @@ async def handoff_onboarding_agent(
         )
         db.add(completion_msg)
 
-        # Create the project
-        project_id = gen_id("proj_")
-        project = Project(
-            id=project_id,
-            name=project_name,
-            description=description if isinstance(description, str) else "",
-            status="active",
-            repository=repository if isinstance(repository, str) else None,
-            onboarding_context=json.dumps(accumulated_ctx),
-            created_at=now,
-            updated_at=now,
+        # Create project + kanban columns via shared helper
+        project_id = await _create_project_with_columns(
+            db, project_name, description, repository, accumulated_ctx, now
         )
-        db.add(project)
-        await db.flush()
-
-        # Create default kanban columns
-        for col_def in DEFAULT_COLUMNS:
-            col = KanbanColumn(
-                id=gen_id("col_"),
-                project_id=project_id,
-                name=col_def["name"],
-                position=col_def["position"],
-                wip_limit=col_def.get("wip_limit"),
-                task_statuses=json.dumps(col_def["task_statuses"]),
-            )
-            db.add(col)
 
         # Mark session completed
         onb.status = "completed"
@@ -798,97 +966,21 @@ async def handoff_onboarding_agent(
         if prev_chat_session_id:
             await _stop_agent_container(prev_chat_session_id, prev_agent_id)
 
-        # Trigger the planning pipeline with Finn's synthesized context
-        planning_run_id: Optional[str] = None
-        try:
-            planning_run_id = str(uuid.uuid4())
-            finn_planning_context: Optional[str] = accumulated_ctx.get(
-                "planning_context"
-            )  # type: ignore
+        # Trigger planning pipeline via shared helper
+        planning_run_id = await _trigger_planning_pipeline(
+            db,
+            project_id,
+            project_name,
+            description,
+            accumulated_ctx,
+            session_id,
+            now,
+        )
 
-            if finn_planning_context:
-                task_desc = f"Plan project: {project_name}\n\n{finn_planning_context}"
-                additional_context_str = finn_planning_context
-            else:
-                ctx_parts = [f"Plan project: {project_name}"]
-                for key, label in [
-                    ("goal", "Goal"),
-                    ("target_customer", "Target customer"),
-                    ("v1_scope", "V1 scope"),
-                    ("tech_preferences", "Tech preferences"),
-                    ("timeline", "Timeline"),
-                    ("architecture_summary", "Architecture"),
-                ]:
-                    if accumulated_ctx.get(key):
-                        ctx_parts.append(f"{label}: {accumulated_ctx[key]}")
-                task_desc = "\n".join(ctx_parts)
-                additional_context_str = json.dumps(accumulated_ctx)
-
-            human_context = json.dumps(
-                {
-                    "project_id": project_id,
-                    "project_name": project_name,
-                    "project_description": description
-                    if isinstance(description, str)
-                    else "",
-                    "additional_context": additional_context_str,
-                    "planning_run": True,
-                    "onboarding_session_id": session_id,
-                }
-            )
-
-            planning_run = Run(
-                id=planning_run_id,
-                pipeline_id="planning",
-                task_description=task_desc,
-                status="pending",
-                outputs="{}",
-                human_context=human_context,
-                created_at=now,
-                updated_at=now,
-            )
-            db.add(planning_run)
-            await db.commit()
-
-            if dependencies.redis_client:
-                await dependencies.redis_client.xadd(
-                    "djinnbot:events:new_runs",
-                    {"run_id": planning_run_id, "pipeline_id": "planning"},
-                )
-            logger.info(
-                f"Planning pipeline triggered: run={planning_run_id}, project={project_id}"
-            )
-        except Exception as e:
-            logger.warning(
-                f"Failed to trigger planning pipeline for project {project_id}: {e}"
-            )
-
-        # Publish events so the dashboard updates (after planning run is
-        # created so we can include the planningRunId)
-        if dependencies.redis_client:
-            try:
-                for event_data in [
-                    {
-                        "type": "PROJECT_CREATED",
-                        "projectId": project_id,
-                        "name": project_name,
-                        "timestamp": now,
-                    },
-                    {
-                        "type": "ONBOARDING_COMPLETED",
-                        "sessionId": session_id,
-                        "projectId": project_id,
-                        "projectName": project_name,
-                        "planningRunId": planning_run_id,
-                        "timestamp": now,
-                    },
-                ]:
-                    await dependencies.redis_client.xadd(
-                        "djinnbot:events:global",
-                        {"data": json.dumps(event_data)},
-                    )
-            except Exception as e:
-                logger.warning(f"Failed to publish onboarding events: {e}")
+        # Publish events via shared helper
+        await _publish_completion_events(
+            session_id, project_id, project_name, planning_run_id, now
+        )
 
         logger.info(
             f"Onboarding auto-finalized via handoff to 'done': "
@@ -1054,32 +1146,13 @@ async def finalize_onboarding_session(
     if req.context:
         accumulated_ctx.update(req.context)
 
-    # Create the project
-    project_id = gen_id("proj_")
-    project = Project(
-        id=project_id,
-        name=req.project_name,
-        description=req.description or accumulated_ctx.get("summary", ""),
-        status="active",
-        repository=req.repository or accumulated_ctx.get("repo"),
-        onboarding_context=json.dumps(accumulated_ctx),
-        created_at=now,
-        updated_at=now,
-    )
-    db.add(project)
-    await db.flush()
+    description = req.description or accumulated_ctx.get("summary", "")
+    repository = req.repository or accumulated_ctx.get("repo")
 
-    # Create default kanban columns
-    for col_def in DEFAULT_COLUMNS:
-        col = KanbanColumn(
-            id=gen_id("col_"),
-            project_id=project_id,
-            name=col_def["name"],
-            position=col_def["position"],
-            wip_limit=col_def.get("wip_limit"),
-            task_statuses=json.dumps(col_def["task_statuses"]),
-        )
-        db.add(col)
+    # Create project + kanban columns via shared helper
+    project_id = await _create_project_with_columns(
+        db, req.project_name, description, repository, accumulated_ctx, now
+    )
 
     # Mark session completed and link to project
     onb.status = "completed"
@@ -1105,112 +1178,21 @@ async def finalize_onboarding_session(
     if onb.chat_session_id:
         await _stop_agent_container(onb.chat_session_id, onb.current_agent_id)
 
-    # Publish events
-    if dependencies.redis_client:
-        try:
-            for event_data in [
-                {
-                    "type": "PROJECT_CREATED",
-                    "projectId": project_id,
-                    "name": req.project_name,
-                    "timestamp": now,
-                },
-                {
-                    "type": "ONBOARDING_COMPLETED",
-                    "sessionId": session_id,
-                    "projectId": project_id,
-                    "timestamp": now,
-                },
-            ]:
-                await dependencies.redis_client.xadd(
-                    "djinnbot:events:global",
-                    {"data": json.dumps(event_data)},
-                )
-        except Exception as e:
-            logger.warning(f"Failed to publish onboarding events: {e}")
+    # Trigger planning pipeline via shared helper
+    planning_run_id = await _trigger_planning_pipeline(
+        db,
+        project_id,
+        req.project_name,
+        description,
+        accumulated_ctx,
+        session_id,
+        now,
+    )
 
-    # Auto-trigger the planning pipeline so the project gets a task breakdown
-    # immediately after creation, seeded with the full onboarding context.
-    #
-    # Finn's final handoff is expected to include a `planning_context` key in
-    # the context dict — a rich synthesized document covering everything gathered
-    # during the onboarding relay. If present, use it as the primary
-    # `additional_context` for the planning pipeline. Fall back to building a
-    # structured summary from individual context fields if not present.
-    planning_run_id: Optional[str] = None
-    try:
-        planning_run_id = str(uuid.uuid4())
-
-        # Prefer Finn's synthesized planning context document if present
-        finn_planning_context: Optional[str] = accumulated_ctx.get("planning_context")  # type: ignore
-
-        if finn_planning_context:
-            # Finn produced a full cohesive document — use it directly
-            task_desc = f"Plan project: {req.project_name}\n\n{finn_planning_context}"
-            additional_context_str = finn_planning_context
-        else:
-            # Fallback: build a structured summary from individual context fields
-            ctx_parts = [f"Plan project: {req.project_name}"]
-            if accumulated_ctx.get("goal"):
-                ctx_parts.append(f"Goal: {accumulated_ctx['goal']}")
-            if accumulated_ctx.get("target_customer"):
-                ctx_parts.append(
-                    f"Target customer: {accumulated_ctx['target_customer']}"
-                )
-            if accumulated_ctx.get("v1_scope"):
-                ctx_parts.append(f"V1 scope: {accumulated_ctx['v1_scope']}")
-            if accumulated_ctx.get("tech_preferences"):
-                ctx_parts.append(
-                    f"Tech preferences: {accumulated_ctx['tech_preferences']}"
-                )
-            if accumulated_ctx.get("timeline"):
-                ctx_parts.append(f"Timeline: {accumulated_ctx['timeline']}")
-            if accumulated_ctx.get("architecture_summary"):
-                ctx_parts.append(
-                    f"Architecture: {accumulated_ctx['architecture_summary']}"
-                )
-            if req.description:
-                ctx_parts.append(f"\n{req.description}")
-            task_desc = "\n".join(ctx_parts)
-            additional_context_str = json.dumps(accumulated_ctx)
-
-        human_context = json.dumps(
-            {
-                "project_id": project_id,
-                "project_name": req.project_name,
-                "project_description": req.description
-                or accumulated_ctx.get("summary", ""),
-                "additional_context": additional_context_str,
-                "planning_run": True,
-                "onboarding_session_id": session_id,
-            }
-        )
-
-        planning_run = Run(
-            id=planning_run_id,
-            pipeline_id="planning",
-            task_description=task_desc,
-            status="pending",
-            outputs="{}",
-            human_context=human_context,
-            created_at=now,
-            updated_at=now,
-        )
-        db.add(planning_run)
-        await db.commit()
-
-        if dependencies.redis_client:
-            await dependencies.redis_client.xadd(
-                "djinnbot:events:new_runs",
-                {"run_id": planning_run_id, "pipeline_id": "planning"},
-            )
-        logger.info(
-            f"Planning pipeline triggered: run={planning_run_id}, project={project_id}"
-        )
-    except Exception as e:
-        logger.warning(
-            f"Failed to trigger planning pipeline for project {project_id}: {e}"
-        )
+    # Publish events via shared helper
+    await _publish_completion_events(
+        session_id, project_id, req.project_name, planning_run_id, now
+    )
 
     logger.info(f"Onboarding finalized: session={session_id}, project={project_id}")
 
@@ -1282,6 +1264,7 @@ async def stop_onboarding_agent(
     }
 
 
+@router.post("/sessions/{session_id}/abandon")
 @router.patch("/sessions/{session_id}/abandon")
 async def abandon_onboarding_session(
     session_id: str,
@@ -1305,7 +1288,10 @@ async def abandon_onboarding_session(
         await _stop_agent_container(onb.chat_session_id, onb.current_agent_id)
 
     onb.status = "abandoned"
-    onb.completed_at = now
+    # NOTE: Do NOT set completed_at here — the session isn't completed, it's
+    # abandoned. completed_at is reserved for successful finalization so we can
+    # distinguish "finished at X" from "gave up at X". updated_at is sufficient
+    # for tracking when the abandonment occurred.
     onb.updated_at = now
     await db.commit()
 
@@ -1385,7 +1371,8 @@ async def internal_update_onboarding_session_status(
     now = now_ms()
     onb.status = new_status
     onb.updated_at = now
-    if onb.completed_at is None:
+    # Only set completed_at for actual completion, not abandonment
+    if new_status == "completed" and onb.completed_at is None:
         onb.completed_at = now
 
     await db.commit()

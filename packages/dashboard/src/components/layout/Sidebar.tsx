@@ -19,7 +19,7 @@ import {
   ChevronUp,
   ShieldCheck,
 } from 'lucide-react';
-import { fetchAgents } from '@/lib/api';
+import { fetchAgents, fetchStatus } from '@/lib/api';
 import { useAuth } from '@/hooks/useAuth';
 import { DashboardQuickActionsDesktop } from '@/components/DashboardQuickActions';
 import {
@@ -30,6 +30,7 @@ import {
   ChatSidebarFlyoutDesktop,
   ChatSidebarFlyoutMobile,
 } from '@/components/chat/ChatSidebarFlyout';
+import { UpdateIndicator } from '@/components/layout/UpdateIndicator';
 
 const navItems = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard },
@@ -84,6 +85,20 @@ export function Sidebar() {
     enabled: isDashboard,
     staleTime: 30_000,
   });
+
+  // Fetch system status for version info (infrequent, long stale time)
+  const { data: statusData } = useQuery({
+    queryKey: ['system-status'],
+    queryFn: fetchStatus,
+    staleTime: 5 * 60_000, // 5 minutes
+    refetchOnWindowFocus: false,
+  });
+
+  // Resolve dashboard version: runtime config > build-time > "dev"
+  const dashboardVersion =
+    (typeof window !== 'undefined' && (window as any).__RUNTIME_CONFIG__?.APP_VERSION) ||
+    __APP_VERSION__ ||
+    'dev';
 
   useEffect(() => {
     const root = window.document.documentElement;
@@ -187,6 +202,9 @@ export function Sidebar() {
           </div>
         )}
 
+        {/* ── Update indicator ── */}
+        <UpdateIndicator />
+
         {/* ── Theme toggle ── */}
         <button
           onClick={() => setIsDark(!isDark)}
@@ -204,6 +222,15 @@ export function Sidebar() {
             </>
           )}
         </button>
+
+        {/* ── Version info ── */}
+        <div className="px-3 py-1.5 text-[10px] leading-tight text-muted-foreground/50 select-none">
+          <span>ui {dashboardVersion}</span>
+          {statusData?.version && <span> &middot; api {statusData.version}</span>}
+          {statusData?.engine_version && statusData.engine_version !== 'unknown' && (
+            <span> &middot; engine {statusData.engine_version}</span>
+          )}
+        </div>
       </div>
     </>
   );

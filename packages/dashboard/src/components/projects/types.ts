@@ -81,6 +81,7 @@ export interface Project {
   slack_channel_id?: string;
   slack_notify_user_id?: string;
   key_user_id?: string;
+  vision?: string;
   columns: Column[];
   tasks: Task[];
   dependencies: Dependency[];

@@ -122,6 +122,7 @@ export class PiMonoRunner implements AgentRunner {
 
     if (apiBaseUrl) {
       const userParam = userId ? `?user_id=${encodeURIComponent(userId)}` : '';
+      console.log(`[PiMonoRunner] Key resolution: userId=${userId ?? 'system'}, mode=${userId ? 'per-user' : 'instance'}`);
       try {
         const res = await authFetch(`${apiBaseUrl}/v1/settings/providers/keys/all${userParam}`);
         if (res.ok) {
@@ -129,6 +130,7 @@ export class PiMonoRunner implements AgentRunner {
           const keys = data.keys ?? {};
           const extra = data.extra ?? {};
           if (Object.keys(keys).length > 0 || Object.keys(extra).length > 0) {
+            console.log(`[PiMonoRunner] Resolved providers: [${Object.keys(keys).join(', ')}]`);
             // Inject primary API keys (provider_id → env var via PROVIDER_ENV_MAP)
             this.injectKeys(keys);
             // Inject extra env vars directly (e.g. AZURE_OPENAI_BASE_URL)
@@ -173,7 +175,10 @@ export class PiMonoRunner implements AgentRunner {
     this.ensureInitialized();
     // Fetch and inject API keys from DB before resolving the model.
     // This ensures UI-set keys are always available without a restart.
-    await this.fetchAndInjectProviderApiKeys();
+    // Pass userId so per-user key resolution (personal > admin-shared) is applied
+    // when the run is scoped to a specific user via project key_user_id or
+    // initiated_by_user_id.
+    await this.fetchAndInjectProviderApiKeys(options.userId);
 
     const sessionId = `pi_${options.runId}_${options.stepId}_${Date.now()}`;
 

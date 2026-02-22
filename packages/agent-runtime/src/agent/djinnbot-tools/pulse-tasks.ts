@@ -4,6 +4,16 @@ import { authFetch } from '../../api/auth-fetch.js';
 
 // ── Schemas ────────────────────────────────────────────────────────────────
 
+const CreateTaskParamsSchema = Type.Object({
+  projectId: Type.String({ description: 'Project ID to create the task in' }),
+  title: Type.String({ description: 'Task title (concise, action-oriented)' }),
+  description: Type.Optional(Type.String({ description: 'Detailed task description (markdown). Include acceptance criteria when possible.' })),
+  priority: Type.Optional(Type.String({ description: 'Priority: P0 (critical), P1 (high), P2 (normal, default), P3 (low)' })),
+  tags: Type.Optional(Type.Array(Type.String(), { description: 'Tags for categorization (e.g. ["backend", "auth"])' })),
+  estimatedHours: Type.Optional(Type.Number({ description: 'Estimated hours to complete' })),
+});
+type CreateTaskParams = Static<typeof CreateTaskParamsSchema>;
+
 const ExecuteTaskParamsSchema = Type.Object({
   projectId: Type.String({ description: 'Project ID containing the task' }),
   taskId: Type.String({ description: 'Task ID to execute' }),
@@ -37,6 +47,64 @@ export function createPulseTasksTools(config: PulseTasksToolsConfig): AgentTool[
     config.apiBaseUrl || process.env.DJINNBOT_API_URL || 'http://api:8000';
 
   return [
+    {
+      name: 'create_task',
+      description:
+        'Create a new task in a project. The task is placed in the Ready column (or Backlog if ' +
+        'it has dependencies). Use this when you identify work that needs to be done — such as ' +
+        'bugs found during development, follow-up work, or breaking a large task into subtasks. ' +
+        'Returns the new task ID so you can add dependencies or claim it immediately.',
+      label: 'create_task',
+      parameters: CreateTaskParamsSchema,
+      execute: async (
+        _toolCallId: string,
+        params: unknown,
+        signal?: AbortSignal,
+      ): Promise<AgentToolResult<VoidDetails>> => {
+        const p = params as CreateTaskParams;
+        const apiBase = getApiBase();
+        try {
+          const url = `${apiBase}/v1/projects/${p.projectId}/tasks`;
+          const body: Record<string, unknown> = {
+            title: p.title,
+            description: p.description ?? '',
+            priority: p.priority ?? 'P2',
+          };
+          if (p.tags) body.tags = p.tags;
+          if (p.estimatedHours !== undefined) body.estimatedHours = p.estimatedHours;
+
+          const response = await authFetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+            signal,
+          });
+          const data = (await response.json()) as any;
+          if (!response.ok) throw new Error(data.detail || `${response.status} ${response.statusText}`);
+
+          return {
+            content: [{
+              type: 'text',
+              text: [
+                `Task created successfully.`, ``,
+                `**Task ID**: ${data.id}`,
+                `**Title**: ${data.title}`,
+                `**Status**: ${data.status}`,
+                `**Column**: ${data.column_id}`, ``,
+                `You can now:`,
+                `- \`claim_task(projectId, "${data.id}")\` to start working on it`,
+                `- \`get_task_context(projectId, "${data.id}")\` to view full details`,
+                `- \`transition_task(projectId, "${data.id}", status)\` to change its status`,
+              ].join('\n'),
+            }],
+            details: {},
+          };
+        } catch (err) {
+          return { content: [{ type: 'text', text: `Error creating task: ${err instanceof Error ? err.message : String(err)}` }], details: {} };
+        }
+      },
+    },
+
     {
       name: 'claim_task',
       description:

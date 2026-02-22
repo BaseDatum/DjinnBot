@@ -709,6 +709,36 @@ function RunDetailPage() {
                       <dd className="text-sm break-words">{run.task}</dd>
                     </div>
                   )}
+                  {run.initiated_by_user_id && (
+                    <div className="flex justify-between">
+                      <dt className="text-sm text-muted-foreground">Initiated By</dt>
+                      <dd className="text-sm font-mono text-xs">{run.initiated_by_user_id.substring(0, 12)}...</dd>
+                    </div>
+                  )}
+                  {run.model_override && (
+                    <div className="flex justify-between">
+                      <dt className="text-sm text-muted-foreground">Model Override</dt>
+                      <dd className="text-sm font-mono text-xs">{run.model_override}</dd>
+                    </div>
+                  )}
+                  {run.key_resolution && (
+                    <div className="flex flex-col gap-1">
+                      <dt className="text-sm text-muted-foreground">Keys Used</dt>
+                      <dd className="text-sm">
+                        <span className="text-xs">
+                          {run.key_resolution.source === 'executing_user' && 'User keys'}
+                          {run.key_resolution.source === 'project_key_user' && 'Project key user'}
+                          {run.key_resolution.source === 'system' && 'System (instance keys)'}
+                          {!run.key_resolution.source && 'Unknown'}
+                        </span>
+                        {run.key_resolution.resolvedProviders && run.key_resolution.resolvedProviders.length > 0 && (
+                          <span className="text-xs text-muted-foreground ml-1">
+                            ({run.key_resolution.resolvedProviders.join(', ')})
+                          </span>
+                        )}
+                      </dd>
+                    </div>
+                  )}
                 </dl>
               </CardContent>
             </Card>

@@ -11,7 +11,7 @@
  * - Per-session streaming via useChatStream hook (SSE + rAF token buffering)
  * - Refreshes from DB on structural events (handoffs, turn_end)
  */
-import { useState, useRef, useCallback, useEffect } from 'react';
+import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
@@ -559,6 +559,45 @@ export function OnboardingChat({ onClose, onProjectCreated, resumeSessionId }: O
     onClose();
   }, [session, onClose]);
 
+  // ── Page-refresh / navigation resilience ──────────────────────────────────
+  // Use a ref so the beforeunload handler always sees the latest session state
+  // without needing to re-register the listener on every session change.
+  const sessionRef = useRef(session);
+  useEffect(() => { sessionRef.current = session; }, [session]);
+
+  // On unmount (navigation away, React re-mount) — abandon if active.
+  useEffect(() => {
+    return () => {
+      const s = sessionRef.current;
+      if (s?.id && s.status === 'active') {
+        // Fire-and-forget — can't await in a cleanup function.
+        abandonOnboardingSession(s.id).catch(() => {});
+      }
+    };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // On hard refresh / tab close — use sendBeacon for reliability.
+  // fetch() is often cancelled by the browser during beforeunload, but
+  // navigator.sendBeacon survives page teardown.
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      const s = sessionRef.current;
+      if (s?.id && s.status === 'active') {
+        const url = `${API_BASE}/onboarding/sessions/${s.id}/abandon`;
+        // sendBeacon can only send POST-like payloads; the endpoint is PATCH
+        // but we also try fetch with keepalive as a fallback.
+        try {
+          navigator.sendBeacon(url, '');
+        } catch {
+          // Fallback: keepalive fetch survives page teardown in most browsers
+          fetch(url, { method: 'PATCH', keepalive: true }).catch(() => {});
+        }
+      }
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, []);
+
   // ── Render ─────────────────────────────────────────────────────────────────
 
   // Read streaming refs (streamingTick ensures re-render)
@@ -718,7 +757,7 @@ export function OnboardingChat({ onClose, onProjectCreated, resumeSessionId }: O
           {/* Message list */}
           <ScrollArea className="flex-1" ref={scrollAreaRef as any}>
             <div className="px-4 py-4 space-y-4 max-w-2xl mx-auto w-full">
-              {messages.map((msg) => {
+              {[...messages].sort((a, b) => a.timestamp - b.timestamp).map((msg) => {
                 const msgIsStreaming = isStreaming && msg.id.startsWith('streaming_');
                 return (
                   <ChatMessage

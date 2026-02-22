@@ -48,6 +48,7 @@ from app.routers import auth as auth_router
 from app.routers import users as users_router
 from app.routers import admin as admin_router
 from app.routers import waitlist as waitlist_router
+from app.routers import updates as updates_router
 
 
 async def _handle_task_run_event(run_id: str, event_type: str):
@@ -505,6 +506,12 @@ async def lifespan(app: FastAPI):
     listener_task = asyncio.create_task(_run_completion_listener())
     logger.info("Started run completion listener")
 
+    # Start background update checker
+    from app.routers.updates import periodic_update_checker
+
+    update_checker_task = asyncio.create_task(periodic_update_checker())
+    logger.info("Started periodic update checker")
+
     # Start GitHub webhook listener
     github_listener_task = None
     if dependencies.redis_client:
@@ -515,6 +522,7 @@ async def lifespan(app: FastAPI):
 
     # Cleanup
     listener_task.cancel()
+    update_checker_task.cancel()
     if github_listener_task:
         github_listener_task.cancel()
 
@@ -623,15 +631,24 @@ app.include_router(mcp.router, prefix="/v1/mcp", tags=["mcp"])
 app.include_router(users_router.router, prefix="/v1/users", tags=["users"])
 app.include_router(admin_router.router, prefix="/v1/admin", tags=["admin"])
 app.include_router(waitlist_router.router, prefix="/v1/waitlist", tags=["waitlist"])
+app.include_router(updates_router.router, prefix="/v1/system/updates", tags=["updates"])
 
 
 @app.get("/v1/status")
 async def status():
     """Get API health status."""
     redis_ok = False
+    engine_version = None
     if dependencies.redis_client:
         try:
             redis_ok = await dependencies.redis_client.ping()
+        except Exception:
+            pass
+        # Read engine version published via Redis
+        try:
+            engine_version = await dependencies.redis_client.get(
+                "djinnbot:engine:version"
+            )
         except Exception:
             pass
 
@@ -682,9 +699,13 @@ async def status():
     except Exception:
         pass
 
+    # Version info — baked in at Docker build time, falls back to env or "dev"
+    api_version = os.getenv("DJINNBOT_BUILD_VERSION", "dev")
+
     return {
         "status": "ok",
-        "version": "0.1.0",
+        "version": api_version,
+        "engine_version": engine_version or "unknown",
         "redis_connected": redis_ok,
         "active_runs": active_runs,
         "total_pipelines": total_pipelines,

@@ -16,7 +16,13 @@ Use `recall` to find recent context about:
 ### 3. Discover Assigned Projects
 Call `get_my_projects()` to list projects you are assigned to.
 
-### 4. Check Your Work Queue
+### 4. Read the Project Vision
+For each active project, call `get_project_vision(projectId)` to read the project's
+living vision document. This contains the project's goals, architecture, constraints,
+and current priorities as defined by the project owner. **Always read the vision
+before starting work** to ensure your contributions align with the project's direction.
+
+### 5. Check Your Work Queue
 For each active project, call `get_ready_tasks(projectId)` to find tasks in your
 columns that are ready to work on. Your allowed columns are configured in your
 `config.yml` under `pulse_columns`.
@@ -29,7 +35,7 @@ columns that are ready to work on. Your allowed columns are configured in your
 
 **Only pick up ONE task per pulse** to stay focused.
 
-### 5. Work On a Task
+### 6. Work On a Task
 
 Once you have identified the highest-priority task:
 
@@ -72,10 +78,15 @@ Once you have identified the highest-priority task:
    Only do this when the task has a pipeline configured and the work is too structured
    for a single pulse session.
 
-### 6. Review Workspace
+7. **Create follow-up tasks** — if during your work you discover additional work
+   that needs to be done (bugs, refactoring, follow-up features), use
+   `create_task(projectId, title, description, priority)` to add them to the project
+   board rather than trying to do everything in one pulse.
+
+### 7. Review Workspace
 Check your progress file and any active work you left last time.
 
-### 7. Report to Sky (if needed)
+### 8. Report to Sky (if needed)
 If you have anything important to report, message Sky via Slack:
 
 ```
@@ -92,7 +103,9 @@ slack_dm({
 | Tool | Purpose |
 |------|---------|
 | `get_my_projects()` | List projects you are assigned to |
+| `get_project_vision(projectId)` | Read the project vision (goals, architecture, priorities) |
 | `get_ready_tasks(projectId)` | Find tasks in your columns ready to work |
+| `create_task(projectId, title, description, priority)` | Create a new task in a project |
 | `claim_task(projectId, taskId)` | Atomically claim a task + provision authenticated git workspace |
 | `get_task_context(projectId, taskId)` | Full task details, description, PR info |
 | `open_pull_request(projectId, taskId, title, body)` | Open a GitHub PR for the task branch |
@@ -132,6 +145,9 @@ End your pulse with a summary in this format:
 
 ### Projects: [count] active
 [List of projects, or "None assigned"]
+
+### Vision Reviewed: [Yes/No]
+[Key priorities from the project vision, or "No vision set"]
 
 ### Task Picked Up: [Yes/No]
 [If yes: task title, project, priority, branch]

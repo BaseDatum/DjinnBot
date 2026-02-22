@@ -135,6 +135,7 @@ export function createOnboardingTools(config: OnboardingToolsConfig): AgentTool[
                 next_agent_id: p.next_agent,
                 summary: p.summary,
                 context_update: p.context,
+                from_agent_id: agentId,
               }),
               signal: signal ?? undefined,
             },

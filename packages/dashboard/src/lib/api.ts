@@ -457,7 +457,7 @@ export async function importTasks(projectId: string, tasks: any[]) {
   return handleResponse(res, 'Import failed');
 }
 
-export async function executeTask(projectId: string, taskId: string, data?: { workflowId?: string; pipelineId?: string; context?: string }) {
+export async function executeTask(projectId: string, taskId: string, data?: { workflowId?: string; pipelineId?: string; context?: string; modelOverride?: string; keyUserId?: string }) {
   const res = await authFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/execute`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -2281,4 +2281,45 @@ export async function extractMcpConfig(text: string): Promise<McpExtractResult> 
     body: JSON.stringify({ text }),
   });
   return handleResponse(res, 'Failed to extract MCP config');
+}
+
+// ── System Updates API ────────────────────────────────────────────────────────
+
+export interface UpdateCheckResult {
+  current_version: string;
+  latest_version: string | null;
+  update_available: boolean;
+  release_url: string | null;
+  release_name: string | null;
+  release_body: string | null;
+  published_at: string | null;
+  checked_at: number;
+}
+
+export interface UpdateApplyResult {
+  status: string;
+  message: string;
+  target_version: string;
+}
+
+/** Get the cached update check result (refreshed hourly by the server). */
+export async function fetchUpdateCheck(): Promise<UpdateCheckResult> {
+  const res = await authFetch(`${API_BASE}/system/updates/check`);
+  return handleResponse(res, 'Failed to check for updates');
+}
+
+/** Force an immediate update check (bypasses cache). */
+export async function forceUpdateCheck(): Promise<UpdateCheckResult> {
+  const res = await authFetch(`${API_BASE}/system/updates/check`, { method: 'POST' });
+  return handleResponse(res, 'Failed to check for updates');
+}
+
+/** Trigger a system update. Engine pulls new images and recreates containers. */
+export async function applyUpdate(targetVersion?: string): Promise<UpdateApplyResult> {
+  const res = await authFetch(`${API_BASE}/system/updates/apply`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ target_version: targetVersion }),
+  });
+  return handleResponse(res, 'Failed to apply update');
 }

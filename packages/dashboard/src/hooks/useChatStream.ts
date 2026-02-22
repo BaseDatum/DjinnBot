@@ -679,13 +679,6 @@ export function useChatStream({
     const queued = eventQueueRef.current;
     eventQueueRef.current = [];
 
-    // Structural events that get replayed via XRANGE and would duplicate
-    // messages already loaded from the DB.
-    const REPLAY_STRUCTURAL = new Set([
-      'tool_start', 'tool_end', 'step_start', 'step_end',
-      'turn_end', 'container_ready', 'session_complete', 'response_aborted',
-    ]);
-
     for (const event of queued) {
       // Always process live events (no stream_id means it came from pub/sub, not XRANGE)
       if (!event.stream_id) {
@@ -693,9 +686,11 @@ export function useChatStream({
         continue;
       }
 
-      // Skip structural replay events when we already have DB messages —
-      // the DB is the source of truth for committed content.
-      if (dbMessageIds && dbMessageIds.size > 0 && REPLAY_STRUCTURAL.has(event.type)) {
+      // When DB messages were loaded, skip ALL XRANGE replay events — the DB
+      // is the source of truth for committed content. Previously only structural
+      // events were skipped, but output/thinking token replays would duplicate
+      // content already in the DB and cause reordering on refresh.
+      if (dbMessageIds && dbMessageIds.size > 0) {
         // Update the cursor so subsequent reconnects start from here
         lastStreamIdRef.current = event.stream_id;
         continue;
@@ -762,12 +757,18 @@ export function useChatStream({
       for (const msg of dbMessages) {
         if (!msg.content && msg.role === 'assistant') continue; // skip empty placeholders
 
+        // Use monotonic sub-offsets so expanded sub-messages from the same DB
+        // row maintain their logical order when the messages array is sorted
+        // by timestamp. Each offset is +1ms which is invisible to the user
+        // but keeps thinking → tool_calls → assistant text in the right order.
+        let subOffset = 0;
+
         if (msg.role === 'assistant' && msg.thinking) {
           result.push({
             id: `${msg.id}_thinking`,
             type: 'thinking',
             content: msg.thinking,
-            timestamp: msg.created_at,
+            timestamp: msg.created_at + (subOffset++),
           });
         }
 
@@ -786,7 +787,7 @@ export function useChatStream({
                 : undefined,
               isError: tc.isError || tc.is_error,
               durationMs: tc.durationMs || tc.duration_ms,
-              timestamp: msg.created_at,
+              timestamp: msg.created_at + (subOffset++),
             });
           }
         }
@@ -800,7 +801,7 @@ export function useChatStream({
                 ? 'assistant'
                 : 'system',
           content: msg.content,
-          timestamp: msg.created_at,
+          timestamp: msg.created_at + (subOffset++),
           model: msg.model || undefined,
           attachments: msg.attachments || undefined,
         });

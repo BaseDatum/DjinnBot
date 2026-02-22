@@ -236,9 +236,12 @@ async def get_run(run_id: str, session: AsyncSession = Depends(get_async_session
     # Sort steps by rowid
     sorted_steps = sorted(run.steps, key=lambda s: getattr(s, "rowid", 0) or 0)
 
-    # Resolve the project's key_user_id for per-user key resolution in the engine.
-    key_user_id = None
-    if run.project_id:
+    # Resolve the effective key_user_id for per-user key resolution in the engine.
+    # Priority: 1) Run-level initiated_by_user_id (who triggered this run)
+    #           2) Project-level key_user_id (configured in project settings)
+    #           3) None (system-level instance keys)
+    key_user_id = getattr(run, "initiated_by_user_id", None)
+    if not key_user_id and run.project_id:
         from app.models.project import Project
 
         proj_result = await session.execute(
@@ -253,6 +256,11 @@ async def get_run(run_id: str, session: AsyncSession = Depends(get_async_session
         "pipeline_id": run.pipeline_id,
         "project_id": run.project_id,  # CRITICAL: Engine needs this for worktree creation
         "key_user_id": key_user_id,  # Multi-user: whose API keys to use for this run
+        "initiated_by_user_id": getattr(run, "initiated_by_user_id", None),
+        "model_override": getattr(run, "model_override", None),
+        "key_resolution": json.loads(run.key_resolution)
+        if getattr(run, "key_resolution", None)
+        else None,
         "task": run.task_description,
         "status": run.status,
         "current_step": run.current_step_id,
@@ -278,6 +286,7 @@ async def get_run(run_id: str, session: AsyncSession = Depends(get_async_session
                 "started_at": s.started_at,
                 "completed_at": s.completed_at,
                 "human_context": s.human_context,
+                "model_used": getattr(s, "model_used", None),
             }
             for s in sorted_steps
         ],

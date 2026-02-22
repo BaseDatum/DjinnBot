@@ -1,6 +1,22 @@
 export type RunStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
 export type StepStatus = 'pending' | 'queued' | 'running' | 'completed' | 'failed' | 'cancelled' | 'retrying';
 
+/**
+ * Captures the full key resolution context for a pipeline run or chat session.
+ * Provides structured metadata about whose API keys are used and why, enabling
+ * audit trails and explicit source tracking.
+ */
+export type KeyResolutionSource = 'project_key_user' | 'executing_user' | 'chat_session' | 'system';
+
+export interface RunKeyContext {
+  /** User whose keys to resolve (personal > admin-shared > nothing). */
+  userId?: string;
+  /** How the userId was determined. */
+  source: KeyResolutionSource;
+  /** Optional model override for this run (overrides agent/pipeline defaults). */
+  modelOverride?: string;
+}
+
 export interface PipelineRun {
   id: string;
   pipelineId: string;
@@ -23,6 +39,16 @@ export interface PipelineRun {
   humanContext?: string;
   /** DjinnBot user whose API keys are used for this run (per-user key resolution). */
   userId?: string;
+  /** User who initiated this run (from dashboard "Execute" or API call). */
+  initiatedByUserId?: string;
+  /** Optional model override — takes priority over agent/pipeline defaults. */
+  modelOverride?: string;
+  /** JSON blob recording which providers were resolved and how. */
+  keyResolution?: {
+    userId?: string;
+    source?: string;
+    resolvedProviders?: string[];
+  };
 }
 
 export interface StepExecution {

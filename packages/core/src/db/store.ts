@@ -89,6 +89,7 @@ export class Store {
         description TEXT NOT NULL DEFAULT '',
         status TEXT NOT NULL DEFAULT 'active',
         repository TEXT,
+        vision TEXT,
         created_at INTEGER NOT NULL,
         updated_at INTEGER NOT NULL,
         completed_at INTEGER

@@ -8,13 +8,14 @@
  * Streaming logic (SSE, token buffering, auto-scroll) lives entirely in useChatStream.
  */
 
-import { useState, useRef, useCallback, useEffect } from 'react';
+import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import { useChatStream } from '@/hooks/useChatStream';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Textarea } from '@/components/ui/textarea';
-import { ChatMessage } from './ChatMessage';
+import { ChatMessage, type ChatMessageData } from './ChatMessage';
+import { ToolCallGroupCard } from '@/components/ToolCallGroupCard';
 import {
   sendChatMessage,
   stopChatResponse,
@@ -33,6 +34,41 @@ import {
   RotateCcw,
   Paperclip,
 } from 'lucide-react';
+
+// ── Message grouping ─────────────────────────────────────────────────────────
+
+/** A rendered item is either a single message or a group of consecutive tool calls. */
+type RenderItem =
+  | { kind: 'message'; msg: ChatMessageData }
+  | { kind: 'tool_group'; calls: ChatMessageData[] };
+
+/**
+ * Group consecutive tool_call messages into collapsible groups.
+ * Non-tool messages pass through as-is.
+ */
+function groupMessages(messages: ChatMessageData[]): RenderItem[] {
+  const result: RenderItem[] = [];
+  let currentGroup: ChatMessageData[] = [];
+
+  const flushGroup = () => {
+    if (currentGroup.length > 0) {
+      result.push({ kind: 'tool_group', calls: [...currentGroup] });
+      currentGroup = [];
+    }
+  };
+
+  for (const msg of messages) {
+    if (msg.type === 'tool_call') {
+      currentGroup.push(msg);
+    } else {
+      flushGroup();
+      result.push({ kind: 'message', msg });
+    }
+  }
+  flushGroup();
+
+  return result;
+}
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -404,6 +440,13 @@ export function AgentChat({
   const liveThinking = streamingThinkingRef.current;
   const isReady = sessionStatus === 'running';
 
+  // Sort by timestamp for stable ordering (especially after page refresh),
+  // then group consecutive tool calls into collapsible blocks.
+  const renderItems = useMemo(
+    () => groupMessages([...messages].sort((a, b) => a.timestamp - b.timestamp)),
+    [messages],
+  );
+
   return (
     <div className="flex flex-col h-full min-h-0 overflow-hidden">
       {/* Connection status strip */}
@@ -460,7 +503,22 @@ export function AgentChat({
               <span className="text-xs">Send a message to begin</span>
             </div>
           )}
-          {messages.map(msg => {
+          {renderItems.map((item, idx) => {
+            if (item.kind === 'tool_group') {
+              const groupKey = item.calls.map(c => c.id).join('|');
+              const hasRunning = item.calls.some(
+                c => !c.result && isStreaming && c.id.startsWith('streaming_'),
+              );
+              return (
+                <ToolCallGroupCard
+                  key={groupKey}
+                  calls={item.calls}
+                  hasRunning={hasRunning}
+                />
+              );
+            }
+
+            const msg = item.msg;
             const msgIsStreaming = isStreaming && msg.id.startsWith('streaming_');
             return (
               <ChatMessage

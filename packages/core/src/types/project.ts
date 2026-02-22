@@ -8,6 +8,7 @@ export interface Project {
   description: string;
   status: ProjectStatus;
   repository: string | null;       // optional git repo path
+  vision: string | null;           // living markdown document — project goals/architecture/priorities
   createdAt: number;
   updatedAt: number;
   completedAt: number | null;
