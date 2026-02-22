@@ -1187,6 +1187,7 @@ export async function listChatSessions(agentId: string, params?: {
       source?: string;
       userId?: string | null;
       resolvedProviders?: string[];
+      providerSources?: Record<string, { source: string; masked_key: string }>;
     } | null;
   }>;
   total: number;
