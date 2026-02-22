@@ -1,14 +1,5 @@
 {
   "mcpServers": {
-    "fetch": {
-      "command": "npx",
-      "args": [
-        "mcp-fetch-server"
-      ],
-      "env": {
-        "DEFAULT_LIMIT": "50000"
-      }
-    },
     "github": {
       "command": "/usr/local/bin/github-mcp-server",
       "args": [
@@ -33,6 +24,15 @@
       "args": [
         "grokipedia-mcp"
       ]
+    },
+    "fetch": {
+      "command": "npx",
+      "args": [
+        "mcp-fetch-server"
+      ],
+      "env": {
+        "DEFAULT_LIMIT": "50000"
+      }
     }
   }
 }

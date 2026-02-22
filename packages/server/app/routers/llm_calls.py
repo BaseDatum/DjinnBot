@@ -185,19 +185,25 @@ def _row_to_response(row: LlmCallLog) -> LlmCallResponse:
 
 
 async def _build_summary(db: AsyncSession, query) -> dict:
-    """Compute aggregated token/cost totals for a set of LLM calls."""
+    """Compute aggregated token/cost totals for a set of LLM calls.
+
+    ``query`` is a SELECT against LlmCallLog with WHERE filters already applied.
+    We extract the WHERE clause and apply it to a fresh aggregation query to
+    avoid the cartesian-product issue that arises from select_from(subquery).
+    """
+    sub = query.subquery()
     summary_query = select(
-        func.count(LlmCallLog.id).label("call_count"),
-        func.sum(LlmCallLog.input_tokens).label("total_input_tokens"),
-        func.sum(LlmCallLog.output_tokens).label("total_output_tokens"),
-        func.sum(LlmCallLog.cache_read_tokens).label("total_cache_read_tokens"),
-        func.sum(LlmCallLog.cache_write_tokens).label("total_cache_write_tokens"),
-        func.sum(LlmCallLog.total_tokens).label("total_tokens"),
-        func.sum(LlmCallLog.cost_total).label("total_cost"),
-        func.sum(LlmCallLog.cost_input).label("total_cost_input"),
-        func.sum(LlmCallLog.cost_output).label("total_cost_output"),
-        func.avg(LlmCallLog.duration_ms).label("avg_duration_ms"),
-    ).select_from(query.subquery())
+        func.count(sub.c.id).label("call_count"),
+        func.sum(sub.c.input_tokens).label("total_input_tokens"),
+        func.sum(sub.c.output_tokens).label("total_output_tokens"),
+        func.sum(sub.c.cache_read_tokens).label("total_cache_read_tokens"),
+        func.sum(sub.c.cache_write_tokens).label("total_cache_write_tokens"),
+        func.sum(sub.c.total_tokens).label("total_tokens"),
+        func.sum(sub.c.cost_total).label("total_cost"),
+        func.sum(sub.c.cost_input).label("total_cost_input"),
+        func.sum(sub.c.cost_output).label("total_cost_output"),
+        func.avg(sub.c.duration_ms).label("avg_duration_ms"),
+    )
     result = await db.execute(summary_query)
     row = result.one()
     return {
