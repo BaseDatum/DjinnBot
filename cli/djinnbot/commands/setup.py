@@ -1505,26 +1505,51 @@ def step_verify_deployment(
 
     # ── 3. SSL-specific checks ──────────────────────────────────────
     if ssl_enabled and domain:
-        console.print(f"[dim]Verifying SSL certificate for {domain}...[/dim]")
-        ssl_ok, ssl_detail = _check_ssl_cert(domain)
-        if ssl_ok:
-            console.print(f"  [green]SSL certificate valid ({ssl_detail})[/green]")
-        else:
-            console.print(f"  [red]SSL certificate issue: {ssl_detail}[/red]")
-            all_ok = False
-
-        # Check API subdomain cert if using subdomain routing
+        # Collect all domains to check
+        ssl_domains: list[tuple[str, str]] = [("SSL", domain)]
         api_domain = get_env_value(env_path, "API_DOMAIN")
         if api_domain and api_domain != domain:
-            console.print(f"[dim]Verifying SSL certificate for {api_domain}...[/dim]")
-            api_ssl_ok, api_ssl_detail = _check_ssl_cert(api_domain)
-            if api_ssl_ok:
+            ssl_domains.append(("API SSL", api_domain))
+
+        ssl_max_wait = 300  # 5 minutes
+        ssl_interval = 30  # seconds between retries
+
+        console.print(
+            f"[dim]Waiting for SSL certificate provisioning "
+            f"(will check every {ssl_interval}s for up to {ssl_max_wait // 60} min)...[/dim]"
+        )
+
+        for label, cert_domain in ssl_domains:
+            elapsed = 0
+            cert_ok = False
+            cert_detail = ""
+            attempt = 0
+
+            while elapsed < ssl_max_wait:
+                attempt += 1
+                cert_ok, cert_detail = _check_ssl_cert(cert_domain)
+                if cert_ok:
+                    break
+
+                remaining = ssl_max_wait - elapsed
                 console.print(
-                    f"  [green]API SSL certificate valid ({api_ssl_detail})[/green]"
+                    f"  [yellow]{label} certificate for {cert_domain} not ready: "
+                    f"{cert_detail} "
+                    f"(attempt {attempt}, retrying in {ssl_interval}s, "
+                    f"{remaining}s remaining)[/yellow]"
+                )
+                time.sleep(ssl_interval)
+                elapsed += ssl_interval
+
+            if cert_ok:
+                console.print(
+                    f"  [green]{label} certificate valid for {cert_domain} "
+                    f"({cert_detail})[/green]"
                 )
             else:
                 console.print(
-                    f"  [red]API SSL certificate issue: {api_ssl_detail}[/red]"
+                    f"  [red]{label} certificate issue for {cert_domain}: "
+                    f"{cert_detail}[/red]"
                 )
                 all_ok = False
 
