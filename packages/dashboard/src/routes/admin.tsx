@@ -1,5 +1,5 @@
 import { createFileRoute, useNavigate } from '@tanstack/react-router';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { API_BASE } from '@/lib/api';
 import { authFetch } from '@/lib/auth';
@@ -110,11 +110,27 @@ interface AdminNotification {
   createdAt: number;
 }
 
+const VALID_TABS = new Set<AdminTab>([
+  'notifications', 'usage', 'users', 'providers', 'sharing', 'memory',
+  'models', 'approvals', 'runtime', 'secrets', 'waitlist', 'email', 'logs',
+]);
+
+function getTabFromHash(): AdminTab {
+  const hash = window.location.hash.replace('#', '');
+  return VALID_TABS.has(hash as AdminTab) ? (hash as AdminTab) : 'notifications';
+}
+
 function AdminPage() {
   const { user } = useAuth();
   const navigate = useNavigate();
-  const [activeTab, setActiveTab] = useState<AdminTab>('notifications');
+  const [activeTab, setActiveTabRaw] = useState<AdminTab>(getTabFromHash);
   const [users, setUsers] = useState<UserItem[]>([]);
+
+  // Persist active tab in URL hash so it survives page refresh
+  const setActiveTab = useCallback((tab: AdminTab) => {
+    setActiveTabRaw(tab);
+    window.location.hash = tab;
+  }, []);
 
   // Notification state
   const [notifications, setNotifications] = useState<AdminNotification[]>([]);

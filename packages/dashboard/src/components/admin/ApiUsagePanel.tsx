@@ -9,7 +9,7 @@
  * - Filterable by user, key source, type, and status
  */
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Activity,
   Key,
@@ -27,6 +27,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { API_BASE } from '@/lib/api';
 import { authFetch } from '@/lib/auth';
+import { useSSE } from '@/hooks/useSSE';
 import { toast } from 'sonner';
 
 interface ProviderSource {
@@ -205,6 +206,43 @@ export function ApiUsagePanel() {
     setOffset(0);
     fetchUsage(0);
   }, [fetchUsage]);
+
+  // Debounced refetch on SSE events (sessions starting/completing/failing)
+  const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const debouncedRefresh = useCallback(() => {
+    if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
+    refreshTimerRef.current = setTimeout(() => {
+      fetchUsage(offset);
+    }, 800); // Debounce to avoid rapid re-fetches
+  }, [fetchUsage, offset]);
+
+  // Live-updating event types that should trigger a refetch
+  const handleSSE = useCallback((event: any) => {
+    const type = event?.type || event?.event;
+    if (
+      type === 'created' ||
+      type === 'completed' ||
+      type === 'status_changed' ||
+      type === 'status' ||
+      type === 'failed' ||
+      type === 'deleted'
+    ) {
+      debouncedRefresh();
+    }
+  }, [debouncedRefresh]);
+
+  // Subscribe to pipeline session SSE stream for live updates
+  useSSE({ url: `${API_BASE}/events/sessions`, onMessage: handleSSE });
+
+  // Subscribe to chat session SSE stream for live updates
+  useSSE({ url: `${API_BASE}/events/chat-sessions`, onMessage: handleSSE });
+
+  // Cleanup debounce timer
+  useEffect(() => {
+    return () => {
+      if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
+    };
+  }, []);
 
   const handleNextPage = () => {
     const newOffset = offset + limit;
