@@ -32,6 +32,10 @@ import {
   Brain,
   MessageSquare,
   ScrollText,
+  Bell,
+  AlertTriangle,
+  Info,
+  AlertCircle,
 } from 'lucide-react';
 import {
   Dialog,
@@ -58,9 +62,10 @@ export const Route = createFileRoute('/admin')({
   component: AdminPage,
 });
 
-type AdminTab = 'users' | 'providers' | 'sharing' | 'memory' | 'models' | 'approvals' | 'runtime' | 'secrets' | 'waitlist' | 'email' | 'logs';
+type AdminTab = 'users' | 'providers' | 'sharing' | 'memory' | 'models' | 'approvals' | 'runtime' | 'secrets' | 'waitlist' | 'email' | 'logs' | 'notifications';
 
 const NAV_ITEMS: NestedSidebarItem[] = [
+  { key: 'notifications', label: 'Notifications', icon: Bell },
   { key: 'users', label: 'Users', icon: Users },
   { key: 'waitlist', label: 'Waitlist', icon: ClipboardList },
   { key: 'email', label: 'Email Settings', icon: Mail },
@@ -93,11 +98,24 @@ interface PendingItem {
   createdAt: number;
 }
 
+interface AdminNotification {
+  id: string;
+  level: string;
+  title: string;
+  detail: string | null;
+  read: boolean;
+  createdAt: number;
+}
+
 function AdminPage() {
   const { user } = useAuth();
   const navigate = useNavigate();
-  const [activeTab, setActiveTab] = useState<AdminTab>('users');
+  const [activeTab, setActiveTab] = useState<AdminTab>('notifications');
   const [users, setUsers] = useState<UserItem[]>([]);
+
+  // Notification state
+  const [notifications, setNotifications] = useState<AdminNotification[]>([]);
+  const [notificationsLoading, setNotificationsLoading] = useState(false);
   const [pendingItems, setPendingItems] = useState<PendingItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [sharedProviders, setSharedProviders] = useState<Array<{id: string; adminUserId: string; providerId: string; targetUserId: string | null; createdAt: number; expiresAt?: number | null; allowedModels?: string[] | null; dailyLimit?: number | null}>>([]);
@@ -164,6 +182,18 @@ function AdminPage() {
       navigate({ to: '/' as any });
     }
   }, [user, navigate]);
+
+  // Load notifications
+  useEffect(() => {
+    if (activeTab === 'notifications') {
+      setNotificationsLoading(true);
+      authFetch(`${API_BASE}/admin/notifications`)
+        .then((res) => res.json())
+        .then(setNotifications)
+        .catch(() => toast.error('Failed to load notifications'))
+        .finally(() => setNotificationsLoading(false));
+    }
+  }, [activeTab]);
 
   // Load users
   useEffect(() => {
@@ -278,6 +308,24 @@ function AdminPage() {
         .finally(() => setLoading(false));
     }
   }, [activeTab]);
+
+  const handleMarkNotificationRead = async (id: string) => {
+    try {
+      await authFetch(`${API_BASE}/admin/notifications/${id}/read`, { method: 'PATCH' });
+      setNotifications((prev) => prev.map((n) => (n.id === id ? { ...n, read: true } : n)));
+    } catch {
+      toast.error('Failed to mark notification as read');
+    }
+  };
+
+  const handleMarkAllNotificationsRead = async () => {
+    try {
+      await authFetch(`${API_BASE}/admin/notifications/mark-all-read`, { method: 'POST' });
+      setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+    } catch {
+      toast.error('Failed to mark all as read');
+    }
+  };
 
   const handleApprove = async (type: string, id: string) => {
     try {
@@ -472,6 +520,66 @@ function AdminPage() {
         activeKey={activeTab}
         onSelect={(key) => setActiveTab(key as AdminTab)}
       >
+        {/* ── Notifications ── */}
+        {activeTab === 'notifications' && (
+          <div className="max-w-5xl mx-auto space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-lg font-semibold flex items-center gap-2">
+                  <Bell className="h-5 w-5" />
+                  System Notifications
+                </h2>
+                <p className="text-sm text-muted-foreground">Infrastructure alerts and system events</p>
+              </div>
+              {notifications.some((n) => !n.read) && (
+                <Button variant="outline" size="sm" onClick={handleMarkAllNotificationsRead}>
+                  <Check className="h-4 w-4 mr-1" /> Mark all read
+                </Button>
+              )}
+            </div>
+            {notificationsLoading ? (
+              <div className="flex justify-center py-12"><Loader2 className="h-6 w-6 animate-spin" /></div>
+            ) : notifications.length === 0 ? (
+              <div className="text-center py-12 text-muted-foreground">No notifications</div>
+            ) : (
+              <div className="space-y-2">
+                {notifications.map((n) => (
+                  <div
+                    key={n.id}
+                    className={`flex items-start gap-3 rounded-lg border p-4 ${n.read ? 'opacity-60' : 'bg-card'}`}
+                  >
+                    <div className="mt-0.5">
+                      {n.level === 'error' ? (
+                        <AlertCircle className="h-5 w-5 text-red-400" />
+                      ) : n.level === 'warning' ? (
+                        <AlertTriangle className="h-5 w-5 text-yellow-400" />
+                      ) : (
+                        <Info className="h-5 w-5 text-blue-400" />
+                      )}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium">{n.title}</span>
+                        <span className="text-xs text-muted-foreground">
+                          {new Date(n.createdAt).toLocaleString()}
+                        </span>
+                      </div>
+                      {n.detail && (
+                        <p className="text-sm text-muted-foreground mt-1 whitespace-pre-wrap break-words">{n.detail}</p>
+                      )}
+                    </div>
+                    {!n.read && (
+                      <Button variant="ghost" size="sm" onClick={() => handleMarkNotificationRead(n.id)}>
+                        <Check className="h-4 w-4" />
+                      </Button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
         {/* ── Users ── */}
         {activeTab === 'users' && (
           <div className="max-w-5xl mx-auto space-y-4">
