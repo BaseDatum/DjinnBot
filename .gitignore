@@ -78,3 +78,8 @@ tmp/
 secrets/
 *.pem
 !*.pem.example
+
+# worktrees
+
+.worktrees/
+
