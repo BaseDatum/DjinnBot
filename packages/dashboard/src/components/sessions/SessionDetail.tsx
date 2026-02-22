@@ -3,9 +3,10 @@ import { useSSE } from '@/hooks/useSSE';
 import { fetchSession, API_BASE } from '@/lib/api';
 import { MarkdownRenderer } from '@/components/MarkdownRenderer';
 import { ToolCallCard } from '@/components/ToolCallCard';
-import { Loader2, Brain, ChevronDown, ChevronRight, AlertCircle, CheckCircle } from 'lucide-react';
+import { Loader2, Brain, ChevronDown, ChevronRight, AlertCircle, CheckCircle, Key } from 'lucide-react';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
+import { KeySourceBadge } from '@/components/ui/KeySourceBadge';
 import { useState, useEffect, useRef, useCallback } from 'react';
 import type { SessionEvent } from '@/types/session';
 
@@ -386,6 +387,15 @@ export function SessionDetail({ sessionId }: SessionDetailProps) {
 
       <ScrollArea className="h-[400px]" ref={scrollRef}>
         <div className="p-4 space-y-4">
+          {/* Key Resolution */}
+          {session.key_resolution && (
+            <div className="flex items-center gap-2">
+              <Key className="h-3.5 w-3.5 text-muted-foreground" />
+              <span className="text-xs text-muted-foreground font-medium">Keys:</span>
+              <KeySourceBadge keyResolution={session.key_resolution} showProviders showKeyDetails />
+            </div>
+          )}
+
           {/* User Prompt */}
           {session.user_prompt && (
             <div>

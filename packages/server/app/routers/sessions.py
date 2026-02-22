@@ -2,7 +2,7 @@
 
 import json
 import asyncio
-from typing import Optional
+from typing import Optional, Dict, List
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from sqlalchemy import select, func
@@ -175,6 +175,70 @@ async def complete_session(
     return {"ok": True}
 
 
+# ── Helpers ──────────────────────────────────────────────────────────────────
+
+
+async def _resolve_session_key_resolutions(
+    db: AsyncSession,
+    sessions: List[Session],
+) -> Dict[str, Optional[dict]]:
+    """Resolve key_resolution for a batch of pipeline sessions.
+
+    Pipeline session IDs follow the pattern ``{runId}_{stepId}``.  This helper
+    extracts run IDs, batch-loads the corresponding Run rows, and returns a map
+    of ``session_id → parsed key_resolution dict``.
+    """
+    from app.models.run import Run
+
+    if not sessions:
+        return {}
+
+    # Extract unique run IDs from session IDs.
+    # Session IDs are "{runId}_{stepId}" — runId itself can contain underscores
+    # (e.g. "run_abc123_step1"), but stepId is always the last segment after
+    # the LAST underscore only if the source is "pipeline".  Actually the
+    # format is `${runId}_${stepId}` where runId is like "run_1234567890_abc"
+    # and stepId is like "step1".  We need to match against actual run IDs.
+    #
+    # Safest approach: collect all possible run ID prefixes and query.
+    session_to_run: Dict[str, str] = {}
+    candidate_run_ids = set()
+
+    for s in sessions:
+        # Try splitting from the right — stepId is the last "_"-delimited segment
+        # only when source is "pipeline".  For other sources, the session ID may
+        # not contain a run ID at all.
+        parts = s.id.rsplit("_", 1)
+        if len(parts) == 2:
+            candidate_run_ids.add(parts[0])
+            session_to_run[s.id] = parts[0]
+
+    if not candidate_run_ids:
+        return {}
+
+    # Batch-fetch runs that match
+    result = await db.execute(
+        select(Run.id, Run.key_resolution).where(Run.id.in_(candidate_run_ids))
+    )
+    run_kr_map: Dict[str, Optional[dict]] = {}
+    for run_id, kr_text in result.all():
+        if kr_text:
+            try:
+                run_kr_map[run_id] = json.loads(kr_text)
+            except (json.JSONDecodeError, TypeError):
+                run_kr_map[run_id] = None
+        else:
+            run_kr_map[run_id] = None
+
+    # Map back to session IDs
+    out: Dict[str, Optional[dict]] = {}
+    for s in sessions:
+        run_id = session_to_run.get(s.id)
+        if run_id and run_id in run_kr_map:
+            out[s.id] = run_kr_map[run_id]
+    return out
+
+
 @router.get("/sessions")
 async def list_all_sessions(
     agent_ids: Optional[str] = None,  # comma-separated list of agent IDs to filter by
@@ -215,6 +279,9 @@ async def list_all_sessions(
 
     logger.debug(f"list_all_sessions: found {len(sessions)} sessions (total={total})")
 
+    # Resolve key_resolution from parent runs
+    key_resolution_map = await _resolve_session_key_resolutions(session, sessions)
+
     return {
         "sessions": [
             {
@@ -231,6 +298,7 @@ async def list_all_sessions(
                 "created_at": s.created_at,
                 "started_at": s.started_at,
                 "completed_at": s.completed_at,
+                "key_resolution": key_resolution_map.get(s.id),
             }
             for s in sessions
         ],
@@ -273,6 +341,9 @@ async def list_agent_sessions(
 
     logger.debug(f"list_agent_sessions: found {len(sessions)} sessions (total={total})")
 
+    # Resolve key_resolution from parent runs
+    key_resolution_map = await _resolve_session_key_resolutions(session, sessions)
+
     return {
         "sessions": [
             {
@@ -289,6 +360,7 @@ async def list_agent_sessions(
                 "created_at": s.created_at,
                 "started_at": s.started_at,
                 "completed_at": s.completed_at,
+                "key_resolution": key_resolution_map.get(s.id),
             }
             for s in sessions
         ],
@@ -320,6 +392,9 @@ async def get_session(
 
     logger.debug(f"get_session: session_id={session_id}, events={len(sorted_events)}")
 
+    # Resolve key_resolution from parent run
+    key_resolution_map = await _resolve_session_key_resolutions(db_session, [session])
+
     return {
         "id": session.id,
         "agent_id": session.agent_id,
@@ -334,6 +409,7 @@ async def get_session(
         "created_at": session.created_at,
         "started_at": session.started_at,
         "completed_at": session.completed_at,
+        "key_resolution": key_resolution_map.get(session.id),
         "events": [
             {
                 "id": e.id,

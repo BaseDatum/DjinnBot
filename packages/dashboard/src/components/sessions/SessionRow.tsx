@@ -3,6 +3,7 @@ import { ChevronDown, ChevronRight, MessageSquare, Zap, CheckCircle, XCircle, Sq
 import { formatDistanceToNow } from 'date-fns';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { KeySourceBadge } from '@/components/ui/KeySourceBadge';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -103,6 +104,7 @@ export function SessionRow({ session, isExpanded, onToggle, onSessionStopped }: 
           {session.turn_count > 0 && (
             <span className="text-xs text-muted-foreground">• {session.turn_count} turns</span>
           )}
+          {session.key_resolution && <KeySourceBadge keyResolution={session.key_resolution} />}
         </div>
         <p className="text-sm text-foreground truncate">{promptPreview}</p>
       </div>

@@ -12,6 +12,12 @@ export interface Session {
   created_at: number;
   started_at?: number;
   completed_at?: number;
+  key_resolution?: {
+    source?: string;
+    userId?: string | null;
+    resolvedProviders?: string[];
+    providerSources?: Record<string, { source: string; masked_key: string }>;
+  } | null;
 }
 
 export interface SessionEvent {
