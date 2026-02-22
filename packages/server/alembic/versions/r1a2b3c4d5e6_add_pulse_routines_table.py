@@ -4,8 +4,8 @@ Adds pulse_routines table for per-agent named pulse routines.  Each agent can
 have multiple routines with independent instructions, schedules, and execution
 settings.
 
-Revision ID: e1f2a3b4c5d6
-Revises: c9d3e5f7a2b1
+Revision ID: r1a2b3c4d5e6
+Revises: q1a2b3c4d5e6
 Create Date: 2026-02-22 00:00:00.000000
 
 """
@@ -17,8 +17,8 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision: str = "e1f2a3b4c5d6"
-down_revision: Union[str, Sequence[str], None] = "c9d3e5f7a2b1"
+revision: str = "r1a2b3c4d5e6"
+down_revision: Union[str, Sequence[str], None] = "q1a2b3c4d5e6"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
