@@ -13,7 +13,8 @@ import {
   useRef,
   useState,
 } from 'react';
-import { fetchAgents, listChatSessions, endChatSession, startChatSession, restartChatSession, getChatSessionStatus, getChatSession, type AgentListItem } from '@/lib/api';
+import { fetchAgents, listChatSessions, endChatSession, startChatSession, restartChatSession, getChatSessionStatus, getChatSession, API_BASE, type AgentListItem } from '@/lib/api';
+import { useSSE } from '@/hooks/useSSE';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -292,6 +293,48 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
     restore();
   }, [agents, restored]);
 
+  // ── SSE: fetch key_resolution when a chat session changes status ──────────
+  //
+  // The engine writes key_resolution asynchronously after resolving provider
+  // keys.  Rather than relying on blind timeout-based polling, we listen to
+  // the chat session SSE stream.  When a session we have open transitions to
+  // a new status (typically starting → running), we fetch its detail to pick
+  // up key_resolution.
+  const handleChatSessionSSE = useCallback((event: any) => {
+    const type = event?.type || event?.event;
+    const sessionId = event?.sessionId;
+    if (!sessionId) return;
+
+    if (type === 'status_changed' || type === 'created') {
+      // Check if we have a pane for this session that's missing keyResolution
+      const pane = panesRef.current.find(p => p.sessionId === sessionId);
+      if (pane && !pane.keyResolution) {
+        // Small delay to let the key_resolution PATCH complete
+        setTimeout(() => {
+          getChatSession(sessionId)
+            .then(session => {
+              if (session.key_resolution) {
+                setPanes(prev =>
+                  prev.map(p =>
+                    p.sessionId === sessionId
+                      ? { ...p, keyResolution: session.key_resolution }
+                      : p,
+                  ),
+                );
+              }
+            })
+            .catch(() => {}); // Non-fatal
+        }, 500);
+      }
+    }
+  }, []);
+
+  useSSE({
+    url: `${API_BASE}/events/chat-sessions`,
+    onMessage: handleChatSessionSSE,
+    enabled: restored,
+  });
+
   const openChat = useCallback(
     (agentId: string, model: string, _resumeSessionId?: string) => {
       // Guard: if a pane for this exact sessionId is already open, just make it
@@ -350,33 +393,28 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
                   : p,
               ),
             );
-            // Fetch key_resolution once the engine has had time to write it.
-            // The engine patches key_resolution asynchronously after container start,
-            // so we poll a few times with increasing delay.
-            const fetchKeyResolution = (sessionId: string, attempt: number) => {
-              if (attempt > 4) return; // Give up after ~12s total
-              const delay = attempt === 0 ? 2000 : 3000;
-              setTimeout(async () => {
-                try {
-                  const session = await getChatSession(sessionId);
-                  if (session.key_resolution) {
-                    setPanes(prev =>
-                      prev.map(p =>
-                        p.paneId === paneId
-                          ? { ...p, keyResolution: session.key_resolution }
-                          : p,
-                      ),
-                    );
-                  } else {
-                    // Not available yet — retry
-                    fetchKeyResolution(sessionId, attempt + 1);
-                  }
-                } catch {
-                  // Non-fatal — key badge just won't appear
-                }
-              }, delay);
-            };
-            fetchKeyResolution(result.sessionId, 0);
+            // key_resolution is fetched reactively via the chat-sessions SSE
+            // listener (handleChatSessionSSE) when the session status changes.
+            // As a fallback in case the SSE event was missed, do a single
+            // delayed fetch.
+            setTimeout(() => {
+              const pane = panesRef.current.find(p => p.paneId === paneId);
+              if (pane && !pane.keyResolution) {
+                getChatSession(result.sessionId)
+                  .then(s => {
+                    if (s.key_resolution) {
+                      setPanes(prev =>
+                        prev.map(p =>
+                          p.paneId === paneId
+                            ? { ...p, keyResolution: s.key_resolution }
+                            : p,
+                        ),
+                      );
+                    }
+                  })
+                  .catch(() => {});
+              }
+            }, 5000);
           })
           .catch(err => {
             console.error('Failed to start chat session:', err);
@@ -451,28 +489,26 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
             p.paneId === paneId ? { ...p, sessionStatus: 'starting', keyResolution: null } : p,
           ),
         );
-        // Re-fetch key_resolution for the restarted session
-        const fetchKeyResolution = (attempt: number) => {
-          if (attempt > 4) return;
-          const delay = attempt === 0 ? 2000 : 3000;
-          setTimeout(async () => {
-            try {
-              const session = await getChatSession(sessionId);
-              if (session.key_resolution) {
-                setPanes(prev =>
-                  prev.map(p =>
-                    p.paneId === paneId
-                      ? { ...p, keyResolution: session.key_resolution }
-                      : p,
-                  ),
-                );
-              } else {
-                fetchKeyResolution(attempt + 1);
-              }
-            } catch { /* non-fatal */ }
-          }, delay);
-        };
-        fetchKeyResolution(0);
+        // key_resolution will be picked up by the SSE listener.
+        // Single fallback fetch after 5s in case SSE was missed.
+        setTimeout(() => {
+          const current = panesRef.current.find(p => p.paneId === paneId);
+          if (current && !current.keyResolution) {
+            getChatSession(sessionId)
+              .then(s => {
+                if (s.key_resolution) {
+                  setPanes(prev =>
+                    prev.map(p =>
+                      p.paneId === paneId
+                        ? { ...p, keyResolution: s.key_resolution }
+                        : p,
+                    ),
+                  );
+                }
+              })
+              .catch(() => {});
+          }
+        }, 5000);
       })
       .catch(err => {
         console.error('Failed to restart session:', err);
