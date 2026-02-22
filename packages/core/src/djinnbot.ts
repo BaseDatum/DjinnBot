@@ -199,6 +199,7 @@ export class DjinnBot {
       getRunTaskBranch: async (runId: string) => (await this.store.getRun(runId))?.taskBranch,
       sessionPersister: this.sessionPersister,
       apiBaseUrl: config.apiUrl || process.env.DJINNBOT_API_URL || process.env.DJINNBOT_API_URL?.replace(/\/api\/?$/, '') || 'http://api:8000',
+      getAgentDefaultModel: (agentId: string) => this.agentRegistry.get(agentId)?.config.model,
     });
   }
 

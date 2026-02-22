@@ -35,6 +35,7 @@ const StepConfigSchema = z.object({
   agent: z.string(), // References AgentConfig.id
   description: z.string().optional(),
   type: z.enum(['standard', 'loop']).optional(),
+  model: z.string().optional(), // Override model for this step (highest precedence)
   input: z.string(), // Template string with {{variables}}
   outputs: z.array(z.string()).optional(),
   loop: LoopConfigSchema.optional(),

@@ -34,6 +34,7 @@ export interface StepConfig {
   agent: string;    // References AgentConfig.id
   description?: string;
   type?: StepType;
+  model?: string;   // Override model for this step (highest precedence)
   input: string;    // Template string with {{variables}}
   outputs?: string[];
   loop?: LoopConfig;

@@ -221,6 +221,16 @@ function PipelineDetailPage() {
             <div className="flex items-center gap-2 overflow-x-auto pb-4">
               {pipelineData.steps.map((step, idx) => {
                 const agent = pipelineData.agents.find(a => a.id === step.agent || a.name === step.agent);
+                // Resolve model using precedence: step > pipeline agent > pipeline default
+                // (agent config.yml and global fallback are server-side only)
+                const resolvedModel = step.model || agent?.model || pipelineData.defaults?.model;
+                const modelSource = step.model
+                  ? 'step'
+                  : agent?.model
+                    ? 'pipeline agent'
+                    : pipelineData.defaults?.model
+                      ? 'pipeline default'
+                      : null;
                 return (
                   <div key={step.id || idx} className="flex items-center gap-2">
                     <Card className="min-w-[200px] bg-muted/50">
@@ -231,13 +241,24 @@ function PipelineDetailPage() {
                         <div className="text-xs text-muted-foreground mb-2">
                           {agent?.emoji || '🤖'} {agent?.name || step.agent}
                         </div>
-                        {(step.model || agent?.model) && (
-                          <Badge variant="secondary" className="text-xs">
-                            {step.model || agent?.model}
-                          </Badge>
+                        {resolvedModel ? (
+                          <div className="flex items-center gap-1">
+                            <Badge variant="secondary" className="text-xs">
+                              {resolvedModel}
+                            </Badge>
+                            {modelSource && (
+                              <span className="text-[10px] text-muted-foreground">
+                                ({modelSource})
+                              </span>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="text-[10px] text-muted-foreground italic">
+                            agent default / global fallback
+                          </span>
                         )}
                         {step.structured_output && (
-                          <Badge variant="outline" className="text-xs ml-1">
+                          <Badge variant="outline" className="text-xs ml-1 mt-1">
                             structured
                           </Badge>
                         )}
@@ -325,8 +346,12 @@ function PipelineDetailPage() {
                     <div className="text-xs font-medium text-blue-400 mb-1">
                       Model Precedence
                     </div>
-                    <div className="text-xs text-blue-300/80">
-                      Step model → Agent model → Pipeline defaults → Global fallback
+                    <div className="text-xs text-blue-300/80 space-y-0.5">
+                      <div>1. Step model <span className="text-blue-400/60">(per-step override)</span></div>
+                      <div>2. Pipeline agent model <span className="text-blue-400/60">(agent block in pipeline YAML)</span></div>
+                      <div>3. Pipeline default model <span className="text-blue-400/60">(pipeline defaults)</span></div>
+                      <div>4. Agent default model <span className="text-blue-400/60">(agent config.yml)</span></div>
+                      <div>5. Global fallback</div>
                     </div>
                   </div>
                 </div>

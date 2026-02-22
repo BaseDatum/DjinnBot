@@ -35,6 +35,8 @@ export interface AgentExecutorConfig {
   sessionPersister?: import('../sessions/session-persister.js').SessionPersister;
   /** API base URL forwarded to StructuredOutputRunner for DB key injection */
   apiBaseUrl?: string;
+  /** Lookup the default model from an agent's config.yml (via AgentRegistry). */
+  getAgentDefaultModel?: (agentId: string) => string | undefined;
 }
 
 // Abstract interface for running agent sessions
@@ -105,6 +107,7 @@ export class AgentExecutor {
   private lifecycleManager?: AgentLifecycleManager;
   private lifecycleTracker?: AgentLifecycleTracker;
   private sessionPersister?: import('../sessions/session-persister.js').SessionPersister;
+  private getAgentDefaultModel?: (agentId: string) => string | undefined;
 
   constructor(config: AgentExecutorConfig) {
     this.eventBus = config.eventBus;
@@ -125,6 +128,7 @@ export class AgentExecutor {
     this.lifecycleManager = config.lifecycleManager;
     this.lifecycleTracker = config.lifecycleTracker;
     this.sessionPersister = config.sessionPersister;
+    this.getAgentDefaultModel = config.getAgentDefaultModel;
     
     // Initialize structured output runner
     this.structuredRunner = new StructuredOutputRunner({
@@ -161,6 +165,29 @@ export class AgentExecutor {
   /** Get the underlying agent runner (for pulse sessions, etc.) */
   getAgentRunner(): AgentRunner {
     return this.agentRunner;
+  }
+
+  /**
+   * Resolve the model for a pipeline step using the precedence chain:
+   *  1. Step-level model override (stepConfig.model)
+   *  2. Pipeline agent model (agentConfig.model in the pipeline YAML)
+   *  3. Pipeline defaults model (pipeline.defaults.model)
+   *  4. Agent default model (from agent's config.yml via registry)
+   *  5. Global fallback
+   */
+  private resolveStepModel(
+    stepConfig: StepConfig,
+    agentConfig: AgentConfig,
+    pipeline: PipelineConfig,
+    agentId: string,
+  ): string {
+    return (
+      stepConfig.model ??
+      agentConfig.model ??
+      pipeline.defaults.model ??
+      this.getAgentDefaultModel?.(agentId) ??
+      'openrouter/moonshotai/kimi-k2.5'
+    );
   }
 
   /**
@@ -396,7 +423,7 @@ export class AgentExecutor {
           source: 'pipeline',
           sourceId: stepId,
           userPrompt: (taskDesc || '').slice(0, 500),  // Truncate for storage
-          model: agentConfig.model ?? pipeline.defaults.model ?? 'openrouter/moonshotai/kimi-k2.5',
+          model: this.resolveStepModel(stepConfig, agentConfig, pipeline, agentId),
         });
       }
 
@@ -417,7 +444,7 @@ export class AgentExecutor {
         const result = await this.structuredRunner.run({
           runId,
           stepId: stepConfig.id,
-          model: agentConfig.model ?? pipeline.defaults.model ?? 'openrouter/moonshotai/kimi-k2.5',
+          model: this.resolveStepModel(stepConfig, agentConfig, pipeline, agentId),
           systemPrompt,
           userPrompt,
           outputSchema: stepConfig.outputSchema,
@@ -569,7 +596,7 @@ export class AgentExecutor {
           runId,
           stepId,
           agentId,
-          model: agentConfig.model ?? pipeline.defaults.model ?? 'openrouter/moonshotai/kimi-k2.5',
+          model: this.resolveStepModel(stepConfig, agentConfig, pipeline, agentId),
           thinkingLevel: agentConfig.thinkingLevel,
           systemPrompt,
           userPrompt,
