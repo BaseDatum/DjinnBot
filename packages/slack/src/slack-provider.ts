@@ -15,6 +15,13 @@ export class SlackProvider implements MessagingProvider {
     this.client = new WebClient(config.botToken);
   }
 
+  private requireChannelId(): string {
+    if (!this.config.defaultChannelId) {
+      throw new Error('[SlackProvider] defaultChannelId is required for this operation but was not configured');
+    }
+    return this.config.defaultChannelId;
+  }
+
   /**
    * Create a new thread by posting an initial message
    * Returns the thread timestamp (thread_ts) which serves as the threadId
@@ -81,7 +88,7 @@ export class SlackProvider implements MessagingProvider {
       const text = `${emoji} *${options.agentId}*\n${options.content}`;
 
       const response: ChatPostMessageResponse = await this.client.chat.postMessage({
-        channel: this.config.defaultChannelId,
+        channel: this.requireChannelId(),
         thread_ts: options.threadId,
         text,
         blocks: [
@@ -128,7 +135,7 @@ export class SlackProvider implements MessagingProvider {
       const color = options.color || statusConfig.color;
 
       const response: ChatPostMessageResponse = await this.client.chat.postMessage({
-        channel: this.config.defaultChannelId,
+        channel: this.requireChannelId(),
         thread_ts: options.threadId,
         text: `${statusConfig.emoji} ${options.title}`,
         blocks: [
@@ -179,7 +186,7 @@ export class SlackProvider implements MessagingProvider {
   async readThread(threadId: string, limit = 100): Promise<ThreadMessage[]> {
     try {
       const response: ConversationsRepliesResponse = await this.client.conversations.replies({
-        channel: this.config.defaultChannelId,
+        channel: this.requireChannelId(),
         ts: threadId,
         limit,
       });
@@ -250,7 +257,7 @@ export class SlackProvider implements MessagingProvider {
       const cleanEmoji = emoji.replace(/:/g, '');
 
       const response = await this.client.reactions.add({
-        channel: this.config.defaultChannelId,
+        channel: this.requireChannelId(),
         timestamp: messageId,
         name: cleanEmoji,
       });

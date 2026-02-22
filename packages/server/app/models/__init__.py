@@ -64,6 +64,7 @@ from app.models.user_provider import (
     AdminSharedProvider,
     UserSecretGrant,
 )
+from app.models.waitlist import WaitlistEntry, EmailSettings
 
 __all__ = [
     # Pydantic models (backward compatibility)
@@ -126,4 +127,7 @@ __all__ = [
     "UserModelProvider",
     "AdminSharedProvider",
     "UserSecretGrant",
+    # Waitlist
+    "WaitlistEntry",
+    "EmailSettings",
 ]

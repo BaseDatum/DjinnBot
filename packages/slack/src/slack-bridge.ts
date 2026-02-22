@@ -32,7 +32,7 @@ export interface SessionContext {
 export interface SlackBridgeConfig {
   eventBus: EventBus;
   agentRegistry: AgentRegistry;
-  defaultChannelId: string;
+  defaultChannelId?: string;
   /** Called when an agent needs to make an LLM decision about a Slack event */
   onDecisionNeeded: (
     agentId: string,
@@ -175,6 +175,20 @@ export class SlackBridge {
       `[SlackBridge] Starting ${slackAgents.length} agent Slack runtimes...`
     );
 
+    for (const agent of slackAgents) {
+      const creds = agent.channels.slack;
+      const hasBotToken = !!creds?.primaryToken;
+      const hasAppToken = !!creds?.secondaryToken;
+      console.log(
+        `[SlackBridge] Agent ${agent.id}: botToken=${hasBotToken ? 'present' : 'MISSING'}, appToken=${hasAppToken ? 'present' : 'MISSING'}`
+      );
+      if (!hasBotToken || !hasAppToken) {
+        console.error(
+          `[SlackBridge] Agent ${agent.id} is missing required Slack credentials — Socket Mode requires both botToken (primaryToken) and appToken (secondaryToken)`
+        );
+      }
+    }
+
     // Start each agent's Socket Mode connection
     const startPromises = slackAgents.map(async (agent: any) => {
       try {
@@ -222,10 +236,21 @@ export class SlackBridge {
       }
     });
 
-    await Promise.allSettled(startPromises);
+    const results = await Promise.allSettled(startPromises);
+
+    // Log any failures with details
+    const failures = results.filter((r): r is PromiseRejectedResult => r.status === 'rejected');
+    if (failures.length > 0) {
+      console.error(
+        `[SlackBridge] ${failures.length}/${slackAgents.length} agent runtimes FAILED to start:`
+      );
+      failures.forEach((f, i) => {
+        console.error(`[SlackBridge]   ${i + 1}. ${f.reason?.message || f.reason}`);
+      });
+    }
 
     console.log(
-      `[SlackBridge] ${this.agentRuntimes.size}/${slackAgents.length} agent runtimes started`
+      `[SlackBridge] ${this.agentRuntimes.size}/${slackAgents.length} agent runtimes started successfully`
     );
 
     // Register output hooks for conversation sessions if ChatSessionManager is available

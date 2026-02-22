@@ -30,6 +30,8 @@ PUBLIC_PATH_PATTERNS: list[re.Pattern] = [
     re.compile(r"^/v1/auth/refresh$"),
     re.compile(r"^/v1/auth/oidc/.+/authorize$"),
     re.compile(r"^/v1/auth/oidc/.+/callback$"),
+    # Waitlist join (public)
+    re.compile(r"^/v1/waitlist/join$"),
     # Webhook endpoints (protected by their own signature verification)
     re.compile(r"^/v1/webhooks/"),
     # OpenAPI docs (useful during development)

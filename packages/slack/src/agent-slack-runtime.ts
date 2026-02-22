@@ -110,8 +110,8 @@ export interface AgentSlackRuntimeConfig {
   ) => Promise<{ systemPrompt: string; identity: string; soul: string; agents: string; decision: string }>;
   /** Check if a thread is a pipeline work thread (shared across all agents) */
   isPipelineThread?: (channelId: string, threadTs: string) => boolean;
-  /** Default channel for run threads */
-  defaultChannelId: string;
+  /** Default channel for run threads (optional — only needed for pipeline thread posting) */
+  defaultChannelId?: string;
   /** Default model for Slack decisions when agent config is missing */
   defaultSlackDecisionModel?: string;
   /** Called when a user gives feedback (thumbs up/down) on an agent response */
@@ -237,29 +237,45 @@ export class AgentSlackRuntime {
   async start(): Promise<void> {
     if (this.running) return;
 
-    // Resolve bot user ID and team ID if not set
-      if (!this.botUserId || !this.teamId) {
-        try {
-          const authResult = await this.client.auth.test();
-          this.botUserId = authResult.user_id as string;
-          this.botId = authResult.bot_id as string | undefined;
-          this.teamId = authResult.team_id as string;
-          console.log(
-            `[${this.agentId}] Bot user ID: ${this.botUserId}, bot ID: ${this.botId ?? 'n/a'}, team ID: ${this.teamId}`
-          );
-        } catch (err) {
-          console.error(
-            `[${this.agentId}] Failed to resolve bot user ID / team ID:`,
-            err
-          );
-        }
-      }
+    console.log(`[${this.agentId}] Starting Socket Mode connection...`);
 
-    await this.app.start();
-    this.running = true;
-    console.log(
-      `[${this.agentId}] Socket Mode connected — ${this.agent.identity.name} ${this.agent.identity.emoji} is online`
-    );
+    // Resolve bot user ID and team ID if not set
+    if (!this.botUserId || !this.teamId) {
+      try {
+        console.log(`[${this.agentId}] Calling auth.test to resolve bot identity...`);
+        const authResult = await this.client.auth.test();
+        this.botUserId = authResult.user_id as string;
+        this.botId = authResult.bot_id as string | undefined;
+        this.teamId = authResult.team_id as string;
+        console.log(
+          `[${this.agentId}] Bot user ID: ${this.botUserId}, bot ID: ${this.botId ?? 'n/a'}, team ID: ${this.teamId}`
+        );
+      } catch (err: any) {
+        const errMsg = err?.data?.error || err?.message || String(err);
+        console.error(
+          `[${this.agentId}] auth.test FAILED — cannot verify Slack credentials. ` +
+          `This usually means the bot token is invalid or revoked. Error: ${errMsg}`
+        );
+        throw new Error(`Slack auth.test failed for ${this.agentId}: ${errMsg}`);
+      }
+    }
+
+    try {
+      console.log(`[${this.agentId}] Opening websocket (app.start)...`);
+      await this.app.start();
+      this.running = true;
+      console.log(
+        `[${this.agentId}] Socket Mode connected — ${this.agent.identity.name} ${this.agent.identity.emoji} is online`
+      );
+    } catch (err: any) {
+      const errMsg = err?.data?.error || err?.message || String(err);
+      console.error(
+        `[${this.agentId}] Socket Mode websocket FAILED to connect. ` +
+        `This usually means the app token (xapp-...) is invalid or Socket Mode is not enabled for this Slack app. ` +
+        `Error: ${errMsg}`
+      );
+      throw err;
+    }
   }
 
   async stop(): Promise<void> {

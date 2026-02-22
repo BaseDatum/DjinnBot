@@ -62,6 +62,6 @@ export interface ThreadMessage {
 export interface SlackConfig {
   botToken: string;
   appToken?: string;      // For Socket Mode
-  defaultChannelId: string;
+  defaultChannelId?: string;
   agentEmojis?: Record<string, string>;  // agentId → emoji
 }

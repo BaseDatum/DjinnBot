@@ -22,8 +22,8 @@ export interface RunThread {
 }
 
 export interface ThreadManagerConfig {
-  /** Default channel for run threads */
-  defaultChannelId: string;
+  /** Default channel for run threads (optional — pipeline threads require per-project config when unset) */
+  defaultChannelId?: string;
   /** Map of agentId → WebClient for all Slack-connected agents */
   agentClients: Map<string, WebClient>;
 }
@@ -48,6 +48,10 @@ export class ThreadManager {
     channelId?: string;
   }): Promise<RunThread | null> {
     const channelId = options.channelId || this.config.defaultChannelId;
+    if (!channelId) {
+      console.warn('[ThreadManager] No channelId provided and no defaultChannelId configured — cannot create Slack thread. Set SLACK_CHANNEL_ID or configure a channel in Project Settings.');
+      return null;
+    }
 
     // Use the first assigned agent's client to create the thread
     const firstAgent = options.assignedAgents[0];

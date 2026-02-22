@@ -7,7 +7,7 @@ import type { MessagingProvider } from './types.js';
 export class SlackEventBridge {
   private eventBus: EventBus;
   private messaging: MessagingProvider;
-  private defaultChannelId: string;
+  private defaultChannelId?: string;
   private activeRuns = new Map<string, {
     threadId: string;
     channelId: string;
@@ -19,7 +19,7 @@ export class SlackEventBridge {
   constructor(options: {
     eventBus: EventBus;
     messaging: MessagingProvider;
-    defaultChannelId: string;
+    defaultChannelId?: string;
   }) {
     this.eventBus = options.eventBus;
     this.messaging = options.messaging;
@@ -36,6 +36,10 @@ export class SlackEventBridge {
     }
 
     const targetChannelId = channelId || this.defaultChannelId;
+    if (!targetChannelId) {
+      console.warn(`[EventBridge] No channelId for run ${runId} and no defaultChannelId configured — skipping`);
+      return;
+    }
     const channel = runChannel(runId);
 
     // Subscribe to run events

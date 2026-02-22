@@ -809,11 +809,17 @@ async function main(): Promise<void> {
     console.log(`[Engine] Loaded ${pipelines.length} pipelines:`,
       pipelines.map(p => p.id).join(', '));
 
-    // Start Slack bridge if configured
-    if (process.env.SLACK_CHANNEL_ID) {
-      console.log('[Engine] Starting Slack bridge...');
+    // Start Slack bridge — agents with Slack credentials will open websocket
+    // connections regardless of whether a default channel is configured.
+    {
+      const slackChannelId = process.env.SLACK_CHANNEL_ID || undefined;
+      if (slackChannelId) {
+        console.log(`[Engine] Starting Slack bridge (SLACK_CHANNEL_ID=${slackChannelId})...`);
+      } else {
+        console.log('[Engine] Starting Slack bridge (no SLACK_CHANNEL_ID — pipeline thread posting will require per-project channel config)...');
+      }
       await djinnBot.startSlackBridge(
-        process.env.SLACK_CHANNEL_ID,
+        slackChannelId,
         async (agentId, systemPrompt, userPrompt, modelString) => {
           // Use @mariozechner/pi-agent-core's Agent to make a simple LLM call
           // for Slack event decisions

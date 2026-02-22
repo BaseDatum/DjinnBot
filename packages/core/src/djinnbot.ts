@@ -1021,7 +1021,7 @@ Start now.`;
 
   /** Start the Slack bridge for agent notifications and interactions */
   async startSlackBridge(
-    channelId: string,
+    channelId: string | undefined,
     onDecisionNeeded: (
       agentId: string,
       systemPrompt: string,
@@ -1050,7 +1050,7 @@ Start now.`;
     this.slackBridge = new SlackBridge({
       eventBus: this.eventBus as any,
       agentRegistry: this.agentRegistry as any,
-      defaultChannelId: channelId,
+      defaultChannelId: channelId as any,
       onDecisionNeeded,
       onHumanGuidance,
       onMemorySearch,
