@@ -27,6 +27,10 @@ import {
   Clock,
   Check,
   X,
+  Database,
+  Cpu,
+  Brain,
+  MessageSquare,
 } from 'lucide-react';
 import {
   Dialog,
@@ -39,24 +43,29 @@ import {
 } from '@/components/ui/dialog';
 import { SecretsSettings } from '@/components/settings/SecretsSettings';
 import { ModelProvidersSettings } from '@/components/settings/ModelProvidersSettings';
+import { MemorySearchSettings } from '@/components/settings/MemorySearchSettings';
 import { NestedSidebar } from '@/components/layout/NestedSidebar';
 import type { NestedSidebarItem } from '@/components/layout/NestedSidebar';
 import { SearchableCombobox } from '@/components/ui/SearchableCombobox';
 import type { ComboboxOption } from '@/components/ui/SearchableCombobox';
 import { fetchModelProviders, type ModelProvider } from '@/lib/api';
+import { ProviderModelSelector } from '@/components/ui/ProviderModelSelector';
+import { useAutoSave } from '@/hooks/useAutoSave';
 
 export const Route = createFileRoute('/admin')({
   component: AdminPage,
 });
 
-type AdminTab = 'users' | 'providers' | 'sharing' | 'approvals' | 'runtime' | 'secrets' | 'waitlist' | 'email';
+type AdminTab = 'users' | 'providers' | 'sharing' | 'memory' | 'models' | 'approvals' | 'runtime' | 'secrets' | 'waitlist' | 'email';
 
 const NAV_ITEMS: NestedSidebarItem[] = [
   { key: 'users', label: 'Users', icon: Users },
   { key: 'waitlist', label: 'Waitlist', icon: ClipboardList },
   { key: 'email', label: 'Email Settings', icon: Mail },
-  { key: 'providers', label: 'Model Providers', icon: Layers },
+  { key: 'providers', label: 'Instance Providers', icon: Layers },
   { key: 'sharing', label: 'Key Sharing', icon: Share2 },
+  { key: 'memory', label: 'Memory Search', icon: Database },
+  { key: 'models', label: 'Default Models', icon: Cpu },
   { key: 'approvals', label: 'Approvals', icon: CheckCircle },
   { key: 'runtime', label: 'Agent Runtime', icon: Container },
   { key: 'secrets', label: 'Instance Secrets', icon: Lock },
@@ -121,6 +130,22 @@ function AdminPage() {
   const [testEmailAddr, setTestEmailAddr] = useState('');
   const [testingSend, setTestingSend] = useState(false);
 
+  // Default models state (moved from Settings to Admin)
+  interface GlobalSettings {
+    defaultWorkingModel: string;
+    defaultThinkingModel: string;
+    defaultSlackDecisionModel: string;
+    defaultWorkingModelThinkingLevel: string;
+    defaultThinkingModelThinkingLevel: string;
+    defaultSlackDecisionModelThinkingLevel: string;
+    pulseIntervalMinutes: number;
+    pulseEnabled: boolean;
+    userSlackId: string;
+    agentRuntimeImage: string;
+  }
+  const [globalSettings, setGlobalSettings] = useState<GlobalSettings | null>(null);
+  const [globalSettingsEdited, setGlobalSettingsEdited] = useState(false);
+
   // Add user dialog state
   const [addUserOpen, setAddUserOpen] = useState(false);
   const [newUserEmail, setNewUserEmail] = useState('');
@@ -182,15 +207,38 @@ function AdminPage() {
     }
   }, [activeTab]);
 
-  // Load runtime settings
+  // Load global settings (used by runtime, default models tabs)
   useEffect(() => {
-    if (activeTab === 'runtime') {
+    if (activeTab === 'runtime' || activeTab === 'models') {
       authFetch(`${API_BASE}/settings/`)
         .then((res) => res.json())
-        .then((data: any) => setRuntimeImage(data.agentRuntimeImage || ''))
+        .then((data: any) => {
+          setRuntimeImage(data.agentRuntimeImage || '');
+          setGlobalSettings(data);
+        })
         .catch(() => {});
     }
   }, [activeTab]);
+
+  // Auto-save global settings (default models)
+  const { saveState: settingsSaveState } = useAutoSave({
+    value: globalSettingsEdited ? globalSettings : null,
+    onSave: async (value) => {
+      if (!value) return;
+      const res = await authFetch(`${API_BASE}/settings/`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(value),
+      });
+      if (!res.ok) throw new Error('Failed to save');
+    },
+    delay: 600,
+  });
+
+  const handleGlobalSettingsChange = (updated: GlobalSettings) => {
+    setGlobalSettings(updated);
+    setGlobalSettingsEdited(true);
+  };
 
   // Load waitlist entries
   useEffect(() => {
@@ -592,13 +640,13 @@ function AdminPage() {
           </div>
         )}
 
-        {/* ── Model Providers ── */}
+        {/* ── Instance Providers ── */}
         {activeTab === 'providers' && (
           <div className="max-w-5xl mx-auto space-y-2">
             <div>
               <h2 className="text-lg font-semibold flex items-center gap-2">
                 <Layers className="h-5 w-5" />
-                Model Providers
+                Instance Providers
               </h2>
               <p className="text-sm text-muted-foreground mt-1">
                 Configure instance-level API keys for AI model providers.
@@ -606,6 +654,108 @@ function AdminPage() {
               </p>
             </div>
             <ModelProvidersSettings />
+          </div>
+        )}
+
+        {/* ── Memory Search ── */}
+        {activeTab === 'memory' && (
+          <div className="max-w-5xl mx-auto space-y-4">
+            <div>
+              <h2 className="text-lg font-semibold flex items-center gap-2">
+                <Database className="h-5 w-5" />
+                Memory Search
+              </h2>
+              <p className="text-sm text-muted-foreground mt-1">
+                Configure the embedding and reranking provider for agent memory (ClawVault semantic recall).
+                Requires an OpenAI-compatible embeddings API —{' '}
+                <strong>OpenRouter</strong> is recommended and reuses the key you already configured above.
+              </p>
+            </div>
+            <MemorySearchSettings />
+          </div>
+        )}
+
+        {/* ── Default Models ── */}
+        {activeTab === 'models' && globalSettings && (
+          <div className="max-w-5xl mx-auto space-y-6">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h2 className="text-lg font-semibold flex items-center gap-2">
+                  <Cpu className="h-5 w-5" />
+                  Default Models
+                </h2>
+                <p className="text-sm text-muted-foreground mt-1">
+                  Fallback models used when agents don't have explicit configuration.
+                  Choose a configured provider, then pick a model.
+                </p>
+              </div>
+              {settingsSaveState === 'saving' && (
+                <span className="text-xs text-muted-foreground animate-pulse shrink-0 mt-1">Saving...</span>
+              )}
+              {settingsSaveState === 'saved' && (
+                <span className="text-xs text-green-500 shrink-0 mt-1">&#x2713; Saved</span>
+              )}
+              {settingsSaveState === 'error' && (
+                <span className="text-xs text-destructive shrink-0 mt-1">Failed to save</span>
+              )}
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="workingModel" className="flex items-center gap-2">
+                <Brain className="h-4 w-4" />
+                Default Working Model
+              </Label>
+              <p className="text-xs text-muted-foreground mb-2">
+                Used for pipeline execution, code generation, and complex tasks
+              </p>
+              <ProviderModelSelector
+                value={globalSettings.defaultWorkingModel}
+                onChange={(v) => handleGlobalSettingsChange({ ...globalSettings, defaultWorkingModel: v })}
+                thinkingLevel={globalSettings.defaultWorkingModelThinkingLevel as any}
+                onThinkingLevelChange={(l) => handleGlobalSettingsChange({ ...globalSettings, defaultWorkingModelThinkingLevel: l })}
+                className="w-full sm:w-full"
+                placeholder="Select working model..."
+              />
+              <p className="text-xs text-muted-foreground font-mono mt-1">{globalSettings.defaultWorkingModel}</p>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="thinkingModel" className="flex items-center gap-2">
+                <MessageSquare className="h-4 w-4" />
+                Default Thinking Model
+              </Label>
+              <p className="text-xs text-muted-foreground mb-2">
+                Used for quick decisions, classification, and triage tasks
+              </p>
+              <ProviderModelSelector
+                value={globalSettings.defaultThinkingModel}
+                onChange={(v) => handleGlobalSettingsChange({ ...globalSettings, defaultThinkingModel: v })}
+                thinkingLevel={globalSettings.defaultThinkingModelThinkingLevel as any}
+                onThinkingLevelChange={(l) => handleGlobalSettingsChange({ ...globalSettings, defaultThinkingModelThinkingLevel: l })}
+                className="w-full sm:w-full"
+                placeholder="Select thinking model..."
+              />
+              <p className="text-xs text-muted-foreground font-mono mt-1">{globalSettings.defaultThinkingModel}</p>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="slackModel" className="flex items-center gap-2">
+                <MessageSquare className="h-4 w-4" />
+                Default Slack Decision Model
+              </Label>
+              <p className="text-xs text-muted-foreground mb-2">
+                Used when agents need to decide how to respond to Slack messages
+              </p>
+              <ProviderModelSelector
+                value={globalSettings.defaultSlackDecisionModel}
+                onChange={(v) => handleGlobalSettingsChange({ ...globalSettings, defaultSlackDecisionModel: v })}
+                thinkingLevel={globalSettings.defaultSlackDecisionModelThinkingLevel as any}
+                onThinkingLevelChange={(l) => handleGlobalSettingsChange({ ...globalSettings, defaultSlackDecisionModelThinkingLevel: l })}
+                className="w-full sm:w-full"
+                placeholder="Select Slack decision model..."
+              />
+              <p className="text-xs text-muted-foreground font-mono mt-1">{globalSettings.defaultSlackDecisionModel}</p>
+            </div>
           </div>
         )}
 
