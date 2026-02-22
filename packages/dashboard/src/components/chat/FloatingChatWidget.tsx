@@ -66,11 +66,31 @@ const DRAWER_SIZE_KEY = 'chat-drawer-size';
 const DEFAULT_DRAWER_W = 420;
 const DEFAULT_DRAWER_H = 600;
 
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+/** True when the viewport width is below the Tailwind `sm` breakpoint (640px). */
+function useIsMobile(breakpoint = 640) {
+  const [isMobile, setIsMobile] = useState(
+    () => typeof window !== 'undefined' && window.innerWidth < breakpoint,
+  );
+
+  useEffect(() => {
+    const mql = window.matchMedia(`(max-width: ${breakpoint - 1}px)`);
+    const onChange = (e: MediaQueryListEvent) => setIsMobile(e.matches);
+    mql.addEventListener('change', onChange);
+    setIsMobile(mql.matches);
+    return () => mql.removeEventListener('change', onChange);
+  }, [breakpoint]);
+
+  return isMobile;
+}
+
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export function FloatingChatWidget() {
   const { location } = useRouterState();
   const isChatPage = location.pathname === '/chat';
+  const isMobile = useIsMobile();
 
   const {
     panes,
@@ -157,6 +177,7 @@ export function FloatingChatWidget() {
   }, []);
 
   const startResize = useCallback((e: React.MouseEvent, edge: 'top' | 'left' | 'top-left') => {
+    if (isMobile) return; // no resize on mobile
     e.preventDefault();
     e.stopPropagation();
     resizeEdgeRef.current = edge;
@@ -167,7 +188,7 @@ export function FloatingChatWidget() {
       h: drawerSizeRef.current.h,
     };
     setIsResizing(true);
-  }, []);
+  }, [isMobile]);
 
   // ── FAB drag-to-reposition (desktop only) ─────────────────────────────────
 
@@ -266,8 +287,9 @@ export function FloatingChatWidget() {
   }, [clamp]);
 
   const handleFabMouseDown = useCallback((e: React.MouseEvent<HTMLButtonElement>) => {
-    // Desktop only — ignore if touch or right-click
+    // Desktop only — ignore if touch, right-click, or mobile viewport
     if (e.button !== 0) return;
+    if (isMobile) return; // disable drag on mobile
     e.preventDefault(); // prevent text selection during drag
 
     const fabRect = fabRef.current?.getBoundingClientRect();
@@ -277,7 +299,7 @@ export function FloatingChatWidget() {
     dragStartRef.current = { mouseX: e.clientX, mouseY: e.clientY, fabX, fabY };
     isDraggingRef.current = true;
     didDragRef.current = false;
-  }, []);
+  }, [isMobile]);
 
   const handleFabMouseUp = useCallback(() => {
     // Handled by the global onMouseUp above; nothing extra needed here.
@@ -427,20 +449,29 @@ export function FloatingChatWidget() {
           'bg-primary text-primary-foreground font-medium text-sm',
           // Only apply hover/active scale when not dragging
           isDragging ? 'cursor-grabbing shadow-2xl scale-105' : 'transition-all hover:scale-105 hover:shadow-xl active:scale-95',
-          // Default position (bottom-right) — only used when fabPos is null or on mobile
-          !fabPos ? 'bottom-[calc(1.25rem+env(safe-area-inset-bottom,0px))] right-5' : '',
+          // Default position (bottom-right) — always used on mobile, or desktop when fabPos is null
+          (isMobile || !fabPos) ? 'bottom-4 right-4 sm:bottom-5 sm:right-5' : '',
+          // Safe-area padding on mobile
+          isMobile ? 'pb-[env(safe-area-inset-bottom,0px)]' : '',
           // Hide on /chat — the sidebar flyout + ChatMobilePill handle that page
           isChatPage ? 'hidden' : '',
-          // On mobile, always snap back to default corner (ignore fabPos)
-          'sm:[position:fixed]',
+          // Prevent touch-drag on mobile
+          isMobile ? 'touch-action-manipulation' : '',
         ].join(' ')}
-        style={fabPos ? {
-          // Desktop: use explicit top/left from drag state; hide bottom/right defaults
-          top: fabPos.y,
-          left: fabPos.x,
-          bottom: 'auto',
-          right: 'auto',
-        } : undefined}
+        style={{
+          // Desktop with drag position: use explicit top/left
+          ...(!isMobile && fabPos ? {
+            top: fabPos.y,
+            left: fabPos.x,
+            bottom: 'auto',
+            right: 'auto',
+          } : {}),
+          // Ensure mobile safe-area bottom offset
+          ...(isMobile ? {
+            bottom: 'calc(1rem + env(safe-area-inset-bottom, 0px))',
+            right: '1rem',
+          } : {}),
+        }}
         onMouseDown={handleFabMouseDown}
         onMouseUp={handleFabMouseUp}
         onClick={() => {
@@ -470,20 +501,28 @@ export function FloatingChatWidget() {
           className={[
             'fixed z-50 flex flex-col',
             'border border-border shadow-2xl bg-card overflow-hidden',
-            // Mobile: full-width bottom sheet
+            // Mobile: full-width bottom sheet pinned to bottom with safe-area
             'left-0 right-0 bottom-0 rounded-t-2xl border-t border-x',
             // Desktop: floating card with rounded corners — position overridden by drawerStyle()
-            fabPos
+            !isMobile && fabPos
               ? 'sm:rounded-xl'
-              : 'sm:left-auto sm:right-5 sm:bottom-20 sm:rounded-xl',
-            // Prevent text selection while resizing
+              : !isMobile
+                ? 'sm:left-auto sm:right-5 sm:bottom-20 sm:rounded-xl'
+                : '',
+            // Prevent text selection while resizing (desktop only)
             isResizing ? 'select-none' : '',
           ].join(' ')}
-          style={fabPos ? drawerStyle() : {
-            // Width and height apply on desktop; on mobile left-0/right-0 override
-            // width to be full-viewport, and height is overridden by maxHeight below.
+          style={isMobile ? {
+            // Mobile: fixed bottom sheet, constrained to viewport
+            maxHeight: 'calc(90dvh - env(safe-area-inset-top, 0px))',
+            maxWidth: '100vw',
+            height: 'calc(85dvh - env(safe-area-inset-top, 0px))',
+            resize: 'none',
+            touchAction: 'pan-y',
+            paddingBottom: 'env(safe-area-inset-bottom, 0px)',
+          } : fabPos ? drawerStyle() : {
+            // Desktop: use persisted drawer size
             width: drawerSize.w,
-            // Mobile: cap with dvh expressions; desktop: use persisted height
             height: `min(${drawerSize.h}px, calc(100dvh - 5rem))`,
             maxHeight: `min(${drawerSize.h}px, 85dvh)`,
           }}
