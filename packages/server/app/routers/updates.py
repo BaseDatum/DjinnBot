@@ -142,9 +142,19 @@ async def check_for_updates() -> UpdateCheckResponse:
     result.published_at = release.get("published_at")
 
     # Compare versions
-    if current in ("latest", "unknown", ""):
-        # Can't compare — show as available if there's any release
+    if current in ("unknown", ""):
+        # Can't determine running version — assume update available
         result.update_available = True
+    elif current == "latest":
+        # Running from "latest" tag — compare the release tag against the
+        # API-reported version (which reflects the actual build version).
+        api_version = os.getenv("DJINNBOT_API_VERSION", "")
+        if api_version and _parse_semver(api_version):
+            result.current_version = api_version
+            result.update_available = _is_newer(tag, api_version)
+        else:
+            # No concrete version available — don't nag about updates
+            result.update_available = False
     else:
         result.update_available = _is_newer(tag, current)
 
