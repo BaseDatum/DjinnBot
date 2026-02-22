@@ -54,6 +54,15 @@ export interface SlackSessionPoolConfig {
    * to cross-reference Slack user IDs with DjinnBot user accounts.
    */
   apiBaseUrl?: string;
+  /**
+   * Called just before a session container is torn down (idle timeout or explicit stop).
+   * Use this to trigger memory consolidation — the agent runs one final turn to
+   * save anything worth remembering from the conversation before the container exits.
+   *
+   * The callback receives the sessionId and agentId. It should resolve (or reject)
+   * before the container is stopped. Failures are logged but do not block teardown.
+   */
+  onBeforeTeardown?: (sessionId: string, agentId: string) => Promise<void>;
 }
 
 export interface SlackAttachmentMeta {
@@ -195,7 +204,7 @@ export class SlackSessionPool {
       channelId: opts.channelId,
       threadTs: opts.threadTs,
       lastActiveAt: Date.now(),
-      idleTimer: this.createIdleTimer(key, sessionId, idleTimeoutMs),
+      idleTimer: this.createIdleTimer(key, sessionId, opts.agentId, idleTimeoutMs),
     };
     this.sessions.set(key, entry);
 
@@ -220,6 +229,15 @@ export class SlackSessionPool {
 
     clearTimeout(entry.idleTimer);
     this.sessions.delete(key);
+
+    // Run pre-teardown hook (memory consolidation) before stopping the container
+    if (this.config.onBeforeTeardown) {
+      try {
+        await this.config.onBeforeTeardown(entry.sessionId, entry.agentId);
+      } catch (err) {
+        console.warn(`[SlackSessionPool] onBeforeTeardown failed for ${entry.sessionId} (non-fatal):`, err);
+      }
+    }
 
     try {
       await this.config.chatSessionManager.stopSession(entry.sessionId);
@@ -343,10 +361,21 @@ export class SlackSessionPool {
     );
   }
 
-  private createIdleTimer(key: string, sessionId: string, idleTimeoutMs: number): NodeJS.Timeout {
+  private createIdleTimer(key: string, sessionId: string, agentId: string, idleTimeoutMs: number): NodeJS.Timeout {
     const timer = setTimeout(async () => {
       console.log(`[SlackSessionPool] Idle timeout for key=${key} sessionId=${sessionId}`);
       this.sessions.delete(key);
+
+      // Run pre-teardown hook (memory consolidation) before stopping the container.
+      // This is the primary trigger point — idle timeout is when most Slack sessions end.
+      if (this.config.onBeforeTeardown) {
+        try {
+          await this.config.onBeforeTeardown(sessionId, agentId);
+        } catch (err) {
+          console.warn(`[SlackSessionPool] onBeforeTeardown failed for ${sessionId} (non-fatal):`, err);
+        }
+      }
+
       try {
         await this.config.chatSessionManager.stopSession(sessionId);
       } catch (err) {
@@ -362,7 +391,7 @@ export class SlackSessionPool {
   private resetIdleTimer(key: string, entry: SlackSessionEntry): void {
     const idleTimeoutMs = entry.source === 'dm' ? this.DM_IDLE_MS : this.THREAD_IDLE_MS;
     clearTimeout(entry.idleTimer);
-    entry.idleTimer = this.createIdleTimer(key, entry.sessionId, idleTimeoutMs);
+    entry.idleTimer = this.createIdleTimer(key, entry.sessionId, entry.agentId, idleTimeoutMs);
     entry.lastActiveAt = Date.now();
   }
 

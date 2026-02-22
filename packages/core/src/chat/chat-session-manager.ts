@@ -1472,6 +1472,93 @@ export class ChatSessionManager {
   }
 
   /**
+   * Trigger a memory consolidation turn before session teardown.
+   *
+   * Sends a "last words" system message instructing the agent to use its
+   * existing `remember` tool to save anything worth keeping from the
+   * conversation — insights, decisions, relationship context, lessons.
+   * The agent decides what to save (or nothing at all). This mirrors how
+   * a person naturally consolidates memories after a meaningful exchange.
+   *
+   * Quality gate: only fires for sessions with ≥ minTurns human turns OR
+   * sessions that used at least one tool (rich sessions). Trivial 1-line
+   * exchanges are skipped to avoid wasting tokens.
+   *
+   * The consolidation runs as a regular agent turn with a hard 60 s timeout.
+   * Failures are non-fatal — the session stops regardless.
+   */
+  async triggerConsolidation(sessionId: string, minTurns: number = 3): Promise<void> {
+    const session = this.activeSessions.get(sessionId);
+    if (!session) {
+      console.log(`[ChatSessionManager] triggerConsolidation: session ${sessionId} not found, skipping`);
+      return;
+    }
+
+    // Quality gate — skip trivial sessions
+    const humanTurns = session.conversationHistory.filter(m => m.role === 'user').length;
+    const hadToolUse = session.accumulatedToolCalls.length > 0;
+    if (humanTurns < minTurns && !hadToolUse) {
+      console.log(
+        `[ChatSessionManager] triggerConsolidation: skipping ${sessionId} ` +
+        `(${humanTurns} human turns, hadToolUse=${hadToolUse} — below threshold)`
+      );
+      return;
+    }
+
+    if (session.status !== 'ready') {
+      console.log(`[ChatSessionManager] triggerConsolidation: session ${sessionId} not ready (${session.status}), skipping`);
+      return;
+    }
+
+    console.log(
+      `[ChatSessionManager] triggerConsolidation: running for ${sessionId} ` +
+      `(${humanTurns} human turns, hadToolUse=${hadToolUse})`
+    );
+
+    const consolidationPrompt = [
+      'This conversation is ending (idle timeout). Before the session closes:',
+      '',
+      'Review our conversation and use the `remember` tool to save anything genuinely',
+      'worth keeping — insights about this person, decisions made, things you learned,',
+      'preferences or context about the relationship. Think like a person who just finished',
+      'a meaningful conversation and is jotting down the important bits.',
+      '',
+      'Guidelines:',
+      '- Only save things that would actually be useful to remember in a future conversation',
+      '- Use memory type "relationship" for things about who you talked to',
+      '- Use memory type "lesson" for things you learned or mistakes corrected',
+      '- Use memory type "decision" for choices made that might recur',
+      '- Use memory type "fact" for specific information worth retaining',
+      '- If nothing stands out as worth remembering, do nothing — just call complete()',
+      '- Do NOT re-save things you already saved during this conversation',
+      '- Keep shared=false (personal) unless the memory is team-relevant knowledge',
+    ].join('\n');
+
+    try {
+      // Wait for the consolidation turn to finish (max 60 s)
+      await Promise.race([
+        this.commandSender.sendAgentStep(sessionId, consolidationPrompt, {}),
+        new Promise<void>((_, reject) =>
+          setTimeout(() => reject(new Error('consolidation timeout')), 60_000)
+        ),
+      ]);
+
+      // Allow time for the agent to process and call remember
+      // We poll for the session to return to 'ready' (agent finished its turn)
+      const pollStart = Date.now();
+      while (Date.now() - pollStart < 55_000) {
+        const s = this.activeSessions.get(sessionId);
+        if (!s || s.status === 'ready') break;
+        await new Promise(r => setTimeout(r, 500));
+      }
+
+      console.log(`[ChatSessionManager] triggerConsolidation: ${sessionId} complete`);
+    } catch (err) {
+      console.warn(`[ChatSessionManager] triggerConsolidation: ${sessionId} failed (non-fatal):`, (err as Error).message);
+    }
+  }
+
+  /**
    * Stop a chat session - stops the container.
    */
   async stopSession(sessionId: string): Promise<void> {

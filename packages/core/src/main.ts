@@ -1092,6 +1092,21 @@ async function main(): Promise<void> {
         } catch (err) {
           console.warn('[Engine] Failed to inject ChatSessionManager into SlackBridge:', err);
         }
+
+        // Wire up memory consolidation: just before a Slack conversation session
+        // is torn down (idle timeout), the agent runs one final turn to save
+        // anything meaningful from the conversation — like a person jotting down
+        // notes after a call.
+        try {
+          djinnBot.slackBridge.setOnBeforeTeardown(async (sessionId: string, _agentId: string) => {
+            if (chatSessionManager) {
+              await chatSessionManager.triggerConsolidation(sessionId);
+            }
+          });
+          console.log('[Engine] Memory consolidation wired to SlackBridge teardown');
+        } catch (err) {
+          console.warn('[Engine] Failed to wire memory consolidation:', err);
+        }
       }
     }
     

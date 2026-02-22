@@ -94,6 +94,12 @@ export interface SlackBridgeConfig {
     responseText: string,
     userName: string,
   ) => Promise<void>;
+  /**
+   * Called just before a Slack conversation session container is torn down.
+   * Typically wired to ChatSessionManager.triggerConsolidation() so the agent
+   * can save meaningful memories from the conversation before the container exits.
+   */
+  onBeforeTeardown?: (sessionId: string, agentId: string) => Promise<void>;
 }
 
 /**
@@ -156,6 +162,7 @@ export class SlackBridge {
       this.sessionPool = new SlackSessionPool({
         chatSessionManager: config.chatSessionManager,
         defaultModel: config.defaultConversationModel ?? config.defaultSlackDecisionModel ?? 'openrouter/minimax/minimax-m2.5',
+        onBeforeTeardown: config.onBeforeTeardown,
       });
     }
   }
@@ -895,6 +902,21 @@ export class SlackBridge {
    * after the Slack bridge starts). Creates the session pool and registers
    * output hooks for conversation streaming.
    */
+  /**
+   * Set the onBeforeTeardown callback after construction.
+   * Called from the engine after ChatSessionManager is injected and the pool
+   * has been created. Updates both the config (for future pool recreations) and
+   * the live session pool instance.
+   */
+  setOnBeforeTeardown(callback: (sessionId: string, agentId: string) => Promise<void>): void {
+    this.config.onBeforeTeardown = callback;
+    if (this.sessionPool) {
+      // Patch the live pool's config directly — the pool reads it on each teardown
+      (this.sessionPool as any).config.onBeforeTeardown = callback;
+    }
+    console.log('[SlackBridge] onBeforeTeardown callback registered for memory consolidation');
+  }
+
   setChatSessionManager(csm: ChatSessionManager, defaultModel?: string): void {
     this.config.chatSessionManager = csm;
     if (defaultModel) this.config.defaultConversationModel = defaultModel;
@@ -902,6 +924,7 @@ export class SlackBridge {
     this.sessionPool = new SlackSessionPool({
       chatSessionManager: csm,
       defaultModel: defaultModel ?? this.config.defaultSlackDecisionModel ?? 'openrouter/minimax/minimax-m2.5',
+      onBeforeTeardown: this.config.onBeforeTeardown,
     });
 
     // Inject pool into all running agent runtimes
