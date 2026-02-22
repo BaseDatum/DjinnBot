@@ -119,6 +119,24 @@ export interface DbMessage {
   attachments?: string[] | null;
   created_at: number;
   completed_at?: number | null;
+
+  // ── Onboarding-specific fields (present on OnboardingMessage responses) ──
+  agent_id?: string | null;
+  agent_name?: string | null;
+  agent_emoji?: string | null;
+  handoff_to_agent?: string | null;
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+/**
+ * Extract context keys from a handoff system message.
+ * The backend appends `[context: key1, key2, ...]` to handoff messages.
+ */
+function parseContextKeys(content: string): string[] {
+  const match = content.match(/\[context:\s*(.+?)\]/);
+  if (!match) return [];
+  return match[1].split(',').map(k => k.trim()).filter(Boolean);
 }
 
 // ── Hook ──────────────────────────────────────────────────────────────────────
@@ -757,6 +775,24 @@ export function useChatStream({
       for (const msg of dbMessages) {
         if (!msg.content && msg.role === 'assistant') continue; // skip empty placeholders
 
+        // ── Handoff messages get their own type ────────────────────────────
+        // System messages with handoff_to_agent set are rendered as cinematic
+        // transition cards rather than plain system dividers.
+        if (msg.role === 'system' && msg.handoff_to_agent) {
+          result.push({
+            id: msg.id,
+            type: 'handoff',
+            content: msg.content,
+            timestamp: msg.created_at,
+            agentId: msg.agent_id || undefined,
+            agentName: msg.agent_name || undefined,
+            agentEmoji: msg.agent_emoji || undefined,
+            handoffTo: msg.handoff_to_agent,
+            handoffContextKeys: parseContextKeys(msg.content),
+          });
+          continue;
+        }
+
         // Use monotonic sub-offsets so expanded sub-messages from the same DB
         // row maintain their logical order when the messages array is sorted
         // by timestamp. Each offset is +1ms which is invisible to the user
@@ -769,6 +805,9 @@ export function useChatStream({
             type: 'thinking',
             content: msg.thinking,
             timestamp: msg.created_at + (subOffset++),
+            agentId: msg.agent_id || undefined,
+            agentName: msg.agent_name || undefined,
+            agentEmoji: msg.agent_emoji || undefined,
           });
         }
 
@@ -804,6 +843,10 @@ export function useChatStream({
           timestamp: msg.created_at + (subOffset++),
           model: msg.model || undefined,
           attachments: msg.attachments || undefined,
+          // Pipe onboarding agent metadata through (no-op for regular chat)
+          agentId: msg.agent_id || undefined,
+          agentName: msg.agent_name || undefined,
+          agentEmoji: msg.agent_emoji || undefined,
         });
       }
       return result;

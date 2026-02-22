@@ -30,6 +30,13 @@ const OnboardingHandoffParamsSchema = Type.Object({
   context: Type.Optional(Type.Record(Type.String(), Type.Unknown(), {
     description: 'Structured context extracted during this interview phase. Keys: project_name, goal, repo, open_source, revenue_goal, target_customer, monetization, timeline, v1_scope, tech_preferences.',
   })),
+  conversation_highlights: Type.Optional(Type.Array(Type.String(), {
+    description: '2-4 specific things the user said or notable moments from the conversation. '
+      + 'NOT structured data (that goes in context) — conversational details that make the '
+      + 'handoff feel seamless. E.g. "User mentioned they tried Firebase and hated vendor lock-in", '
+      + '"They said they are a solo founder working evenings". The next agent will reference '
+      + 'these in their greeting to show continuity.',
+  })),
 });
 type OnboardingHandoffParams = Static<typeof OnboardingHandoffParamsSchema>;
 
@@ -136,6 +143,7 @@ export function createOnboardingTools(config: OnboardingToolsConfig): AgentTool[
                 summary: p.summary,
                 context_update: p.context,
                 from_agent_id: agentId,
+                conversation_highlights: p.conversation_highlights,
               }),
               signal: signal ?? undefined,
             },

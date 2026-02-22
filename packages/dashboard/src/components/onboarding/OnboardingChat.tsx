@@ -48,6 +48,15 @@ import {
 import { ProviderModelSelector } from '@/components/ui/ProviderModelSelector';
 import { DEFAULT_CHAT_MODEL } from '@/lib/constants';
 import { ChatMessage } from '@/components/chat/ChatMessage';
+import {
+  OnboardingAgentMessage,
+  AgentComposingIndicator,
+  HandoffCard,
+  CompletionOverlay,
+  getAgentStyle,
+  AGENT_META,
+  AGENT_CHAIN,
+} from './OnboardingMessages';
 
 // ============================================================================
 // Types
@@ -164,6 +173,35 @@ function ProjectProfileSidebar({
   );
   const progress = Math.round((filledFields.length / PROFILE_FIELDS.length) * 100);
 
+  // ── Discovery animation: track which fields just changed ──────────────
+  const prevContextRef = useRef<Record<string, unknown>>({});
+  const [recentlyDiscovered, setRecentlyDiscovered] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    const prev = prevContextRef.current;
+    const discovered = new Set<string>();
+
+    for (const field of PROFILE_FIELDS) {
+      const prevVal = prev[field.key];
+      const newVal = context[field.key];
+      // Detect empty → populated transition (not just any change)
+      const wasEmpty = prevVal === undefined || prevVal === null || prevVal === '';
+      const isFilled = newVal !== undefined && newVal !== null && newVal !== '';
+      if (wasEmpty && isFilled) {
+        discovered.add(field.key);
+      }
+    }
+
+    prevContextRef.current = { ...context };
+
+    if (discovered.size > 0) {
+      setRecentlyDiscovered(discovered);
+      // Clear the animation class after it completes
+      const timer = setTimeout(() => setRecentlyDiscovered(new Set()), 2200);
+      return () => clearTimeout(timer);
+    }
+  }, [context]);
+
   return (
     <div className="flex flex-col h-full border-l bg-card/50 w-72 shrink-0">
       <div className="px-4 py-3 border-b">
@@ -175,7 +213,7 @@ function ProjectProfileSidebar({
           </div>
           <div className="h-1.5 rounded-full bg-muted overflow-hidden">
             <div
-              className="h-full rounded-full bg-primary transition-all duration-500"
+              className="h-full rounded-full bg-primary transition-all duration-700 ease-out"
               style={{ width: `${progress}%` }}
             />
           </div>
@@ -188,17 +226,36 @@ function ProjectProfileSidebar({
             const val = context[field.key];
             const Icon = field.icon;
             const hasValue = val !== undefined && val !== null && val !== '';
+            const isNew = recentlyDiscovered.has(field.key);
+
             return (
-              <div key={field.key} className={`flex gap-2.5 ${hasValue ? '' : 'opacity-40'}`}>
-                <div className="mt-0.5 shrink-0">
-                  <Icon className="h-3.5 w-3.5 text-muted-foreground" />
+              <div
+                key={field.key}
+                className={[
+                  'flex gap-2.5 rounded-md px-1.5 py-1 -mx-1.5 transition-all duration-500',
+                  hasValue ? '' : 'opacity-40',
+                  isNew ? 'onboarding-field-discover' : '',
+                ].join(' ')}
+              >
+                <div className="mt-0.5 shrink-0 relative">
+                  <Icon className={[
+                    'h-3.5 w-3.5 transition-colors duration-500',
+                    isNew ? 'text-primary' : 'text-muted-foreground',
+                  ].join(' ')} />
+                  {/* Discovery sparkle */}
+                  {isNew && (
+                    <Sparkles className="absolute -top-1 -right-1.5 h-2.5 w-2.5 text-primary onboarding-sparkle" />
+                  )}
                 </div>
                 <div className="min-w-0">
                   <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground leading-none mb-0.5">
                     {field.label}
                   </p>
                   {hasValue ? (
-                    <p className="text-xs text-foreground break-words leading-snug">
+                    <p className={[
+                      'text-xs break-words leading-snug transition-colors duration-500',
+                      isNew ? 'text-primary font-medium' : 'text-foreground',
+                    ].join(' ')}>
                       {field.format ? field.format(val) : String(val)}
                     </p>
                   ) : (
@@ -231,6 +288,180 @@ function ProjectProfileSidebar({
             Keep chatting — the profile fills in automatically
           </p>
         )}
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// OnboardingInput — text input with @-mention agent quick switcher
+// ============================================================================
+
+function OnboardingInput({
+  input,
+  setInput,
+  inputRef,
+  onSend,
+  onKeyDown,
+  isSending,
+  isAgentWorking,
+  currentAgentId,
+  currentAgentName,
+}: {
+  input: string;
+  setInput: (val: string) => void;
+  inputRef: React.RefObject<HTMLTextAreaElement | null>;
+  onSend: () => void;
+  onKeyDown: (e: React.KeyboardEvent) => void;
+  isSending: boolean;
+  isAgentWorking: boolean;
+  currentAgentId?: string;
+  currentAgentName?: string;
+}) {
+  const [mentionQuery, setMentionQuery] = useState<string | null>(null);
+  const [selectedIdx, setSelectedIdx] = useState(0);
+
+  // Detect @mention at cursor position
+  const handleChange = useCallback(
+    (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+      const value = e.target.value;
+      setInput(value);
+
+      const cursorPos = e.target.selectionStart ?? value.length;
+      const textBeforeCursor = value.slice(0, cursorPos);
+      const mentionMatch = textBeforeCursor.match(/@(\w*)$/);
+
+      if (mentionMatch) {
+        setMentionQuery(mentionMatch[1].toLowerCase());
+        setSelectedIdx(0);
+      } else {
+        setMentionQuery(null);
+      }
+    },
+    [setInput],
+  );
+
+  // Filter agents: exclude current, match by id or name prefix
+  const suggestions = useMemo(() => {
+    if (mentionQuery === null) return [];
+    return AGENT_CHAIN
+      .filter((id) => id !== currentAgentId)
+      .filter((id) => {
+        const meta = AGENT_META[id];
+        return (
+          id.startsWith(mentionQuery) ||
+          meta.name.toLowerCase().startsWith(mentionQuery)
+        );
+      });
+  }, [mentionQuery, currentAgentId]);
+
+  // Insert the selected mention
+  const insertMention = useCallback(
+    (agentId: string) => {
+      const meta = AGENT_META[agentId];
+      // Replace the @query with @AgentName
+      const lastAtIdx = input.lastIndexOf('@');
+      if (lastAtIdx !== -1) {
+        setInput(input.slice(0, lastAtIdx) + `@${meta.name} `);
+      }
+      setMentionQuery(null);
+      inputRef.current?.focus();
+    },
+    [input, setInput, inputRef],
+  );
+
+  // Keyboard navigation inside the dropdown
+  const handleKeyDownWrapped = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (suggestions.length > 0 && mentionQuery !== null) {
+        if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          setSelectedIdx((i) => Math.min(i + 1, suggestions.length - 1));
+          return;
+        }
+        if (e.key === 'ArrowUp') {
+          e.preventDefault();
+          setSelectedIdx((i) => Math.max(i - 1, 0));
+          return;
+        }
+        if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey)) {
+          e.preventDefault();
+          insertMention(suggestions[selectedIdx]);
+          return;
+        }
+        if (e.key === 'Escape') {
+          setMentionQuery(null);
+          return;
+        }
+      }
+      // Default: delegate to the parent handler (Enter to send)
+      onKeyDown(e);
+    },
+    [suggestions, mentionQuery, selectedIdx, insertMention, onKeyDown],
+  );
+
+  return (
+    <div className="px-4 py-3 border-t bg-card shrink-0">
+      <div className="flex gap-2 items-end max-w-2xl mx-auto relative">
+        {/* @-mention dropdown */}
+        {suggestions.length > 0 && (
+          <div className="absolute bottom-full mb-1 left-0 bg-popover border rounded-lg shadow-lg py-1 z-20 min-w-[200px] animate-in fade-in slide-in-from-bottom-1 duration-150">
+            {suggestions.map((agentId, idx) => {
+              const meta = AGENT_META[agentId];
+              const style = getAgentStyle(agentId);
+              return (
+                <button
+                  key={agentId}
+                  className={[
+                    'flex items-center gap-2.5 w-full px-3 py-1.5 text-sm text-left transition-colors',
+                    idx === selectedIdx ? 'bg-accent' : 'hover:bg-accent/50',
+                  ].join(' ')}
+                  onMouseDown={(e) => {
+                    e.preventDefault(); // Don't blur the textarea
+                    insertMention(agentId);
+                  }}
+                  onMouseEnter={() => setSelectedIdx(idx)}
+                >
+                  <span className="text-base">{meta.emoji}</span>
+                  <span className="font-medium">{meta.name}</span>
+                  <span className="text-xs text-muted-foreground ml-auto">{meta.role}</span>
+                </button>
+              );
+            })}
+            <div className="px-3 pt-1 pb-0.5 border-t mt-1">
+              <p className="text-[9px] text-muted-foreground">
+                Direct a question to another agent
+              </p>
+            </div>
+          </div>
+        )}
+
+        <Textarea
+          ref={inputRef}
+          value={input}
+          onChange={handleChange}
+          onKeyDown={handleKeyDownWrapped}
+          placeholder={
+            isAgentWorking
+              ? `${currentAgentName || 'Stas'} is composing\u2026`
+              : 'Type a message\u2026 (@ to mention an agent)'
+          }
+          className="resize-none min-h-[40px] max-h-32 text-sm"
+          rows={1}
+          disabled={isSending || isAgentWorking}
+        />
+        <Button
+          size="icon"
+          onClick={onSend}
+          disabled={!input.trim() || isSending || isAgentWorking}
+          className="shrink-0 h-10 w-10"
+        >
+          {isSending ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <Send className="h-4 w-4" />
+          )}
+        </Button>
       </div>
     </div>
   );
@@ -759,6 +990,26 @@ export function OnboardingChat({ onClose, onProjectCreated, resumeSessionId }: O
             <div className="px-4 py-4 space-y-4 max-w-2xl mx-auto w-full">
               {[...messages].sort((a, b) => a.timestamp - b.timestamp).map((msg) => {
                 const msgIsStreaming = isStreaming && msg.id.startsWith('streaming_');
+
+                // ── Handoff transition card ────────────────────────────────
+                if (msg.type === 'handoff') {
+                  return <HandoffCard key={msg.id} message={msg} />;
+                }
+
+                // ── Agent-styled assistant messages ────────────────────────
+                if (msg.agentId && (msg.type === 'assistant' || msg.type === 'thinking')) {
+                  return (
+                    <OnboardingAgentMessage
+                      key={msg.id}
+                      message={msg}
+                      isStreaming={msgIsStreaming}
+                      streamingContent={msgIsStreaming && msg.type === 'assistant' ? liveText : undefined}
+                      streamingThinking={msgIsStreaming && msg.type === 'thinking' ? liveThinking : undefined}
+                    />
+                  );
+                }
+
+                // ── All other messages: user, system, tool_call, error ─────
                 return (
                   <ChatMessage
                     key={msg.id}
@@ -769,20 +1020,12 @@ export function OnboardingChat({ onClose, onProjectCreated, resumeSessionId }: O
                   />
                 );
               })}
-              {/* Animated "composing" bubble */}
+              {/* Agent-styled composing indicator */}
               {isAgentWorking && !isStreaming && (
-                <div className="flex gap-3 my-3">
-                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-base">
-                    {session?.current_agent_emoji || '\uD83D\uDE80'}
-                  </div>
-                  <div className="max-w-[80%] rounded-2xl rounded-bl-sm bg-muted px-4 py-3">
-                    <div className="flex items-center gap-1.5">
-                      <span className="h-2 w-2 rounded-full bg-muted-foreground/50 animate-bounce [animation-delay:0ms]" />
-                      <span className="h-2 w-2 rounded-full bg-muted-foreground/50 animate-bounce [animation-delay:150ms]" />
-                      <span className="h-2 w-2 rounded-full bg-muted-foreground/50 animate-bounce [animation-delay:300ms]" />
-                    </div>
-                  </div>
-                </div>
+                <AgentComposingIndicator
+                  agentId={session?.current_agent_id}
+                  agentEmoji={session?.current_agent_emoji}
+                />
               )}
               {/* Auto-scroll sentinel */}
               <div ref={scrollSentinelRef} className="h-px" />
@@ -799,81 +1042,29 @@ export function OnboardingChat({ onClose, onProjectCreated, resumeSessionId }: O
             </div>
           )}
 
-          {/* Completion banner — shown when onboarding finishes */}
+          {/* Completion overlay — "Project is Born" moment */}
           {completionInfo && (
-            <div className="mx-4 mb-2 rounded-lg border border-primary/30 bg-primary/5 px-4 py-3 shrink-0">
-              <div className="flex items-start gap-3">
-                <CheckCircle2 className="h-5 w-5 text-primary mt-0.5 shrink-0" />
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium">
-                    Project &ldquo;{completionInfo.projectName || 'Untitled'}&rdquo; created
-                  </p>
-                  <p className="text-xs text-muted-foreground mt-0.5">
-                    {completionInfo.planningRunId
-                      ? 'The planning pipeline is now running — Finn is breaking down your project into tasks.'
-                      : 'Onboarding complete.'}
-                  </p>
-                  <div className="flex items-center gap-2 mt-2">
-                    {completionInfo.projectId && (
-                      <Button
-                        size="sm"
-                        variant="default"
-                        className="h-7 text-xs"
-                        onClick={() => onProjectCreated(completionInfo.projectId!)}
-                      >
-                        View Project
-                      </Button>
-                    )}
-                    {completionInfo.planningRunId && (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="h-7 text-xs"
-                        onClick={() => {
-                          window.location.href = `/runs/${completionInfo.planningRunId}`;
-                        }}
-                      >
-                        View Planning Run
-                      </Button>
-                    )}
-                  </div>
-                </div>
-              </div>
-            </div>
+            <CompletionOverlay
+              projectName={completionInfo.projectName}
+              projectId={completionInfo.projectId}
+              planningRunId={completionInfo.planningRunId}
+              onEnterProject={onProjectCreated}
+            />
           )}
 
           {/* Input — hidden when session is completed */}
           {session?.status === 'active' ? (
-            <div className="px-4 py-3 border-t bg-card shrink-0">
-              <div className="flex gap-2 items-end max-w-2xl mx-auto">
-                <Textarea
-                  ref={inputRef}
-                  value={input}
-                  onChange={(e) => setInput(e.target.value)}
-                  onKeyDown={handleKeyDown}
-                  placeholder={
-                    isAgentWorking
-                      ? `${session?.current_agent_name || 'Stas'} is composing\u2026`
-                      : 'Type a message\u2026 (Enter to send)'
-                  }
-                  className="resize-none min-h-[40px] max-h-32 text-sm"
-                  rows={1}
-                  disabled={isSending || isAgentWorking}
-                />
-                <Button
-                  size="icon"
-                  onClick={handleSend}
-                  disabled={!input.trim() || isSending || isAgentWorking}
-                  className="shrink-0 h-10 w-10"
-                >
-                  {isSending ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <Send className="h-4 w-4" />
-                  )}
-                </Button>
-              </div>
-            </div>
+            <OnboardingInput
+              input={input}
+              setInput={setInput}
+              inputRef={inputRef}
+              onSend={handleSend}
+              onKeyDown={handleKeyDown}
+              isSending={isSending}
+              isAgentWorking={isAgentWorking}
+              currentAgentId={session?.current_agent_id}
+              currentAgentName={session?.current_agent_name}
+            />
           ) : !completionInfo ? (
             <div className="px-4 py-3 border-t bg-card shrink-0">
               <p className="text-xs text-muted-foreground text-center">Session ended</p>
