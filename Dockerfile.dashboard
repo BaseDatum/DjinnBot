@@ -1,5 +1,7 @@
-# Build stage
-FROM node:20-alpine AS builder
+# Build stage - pinned to linux/amd64 because the output is just static files
+# (HTML/CSS/JS) and native npm binaries (esbuild, rollup) crash under QEMU
+# arm64 emulation on amd64 CI runners. The nginx runtime stage is multi-arch.
+FROM --platform=linux/amd64 node:20-alpine AS builder
 
 WORKDIR /build
 
@@ -17,18 +19,11 @@ ENV VITE_APP_VERSION=$BUILD_VERSION
 COPY package.json package-lock.json ./
 COPY packages/dashboard/package.json ./packages/dashboard/
 
-# Install all deps then force-install rollup musl binary for current arch.
+# Install all deps then force-install rollup musl binary for amd64.
 # npm has a known bug with optional deps (npm/cli#4828) - the separate
 # --force install ensures the native binary actually lands in node_modules.
-# Only install the binary matching the target arch to avoid --force corrupting
-# other binaries (vite was being unlinked on arm64 when both were installed).
-ARG TARGETARCH
 RUN npm install && \
-    if [ "${TARGETARCH}" = "arm64" ]; then \
-      npm install --force @rollup/rollup-linux-arm64-musl 2>/dev/null; \
-    else \
-      npm install --force @rollup/rollup-linux-x64-musl 2>/dev/null; \
-    fi; \
+    npm install --force @rollup/rollup-linux-x64-musl 2>/dev/null; \
     ls node_modules/@rollup/ || true
 
 # Copy dashboard source
