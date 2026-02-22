@@ -2456,3 +2456,33 @@ export async function applyUpdate(targetVersion?: string): Promise<UpdateApplyRe
   });
   return handleResponse(res, 'Failed to apply update');
 }
+
+// ── Built-in tool overrides ───────────────────────────────────────────────────
+
+export interface ToolOverride {
+  agent_id: string;
+  tool_name: string;
+  /** false = disabled, true = explicitly enabled (rare — absence means enabled) */
+  enabled: boolean;
+  updated_at: number;
+  updated_by: string;
+}
+
+/** Fetch all override records for an agent. Absent tools are implicitly enabled. */
+export async function fetchToolOverrides(agentId: string): Promise<ToolOverride[]> {
+  const res = await authFetch(`${API_BASE}/agents/${agentId}/tools/overrides`);
+  return handleResponse(res, 'Failed to fetch tool overrides');
+}
+
+/** Bulk-upsert enable/disable states for a list of tools. */
+export async function setToolOverrides(
+  agentId: string,
+  overrides: Array<{ tool_name: string; enabled: boolean }>,
+): Promise<ToolOverride[]> {
+  const res = await authFetch(`${API_BASE}/agents/${agentId}/tools/overrides`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ overrides }),
+  });
+  return handleResponse(res, 'Failed to update tool overrides');
+}

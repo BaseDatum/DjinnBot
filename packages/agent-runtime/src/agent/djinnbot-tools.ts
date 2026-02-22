@@ -34,10 +34,31 @@ export interface DjinnBotToolsConfig {
   pulseColumns?: string[];
   onComplete: (outputs: Record<string, string>, summary?: string) => void;
   onFail: (error: string, details?: string) => void;
+  /**
+   * Whether this container is running a pipeline step (RUN_ID starts with 'run_').
+   * Pipeline tools (pulse-projects, pulse-tasks) are included when true.
+   */
+  isPipelineRun?: boolean;
+  /**
+   * Whether this container is running a pulse/standalone session
+   * (RUN_ID starts with 'standalone_').
+   * Pipeline tools (pulse-projects, pulse-tasks) are included when true.
+   */
+  isPulseSession?: boolean;
+  /**
+   * Whether this container is running an onboarding session
+   * (ONBOARDING_SESSION_ID env var is set).
+   * Onboarding tools are included only when true.
+   */
+  isOnboardingSession?: boolean;
 }
 
 export function createDjinnBotTools(config: DjinnBotToolsConfig): AgentTool[] {
-  const { publisher, requestIdRef, agentId, vaultPath, sharedPath, onComplete, onFail, apiBaseUrl, pulseColumns } = config;
+  const {
+    publisher, requestIdRef, agentId, vaultPath, sharedPath,
+    onComplete, onFail, apiBaseUrl, pulseColumns,
+    isOnboardingSession = false,
+  } = config;
 
   return [
     ...createStepControlTools({ onComplete, onFail }),
@@ -52,14 +73,16 @@ export function createDjinnBotTools(config: DjinnBotToolsConfig): AgentTool[] {
 
     ...createSkillsTools({ agentId, apiBaseUrl }),
 
-    ...createOnboardingTools({ agentId, apiBaseUrl }),
-
     ...createGitHubTools({ apiBaseUrl }),
 
+    ...createSecretsTools({ agentId, apiBaseUrl }),
+
+    // Pulse/pipeline tools — always included (chat, pipeline, and pulse sessions)
     ...createPulseProjectsTools({ agentId, apiBaseUrl, pulseColumns }),
 
     ...createPulseTasksTools({ agentId, apiBaseUrl }),
 
-    ...createSecretsTools({ agentId, apiBaseUrl }),
+    // Onboarding tools — only for onboarding sessions (ONBOARDING_SESSION_ID is set)
+    ...(isOnboardingSession ? createOnboardingTools({ agentId, apiBaseUrl }) : []),
   ];
 }

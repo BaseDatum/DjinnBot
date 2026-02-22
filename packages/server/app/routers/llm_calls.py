@@ -29,6 +29,7 @@ class RecordLlmCallRequest(BaseModel):
     run_id: Optional[str] = None
     agent_id: str
     request_id: Optional[str] = None
+    user_id: Optional[str] = None
     provider: str
     model: str
     key_source: Optional[str] = None
@@ -53,6 +54,7 @@ class LlmCallResponse(BaseModel):
     run_id: Optional[str] = None
     agent_id: str
     request_id: Optional[str] = None
+    user_id: Optional[str] = None
     provider: str
     model: str
     key_source: Optional[str] = None
@@ -94,6 +96,7 @@ async def record_llm_call(
         run_id=body.run_id,
         agent_id=body.agent_id,
         request_id=body.request_id,
+        user_id=body.user_id,
         provider=body.provider,
         model=body.model,
         key_source=body.key_source,
@@ -128,6 +131,7 @@ async def record_llm_call(
                     "run_id": call.run_id,
                     "agent_id": call.agent_id,
                     "request_id": call.request_id,
+                    "user_id": call.user_id,
                     "provider": call.provider,
                     "model": call.model,
                     "key_source": call.key_source,
@@ -164,6 +168,7 @@ def _row_to_response(row: LlmCallLog) -> LlmCallResponse:
         run_id=row.run_id,
         agent_id=row.agent_id,
         request_id=row.request_id,
+        user_id=row.user_id,
         provider=row.provider,
         model=row.model,
         key_source=row.key_source,

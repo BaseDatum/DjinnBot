@@ -9,10 +9,12 @@ Endpoints:
     PUT    /v1/admin/users/{user_id}                  update user (role, active)
     DELETE /v1/admin/users/{user_id}                  deactivate user
 
-  Key sharing:
+   Key sharing:
     GET    /v1/admin/shared-providers                 list admin's shared provider grants
     POST   /v1/admin/shared-providers                 share provider key with user(s)
+    PATCH  /v1/admin/shared-providers/{grant_id}      update restrictions on a share
     DELETE /v1/admin/shared-providers/{grant_id}      revoke a share
+    GET    /v1/admin/shared-providers/usage            today's usage stats per share
 
   Approval workflow:
     GET    /v1/admin/pending-approvals                list pending skills + MCP servers
@@ -104,6 +106,22 @@ class ShareProviderRequest(BaseModel):
     expiresAt: Optional[int] = None  # Unix ms timestamp — NULL = never expires
     allowedModels: Optional[list] = None  # e.g. ["claude-sonnet-4", "claude-haiku-3-5"]
     dailyLimit: Optional[int] = None  # Max requests per day — NULL = unlimited
+    dailyCostLimitUsd: Optional[float] = None  # Max USD cost per day — NULL = unlimited
+
+
+class UpdateShareProviderRequest(BaseModel):
+    """Update restrictions on an existing provider share."""
+
+    expiresAt: Optional[int] = None
+    allowedModels: Optional[list] = None
+    dailyLimit: Optional[int] = None
+    dailyCostLimitUsd: Optional[float] = None
+    # Sentinel: use explicit "clear" for fields you want to set to NULL.
+    # If a field is omitted (None), it is NOT updated.
+    clearExpiresAt: bool = False
+    clearAllowedModels: bool = False
+    clearDailyLimit: bool = False
+    clearDailyCostLimitUsd: bool = False
 
 
 class SharedProviderResponse(BaseModel):
@@ -115,6 +133,7 @@ class SharedProviderResponse(BaseModel):
     expiresAt: Optional[int] = None
     allowedModels: Optional[list] = None
     dailyLimit: Optional[int] = None
+    dailyCostLimitUsd: Optional[float] = None
 
 
 class PendingApprovalItem(BaseModel):
@@ -285,6 +304,7 @@ async def list_shared_providers(
             if row.allowed_models
             else None,
             dailyLimit=row.daily_limit,
+            dailyCostLimitUsd=row.daily_cost_limit_usd,
         )
         for row in result.scalars().all()
     ]
@@ -334,6 +354,7 @@ async def share_provider(
         expires_at=body.expiresAt,
         allowed_models=_json.dumps(body.allowedModels) if body.allowedModels else None,
         daily_limit=body.dailyLimit,
+        daily_cost_limit_usd=body.dailyCostLimitUsd,
     )
     session.add(share)
     await session.commit()
@@ -354,6 +375,68 @@ async def share_provider(
         if share.allowed_models
         else None,
         dailyLimit=share.daily_limit,
+        dailyCostLimitUsd=share.daily_cost_limit_usd,
+    )
+
+
+@router.patch(
+    "/shared-providers/{grant_id}",
+    response_model=SharedProviderResponse,
+)
+async def update_shared_provider(
+    grant_id: str,
+    body: UpdateShareProviderRequest,
+    admin: AuthUser = Depends(get_current_admin),
+    session: AsyncSession = Depends(get_async_session),
+) -> SharedProviderResponse:
+    """Update restrictions on an existing provider key share.
+
+    Fields set to a value are updated; fields left as None are untouched.
+    Use the ``clear*`` booleans to explicitly set a field to NULL.
+    """
+    import json as _json
+
+    share = await session.get(AdminSharedProvider, grant_id)
+    if not share:
+        raise HTTPException(status_code=404, detail="Share not found")
+
+    # Apply updates
+    if body.clearExpiresAt:
+        share.expires_at = None
+    elif body.expiresAt is not None:
+        share.expires_at = body.expiresAt
+
+    if body.clearAllowedModels:
+        share.allowed_models = None
+    elif body.allowedModels is not None:
+        share.allowed_models = _json.dumps(body.allowedModels)
+
+    if body.clearDailyLimit:
+        share.daily_limit = None
+    elif body.dailyLimit is not None:
+        share.daily_limit = body.dailyLimit
+
+    if body.clearDailyCostLimitUsd:
+        share.daily_cost_limit_usd = None
+    elif body.dailyCostLimitUsd is not None:
+        share.daily_cost_limit_usd = body.dailyCostLimitUsd
+
+    await session.commit()
+    await session.refresh(share)
+
+    logger.info(f"Admin {admin.id} updated provider share {grant_id}")
+    return SharedProviderResponse(
+        id=share.id,
+        adminUserId=share.admin_user_id,
+        providerId=share.provider_id,
+        targetUserId=share.target_user_id,
+        createdAt=share.created_at,
+        expiresAt=share.expires_at,
+        allowedModels=_json.loads(share.allowed_models)
+        if share.allowed_models
+        else None,
+        dailyLimit=share.daily_limit,
+        dailyCostLimitUsd=share.daily_cost_limit_usd,
     )
 
 
@@ -371,6 +454,77 @@ async def revoke_shared_provider(
     await session.commit()
     logger.info(f"Admin {admin.id} revoked provider share {grant_id}")
     return {"status": "revoked", "id": grant_id}
+
+
+@router.get("/shared-providers/usage")
+async def get_share_usage(
+    admin: AuthUser = Depends(get_current_admin),
+    session: AsyncSession = Depends(get_async_session),
+) -> dict:
+    """Get today's usage stats for all admin-shared providers.
+
+    Returns per-share usage (call count, cost) so the admin dashboard
+    can display usage gauges alongside each share's limits.
+    """
+    from sqlalchemy import or_
+    from app.utils import now_ms as _now_ms
+    from app.share_limits import check_share_limits
+
+    _now = _now_ms()
+    # Load all non-expired shares
+    result = await session.execute(
+        select(AdminSharedProvider).where(
+            or_(
+                AdminSharedProvider.expires_at == None,
+                AdminSharedProvider.expires_at > _now,
+            ),
+        )
+    )
+    all_shares = list(result.scalars().all())
+
+    # Group shares by target_user_id to check per-user usage
+    from collections import defaultdict
+
+    by_user: dict[str | None, list] = defaultdict(list)
+    for share in all_shares:
+        by_user[share.target_user_id].append(share)
+
+    # For broadcast shares (target=None), we'd need to check ALL users.
+    # For now, return the share metadata with limits but no per-user breakdown.
+    # Per-user breakdown is available via the existing API usage panel.
+
+    usage_by_share: dict[str, dict] = {}
+    for share in all_shares:
+        usage_by_share[share.id] = {
+            "id": share.id,
+            "providerId": share.provider_id,
+            "targetUserId": share.target_user_id,
+            "dailyLimit": share.daily_limit,
+            "dailyCostLimitUsd": share.daily_cost_limit_usd,
+            "allowedModels": (
+                json.loads(share.allowed_models) if share.allowed_models else None
+            ),
+        }
+
+    # For targeted shares, check the specific user's usage
+    for target_user_id, shares in by_user.items():
+        if target_user_id is None:
+            continue  # Broadcast shares — skip per-user check for now
+        share_usage = await check_share_limits(session, target_user_id, shares)
+        for provider_id, info in share_usage.items():
+            # Find the matching share row
+            for share in shares:
+                if share.provider_id == provider_id:
+                    usage_by_share[share.id].update(
+                        {
+                            "callsToday": info.calls_today,
+                            "costTodayUsd": round(info.cost_today_usd, 6),
+                            "limitExceeded": info.limit_exceeded,
+                            "exceededReason": info.exceeded_reason,
+                        }
+                    )
+
+    return {"shares": list(usage_by_share.values())}
 
 
 # ═════════════════════════════════════════════════════════════════════════════

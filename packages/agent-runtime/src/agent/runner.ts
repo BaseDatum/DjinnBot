@@ -106,6 +106,9 @@ export class ContainerAgentRunner {
   private tools: AgentTool[] | null = null;
   private mcpTools: AgentTool[] = [];
   private mcpToolsDirty = true; // Start dirty so first turn fetches
+  // Set of built-in tool names that the user has explicitly disabled.
+  private disabledTools: Set<string> = new Set();
+  private disabledToolsDirty = true; // Start dirty so first turn fetches
   private unsubscribeAgent: (() => void) | null = null;
 
   // ── Per-step mutable state read by the persistent subscription ──────────
@@ -150,6 +153,8 @@ export class ContainerAgentRunner {
     this.tools = null;
     this.mcpTools = [];
     this.mcpToolsDirty = true;
+    this.disabledTools = new Set();
+    this.disabledToolsDirty = true;
     console.log(`[AgentRunner] Session reset — conversation history cleared`);
   }
 
@@ -161,6 +166,16 @@ export class ContainerAgentRunner {
   invalidateMcpTools(): void {
     this.mcpToolsDirty = true;
     console.log(`[AgentRunner] MCP tools marked dirty — will refresh on next turn`);
+  }
+
+  /**
+   * Mark built-in tool override cache as stale.
+   * Called when the 'djinnbot:tools:overrides-changed' Redis broadcast arrives.
+   * The next runStep() will re-fetch the disabled-tools list from the API.
+   */
+  invalidateToolOverrides(): void {
+    this.disabledToolsDirty = true;
+    console.log(`[AgentRunner] Tool overrides marked dirty — will refresh on next turn`);
   }
 
   // ── Model resolution (once) ─────────────────────────────────────────────
@@ -182,6 +197,20 @@ export class ContainerAgentRunner {
       ? pulseColumnsRaw.split(',').map(c => c.trim()).filter(Boolean)
       : [];
 
+    // Detect session context from env vars injected by the engine at container start.
+    // RUN_ID format signals the run type:
+    //   'run_*'        → pipeline step (agent executing a task in a pipeline)
+    //   'standalone_*' → pulse/standalone session (agent discovering and dispatching work)
+    //   anything else  → plain chat session
+    const runId = process.env.RUN_ID || '';
+    const isPipelineRun = runId.startsWith('run_');
+    const isPulseSession = runId.startsWith('standalone_');
+    const isOnboardingSession = Boolean(process.env.ONBOARDING_SESSION_ID);
+
+    console.log(
+      `[AgentRunner] Session context: isPipelineRun=${isPipelineRun}, isPulseSession=${isPulseSession}, isOnboardingSession=${isOnboardingSession}`,
+    );
+
     const tools: AgentTool[] = [];
 
     // Container tools (read, write, edit, bash with Redis streaming)
@@ -202,6 +231,9 @@ export class ContainerAgentRunner {
       agentsDir: this.options.agentsDir || process.env.AGENTS_DIR,
       apiBaseUrl,
       pulseColumns,
+      isPipelineRun,
+      isPulseSession,
+      isOnboardingSession,
       onComplete: (outputs, summary) => {
         this.stepCompleted = true;
         this.stepResult = {
@@ -224,12 +256,44 @@ export class ContainerAgentRunner {
   }
 
   /**
+   * Refresh disabled-tool overrides only when the cache is dirty.
+   * Fetches the list of disabled tool names from the API.
+   */
+  private async refreshToolOverrides(): Promise<void> {
+    const apiBaseUrl = process.env.DJINNBOT_API_URL || 'http://api:8000';
+    const apiToken = process.env.AGENT_API_KEY || process.env.ENGINE_INTERNAL_TOKEN;
+    try {
+      const url = `${apiBaseUrl}/v1/agents/${this.options.agentId}/tools/disabled`;
+      const res = await authFetch(url, {
+        headers: apiToken ? { Authorization: `Bearer ${apiToken}` } : {},
+      });
+      if (res.ok) {
+        const disabled = await res.json() as string[];
+        this.disabledTools = new Set(disabled);
+        console.log(`[AgentRunner] Tool overrides refreshed: ${disabled.length} disabled tool(s)${disabled.length ? ` (${disabled.join(', ')})` : ''}`);
+      } else {
+        console.warn(`[AgentRunner] Failed to fetch tool overrides: ${res.status} — proceeding with all tools enabled`);
+        this.disabledTools = new Set();
+      }
+    } catch (err) {
+      console.warn(`[AgentRunner] Error fetching tool overrides: ${err} — proceeding with all tools enabled`);
+      this.disabledTools = new Set();
+    }
+    this.disabledToolsDirty = false;
+  }
+
+  /**
    * Refresh MCP tools only when the cache is dirty (grant changed).
-   * Returns the full tools array (static + MCP).
+   * Returns the full tools array (static tools filtered by overrides + MCP).
    */
   private async getTools(): Promise<AgentTool[]> {
     if (!this.tools) {
       this.tools = this.buildTools();
+    }
+
+    // Refresh disabled-tools list when dirty (startup or override change)
+    if (this.disabledToolsDirty) {
+      await this.refreshToolOverrides();
     }
 
     if (this.mcpToolsDirty) {
@@ -245,7 +309,12 @@ export class ContainerAgentRunner {
       console.log(`[AgentRunner] MCP tools refreshed: ${this.mcpTools.length} tool(s)`);
     }
 
-    return [...this.tools, ...this.mcpTools];
+    // Apply per-agent built-in tool overrides
+    const activeTools = this.disabledTools.size > 0
+      ? this.tools.filter(t => !this.disabledTools.has(t.name))
+      : this.tools;
+
+    return [...activeTools, ...this.mcpTools];
   }
 
   // ── Persistent event subscription ───────────────────────────────────────
@@ -370,12 +439,15 @@ export class ContainerAgentRunner {
     // Determine key source from env (injected by engine along with the keys)
     const keySource = process.env.KEY_SOURCE || undefined;
     const keyMasked = process.env.KEY_MASKED || undefined;
+    // User attribution for per-user daily usage tracking / share limit enforcement
+    const userId = process.env.DJINNBOT_USER_ID || undefined;
 
     const payload = {
       session_id: sessionId,
       run_id: runId,
       agent_id: this.options.agentId,
       request_id: this.requestIdRef.current || undefined,
+      user_id: userId,
       provider: String(model.provider),
       model: model.id,
       key_source: keySource,

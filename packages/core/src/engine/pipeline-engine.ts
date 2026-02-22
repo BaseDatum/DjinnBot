@@ -121,7 +121,7 @@ export class PipelineEngine {
       } catch (wsErr) {
         const wsError = `Workspace setup failed: ${wsErr instanceof Error ? wsErr.message : String(wsErr)}`;
         console.error(`[PipelineEngine] ${wsError}`);
-        this.store.updateRun(runId, { status: 'failed', updatedAt: now, completedAt: now });
+        await this.store.updateRun(runId, { status: 'failed', updatedAt: now, completedAt: now });
         await this.eventBus.publish(runChannel(runId), {
           type: 'RUN_FAILED', runId, error: wsError, timestamp: now,
         });
@@ -216,7 +216,7 @@ export class PipelineEngine {
     } catch (wsErr) {
       const wsError = `Workspace setup failed on resume: ${wsErr instanceof Error ? wsErr.message : String(wsErr)}`;
       console.error(`[PipelineEngine] ${wsError}`);
-      this.store.updateRun(runId, { status: 'failed', updatedAt: now, completedAt: now });
+      await this.store.updateRun(runId, { status: 'failed', updatedAt: now, completedAt: now });
       await this.eventBus.publish(runChannel(runId), {
         type: 'RUN_FAILED', runId, error: wsError, timestamp: now,
       });
@@ -317,7 +317,7 @@ export class PipelineEngine {
       // Update run status if it still exists
       const existingRun = await this.store.getRun(runId);
       if (existingRun) {
-        this.store.updateRun(runId, {
+        await this.store.updateRun(runId, {
           status: 'cancelled',
           updatedAt: Date.now(),
           completedAt: Date.now(),
@@ -454,7 +454,7 @@ export class PipelineEngine {
             completedAt: event.timestamp,
           });
 
-          this.store.updateRun(runId, {
+          await this.store.updateRun(runId, {
             status: 'failed',
             updatedAt: event.timestamp,
             completedAt: event.timestamp,
@@ -896,7 +896,7 @@ export class PipelineEngine {
     // await Promise.resolve() handles both sync and async store implementations.
     const allOutputs = { ...await Promise.resolve(this.store.getOutputs(runId)), ...lastStepOutputs };
     
-    this.store.updateRun(runId, {
+    await this.store.updateRun(runId, {
       status: 'completed',
       outputs: allOutputs,
       updatedAt: now,
@@ -950,7 +950,7 @@ export class PipelineEngine {
   // Fail a run
   private async failRun(runId: string, error: string): Promise<void> {
     const now = Date.now();
-    this.store.updateRun(runId, {
+    await this.store.updateRun(runId, {
       status: 'failed',
       updatedAt: now,
       completedAt: now,
@@ -1019,7 +1019,7 @@ export class PipelineEngine {
     const run = await this.store.getRun(runId);
     if (run && (run.status === 'pending' || run.status === 'running')) {
       const now = Date.now();
-      this.store.updateRun(runId, {
+      await this.store.updateRun(runId, {
         status: 'failed',
         updatedAt: now,
         completedAt: now,

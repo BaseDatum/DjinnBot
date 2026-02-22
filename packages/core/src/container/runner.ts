@@ -248,6 +248,9 @@ export class ContainerRunner implements AgentRunner {
           ...(process.env.MCPO_API_KEY ? { MCPO_API_KEY: process.env.MCPO_API_KEY } : {}),
           // LLM call logging context — used by the runtime to tag each API call
           RUN_ID: runId,
+          // User attribution — agent-runtime includes this in LLM call logs
+          // so daily usage can be tracked per-user for share limit enforcement.
+          ...(userId ? { DJINNBOT_USER_ID: userId } : {}),
           ...(() => {
             const provider = model.includes('/') ? model.split('/')[0] : model;
             const ks = this._lastKeySources[provider];

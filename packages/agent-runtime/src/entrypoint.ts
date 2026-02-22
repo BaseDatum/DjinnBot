@@ -56,21 +56,39 @@ async function main(): Promise<void> {
   // dirty so the next turn re-fetches definitions from the API.
   const agentId = process.env.AGENT_ID || 'unknown';
   const MCP_GRANTS_CHANNEL = 'djinnbot:mcp:grants-changed';
+  const TOOL_OVERRIDES_CHANNEL = 'djinnbot:tools:overrides-changed';
+
   broadcastSubscriber.on('message', (ch: string, message: string) => {
-    if (ch !== MCP_GRANTS_CHANNEL) return;
-    try {
-      const data = JSON.parse(message);
-      // Only invalidate if the grant change targets this agent (or is global)
-      if (!data.agent_id || data.agent_id === agentId) {
+    // MCP grant changes
+    if (ch === MCP_GRANTS_CHANNEL) {
+      try {
+        const data = JSON.parse(message);
+        if (!data.agent_id || data.agent_id === agentId) {
+          runner.invalidateMcpTools();
+        }
+      } catch {
         runner.invalidateMcpTools();
       }
-    } catch {
-      // Malformed message — invalidate defensively
-      runner.invalidateMcpTools();
+      return;
+    }
+
+    // Built-in tool override changes
+    if (ch === TOOL_OVERRIDES_CHANNEL) {
+      try {
+        const data = JSON.parse(message);
+        if (!data.agent_id || data.agent_id === agentId) {
+          runner.invalidateToolOverrides();
+        }
+      } catch {
+        runner.invalidateToolOverrides();
+      }
+      return;
     }
   });
+
   await broadcastSubscriber.subscribe(MCP_GRANTS_CHANNEL);
-  console.log(`[AgentRuntime] Subscribed to ${MCP_GRANTS_CHANNEL} for agent ${agentId}`);
+  await broadcastSubscriber.subscribe(TOOL_OVERRIDES_CHANNEL);
+  console.log(`[AgentRuntime] Subscribed to ${MCP_GRANTS_CHANNEL} and ${TOOL_OVERRIDES_CHANNEL} for agent ${agentId}`);
 
   // Start file watcher
   // File watcher runs continuously - requestId is undefined since changes

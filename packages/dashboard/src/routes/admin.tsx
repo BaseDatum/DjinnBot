@@ -137,7 +137,7 @@ function AdminPage() {
   const [notificationsLoading, setNotificationsLoading] = useState(false);
   const [pendingItems, setPendingItems] = useState<PendingItem[]>([]);
   const [loading, setLoading] = useState(true);
-  const [sharedProviders, setSharedProviders] = useState<Array<{id: string; adminUserId: string; providerId: string; targetUserId: string | null; createdAt: number; expiresAt?: number | null; allowedModels?: string[] | null; dailyLimit?: number | null}>>([]);
+  const [sharedProviders, setSharedProviders] = useState<Array<{id: string; adminUserId: string; providerId: string; targetUserId: string | null; createdAt: number; expiresAt?: number | null; allowedModels?: string[] | null; dailyLimit?: number | null; dailyCostLimitUsd?: number | null}>>([]);
   const [runtimeImage, setRuntimeImage] = useState('');
   const [runtimeSaving, setRuntimeSaving] = useState(false);
   const [newShareProvider, setNewShareProvider] = useState('');
@@ -145,6 +145,12 @@ function AdminPage() {
   const [newShareExpiry, setNewShareExpiry] = useState('');
   const [newShareModels, setNewShareModels] = useState('');
   const [newShareDailyLimit, setNewShareDailyLimit] = useState('');
+  const [newShareCostLimit, setNewShareCostLimit] = useState('');
+  const [editingShareId, setEditingShareId] = useState<string | null>(null);
+  const [editShareModels, setEditShareModels] = useState('');
+  const [editShareDailyLimit, setEditShareDailyLimit] = useState('');
+  const [editShareCostLimit, setEditShareCostLimit] = useState('');
+  const [editShareExpiry, setEditShareExpiry] = useState('');
   const [sharingLoading, setShareLoading] = useState(false);
   const [providerOptions, setProviderOptions] = useState<ComboboxOption[]>([]);
   const [userOptions, setUserOptions] = useState<ComboboxOption[]>([]);
@@ -962,6 +968,17 @@ function AdminPage() {
                     className="h-8 text-xs"
                   />
                 </div>
+                <div className="w-28 space-y-1">
+                  <Label className="text-xs">Cost/Day (USD)</Label>
+                  <Input
+                    type="number"
+                    step="0.01"
+                    value={newShareCostLimit}
+                    onChange={(e) => setNewShareCostLimit(e.target.value)}
+                    placeholder="No limit"
+                    className="h-8 text-xs"
+                  />
+                </div>
                 <Button
                   size="sm"
                   disabled={!newShareProvider.trim()}
@@ -972,6 +989,7 @@ function AdminPage() {
                         ? newShareModels.split(',').map(m => m.trim()).filter(Boolean)
                         : null;
                       const dailyLimit = newShareDailyLimit ? parseInt(newShareDailyLimit, 10) : null;
+                      const dailyCostLimitUsd = newShareCostLimit ? parseFloat(newShareCostLimit) : null;
                       const res = await authFetch(`${API_BASE}/admin/shared-providers`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
@@ -981,6 +999,7 @@ function AdminPage() {
                           expiresAt,
                           allowedModels,
                           dailyLimit: dailyLimit && !isNaN(dailyLimit) ? dailyLimit : null,
+                          dailyCostLimitUsd: dailyCostLimitUsd && !isNaN(dailyCostLimitUsd) ? dailyCostLimitUsd : null,
                         }),
                       });
                       if (!res.ok) {
@@ -994,6 +1013,7 @@ function AdminPage() {
                       setNewShareExpiry('');
                       setNewShareModels('');
                       setNewShareDailyLimit('');
+                      setNewShareCostLimit('');
                       toast.success('Provider shared');
                     } catch (err: any) {
                       toast.error(err?.message || 'Failed to share');
@@ -1031,6 +1051,8 @@ function AdminPage() {
                         ? userOptions.find((u) => u.value === sp.targetUserId)?.label ?? sp.targetUserId
                         : null;
                       const isExpired = sp.expiresAt && sp.expiresAt < Date.now();
+                      const isEditing = editingShareId === sp.id;
+                      const hasAnyRestriction = sp.expiresAt || sp.allowedModels?.length || sp.dailyLimit || sp.dailyCostLimitUsd;
                       return (
                       <tr key={sp.id} className={`hover:bg-muted/30 ${isExpired ? 'opacity-50' : ''}`}>
                         <td className="px-4 py-2 text-xs">
@@ -1041,42 +1063,131 @@ function AdminPage() {
                           {targetLabel || <span className="text-blue-500">All users</span>}
                         </td>
                         <td className="px-4 py-2 text-xs space-y-0.5">
-                          {isExpired && (
-                            <span className="text-red-500 font-medium">Expired</span>
-                          )}
-                          {sp.expiresAt && !isExpired && (
-                            <div className="text-muted-foreground">
-                              Expires {new Date(sp.expiresAt).toLocaleDateString()}
+                          {isEditing ? (
+                            <div className="space-y-1.5 py-1">
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-muted-foreground w-16 shrink-0">Expires:</span>
+                                <Input type="date" value={editShareExpiry} onChange={(e) => setEditShareExpiry(e.target.value)} className="h-6 text-xs w-32" />
+                              </div>
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-muted-foreground w-16 shrink-0">Models:</span>
+                                <Input type="text" value={editShareModels} onChange={(e) => setEditShareModels(e.target.value)} placeholder="e.g. claude-sonnet-4, gpt-4o" className="h-6 text-xs font-mono flex-1" />
+                              </div>
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-muted-foreground w-16 shrink-0">Req/day:</span>
+                                <Input type="number" value={editShareDailyLimit} onChange={(e) => setEditShareDailyLimit(e.target.value)} placeholder="No limit" className="h-6 text-xs w-24" />
+                              </div>
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-muted-foreground w-16 shrink-0">$/day:</span>
+                                <Input type="number" step="0.01" value={editShareCostLimit} onChange={(e) => setEditShareCostLimit(e.target.value)} placeholder="No limit" className="h-6 text-xs w-24" />
+                              </div>
                             </div>
-                          )}
-                          {sp.allowedModels && sp.allowedModels.length > 0 && (
-                            <div className="text-muted-foreground">
-                              {sp.allowedModels.length} model{sp.allowedModels.length !== 1 ? 's' : ''}
-                            </div>
-                          )}
-                          {sp.dailyLimit && (
-                            <div className="text-muted-foreground">{sp.dailyLimit}/day</div>
-                          )}
-                          {!sp.expiresAt && !sp.allowedModels?.length && !sp.dailyLimit && (
-                            <span className="text-muted-foreground">None</span>
+                          ) : (
+                            <>
+                              {isExpired && (
+                                <span className="text-red-500 font-medium">Expired</span>
+                              )}
+                              {sp.expiresAt && !isExpired && (
+                                <div className="text-muted-foreground">
+                                  Expires {new Date(sp.expiresAt).toLocaleDateString()}
+                                </div>
+                              )}
+                              {sp.allowedModels && sp.allowedModels.length > 0 && (
+                                <div className="text-muted-foreground" title={sp.allowedModels.join(', ')}>
+                                  Models: <span className="font-mono">{sp.allowedModels.join(', ')}</span>
+                                </div>
+                              )}
+                              {sp.dailyLimit != null && (
+                                <div className="text-muted-foreground">{sp.dailyLimit} requests/day</div>
+                              )}
+                              {sp.dailyCostLimitUsd != null && (
+                                <div className="text-muted-foreground">${sp.dailyCostLimitUsd.toFixed(2)}/day</div>
+                              )}
+                              {!hasAnyRestriction && (
+                                <span className="text-muted-foreground">Unrestricted</span>
+                              )}
+                            </>
                           )}
                         </td>
-                        <td className="px-4 py-2 text-right">
-                          <button
-                            onClick={async () => {
-                              try {
-                                await authFetch(`${API_BASE}/admin/shared-providers/${sp.id}`, { method: 'DELETE' });
-                                setSharedProviders((prev) => prev.filter((s) => s.id !== sp.id));
-                                toast.success('Share revoked');
-                              } catch {
-                                toast.error('Failed to revoke');
-                              }
-                            }}
-                            className="text-destructive hover:underline text-xs inline-flex items-center gap-1"
-                          >
-                            <Trash2 className="h-3 w-3" />
-                            Revoke
-                          </button>
+                        <td className="px-4 py-2 text-right space-x-2">
+                          {isEditing ? (
+                            <>
+                              <button
+                                onClick={async () => {
+                                  try {
+                                    const expiresAt = editShareExpiry ? new Date(editShareExpiry).getTime() : undefined;
+                                    const allowedModels = editShareModels.trim()
+                                      ? editShareModels.split(',').map(m => m.trim()).filter(Boolean)
+                                      : undefined;
+                                    const dailyLimit = editShareDailyLimit ? parseInt(editShareDailyLimit, 10) : undefined;
+                                    const dailyCostLimitUsd = editShareCostLimit ? parseFloat(editShareCostLimit) : undefined;
+
+                                    const body: Record<string, unknown> = {};
+                                    if (expiresAt !== undefined) body.expiresAt = expiresAt;
+                                    else body.clearExpiresAt = !editShareExpiry;
+                                    if (allowedModels !== undefined) body.allowedModels = allowedModels;
+                                    else body.clearAllowedModels = !editShareModels.trim();
+                                    if (dailyLimit !== undefined && !isNaN(dailyLimit)) body.dailyLimit = dailyLimit;
+                                    else body.clearDailyLimit = !editShareDailyLimit;
+                                    if (dailyCostLimitUsd !== undefined && !isNaN(dailyCostLimitUsd)) body.dailyCostLimitUsd = dailyCostLimitUsd;
+                                    else body.clearDailyCostLimitUsd = !editShareCostLimit;
+
+                                    const res = await authFetch(`${API_BASE}/admin/shared-providers/${sp.id}`, {
+                                      method: 'PATCH',
+                                      headers: { 'Content-Type': 'application/json' },
+                                      body: JSON.stringify(body),
+                                    });
+                                    if (!res.ok) throw new Error((await res.json()).detail || 'Failed');
+                                    const updated = await res.json();
+                                    setSharedProviders((prev) => prev.map((s) => s.id === sp.id ? updated : s));
+                                    setEditingShareId(null);
+                                    toast.success('Share updated');
+                                  } catch (err: any) {
+                                    toast.error(err?.message || 'Failed to update');
+                                  }
+                                }}
+                                className="text-green-600 hover:underline text-xs inline-flex items-center gap-1"
+                              >
+                                Save
+                              </button>
+                              <button
+                                onClick={() => setEditingShareId(null)}
+                                className="text-muted-foreground hover:underline text-xs"
+                              >
+                                Cancel
+                              </button>
+                            </>
+                          ) : (
+                            <>
+                              <button
+                                onClick={() => {
+                                  setEditingShareId(sp.id);
+                                  setEditShareExpiry(sp.expiresAt ? new Date(sp.expiresAt).toISOString().split('T')[0] : '');
+                                  setEditShareModels(sp.allowedModels?.join(', ') ?? '');
+                                  setEditShareDailyLimit(sp.dailyLimit != null ? String(sp.dailyLimit) : '');
+                                  setEditShareCostLimit(sp.dailyCostLimitUsd != null ? String(sp.dailyCostLimitUsd) : '');
+                                }}
+                                className="text-blue-600 hover:underline text-xs inline-flex items-center gap-1"
+                              >
+                                Edit
+                              </button>
+                              <button
+                                onClick={async () => {
+                                  try {
+                                    await authFetch(`${API_BASE}/admin/shared-providers/${sp.id}`, { method: 'DELETE' });
+                                    setSharedProviders((prev) => prev.filter((s) => s.id !== sp.id));
+                                    toast.success('Share revoked');
+                                  } catch {
+                                    toast.error('Failed to revoke');
+                                  }
+                                }}
+                                className="text-destructive hover:underline text-xs inline-flex items-center gap-1"
+                              >
+                                <Trash2 className="h-3 w-3" />
+                                Revoke
+                              </button>
+                            </>
+                          )}
                         </td>
                       </tr>
                       );

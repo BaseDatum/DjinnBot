@@ -1247,6 +1247,9 @@ export class ChatSessionManager {
           ...(thinkingLevel && thinkingLevel !== 'off' ? { AGENT_THINKING_LEVEL: thinkingLevel } : {}),
           // LLM call logging context — used by the runtime to tag each API call
           CHAT_SESSION_ID: sessionId,
+          // User attribution — agent-runtime includes this in LLM call logs
+          // so daily usage can be tracked per-user for share limit enforcement.
+          ...(userId ? { DJINNBOT_USER_ID: userId } : {}),
           ...(() => {
             // Extract provider from model string (e.g. "anthropic/claude-sonnet-4" → "anthropic")
             const provider = model.includes('/') ? model.split('/')[0] : model;

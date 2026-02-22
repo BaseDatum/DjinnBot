@@ -14,6 +14,7 @@ from sqlalchemy import (
     Boolean,
     Integer,
     BigInteger,
+    Float,
     Index,
     ForeignKey,
     UniqueConstraint,
@@ -97,7 +98,11 @@ class AdminSharedProvider(Base):
     expires_at: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
     # JSON array of model IDs, e.g. '["claude-sonnet-4", "claude-haiku-3-5"]'
     allowed_models: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # Max LLM API calls per day — NULL = unlimited.
     daily_limit: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    # Max USD cost per day — NULL = unlimited.
+    # Enforced by summing llm_call_logs.cost_total for the current UTC day.
+    daily_cost_limit_usd: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
 
 
 class UserSecretGrant(Base):

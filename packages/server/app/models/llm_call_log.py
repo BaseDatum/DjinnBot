@@ -38,6 +38,12 @@ class LlmCallLog(Base):
     agent_id: Mapped[str] = mapped_column(String(128), nullable=False)
     request_id: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
 
+    # ── User attribution ────────────────────────────────────────────────────
+    # Which user's keys funded this call.  Set when key resolution is per-user
+    # (chat sessions with a logged-in user, project runs with an executing_user).
+    # NULL for system-level / webhook-triggered calls with no user context.
+    user_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+
     # ── Model info ──────────────────────────────────────────────────────────
     provider: Mapped[str] = mapped_column(
         String(64), nullable=False

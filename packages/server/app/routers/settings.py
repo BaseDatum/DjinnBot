@@ -1015,6 +1015,26 @@ async def get_all_provider_keys(
     result = await session.execute(select(ModelProvider))
     instance_providers = {row.provider_id: row for row in result.scalars().all()}
 
+    # 4. Enforce daily usage limits on admin-shared providers
+    #    This checks daily_limit (request count) and daily_cost_limit_usd
+    #    against today's llm_call_logs for this user.
+    from app.share_limits import check_share_limits
+
+    share_usage = await check_share_limits(session, user_id, shared_rows)
+
+    # Remove providers that have exceeded their limits from the shared set
+    blocked_providers: Dict[str, str] = {}  # provider_id → reason
+    for provider_id, usage_info in share_usage.items():
+        if usage_info.limit_exceeded:
+            shared_provider_ids.discard(provider_id)
+            blocked_providers[provider_id] = (
+                usage_info.exceeded_reason or "Limit exceeded"
+            )
+            logger.info(
+                f"Share limit exceeded for user {user_id}, "
+                f"provider {provider_id}: {usage_info.exceeded_reason}"
+            )
+
     keys: Dict[str, str] = {}
     extra: Dict[str, str] = {}
     # Track per-provider key source: "personal", "admin_shared", or "instance"
@@ -1064,18 +1084,23 @@ async def get_all_provider_keys(
 
     # Build model restriction map from shared grants that have allowed_models set
     model_restrictions: Dict[str, list] = {}
-    for share in shared_rows:
-        if share.allowed_models and share.provider_id in keys:
-            try:
-                model_restrictions[share.provider_id] = json.loads(share.allowed_models)
-            except (json.JSONDecodeError, TypeError):
-                pass
+    for provider_id, usage_info in share_usage.items():
+        if usage_info.allowed_models and provider_id in keys:
+            model_restrictions[provider_id] = usage_info.allowed_models
+
+    # Build per-provider usage info for transparency (engine can surface this)
+    share_usage_info: Dict[str, dict] = {}
+    for provider_id, usage_info in share_usage.items():
+        if provider_id in keys or provider_id in blocked_providers:
+            share_usage_info[provider_id] = usage_info.to_dict()
 
     return {
         "keys": keys,
         "extra": extra,
         "model_restrictions": model_restrictions,
         "key_sources": key_sources,
+        "blocked_providers": blocked_providers,
+        "share_usage": share_usage_info,
     }
 
 

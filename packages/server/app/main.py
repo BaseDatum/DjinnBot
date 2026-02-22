@@ -43,6 +43,7 @@ from app.routers import (
 from app.routers import channels
 from app.routers import secrets
 from app.routers import mcp
+from app.routers import agent_tools
 from app.routers import attachments
 from app.routers import auth as auth_router
 from app.routers import users as users_router
@@ -630,6 +631,7 @@ app.include_router(pulse_routines.router, prefix="/v1", tags=["pulse-routines"])
 app.include_router(onboarding.router, prefix="/v1/onboarding", tags=["onboarding"])
 app.include_router(skills.router, prefix="/v1/skills", tags=["skills"])
 app.include_router(channels.router, prefix="/v1/agents", tags=["channels"])
+app.include_router(agent_tools.router, prefix="/v1/agents", tags=["agent-tools"])
 app.include_router(secrets.router, prefix="/v1/secrets", tags=["secrets"])
 app.include_router(mcp.router, prefix="/v1/mcp", tags=["mcp"])
 app.include_router(users_router.router, prefix="/v1/users", tags=["users"])
