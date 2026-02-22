@@ -317,6 +317,37 @@ export class DjinnBot {
             }).catch(err => console.error('[DjinnBot] Failed to persist tool_end event:', err));
           }
         },
+        onMessageAgent: async (agentId, runId, stepId, to, message, priority, messageType) => {
+          const msgId = await this.agentInbox.send({
+            from: agentId,
+            to,
+            message,
+            priority: priority as any,
+            type: messageType as any,
+            timestamp: Date.now(),
+          });
+          console.log(`[DjinnBot] Container agent ${agentId} → ${to}: "${message.slice(0, 80)}" (${msgId})`);
+
+          // If urgent priority, publish a wake notification so AgentPulse can trigger immediately
+          if (priority === 'urgent' || priority === 'high') {
+            await this.agentInbox.publishWake(to, agentId, priority, messageType, msgId);
+          }
+
+          return msgId;
+        },
+        onSlackDm: async (agentId, runId, stepId, message, urgent) => {
+          if (!this.slackBridge) {
+            return 'Slack bridge not started - cannot send DM to user.';
+          }
+          try {
+            await this.slackBridge.sendDmToUser(agentId, message, urgent);
+            console.log(`[DjinnBot] Container agent ${agentId} sent Slack DM: "${message.slice(0, 80)}..."`);
+            return `Message sent to user via Slack DM${urgent ? ' (marked urgent)' : ''}.`;
+          } catch (err) {
+            console.error(`[DjinnBot] Failed to send Slack DM from container:`, err);
+            return `Failed to send Slack DM: ${(err as Error).message}`;
+          }
+        },
       });
     }
 
@@ -484,6 +515,12 @@ export class DjinnBot {
           timestamp: Date.now(),
         });
         console.log(`[DjinnBot] Agent ${agentId} → ${to}: "${message.slice(0, 80)}" (${msgId})`);
+
+        // If urgent/high priority, publish wake notification
+        if (priority === 'urgent' || priority === 'high') {
+          await this.agentInbox.publishWake(to, agentId, priority, type, msgId);
+        }
+
         return msgId;
       },
       onSlackDm: async (agentId, runId, stepId, message, urgent) => {
@@ -604,6 +641,7 @@ export class DjinnBot {
         intervalMs: 30 * 60 * 1000, // 30 minutes (default fallback)
         timeoutMs: 60 * 1000,       // 60 seconds per agent
         agentIds: this.agentRegistry.getIds(),
+        redisUrl: this.config.redisUrl,    // Enable wake-on-message
       },
       {
         getAgentState: (agentId) => this.lifecycleManager.getState(agentId),
@@ -613,9 +651,13 @@ export class DjinnBot {
         getAgentPulseSchedule: async (agentId) => this.loadAgentPulseSchedule(agentId),
         getAgentPulseRoutines: async (agentId) => this.fetchAgentPulseRoutines(agentId),
         getAssignedTasks: async (agentId) => this.fetchAssignedTasks(agentId),
-        startPulseSession: (agentId, sessionId) => this.lifecycleManager.startPulseSession(agentId, sessionId),
+        startPulseSession: (agentId, sessionId) => {
+          // Load per-agent maxConcurrent from config.yml coordination settings
+          const maxConcurrent = this.getAgentMaxConcurrentPulseSessions(agentId);
+          return this.lifecycleManager.startPulseSession(agentId, sessionId, maxConcurrent);
+        },
         endPulseSession: (agentId, sessionId) => this.lifecycleManager.endPulseSession(agentId, sessionId),
-        maxConcurrentPulseSessions: 2,
+        maxConcurrentPulseSessions: 2, // Global default — per-agent overrides via startPulseSession
         onRoutinePulseComplete: (routineId) => this.updateRoutineStats(routineId),
       },
     );
@@ -654,6 +696,23 @@ export class DjinnBot {
       return null;
     }
     return this.agentPulse.getTimeline(hours);
+  }
+
+  /**
+   * Read maxConcurrentPulseSessions from an agent's config.yml coordination section.
+   * Returns the configured value, or 2 as default.
+   */
+  private getAgentMaxConcurrentPulseSessions(agentId: string): number {
+    try {
+      const configPath = join(this.config.agentsDir, agentId, 'config.yml');
+      const fs = require('node:fs');
+      const yaml = require('yaml');
+      const content = fs.readFileSync(configPath, 'utf-8');
+      const config = yaml.parse(content) || {};
+      return config?.coordination?.max_concurrent_pulse_sessions ?? 2;
+    } catch {
+      return 2; // Default
+    }
   }
 
   /** Load pulse schedule config for an agent from config.yml */

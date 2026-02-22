@@ -32,6 +32,26 @@ export interface MessagingConfig {
   retention_days: number;
 }
 
+/** Wake guardrail settings — controls how agents can wake each other */
+export interface WakeGuardrailsConfig {
+  /** Minimum seconds between wakes per agent (default 300) */
+  cooldownSeconds: number;
+  /** Max wake-triggered pulses per agent per day (default 12) */
+  maxWakesPerDay: number;
+  /** Max daily active session minutes per agent (default 120) */
+  maxDailySessionMinutes: number;
+  /** Max wakes from a single source→target pair per day (default 5) */
+  maxWakesPerPairPerDay: number;
+}
+
+/** Coordination settings for concurrent agent instances */
+export interface CoordinationConfig {
+  /** Max concurrent pulse sessions for this agent (default 2) */
+  maxConcurrentPulseSessions: number;
+  /** Wake guardrails (cost control for agent-to-agent wake-ups) */
+  wakeGuardrails: WakeGuardrailsConfig;
+}
+
 export type ThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
 
 export interface AgentConfig {
@@ -58,6 +78,8 @@ export interface AgentConfig {
    * Default: 120000 (2 minutes).
    */
   pulseContainerTimeoutMs?: number;
+  /** Coordination settings (concurrency, wake guardrails) */
+  coordination?: CoordinationConfig;
   sandbox?: SandboxConfig;
   lifecycle?: LifecycleConfig;
   pulse?: PulseConfig;
@@ -71,3 +93,13 @@ export const SANDBOX_LIMITS = {
   timeout_seconds: { min: 30, max: 3600, default: 300 },
   network: { default: true }
 } as const;
+
+export const COORDINATION_DEFAULTS: CoordinationConfig = {
+  maxConcurrentPulseSessions: 2,
+  wakeGuardrails: {
+    cooldownSeconds: 300,
+    maxWakesPerDay: 12,
+    maxDailySessionMinutes: 120,
+    maxWakesPerPairPerDay: 5,
+  },
+};

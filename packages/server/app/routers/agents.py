@@ -478,6 +478,21 @@ async def get_agent_config(agent_id: str):
     with open(config_path, "r") as f:
         raw = yaml.safe_load(f) or {}
 
+    # Build coordination config from raw YAML
+    coordination_raw = raw.get("coordination", {})
+    wake_raw = coordination_raw.get("wake_guardrails", {})
+    coordination = {
+        "maxConcurrentPulseSessions": coordination_raw.get(
+            "max_concurrent_pulse_sessions", 2
+        ),
+        "wakeGuardrails": {
+            "cooldownSeconds": wake_raw.get("cooldown_seconds", 300),
+            "maxWakesPerDay": wake_raw.get("max_wakes_per_day", 12),
+            "maxDailySessionMinutes": wake_raw.get("max_daily_session_minutes", 120),
+            "maxWakesPerPairPerDay": wake_raw.get("max_wakes_per_pair_per_day", 5),
+        },
+    }
+
     # Map snake_case to camelCase for frontend
     return {
         "model": raw.get("model", ""),
@@ -496,7 +511,7 @@ async def get_agent_config(agent_id: str):
         "pulseContainerTimeoutMs": raw.get(
             "pulse_container_timeout_ms", raw.get("pulseContainerTimeoutMs", 120000)
         ),
-        # skillsDisabled removed in V2 — access is managed via DB (agent_skills table)
+        "coordination": coordination,
     }
 
 
@@ -529,12 +544,36 @@ async def update_agent_config(agent_id: str, req: dict):
         "pulseContainerTimeoutMs": "pulse_container_timeout_ms",
         "timeout": "timeout",
         "maxRetries": "max_retries",
-        # skillsDisabled removed in V2 — access is managed via DB
     }
 
     for camel_key, yaml_key in key_mapping.items():
         if camel_key in req:
             existing[yaml_key] = req[camel_key]
+
+    # Handle nested coordination config
+    if "coordination" in req:
+        coord = req["coordination"]
+        if not isinstance(existing.get("coordination"), dict):
+            existing["coordination"] = {}
+        if "maxConcurrentPulseSessions" in coord:
+            existing["coordination"]["max_concurrent_pulse_sessions"] = coord[
+                "maxConcurrentPulseSessions"
+            ]
+        if "wakeGuardrails" in coord:
+            wg = coord["wakeGuardrails"]
+            if not isinstance(existing["coordination"].get("wake_guardrails"), dict):
+                existing["coordination"]["wake_guardrails"] = {}
+            wake_mapping = {
+                "cooldownSeconds": "cooldown_seconds",
+                "maxWakesPerDay": "max_wakes_per_day",
+                "maxDailySessionMinutes": "max_daily_session_minutes",
+                "maxWakesPerPairPerDay": "max_wakes_per_pair_per_day",
+            }
+            for camel_key, yaml_key in wake_mapping.items():
+                if camel_key in wg:
+                    existing["coordination"]["wake_guardrails"][yaml_key] = wg[
+                        camel_key
+                    ]
 
     # Write back
     logger.debug(f"Writing config.yml for agent: {agent_id}")
@@ -542,6 +581,75 @@ async def update_agent_config(agent_id: str, req: dict):
         yaml.dump(existing, f, default_flow_style=False)
 
     return {"status": "updated", "config": existing}
+
+
+# ── Work Ledger (live coordination) ──────────────────────────────────────
+
+
+@router.get("/{agent_id}/work-ledger")
+async def get_agent_work_ledger(agent_id: str):
+    """Get active work locks for an agent across all parallel instances."""
+    if not dependencies.redis_client:
+        raise HTTPException(status_code=503, detail="Redis not available")
+
+    ledger_key = f"djinnbot:agent:{agent_id}:work_ledger"
+    keys = await dependencies.redis_client.smembers(ledger_key)
+
+    if not keys:
+        return {"agentId": agent_id, "locks": [], "count": 0}
+
+    locks = []
+    expired_keys = []
+    for key in keys:
+        lock_key = f"djinnbot:agent:{agent_id}:work_lock:{key}"
+        raw = await dependencies.redis_client.get(lock_key)
+        if not raw:
+            expired_keys.append(key)
+            continue
+        try:
+            entry = json.loads(raw)
+            ttl = await dependencies.redis_client.ttl(lock_key)
+            locks.append(
+                {
+                    "key": key,
+                    "sessionId": entry.get("sessionId"),
+                    "description": entry.get("description"),
+                    "acquiredAt": entry.get("acquiredAt"),
+                    "ttlSeconds": entry.get("ttlSeconds"),
+                    "remainingSeconds": max(0, ttl) if ttl > 0 else 0,
+                }
+            )
+        except (json.JSONDecodeError, TypeError):
+            expired_keys.append(key)
+
+    # Clean up expired keys
+    if expired_keys:
+        await dependencies.redis_client.srem(ledger_key, *expired_keys)
+
+    return {
+        "agentId": agent_id,
+        "locks": sorted(locks, key=lambda x: x.get("acquiredAt", 0)),
+        "count": len(locks),
+    }
+
+
+@router.get("/{agent_id}/wake-stats")
+async def get_agent_wake_stats(agent_id: str):
+    """Get wake guardrail stats for an agent (today's usage)."""
+    if not dependencies.redis_client:
+        raise HTTPException(status_code=503, detail="Redis not available")
+
+    from datetime import date
+
+    today = date.today().isoformat()
+    day_key = f"djinnbot:agent:{agent_id}:wakes:{today}"
+    wakes_today = await dependencies.redis_client.get(day_key)
+
+    return {
+        "agentId": agent_id,
+        "wakesToday": int(wakes_today) if wakes_today else 0,
+        "date": today,
+    }
 
 
 @router.put("/{agent_id}/files/{filename}")

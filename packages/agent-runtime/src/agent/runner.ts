@@ -26,6 +26,8 @@ export interface RequestIdRef {
 
 export interface ContainerAgentRunnerOptions {
   publisher: RedisPublisher;
+  /** Redis client for direct operations (work ledger, coordination). */
+  redis: import('../redis/client.js').RedisClient;
   agentId: string;
   workspacePath: string;
   vaultPath: string;
@@ -224,8 +226,10 @@ export class ContainerAgentRunner {
     // DjinnBot tools (complete, fail, recall, remember, project/task tools, skills, etc.)
     const djinnBotTools = createDjinnBotTools({
       publisher: this.options.publisher,
+      redis: this.options.redis,
       requestIdRef: this.requestIdRef,
       agentId: this.options.agentId,
+      sessionId: this.options.runId || process.env.RUN_ID || 'unknown',
       vaultPath: this.options.vaultPath,
       sharedPath: this.options.sharedPath,
       agentsDir: this.options.agentsDir || process.env.AGENTS_DIR,
