@@ -40,6 +40,19 @@ const OnboardingHandoffParamsSchema = Type.Object({
 });
 type OnboardingHandoffParams = Static<typeof OnboardingHandoffParamsSchema>;
 
+const UpdateOnboardingDiagramParamsSchema = Type.Object({
+  mermaid: Type.String({
+    description: 'Complete Mermaid diagram markup. Use `graph TD` or `graph LR` for reliability. '
+      + 'ALWAYS quote edge labels: `A -->|"label"| B`. Node IDs must be alphanumeric only. '
+      + 'This REPLACES the current diagram — include all existing nodes/edges plus your additions. '
+      + 'Keep it clean and readable; a simple correct diagram beats a complex broken one.',
+  }),
+  caption: Type.Optional(Type.String({
+    description: 'Short caption describing what the diagram shows (e.g. "Infrastructure topology", "Business model overview").',
+  })),
+});
+type UpdateOnboardingDiagramParams = Static<typeof UpdateOnboardingDiagramParamsSchema>;
+
 // ── Types ──────────────────────────────────────────────────────────────────
 
 interface VoidDetails {}
@@ -98,6 +111,51 @@ export function createOnboardingTools(config: OnboardingToolsConfig): AgentTool[
           return { content: [{ type: 'text', text: `Onboarding context updated: ${keys}` }], details: {} };
         } catch (err) {
           return { content: [{ type: 'text', text: `Failed to update onboarding context: ${err}` }], details: {} };
+        }
+      },
+    },
+
+    // update_onboarding_diagram — evolve the live project diagram
+    {
+      name: 'update_onboarding_diagram',
+      description:
+        'Update the evolving project diagram that the user sees in real time on the left panel. ' +
+        'Call this EARLY and OFTEN — the user watches the diagram grow as you learn about the project. ' +
+        'First call: create a simple starting diagram with what you know. ' +
+        'Subsequent calls: extend it with new nodes and edges as you learn more. ' +
+        'Each call REPLACES the full diagram — include everything from previous versions plus your additions. ' +
+        'Use Mermaid graph TD/LR syntax. Keep it clean and correct.',
+      label: 'update_onboarding_diagram',
+      parameters: UpdateOnboardingDiagramParamsSchema,
+      execute: async (
+        _toolCallId: string,
+        params: unknown,
+        signal?: AbortSignal,
+        _onUpdate?: AgentToolUpdateCallback<VoidDetails>
+      ): Promise<AgentToolResult<VoidDetails>> => {
+        const p = params as UpdateOnboardingDiagramParams;
+        const apiBase = getApiBase();
+        const onboardingSessionId = process.env.ONBOARDING_SESSION_ID;
+        if (!onboardingSessionId) {
+          return { content: [{ type: 'text', text: 'No onboarding session ID — diagram not updated.' }], details: {} };
+        }
+        try {
+          const response = await authFetch(
+            `${apiBase}/v1/onboarding/sessions/${onboardingSessionId}/diagram`,
+            {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ mermaid: p.mermaid, caption: p.caption }),
+              signal: signal ?? undefined,
+            },
+          );
+          if (!response.ok) {
+            const text = await response.text();
+            return { content: [{ type: 'text', text: `Diagram update failed: ${response.status} ${text}` }], details: {} };
+          }
+          return { content: [{ type: 'text', text: `Diagram updated${p.caption ? `: ${p.caption}` : ''}.` }], details: {} };
+        } catch (err) {
+          return { content: [{ type: 'text', text: `Failed to update diagram: ${err}` }], details: {} };
         }
       },
     },

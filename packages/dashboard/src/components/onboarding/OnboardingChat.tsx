@@ -57,6 +57,8 @@ import {
   AGENT_META,
   AGENT_CHAIN,
 } from './OnboardingMessages';
+import { OnboardingDiagramPanel, type DiagramState } from './OnboardingDiagramPanel';
+import { OnboardingMiniMemoryGraph } from './OnboardingMiniMemoryGraph';
 
 // ============================================================================
 // Types
@@ -76,6 +78,7 @@ interface GlobalSSEEvent {
   toAgent?: string;
   newChatSessionId?: string;
   context?: Record<string, unknown>;
+  diagramState?: DiagramState;
   phase?: string;
   projectId?: string;
   projectName?: string;
@@ -490,6 +493,10 @@ export function OnboardingChat({ onClose, onProjectCreated, resumeSessionId }: O
   const [isWaitingForAgent, setIsWaitingForAgent] = useState(false);
 
   const [error, setError] = useState<string | null>(null);
+  // Evolving diagram state — updated via ONBOARDING_DIAGRAM_UPDATED SSE
+  const [diagramState, setDiagramState] = useState<DiagramState | null>(null);
+  // Left panel collapse state — respects viewport width
+  const [diagramCollapsed, setDiagramCollapsed] = useState(false);
   // Completion state — set when ONBOARDING_COMPLETED fires
   const [completionInfo, setCompletionInfo] = useState<{
     projectId?: string;
@@ -567,6 +574,8 @@ export function OnboardingChat({ onClose, onProjectCreated, resumeSessionId }: O
         if (!cancelled) {
           setSession(s);
           setMessagesFromDb(expandDbMessages(s.messages));
+          // Initialize diagram state from session (may be null for fresh sessions)
+          if (s.diagram_state) setDiagramState(s.diagram_state);
           // NOTE: markHistoryLoaded() is NOT called here. It must run AFTER
           // useChatStream's reset effect (which fires when sessionId changes
           // from '' to the new chat_session_id and resets historyLoadedRef
@@ -610,6 +619,8 @@ export function OnboardingChat({ onClose, onProjectCreated, resumeSessionId }: O
     try {
       const s = await getOnboardingSession(session.id);
       setSession(s);
+      // Sync diagram state from DB
+      if (s.diagram_state) setDiagramState(s.diagram_state);
       // Merge DB messages with any active streaming state using deduplication.
       // setMessagesFromDb preserves in-flight streaming_ prefixed messages
       // while replacing all committed messages with the DB source of truth.
@@ -666,6 +677,10 @@ export function OnboardingChat({ onClose, onProjectCreated, resumeSessionId }: O
           setSession((prev) =>
             prev ? { ...prev, context: { ...prev.context, ...event.context } } : prev
           );
+        }
+
+        if (event.type === 'ONBOARDING_DIAGRAM_UPDATED' && event.diagramState) {
+          setDiagramState(event.diagramState);
         }
 
         if (event.type === 'ONBOARDING_COMPLETED') {
@@ -971,9 +986,23 @@ export function OnboardingChat({ onClose, onProjectCreated, resumeSessionId }: O
         </div>
       </div>
 
-      {/* Main body */}
+      {/* Main body — 3-column layout: [Diagram | Chat | Profile] */}
       <div className="flex flex-1 min-h-0">
-        {/* Chat area */}
+        {/* Left panel: Diagram + Mini Memory Graph */}
+        {session && (
+          <div className={`flex flex-col min-h-0 shrink-0 transition-all duration-200 ${diagramCollapsed ? 'w-10' : 'w-80'}`}>
+            <OnboardingDiagramPanel
+              diagramState={diagramState}
+              collapsed={diagramCollapsed}
+              onToggleCollapse={() => setDiagramCollapsed((c) => !c)}
+            />
+            {!diagramCollapsed && (
+              <OnboardingMiniMemoryGraph height={180} />
+            )}
+          </div>
+        )}
+
+        {/* Chat area (center) */}
         <div className="flex flex-col flex-1 min-w-0">
           {/* Agent header */}
           {session && (
@@ -1072,7 +1101,7 @@ export function OnboardingChat({ onClose, onProjectCreated, resumeSessionId }: O
           ) : null}
         </div>
 
-        {/* Profile sidebar */}
+        {/* Profile sidebar (right) */}
         {session && (
           <ProjectProfileSidebar
             context={session.context}

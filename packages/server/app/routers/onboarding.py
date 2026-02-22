@@ -112,6 +112,15 @@ class OnboardingMessageResponse(BaseModel):
     created_at: int
 
 
+class DiagramState(BaseModel):
+    """The evolving Mermaid diagram built collaboratively during onboarding."""
+
+    mermaid: str
+    caption: Optional[str] = None
+    last_agent_id: Optional[str] = None
+    version: int = 1
+
+
 class OnboardingSessionResponse(BaseModel):
     id: str
     status: str
@@ -121,6 +130,7 @@ class OnboardingSessionResponse(BaseModel):
     current_agent_emoji: str
     phase: str
     context: dict
+    diagram_state: Optional[DiagramState] = None
     chat_session_id: Optional[str]
     model: str
     created_at: int
@@ -180,6 +190,14 @@ def _serialize_session(
             ctx = json.loads(session.context)
         except Exception:
             pass
+    # Parse diagram state
+    diagram: Optional[DiagramState] = None
+    if session.diagram_state:
+        try:
+            diagram = DiagramState(**json.loads(session.diagram_state))
+        except Exception:
+            pass
+
     msg_list = messages if messages is not None else (session.messages or [])
     return OnboardingSessionResponse(
         id=session.id,
@@ -190,6 +208,7 @@ def _serialize_session(
         current_agent_emoji=emoji,
         phase=session.phase,
         context=ctx,
+        diagram_state=diagram,
         chat_session_id=session.chat_session_id,
         model=session.model,
         created_at=session.created_at,
@@ -1466,6 +1485,74 @@ async def update_onboarding_context(
             pass
 
     return {"status": "updated", "context": existing}
+
+
+class UpdateDiagramRequest(BaseModel):
+    """Update the evolving onboarding diagram."""
+
+    mermaid: str
+    caption: Optional[str] = None
+
+
+@router.patch("/sessions/{session_id}/diagram")
+async def update_onboarding_diagram(
+    session_id: str,
+    req: UpdateDiagramRequest,
+    db: AsyncSession = Depends(get_async_session),
+):
+    """Update the evolving Mermaid diagram for an onboarding session.
+
+    Called by agents via the update_onboarding_diagram tool to progressively
+    build the project diagram throughout the onboarding process.  Each call
+    replaces the full Mermaid string (the agent sees the current diagram in
+    its context and builds on it).
+    """
+    result = await db.execute(
+        select(OnboardingSession).where(OnboardingSession.id == session_id)
+    )
+    onb = result.scalar_one_or_none()
+    if not onb:
+        raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
+
+    # Parse existing state to bump version
+    existing_version = 0
+    if onb.diagram_state:
+        try:
+            existing = json.loads(onb.diagram_state)
+            existing_version = existing.get("version", 0)
+        except Exception:
+            pass
+
+    new_state = {
+        "mermaid": req.mermaid,
+        "caption": req.caption,
+        "last_agent_id": onb.current_agent_id,
+        "version": existing_version + 1,
+    }
+    onb.diagram_state = json.dumps(new_state)
+    onb.updated_at = now_ms()
+    await db.commit()
+
+    # Broadcast so the diagram panel updates live
+    if dependencies.redis_client:
+        try:
+            await dependencies.redis_client.xadd(
+                "djinnbot:events:global",
+                {
+                    "data": json.dumps(
+                        {
+                            "type": "ONBOARDING_DIAGRAM_UPDATED",
+                            "sessionId": session_id,
+                            "diagramState": new_state,
+                            "timestamp": now_ms(),
+                        }
+                    )
+                },
+            )
+        except Exception:
+            pass
+
+    return {"status": "updated", "diagramState": new_state}
 
 
 @router.patch("/internal/messages/{message_id}/complete")

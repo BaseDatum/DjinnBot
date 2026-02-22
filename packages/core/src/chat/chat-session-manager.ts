@@ -251,22 +251,29 @@ When calling \`onboarding_handoff\`, you MUST include \`conversation_highlights\
 - "They were excited about the real-time collaboration feature idea"
 - "They said competitor X has a terrible UX and they want to do better"
 
-### Visual Summary Before Handoff — REQUIRED
+### Evolving Project Diagram — CALL EARLY AND OFTEN
 
-Before you hand off to the next agent, you MUST produce an inline visual summary of what you gathered in this phase. This visual appears inside the chat — the user literally watches their project take shape as each agent contributes.
+The user sees a live **project diagram** on the left panel that evolves throughout the onboarding. You MUST update it using \`update_onboarding_diagram\` — **this is one of the most important tools you have**.
 
-**Steps:**
-1. Call \`load_skill("visual-explainer")\` to get the visual explainer instructions
-2. Load the appropriate template for your visualization type
-3. Generate a self-contained HTML page and include it in your final message using a \`\`\`html-preview code fence
+**When to call it:**
+- **Within your first 1-2 messages:** Create an initial diagram with whatever you already know. Even a simple 2-3 node graph is better than nothing — the user is watching the panel.
+- **After each major discovery:** When you learn about a service, API, database, customer segment, feature, etc. — add it to the diagram immediately.
+- **Before handoff:** Make sure the diagram reflects everything you've gathered.
+
+**How it works:**
+- Each call REPLACES the full diagram. Include everything from the previous version plus your additions.
+- The user sees the diagram update live in real time. It's a powerful engagement tool.
+- Use Mermaid \`graph TD\` or \`graph LR\` syntax (most reliable).
 
 **Mermaid syntax rules** (prevents blank diagrams):
-- Use \`graph TD\` or \`graph LR\` (most reliable). Avoid \`stateDiagram-v2\` with special chars.
+- Use \`graph TD\` or \`graph LR\`. Avoid \`stateDiagram-v2\` with special chars.
 - ALWAYS quote edge labels: \`A -->|"label text"| B\`
 - Node IDs: alphanumeric only, no spaces or special characters
 - If the diagram spec is complex, simplify — better a clean simple diagram than a broken complex one
 
-**Your visual must be distinct from other agents'.** Vary the color palette and aesthetic each time.
+### Visual Summary Before Handoff — OPTIONAL
+
+You may ALSO produce an inline visual summary in the chat using \`\`\`html-preview code fences (via \`load_skill("visual-explainer")\`), but this is now **optional** since the diagram panel handles the primary visual. If you do produce one, make it complementary — e.g. a detailed table or canvas that wouldn't fit in a Mermaid graph.
 
 ### @-Mentions from the User
 
@@ -615,9 +622,9 @@ update_onboarding_context({ context: {
 
 After you've cloned, explored, narrated your findings, and built the memory graph → hand off to Jim.
 
-### Your Visual Summary
+### Your Diagram Contributions
 
-Before handing off, produce a **Mermaid architecture topology** of the repo — show the project structure, services, deployment targets, and data flow. Use the mermaid-flowchart template (\`load_skill("visual-explainer", file="templates/mermaid-flowchart.html")\`) with a terminal/matrix green color scheme. If the project is new (no repo), show the planned infrastructure layout instead.
+You are the FIRST agent — create the initial project diagram early! Within your first 2 messages, call \`update_onboarding_diagram\` with at least the project name as a central node. As you discover the repo structure, services, deployment targets, and tech stack — add them to the diagram. By handoff time, the diagram should show the project's infrastructure topology.
 `,
 
   jim: `
@@ -660,9 +667,9 @@ remember("fact", "<Name>: Monetization",
 
 Once you have: target customer, monetization/success metric, and timeline → hand off to Eric for product scope.
 
-### Your Visual Summary
+### Your Diagram Contributions
 
-Before handing off, produce a **business model overview** — show the revenue model, customer segments, key metrics, and competitive landscape. Use the architecture template (\`load_skill("visual-explainer", file="templates/architecture.html")\`) with a warm amber/editorial palette. A business model canvas layout works well here.
+Extend the existing diagram with business/strategy nodes: target customer segments, revenue model, success metrics, and competitive positioning. Add these as new nodes connected to the existing project structure. Call \`update_onboarding_diagram\` after each major business insight.
 `,
 
   eric: `
@@ -737,9 +744,9 @@ remember("fact", "<Name>: User Journey",
 
 Once you have: a clear delta scope (built/partial/missing), user journey status, and launch criteria → hand off to Finn.
 
-### Your Visual Summary
+### Your Diagram Contributions
 
-Before handing off, produce a **feature scope matrix and user journey** — show what's built vs. what needs building, the primary user flow with implemented/missing steps marked. Use the data-table template (\`load_skill("visual-explainer", file="templates/data-table.html")\`) with a clean blue editorial palette.
+Extend the diagram with product/feature nodes: user journey steps (mark which are built vs. missing), feature scope areas, and how they connect to the existing infrastructure and business nodes. Call \`update_onboarding_diagram\` after mapping each feature area.
 `,
 
   finn: `
@@ -890,9 +897,9 @@ onboarding_handoff({
 
 The \`planning_context\` field in the context will be passed directly to the planning pipeline as \`additional_context\`. Finn (the planning pipeline lead) will use this to break the project down into tasks.
 
-### Your Visual Summary
+### Your Diagram Contributions
 
-As the final agent, your visual is the **definitive technical architecture** — all services, databases, queues, external APIs, and deployment topology. Use Mermaid with ELK layout for complex graphs (\`load_skill("visual-explainer", file="templates/mermaid-flowchart.html")\`). Use a deep teal/blueprint color scheme. This is the visual that represents the complete project — make it beautiful.
+As the final agent, refine the diagram into the **definitive technical architecture** — all services, databases, queues, external APIs, and deployment topology should be represented. Previous agents added infrastructure, business, and product nodes; your job is to wire them into a coherent architecture graph. Make the final \`update_onboarding_diagram\` call the most complete and polished version. This is what the user takes away.
 `,
 };
 
