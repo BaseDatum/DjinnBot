@@ -311,11 +311,15 @@ async function buildToolsForServer(
  *
  * Called once per runStep() so that mid-session grant changes take effect on
  * the next turn (tools are refreshed via agent.setTools() each turn).
+ *
+ * @param apiToken  Bearer token sent to the DjinnBot API server (AGENT_API_KEY
+ *                  or ENGINE_INTERNAL_TOKEN).  Required when AUTH_ENABLED=true.
  */
 export async function createMcpTools(
   agentId: string,
   apiBaseUrl: string,
-  mcpoApiKey: string
+  mcpoApiKey: string,
+  apiToken?: string
 ): Promise<AgentTool[]> {
   if (!mcpoApiKey && !process.env.MCPO_BASE_URL) {
     // mcpo not configured — skip silently
@@ -326,7 +330,10 @@ export async function createMcpTools(
   try {
     const res = await fetch(
       `${apiBaseUrl}/v1/mcp/agents/${encodeURIComponent(agentId)}/manifest`,
-      { signal: AbortSignal.timeout(5000) }
+      {
+        headers: apiToken ? { Authorization: `Bearer ${apiToken}` } : {},
+        signal: AbortSignal.timeout(5000),
+      }
     );
     if (!res.ok) {
       if (res.status !== 404) {

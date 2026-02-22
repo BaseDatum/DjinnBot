@@ -182,7 +182,7 @@ async def sse_agent_events():
     Test with: curl -N http://localhost:8000/api/agents/events
     """
     return StreamingResponse(
-        event_generator(),
+        lifecycle_event_generator(),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

@@ -234,10 +234,12 @@ export class ContainerAgentRunner {
 
     if (this.mcpToolsDirty) {
       const apiBaseUrl = process.env.DJINNBOT_API_URL || 'http://api:8000';
+      const apiToken = process.env.AGENT_API_KEY || process.env.ENGINE_INTERNAL_TOKEN;
       this.mcpTools = await createMcpTools(
         this.options.agentId,
         apiBaseUrl,
         process.env.MCPO_API_KEY || '',
+        apiToken,
       );
       this.mcpToolsDirty = false;
       console.log(`[AgentRunner] MCP tools refreshed: ${this.mcpTools.length} tool(s)`);

@@ -274,10 +274,12 @@ export class PiMonoRunner implements AgentRunner {
     // Add native MCP tools for any server granted to this agent.
     // Fetched fresh on every runAgent() call so mid-run grant changes take effect.
     const apiBaseUrl = this.config.apiBaseUrl || process.env.DJINNBOT_API_URL || 'http://api:8000';
+    const apiToken = process.env.ENGINE_INTERNAL_TOKEN || process.env.AGENT_API_KEY;
     const mcpTools = await createMcpTools(
       options.agentId,
       apiBaseUrl,
       process.env.MCPO_API_KEY || '',
+      apiToken,
     );
     if (mcpTools.length > 0) {
       tools.push(...mcpTools as AgentTool[]);
