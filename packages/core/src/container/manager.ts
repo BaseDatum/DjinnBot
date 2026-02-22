@@ -23,6 +23,8 @@ export interface ContainerInfo {
   containerId: string;
   runId: string;
   status: 'created' | 'starting' | 'ready' | 'running' | 'stopping' | 'stopped';
+  /** Set to true when the image was auto-pulled during container creation. */
+  imagePulled?: boolean;
 }
 
 const DEFAULT_IMAGE = process.env.AGENT_RUNTIME_IMAGE || 'ghcr.io/basedatum/djinnbot/agent-runtime:latest';
@@ -32,9 +34,15 @@ const READY_TIMEOUT_MS = 30000;
 const DEFAULT_MEMORY_LIMIT = 2 * 1024 * 1024 * 1024;  // 2 GB
 const DEFAULT_CPU_LIMIT = 2;                            // 2 vCPUs
 
+/** Callback invoked by ContainerManager when an image pull starts or completes. */
+export type ImagePullCallback = (event: 'pull_start' | 'pull_success' | 'pull_failed', image: string, error?: string) => void;
+
 export class ContainerManager {
   private docker: Docker;
   private containers = new Map<string, ContainerInfo>();
+
+  /** Optional callback notified when the manager auto-pulls a missing image. */
+  onImagePull?: ImagePullCallback;
 
   constructor(
     private redis: RedisType,
@@ -120,6 +128,34 @@ export class ContainerManager {
         console.error('[ContainerManager] Docker event stream error:', streamErr.message);
       });
     });
+  }
+
+  /**
+   * Pull a Docker image. Returns true on success, false on failure.
+   * Used internally when createContainer encounters a missing image.
+   */
+  private async pullImage(image: string): Promise<void> {
+    return new Promise<void>((resolve, reject) => {
+      this.docker.pull(image, (err: Error | null, stream: NodeJS.ReadableStream) => {
+        if (err) return reject(err);
+        // Follow the pull progress to completion
+        this.docker.modem.followProgress(stream, (progressErr: Error | null) => {
+          if (progressErr) return reject(progressErr);
+          resolve();
+        });
+      });
+    });
+  }
+
+  /**
+   * Returns true if the error is a Docker "No such image" 404.
+   */
+  private static isImageNotFoundError(err: any): boolean {
+    return (
+      err?.statusCode === 404 &&
+      typeof err?.json?.message === 'string' &&
+      err.json.message.includes('No such image')
+    );
   }
 
   async createContainer(config: ContainerConfig): Promise<ContainerInfo> {
@@ -208,7 +244,7 @@ export class ContainerManager {
       // e.g. "/data/workspaces/proj_xxx" → "workspaces/proj_xxx"
       const projectRelative = projectWorkspacePath ? projectWorkspacePath.replace('/data/', '') : null;
 
-      const container = await this.docker.createContainer({
+      const containerOpts: Docker.ContainerCreateOptions = {
         Image: image,
         name: `djinn-run-${runId}`,
         Env: [
@@ -378,12 +414,40 @@ export class ContainerManager {
           // Start the agent runtime
           `exec node /app/packages/agent-runtime/dist/entrypoint.js`
         ],
-      });
+      };
+
+      // Attempt to create the container; if the image is missing, pull it and retry.
+      let container: Docker.Container;
+      let imagePulled = false;
+      try {
+        container = await this.docker.createContainer(containerOpts);
+      } catch (createErr: any) {
+        if (!ContainerManager.isImageNotFoundError(createErr)) throw createErr;
+
+        // Image not found — attempt to pull it
+        console.log(`[ContainerManager] Image "${image}" not found locally, pulling...`);
+        this.onImagePull?.('pull_start', image);
+        try {
+          await this.pullImage(image);
+          console.log(`[ContainerManager] Successfully pulled image "${image}"`);
+          this.onImagePull?.('pull_success', image);
+          imagePulled = true;
+        } catch (pullErr: any) {
+          const pullMsg = pullErr?.message || String(pullErr);
+          console.error(`[ContainerManager] Failed to pull image "${image}":`, pullMsg);
+          this.onImagePull?.('pull_failed', image, pullMsg);
+          throw new Error(`Failed to pull agent runtime image "${image}": ${pullMsg}`);
+        }
+
+        // Retry container creation after successful pull
+        container = await this.docker.createContainer(containerOpts);
+      }
 
       const info: ContainerInfo = {
         containerId: container.id,
         runId,
         status: 'created',
+        imagePulled,
       };
       this.containers.set(runId, info);
 

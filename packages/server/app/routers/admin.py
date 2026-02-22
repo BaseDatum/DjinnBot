@@ -35,13 +35,14 @@ from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_async_session
-from app.auth.dependencies import get_current_admin, AuthUser
+from app.auth.dependencies import get_current_admin, get_service_or_user, AuthUser
 from app.auth.passwords import hash_password
 from app.models.auth import User
 from app.models.user_provider import AdminSharedProvider, UserSecretGrant
 from app.models.secret import Secret
 from app.models.skill import Skill
 from app.models.mcp import McpServer
+from app.models.admin_notification import AdminNotification
 from app.models.base import now_ms
 from app.logging_config import get_logger
 
@@ -554,3 +555,115 @@ async def revoke_instance_secret_from_user(
     logger.info(
         f"Admin {admin.id} revoked instance secret {secret_id} from user {user_id}"
     )
+
+
+# ── Admin notifications ──────────────────────────────────────────────────────
+
+
+class CreateNotificationRequest(BaseModel):
+    level: str = "info"  # info, warning, error
+    title: str
+    detail: Optional[str] = None
+
+
+class NotificationResponse(BaseModel):
+    id: str
+    level: str
+    title: str
+    detail: Optional[str]
+    read: bool
+    createdAt: int
+
+
+@router.post("/notifications", response_model=NotificationResponse)
+async def create_admin_notification(
+    request: CreateNotificationRequest,
+    _caller: AuthUser = Depends(get_service_or_user),
+    session: AsyncSession = Depends(get_async_session),
+):
+    """Create a system notification visible to admins.
+
+    Called by the engine (via ENGINE_INTERNAL_TOKEN) when infrastructure-level
+    issues occur — e.g. failed image pull, resource exhaustion.
+    """
+    notif = AdminNotification(
+        id=AdminNotification.generate_id(),
+        level=request.level,
+        title=request.title,
+        detail=request.detail,
+        read=False,
+        created_at=now_ms(),
+    )
+    session.add(notif)
+    await session.commit()
+    logger.info(f"Admin notification created: [{notif.level}] {notif.title}")
+    return NotificationResponse(
+        id=notif.id,
+        level=notif.level,
+        title=notif.title,
+        detail=notif.detail,
+        read=notif.read,
+        createdAt=notif.created_at,
+    )
+
+
+@router.get("/notifications", response_model=list[NotificationResponse])
+async def list_admin_notifications(
+    unread_only: bool = False,
+    limit: int = 50,
+    admin: AuthUser = Depends(get_current_admin),
+    session: AsyncSession = Depends(get_async_session),
+):
+    """List admin notifications, newest first."""
+    stmt = select(AdminNotification).order_by(AdminNotification.created_at.desc())
+    if unread_only:
+        stmt = stmt.where(AdminNotification.read == False)
+    stmt = stmt.limit(limit)
+    result = await session.execute(stmt)
+    notifications = result.scalars().all()
+    return [
+        NotificationResponse(
+            id=n.id,
+            level=n.level,
+            title=n.title,
+            detail=n.detail,
+            read=n.read,
+            createdAt=n.created_at,
+        )
+        for n in notifications
+    ]
+
+
+@router.patch("/notifications/{notification_id}/read")
+async def mark_notification_read(
+    notification_id: str,
+    admin: AuthUser = Depends(get_current_admin),
+    session: AsyncSession = Depends(get_async_session),
+):
+    """Mark a notification as read."""
+    result = await session.execute(
+        select(AdminNotification).where(AdminNotification.id == notification_id)
+    )
+    notif = result.scalar_one_or_none()
+    if not notif:
+        raise HTTPException(status_code=404, detail="Notification not found")
+    notif.read = True
+    await session.commit()
+    return {"ok": True}
+
+
+@router.post("/notifications/mark-all-read")
+async def mark_all_notifications_read(
+    admin: AuthUser = Depends(get_current_admin),
+    session: AsyncSession = Depends(get_async_session),
+):
+    """Mark all unread notifications as read."""
+    from sqlalchemy import update
+
+    await session.execute(
+        update(AdminNotification)
+        .where(AdminNotification.read == False)
+        .values(read=True)
+    )
+    await session.commit()
+    return {"ok": True}

@@ -50,6 +50,8 @@ export interface StreamingSSEEvent {
     durationMs?: number;
     content?: string;
     stream?: string;
+    /** Status/error message from session_status or session_error events. */
+    message?: string;
   };
 }
 
@@ -66,6 +68,8 @@ export interface UseChatStreamOptions {
   onResponseAborted?: () => void;
   /** Called when container_ready arrives. */
   onContainerReady?: () => void;
+  /** Called when session_error arrives (e.g. image pull failure). */
+  onSessionError?: (message: string) => void;
   /** When true, suppress the "Agent is ready" system message on container_ready.
    *  Useful for onboarding where a composing indicator is shown instead. */
   suppressReadyMessage?: boolean;
@@ -153,6 +157,7 @@ export function useChatStream({
   onSessionComplete,
   onResponseAborted,
   onContainerReady,
+  onSessionError,
   suppressReadyMessage = false,
 }: UseChatStreamOptions): UseChatStreamReturn {
   const [messages, setMessages] = useState<ChatMessageData[]>([]);
@@ -260,10 +265,12 @@ export function useChatStream({
   const onSessionCompleteRef = useRef(onSessionComplete);
   const onResponseAbortedRef = useRef(onResponseAborted);
   const onContainerReadyRef = useRef(onContainerReady);
+  const onSessionErrorRef = useRef(onSessionError);
   useEffect(() => { onTurnEndRef.current = onTurnEnd; }, [onTurnEnd]);
   useEffect(() => { onSessionCompleteRef.current = onSessionComplete; }, [onSessionComplete]);
   useEffect(() => { onResponseAbortedRef.current = onResponseAborted; }, [onResponseAborted]);
   useEffect(() => { onContainerReadyRef.current = onContainerReady; }, [onContainerReady]);
+  useEffect(() => { onSessionErrorRef.current = onSessionError; }, [onSessionError]);
 
   // ── Commit streaming content into messages (called on turn_end, abort, etc.) ──
   const commitStreaming = useCallback(() => {
@@ -662,6 +669,30 @@ export function useChatStream({
             }]);
           }
           break;
+
+        case 'session_status':
+          // Informational status from the engine (e.g. "Pulling the latest agent runtime...")
+          setMessages(prev => [...prev, {
+            id: nextMsgId('status'),
+            type: 'system' as const,
+            content: event.data?.message || 'Session status update',
+            timestamp: Date.now(),
+          }]);
+          break;
+
+        case 'session_error': {
+          // Error from the engine (e.g. image pull failure)
+          const errorMsg = (event.data?.message as string) || 'An error occurred.';
+          setMessages(prev => [...prev, {
+            id: nextMsgId('error'),
+            type: 'error' as const,
+            content: errorMsg,
+            timestamp: Date.now(),
+          }]);
+          setIsStreaming(false);
+          onSessionErrorRef.current?.(errorMsg);
+          break;
+        }
       }
     },
     [scheduleFlush, commitStreaming],

@@ -169,6 +169,9 @@ export function AgentChat({
       setSessionStatus('running');
       setTimeout(() => inputRef.current?.focus(), 50);
     }, []),
+    onSessionError: useCallback(() => {
+      setSessionStatus('idle');
+    }, []),
   });
 
   const {

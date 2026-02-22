@@ -1223,6 +1223,33 @@ export class ChatSessionManager {
         },
       };
       
+      // Wire up image pull callback — if the runtime image is missing the
+      // ContainerManager will auto-pull it. We forward status to the user via SSE
+      // and, on failure, create an admin notification.
+      this.containerManager.onImagePull = (event, image, error) => {
+        if (event === 'pull_start') {
+          this.publishToChannel(sessionId, {
+            type: 'session_status',
+            timestamp: Date.now(),
+            data: { message: 'Pulling the latest agent runtime...' },
+          });
+        } else if (event === 'pull_failed') {
+          // Notify the user something went wrong
+          this.publishToChannel(sessionId, {
+            type: 'session_error',
+            timestamp: Date.now(),
+            data: { message: 'Something went wrong starting the session. The admins have been notified.' },
+          });
+          // Create an admin notification (fire-and-forget)
+          this.createAdminNotification(
+            'error',
+            'Failed to pull agent runtime image',
+            `Image "${image}" could not be pulled: ${error}`,
+          );
+        }
+        // pull_success — no separate message needed, the session continues to start normally
+      };
+
       // Create and start container
       await this.containerManager.createContainer(containerConfig);
       
@@ -1277,8 +1304,21 @@ export class ChatSessionManager {
       console.error(`[ChatSessionManager] Failed to start session ${sessionId}:`, err);
       session.status = 'stopping';
       this.activeSessions.delete(sessionId);
-      
-      await this.updateSessionStatus(sessionId, 'failed', String(err));
+
+      const errMsg = String(err);
+      const isImagePullFailure = errMsg.includes('Failed to pull agent runtime image');
+
+      // For image pull failures the user-facing SSE message was already sent
+      // in the onImagePull callback. For other errors, send a generic error event.
+      if (!isImagePullFailure) {
+        this.publishToChannel(sessionId, {
+          type: 'session_error',
+          timestamp: Date.now(),
+          data: { message: 'Something went wrong starting the session. Please try again.' },
+        });
+      }
+
+      await this.updateSessionStatus(sessionId, 'failed', errMsg);
       throw err;
     }
   }
@@ -1659,6 +1699,7 @@ export class ChatSessionManager {
     'tool_start', 'tool_end',
     'container_ready', 'container_busy', 'container_idle', 'container_exiting',
     'response_aborted', 'session_complete',
+    'session_status', 'session_error',
   ]);
 
   /**
@@ -1957,6 +1998,20 @@ export class ChatSessionManager {
       console.warn(`[ChatSessionManager] Failed to ensure session DB row for ${sessionId}:`, err);
       // Non-fatal — the session will still work, just won't be recoverable after restart
     }
+  }
+
+  /**
+   * Create an admin notification via the API.
+   * Non-blocking — failures are logged but do not propagate.
+   */
+  private createAdminNotification(level: 'info' | 'warning' | 'error', title: string, detail?: string): void {
+    authFetch(`${this.apiBaseUrl}/v1/admin/notifications`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ level, title, detail }),
+    }).catch(err => {
+      console.warn(`[ChatSessionManager] Failed to create admin notification:`, err);
+    });
   }
 
   /**

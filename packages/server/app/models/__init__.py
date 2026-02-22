@@ -66,6 +66,7 @@ from app.models.user_provider import (
 )
 from app.models.waitlist import WaitlistEntry, EmailSettings
 from app.models.pulse_routine import PulseRoutine
+from app.models.admin_notification import AdminNotification
 
 __all__ = [
     # Pydantic models (backward compatibility)
@@ -133,4 +134,6 @@ __all__ = [
     "EmailSettings",
     # Pulse routines
     "PulseRoutine",
+    # Admin notifications
+    "AdminNotification",
 ]
