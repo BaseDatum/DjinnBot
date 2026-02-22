@@ -22,6 +22,7 @@ interface Run {
     source?: string;
     userId?: string | null;
     resolvedProviders?: string[];
+    providerSources?: Record<string, { source: string; masked_key: string }>;
   } | null;
   initiated_by_user_id?: string | null;
 }

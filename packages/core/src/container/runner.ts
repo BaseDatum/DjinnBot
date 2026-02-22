@@ -43,13 +43,20 @@ export class ContainerRunner implements AgentRunner {
   /** Map from provider_id → canonical env var name (imported from constants.ts) */
   private static readonly PROVIDER_ENV_MAP = PROVIDER_ENV_MAP;
 
+  /** Per-provider key source metadata returned by the last fetchProviderEnvVars call. */
+  private _lastKeySources: Record<string, { source: string; masked_key: string }> = {};
+
   /**
    * Fetch all configured provider API keys and extra env vars, returning them
    * as { ENV_VAR_NAME: value } ready to spread into a container env block.
    * DB-stored values override process.env.
+   *
+   * Side-effect: populates `this._lastKeySources` with per-provider key source
+   * metadata (source type + masked key) for recording in key_resolution.
    */
   private async fetchProviderEnvVars(userId?: string): Promise<Record<string, string>> {
     const result: Record<string, string> = {};
+    this._lastKeySources = {};
     // When fetching for a specific user, don't seed from process.env —
     // strict mode means only user-owned or admin-shared keys are used.
     if (!userId) {
@@ -65,7 +72,15 @@ export class ContainerRunner implements AgentRunner {
     try {
       const res = await authFetch(`${apiBaseUrl}/v1/settings/providers/keys/all${userParam}`);
       if (res.ok) {
-        const data = await res.json() as { keys: Record<string, string>; extra?: Record<string, string> };
+        const data = await res.json() as {
+          keys: Record<string, string>;
+          extra?: Record<string, string>;
+          key_sources?: Record<string, { source: string; masked_key: string }>;
+        };
+        // Capture per-provider key source metadata
+        if (data.key_sources) {
+          this._lastKeySources = data.key_sources;
+        }
         // Inject primary API keys
         for (const [providerId, apiKey] of Object.entries(data.keys)) {
           if (!apiKey) continue;
@@ -184,7 +199,8 @@ export class ContainerRunner implements AgentRunner {
       ]);
       providerEnvVars = fetchedProviderEnvVars;
 
-      // Record key resolution metadata on the run (non-blocking)
+      // Record key resolution metadata on the run (non-blocking).
+      // Includes per-provider source (personal / admin_shared / instance) and masked keys.
       const resolvedProviders = Object.keys(providerEnvVars)
         .filter(k => k.endsWith('_API_KEY') || k.endsWith('_TOKEN'))
         .map(k => {
@@ -203,6 +219,7 @@ export class ContainerRunner implements AgentRunner {
             userId: userId ?? null,
             source: userId ? 'executing_user' : 'system',
             resolvedProviders,
+            providerSources: this._lastKeySources,
           }),
         }),
       }).catch(() => {}); // Non-fatal — don't block container creation

@@ -915,6 +915,24 @@ async def remove_provider(
     return {"status": "ok", "providerId": provider_id}
 
 
+def _mask_key(api_key: str) -> str:
+    """Return a masked version of an API key showing only prefix and last 4 chars.
+
+    Examples:
+        sk-abc...7xQ2
+        key-...mN9p   (if key is very short)
+    """
+    if not api_key or len(api_key) < 8:
+        return "****"
+    # Show first chars up to the first dash or 4 chars, then last 4
+    prefix_end = api_key.find("-", 0, 8)
+    if prefix_end > 0:
+        prefix = api_key[: prefix_end + 1]
+    else:
+        prefix = api_key[:4]
+    return f"{prefix}...{api_key[-4:]}"
+
+
 @router.get("/providers/keys/all")
 async def get_all_provider_keys(
     user_id: Optional[str] = None,
@@ -956,7 +974,14 @@ async def get_all_provider_keys(
                             extra[k] = v
                 except (json.JSONDecodeError, TypeError):
                     pass
-        return {"keys": keys, "extra": extra}
+        return {
+            "keys": keys,
+            "extra": extra,
+            "key_sources": {
+                pid: {"source": "instance", "masked_key": _mask_key(api_key)}
+                for pid, api_key in keys.items()
+            },
+        }
 
     # ── Per-user mode: strict resolution ──────────────────────────────────
 
@@ -992,6 +1017,8 @@ async def get_all_provider_keys(
 
     keys: Dict[str, str] = {}
     extra: Dict[str, str] = {}
+    # Track per-provider key source: "personal", "admin_shared", or "instance"
+    key_sources: Dict[str, Dict[str, str]] = {}
 
     # Collect all provider IDs the user has access to
     all_provider_ids = set(user_providers.keys()) | shared_provider_ids
@@ -1001,6 +1028,10 @@ async def get_all_provider_keys(
         user_row = user_providers.get(provider_id)
         if user_row and user_row.api_key:
             keys[provider_id] = user_row.api_key
+            key_sources[provider_id] = {
+                "source": "personal",
+                "masked_key": _mask_key(user_row.api_key),
+            }
             if user_row.extra_config:
                 try:
                     ec = json.loads(user_row.extra_config)
@@ -1016,6 +1047,10 @@ async def get_all_provider_keys(
             instance_row = instance_providers.get(provider_id)
             if instance_row and instance_row.api_key:
                 keys[provider_id] = instance_row.api_key
+                key_sources[provider_id] = {
+                    "source": "admin_shared",
+                    "masked_key": _mask_key(instance_row.api_key),
+                }
                 if instance_row.extra_config:
                     try:
                         ec = json.loads(instance_row.extra_config)
@@ -1036,7 +1071,12 @@ async def get_all_provider_keys(
             except (json.JSONDecodeError, TypeError):
                 pass
 
-    return {"keys": keys, "extra": extra, "model_restrictions": model_restrictions}
+    return {
+        "keys": keys,
+        "extra": extra,
+        "model_restrictions": model_restrictions,
+        "key_sources": key_sources,
+    }
 
 
 # Providers with a live /v1/models endpoint (OpenAI-compatible).

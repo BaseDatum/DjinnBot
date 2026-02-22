@@ -732,7 +732,7 @@ function RunDetailPage() {
                     <div className="flex flex-col gap-1">
                       <dt className="text-sm text-muted-foreground">Keys Used</dt>
                       <dd>
-                        <KeySourceBadge keyResolution={run.key_resolution} showProviders />
+                        <KeySourceBadge keyResolution={run.key_resolution} showProviders showKeyDetails />
                       </dd>
                     </div>
                   )}

@@ -978,9 +978,13 @@ export class ChatSessionManager {
    * The settings endpoint already does this server-side, so this is just a
    * pass-through; we keep process.env as an additional local fallback.
    */
+  /** Per-provider key source metadata returned by the last fetchProviderEnvVars call. */
+  private _lastKeySources: Record<string, { source: string; masked_key: string }> = {};
+
   private async fetchProviderEnvVars(userId?: string): Promise<Record<string, string>> {
     // Start with whatever is already in process.env (primary API keys only)
     const result: Record<string, string> = {};
+    this._lastKeySources = {};
     // When fetching for a specific user, don't seed from process.env —
     // strict mode means only user-owned or admin-shared keys are used.
     if (!userId) {
@@ -995,7 +999,15 @@ export class ChatSessionManager {
     try {
       const res = await authFetch(`${this.apiBaseUrl}/v1/settings/providers/keys/all${userParam}`);
       if (res.ok) {
-        const data = await res.json() as { keys: Record<string, string>; extra?: Record<string, string> };
+        const data = await res.json() as {
+          keys: Record<string, string>;
+          extra?: Record<string, string>;
+          key_sources?: Record<string, { source: string; masked_key: string }>;
+        };
+        // Capture per-provider key source metadata
+        if (data.key_sources) {
+          this._lastKeySources = data.key_sources;
+        }
         // Primary API keys
         for (const [providerId, apiKey] of Object.entries(data.keys)) {
           if (!apiKey) continue;
@@ -1175,6 +1187,7 @@ export class ChatSessionManager {
 
       // Record key resolution metadata on the chat session (non-blocking).
       // This mirrors what ContainerRunner does for pipeline runs.
+      // Includes per-provider source (personal / admin_shared / instance) and masked keys.
       const resolvedProviders = Object.keys(providerEnvVars)
         .filter(k => k.endsWith('_API_KEY') || k.endsWith('_TOKEN'))
         .map(k => {
@@ -1191,6 +1204,7 @@ export class ChatSessionManager {
             userId: userId ?? null,
             source: userId ? 'executing_user' : 'system',
             resolvedProviders,
+            providerSources: this._lastKeySources,
           }),
         }),
       }).catch(() => {}); // Non-fatal — don't block container creation

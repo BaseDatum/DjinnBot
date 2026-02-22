@@ -35,7 +35,7 @@ import uuid
 import json
 import asyncio
 import os
-from typing import Optional, List, AsyncGenerator
+from typing import Optional, List, AsyncGenerator, Dict
 
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from fastapi.responses import StreamingResponse
@@ -887,3 +887,199 @@ async def mark_all_notifications_read(
     )
     await session.commit()
     return {"ok": True}
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+#  API USAGE — unified view of all sessions & runs with key resolution
+# ═════════════════════════════════════════════════════════════════════════════
+
+
+class UsageItem(BaseModel):
+    """A single usage entry (either a chat session or a pipeline run)."""
+
+    id: str
+    type: str  # "chat" or "run"
+    agentId: str
+    userId: Optional[str] = None
+    userEmail: Optional[str] = None
+    userDisplayName: Optional[str] = None
+    source: Optional[str] = (
+        None  # how session started: "dashboard", "slack", "api", etc.
+    )
+    model: Optional[str] = None
+    status: str
+    keyResolution: Optional[dict] = None
+    createdAt: int
+    completedAt: Optional[int] = None
+
+
+class UsageListResponse(BaseModel):
+    items: List[UsageItem]
+    total: int
+    hasMore: bool
+
+
+@router.get("/usage", response_model=UsageListResponse)
+async def list_api_usage(
+    admin: AuthUser = Depends(get_current_admin),
+    session: AsyncSession = Depends(get_async_session),
+    user_id: Optional[str] = Query(None, description="Filter by user ID"),
+    key_source: Optional[str] = Query(
+        None,
+        description="Filter by key source type: personal, admin_shared, instance, system",
+    ),
+    status_filter: Optional[str] = Query(
+        None, alias="status", description="Filter by status"
+    ),
+    item_type: Optional[str] = Query(
+        None, alias="type", description="Filter by type: chat or run"
+    ),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+) -> UsageListResponse:
+    """List all API usage across all users — chat sessions and pipeline runs.
+
+    Provides a unified admin view of:
+    - Who initiated each session/run
+    - Which API keys were used (personal / admin-shared / instance)
+    - Masked key hints per provider
+    - Model, status, and timing info
+    """
+    from app.models.chat import ChatSession
+    from app.models.run import Run
+
+    items: List[UsageItem] = []
+
+    # ── Fetch chat sessions ──────────────────────────────────────────────
+    if item_type is None or item_type == "chat":
+        chat_query = select(ChatSession).order_by(ChatSession.created_at.desc())
+        if status_filter:
+            chat_query = chat_query.where(ChatSession.status == status_filter)
+
+        chat_result = await session.execute(chat_query)
+        chat_sessions = chat_result.scalars().all()
+
+        for cs in chat_sessions:
+            kr = None
+            cs_user_id = None
+            if cs.key_resolution:
+                try:
+                    kr = json.loads(cs.key_resolution)
+                    cs_user_id = kr.get("userId")
+                except (json.JSONDecodeError, TypeError):
+                    pass
+
+            # Apply user filter
+            if user_id and cs_user_id != user_id:
+                continue
+
+            # Apply key source filter
+            if key_source and kr:
+                provider_sources = kr.get("providerSources", {})
+                if provider_sources and not any(
+                    ps.get("source") == key_source for ps in provider_sources.values()
+                ):
+                    continue
+                elif not provider_sources:
+                    # Legacy format: check top-level source
+                    top_source = kr.get("source", "")
+                    if key_source == "instance" and top_source != "system":
+                        continue
+                    elif key_source == "personal" and top_source != "executing_user":
+                        continue
+                    elif key_source not in ("instance", "personal"):
+                        continue
+
+            items.append(
+                UsageItem(
+                    id=cs.id,
+                    type="chat",
+                    agentId=cs.agent_id,
+                    userId=cs_user_id,
+                    source="dashboard",
+                    model=cs.model,
+                    status=cs.status,
+                    keyResolution=kr,
+                    createdAt=cs.created_at,
+                    completedAt=cs.completed_at,
+                )
+            )
+
+    # ── Fetch pipeline runs ──────────────────────────────────────────────
+    if item_type is None or item_type == "run":
+        run_query = select(Run).order_by(Run.created_at.desc())
+        if status_filter:
+            run_query = run_query.where(Run.status == status_filter)
+        if user_id:
+            run_query = run_query.where(Run.initiated_by_user_id == user_id)
+
+        run_result = await session.execute(run_query)
+        runs = run_result.scalars().all()
+
+        for r in runs:
+            kr = None
+            if r.key_resolution:
+                try:
+                    kr = json.loads(r.key_resolution)
+                except (json.JSONDecodeError, TypeError):
+                    pass
+
+            run_user_id = getattr(r, "initiated_by_user_id", None) or (
+                kr.get("userId") if kr else None
+            )
+
+            # Apply key source filter
+            if key_source and kr:
+                provider_sources = kr.get("providerSources", {})
+                if provider_sources and not any(
+                    ps.get("source") == key_source for ps in provider_sources.values()
+                ):
+                    continue
+                elif not provider_sources:
+                    top_source = kr.get("source", "")
+                    if key_source == "instance" and top_source != "system":
+                        continue
+                    elif key_source == "personal" and top_source != "executing_user":
+                        continue
+                    elif key_source not in ("instance", "personal"):
+                        continue
+
+            items.append(
+                UsageItem(
+                    id=r.id,
+                    type="run",
+                    agentId=r.pipeline_id,
+                    userId=run_user_id,
+                    source="pipeline",
+                    model=getattr(r, "model_override", None),
+                    status=r.status,
+                    keyResolution=kr,
+                    createdAt=r.created_at,
+                    completedAt=r.completed_at,
+                )
+            )
+
+    # ── Sort combined results by created_at desc ─────────────────────────
+    items.sort(key=lambda x: x.createdAt, reverse=True)
+    total = len(items)
+
+    # ── Resolve user emails/names for the page of results ────────────────
+    page_items = items[offset : offset + limit]
+
+    user_ids = {i.userId for i in page_items if i.userId}
+    user_map: Dict[str, User] = {}
+    if user_ids:
+        user_result = await session.execute(select(User).where(User.id.in_(user_ids)))
+        user_map = {u.id: u for u in user_result.scalars().all()}
+
+    for item in page_items:
+        if item.userId and item.userId in user_map:
+            u = user_map[item.userId]
+            item.userEmail = u.email
+            item.userDisplayName = u.display_name
+
+    return UsageListResponse(
+        items=page_items,
+        total=total,
+        hasMore=(offset + len(page_items)) < total,
+    )

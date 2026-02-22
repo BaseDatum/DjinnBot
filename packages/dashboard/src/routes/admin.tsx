@@ -36,6 +36,7 @@ import {
   AlertTriangle,
   Info,
   AlertCircle,
+  Activity,
 } from 'lucide-react';
 import {
   Dialog,
@@ -57,15 +58,17 @@ import { fetchModelProviders, type ModelProvider } from '@/lib/api';
 import { ProviderModelSelector } from '@/components/ui/ProviderModelSelector';
 import { useAutoSave } from '@/hooks/useAutoSave';
 import { ContainerLogs } from '@/components/admin/ContainerLogs';
+import { ApiUsagePanel } from '@/components/admin/ApiUsagePanel';
 
 export const Route = createFileRoute('/admin')({
   component: AdminPage,
 });
 
-type AdminTab = 'users' | 'providers' | 'sharing' | 'memory' | 'models' | 'approvals' | 'runtime' | 'secrets' | 'waitlist' | 'email' | 'logs' | 'notifications';
+type AdminTab = 'users' | 'providers' | 'sharing' | 'memory' | 'models' | 'approvals' | 'runtime' | 'secrets' | 'waitlist' | 'email' | 'logs' | 'notifications' | 'usage';
 
 const NAV_ITEMS: NestedSidebarItem[] = [
   { key: 'notifications', label: 'Notifications', icon: Bell },
+  { key: 'usage', label: 'API Usage', icon: Activity },
   { key: 'users', label: 'Users', icon: Users },
   { key: 'waitlist', label: 'Waitlist', icon: ClipboardList },
   { key: 'email', label: 'Email Settings', icon: Mail },
@@ -579,6 +582,9 @@ function AdminPage() {
             )}
           </div>
         )}
+
+        {/* ── API Usage ── */}
+        {activeTab === 'usage' && <ApiUsagePanel />}
 
         {/* ── Users ── */}
         {activeTab === 'users' && (
