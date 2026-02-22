@@ -17,6 +17,8 @@ export interface StandaloneSessionOptions {
   sourceId?: string;
   /** Kanban column names this agent is allowed to work from (passed to pulse tools). */
   pulseColumns?: string[];
+  /** Executor model for spawn_executor — passed to container as EXECUTOR_MODEL env var. */
+  executorModel?: string;
   /** DjinnBot user whose API keys are used for this session (per-user key resolution). */
   userId?: string;
 }
@@ -88,6 +90,7 @@ export class StandaloneSessionRunner {
         maxTurns: opts.maxTurns || 999,
         timeout: opts.timeout || 120000,
         pulseColumns: opts.pulseColumns,
+        executorModel: opts.executorModel,
         userId: opts.userId,
       });
 

@@ -392,7 +392,7 @@ function AgentDetailPage() {
                 <div>
                   <label className="block text-sm font-medium mb-1">Working Model</label>
                   <p className="text-xs text-muted-foreground mb-2">
-                    The LLM used when this agent executes pipeline steps — writing code, analyzing tasks, generating output.
+                    The default LLM for this agent — used for pipeline steps, chat, and as fallback for all other model roles.
                   </p>
                   <ProviderModelSelector
                     value={config.model || ''}
@@ -404,6 +404,49 @@ function AgentDetailPage() {
                   />
                   {config.model && (
                     <p className="text-xs text-muted-foreground font-mono mt-1">{config.model}</p>
+                  )}
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-1">Planning Model</label>
+                  <p className="text-xs text-muted-foreground mb-2">
+                    The LLM used during pulse routines for strategic work — claiming tasks, reading context, writing
+                    execution prompts, and reviewing results. This should be your smartest model.
+                  </p>
+                  <ProviderModelSelector
+                    value={config.planningModel || ''}
+                    onChange={(v) => handleConfigChange({ ...config, planningModel: v })}
+                    className="w-full sm:w-full"
+                    placeholder="Defaults to working model if not set..."
+                  />
+                  {config.planningModel && (
+                    <p className="text-xs text-muted-foreground font-mono mt-1">{config.planningModel}</p>
+                  )}
+                  {!config.planningModel && config.model && (
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Using working model: <span className="font-mono">{config.model}</span>
+                    </p>
+                  )}
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-1">Executor Model</label>
+                  <p className="text-xs text-muted-foreground mb-2">
+                    The LLM used when this agent spawns a fresh executor via <code className="text-xs bg-muted px-1 rounded">spawn_executor()</code>.
+                    The planning model writes a thorough prompt, then the executor model implements it in a clean context window.
+                    Use a fast/cheap model here to optimize cost.
+                  </p>
+                  <ProviderModelSelector
+                    value={config.executorModel || ''}
+                    onChange={(v) => handleConfigChange({ ...config, executorModel: v })}
+                    className="w-full sm:w-full"
+                    placeholder="Defaults to working model if not set..."
+                  />
+                  {config.executorModel && (
+                    <p className="text-xs text-muted-foreground font-mono mt-1">{config.executorModel}</p>
+                  )}
+                  {!config.executorModel && config.model && (
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Using working model: <span className="font-mono">{config.model}</span>
+                    </p>
                   )}
                 </div>
                 <div>

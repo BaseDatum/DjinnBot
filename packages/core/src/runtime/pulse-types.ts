@@ -136,6 +136,10 @@ export interface PulseRoutine {
   maxConcurrent: number;
   pulseColumns?: string[];
 
+  /** Per-routine model overrides (null = inherit from agent config) */
+  planningModel?: string;
+  executorModel?: string;
+
   /** Display */
   sortOrder: number;
   color?: string;

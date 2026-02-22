@@ -482,6 +482,8 @@ async def get_agent_config(agent_id: str):
     return {
         "model": raw.get("model", ""),
         "thinkingModel": raw.get("thinking_model", raw.get("thinkingModel", "")),
+        "planningModel": raw.get("planning_model", raw.get("planningModel", "")),
+        "executorModel": raw.get("executor_model", raw.get("executorModel", "")),
         "thinkingLevel": raw.get("thinking_level", raw.get("thinkingLevel", "off")),
         "thinkingModelThinkingLevel": raw.get(
             "thinking_model_thinking_level",
@@ -520,6 +522,8 @@ async def update_agent_config(agent_id: str, req: dict):
     key_mapping = {
         "model": "model",
         "thinkingModel": "thinking_model",
+        "planningModel": "planning_model",
+        "executorModel": "executor_model",
         "thinkingLevel": "thinking_level",
         "thinkingModelThinkingLevel": "thinking_model_thinking_level",
         "threadMode": "thread_mode",

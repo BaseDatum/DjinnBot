@@ -26,6 +26,7 @@ import {
   KeyRound,
   Wrench,
   AlertTriangle,
+  Send, Hash, SearchCode,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { toast } from 'sonner';
@@ -53,6 +54,7 @@ const TOOL_CATEGORIES: { key: string; label: string; color: string }[] = [
   { key: 'onboarding', label: 'Onboarding',      color: 'text-teal-500 border-teal-500/30'     },
   { key: 'graph',      label: 'Memory Graph',    color: 'text-violet-500 border-violet-500/30' },
   { key: 'secrets',    label: 'Secrets',         color: 'text-red-500 border-red-500/30'       },
+  { key: 'slack',      label: 'Slack',           color: 'text-emerald-500 border-emerald-500/30' },
 ];
 
 const BUILT_IN_TOOLS: BuiltInTool[] = [
@@ -266,6 +268,26 @@ const BUILT_IN_TOOLS: BuiltInTool[] = [
     description: 'Retrieve secrets granted to the agent by the user (API keys, tokens, credentials).',
     category: 'secrets',
     icon: KeyRound,
+  },
+
+  // ── Slack tools ───────────────────────────────────────────────────────────
+  {
+    name: 'slack_send_message',
+    description: 'Post a message to a Slack channel by ID or name. Supports mrkdwn formatting and thread replies. Requires the agent\'s Slack bot token to be configured.',
+    category: 'slack',
+    icon: Send,
+  },
+  {
+    name: 'slack_list_channels',
+    description: 'List all Slack channels the agent\'s bot is a member of, including their IDs, names, and topics.',
+    category: 'slack',
+    icon: Hash,
+  },
+  {
+    name: 'slack_lookup_channel',
+    description: 'Resolve a Slack channel name to its channel ID. Use before slack_send_message when only the name is known.',
+    category: 'slack',
+    icon: SearchCode,
   },
 ];
 

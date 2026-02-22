@@ -51,6 +51,12 @@ class PulseRoutine(Base, PrefixedIdMixin, TimestampMixin):
     max_concurrent: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     pulse_columns: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
 
+    # --- model overrides (per-routine) ---
+    # When set, these override the agent-level defaults for this routine.
+    # Resolution: routine → agent config → global fallback
+    planning_model: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
+    executor_model: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
+
     # --- ordering ---
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 

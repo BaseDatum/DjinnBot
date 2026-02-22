@@ -53,6 +53,8 @@ from app.routers import updates as updates_router
 from app.routers import pulse_routines
 from app.routers import llm_calls
 from app.routers import user_usage
+from app.routers import slack as slack_router
+from app.routers import spawn_executor as spawn_executor_router
 
 
 async def _handle_task_run_event(run_id: str, event_type: str):
@@ -640,6 +642,10 @@ app.include_router(llm_calls.router, prefix="/v1", tags=["llm-calls"])
 app.include_router(user_usage.router, prefix="/v1", tags=["user-usage"])
 app.include_router(waitlist_router.router, prefix="/v1/waitlist", tags=["waitlist"])
 app.include_router(updates_router.router, prefix="/v1/system/updates", tags=["updates"])
+app.include_router(slack_router.router, prefix="/v1/slack", tags=["slack"])
+app.include_router(
+    spawn_executor_router.router, prefix="/v1/internal", tags=["internal"]
+)
 
 
 @app.get("/v1/status")

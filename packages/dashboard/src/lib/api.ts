@@ -1370,6 +1370,8 @@ export interface PulseRoutine {
   timeoutMs: number | null;
   maxConcurrent: number;
   pulseColumns: string[] | null;
+  planningModel: string | null;
+  executorModel: string | null;
   sortOrder: number;
   lastRunAt: number | null;
   totalRuns: number;
@@ -1390,6 +1392,8 @@ export interface CreatePulseRoutineRequest {
   maxConcurrent?: number;
   pulseColumns?: string[];
   color?: string;
+  planningModel?: string;
+  executorModel?: string;
 }
 
 export interface UpdatePulseRoutineRequest {
@@ -1405,6 +1409,8 @@ export interface UpdatePulseRoutineRequest {
   maxConcurrent?: number;
   pulseColumns?: string[];
   color?: string;
+  planningModel?: string;
+  executorModel?: string;
 }
 
 export async function fetchPulseRoutines(agentId: string): Promise<{ routines: PulseRoutine[] }> {

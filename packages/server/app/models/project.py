@@ -127,6 +127,15 @@ class Task(Base, TimestampWithCompletedMixin):
     task_metadata: Mapped[str] = mapped_column(
         "metadata", Text, nullable=False, default="{}"
     )  # JSON object
+    # Two-stage review tracking (spec compliance + code quality)
+    spec_review_status: Mapped[Optional[str]] = mapped_column(
+        String(32), nullable=True
+    )  # pending | passed | failed | skipped
+    quality_review_status: Mapped[Optional[str]] = mapped_column(
+        String(32), nullable=True
+    )  # pending | passed | failed | skipped
+    spec_review_notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    quality_review_notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     # Relationships
     project: Mapped["Project"] = relationship(back_populates="tasks")

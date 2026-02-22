@@ -236,6 +236,8 @@ export class ContainerRunner implements AgentRunner {
         image: runtimeImage,
         env: {
           AGENT_MODEL: model,
+          // Executor model for spawn_executor tool — defaults to AGENT_MODEL if not set.
+          ...(options.executorModel ? { EXECUTOR_MODEL: options.executorModel } : {}),
           // All configured provider API keys injected by their canonical env var names
           ...providerEnvVars,
           // Pass pulse columns so the agent-runtime can scope get_ready_tasks correctly.

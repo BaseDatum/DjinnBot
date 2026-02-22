@@ -1,9 +1,13 @@
 # Planning Pipeline — Decomposes a project into tasks with dependencies
 # NOTE: Steps with outputSchema use direct API calls with constrained JSON output.
 # Tools are not available in structured output mode.
+#
+# Context engineering: Every step receives {{project_vision}} — the synthesized
+# vision document from onboarding. This ensures all agents share the same
+# understanding of goals, architecture, and constraints.
 id: planning
 name: Project Planning Pipeline
-version: 1.0.0
+version: 1.1.0
 description: AI-driven project decomposition into tasks with dependency chains
 
 defaults:
@@ -41,7 +45,7 @@ steps:
                   description: "Clear, actionable task title (verb + noun)"
                 description:
                   type: string
-                  description: "Detailed description of what needs to be done"
+                  description: "Detailed description including acceptance criteria and what 'done' looks like"
                 priority:
                   type: string
                   enum: ["P0", "P1", "P2", "P3"]
@@ -69,19 +73,29 @@ steps:
       Project Name: {{project_name}}
       Project Description: {{task_description}}
 
+      {% if project_vision %}
+      ## Project Vision
+      {{project_vision}}
+      {% endif %}
+
       {% if additional_context %}
       Additional Context:
       {{additional_context}}
       {% endif %}
 
       Create a comprehensive task breakdown with 5-20 tasks.
+      
       Rules:
       - Break down into 5-20 tasks (not too granular, not too high-level)
+      - Each task description MUST include clear acceptance criteria (what does "done" look like?)
       - Dependencies reference other task titles exactly
       - No circular dependencies
       - P0 tasks should have no or minimal dependencies
       - Include testing and documentation tasks
       - Be realistic with hour estimates
+      - Task descriptions should be detailed enough that an AI agent with zero context
+        (but access to the codebase) can implement them. Vague descriptions like
+        "implement auth" will produce vague results.
     outputs:
       - task_breakdown_json
     onComplete: VALIDATE
@@ -125,6 +139,11 @@ steps:
       You are the Solutions Architect. Review and validate this task breakdown.
 
       Project: {{project_name}}
+
+      {% if project_vision %}
+      ## Project Vision
+      {{project_vision}}
+      {% endif %}
       
       Task Breakdown:
       {{task_breakdown_json}}
@@ -135,6 +154,7 @@ steps:
       3. Unrealistic estimates
       4. Missing technical tasks
       5. Proper priority assignment
+      6. Task descriptions include acceptance criteria (add them if missing)
 
       You may add, modify, or remove tasks. Fix any dependency issues.
       Ensure:
@@ -142,11 +162,14 @@ steps:
       - All dependency references match exact task titles
       - Estimates are realistic
       - Critical path makes sense
+      - Every description includes acceptance criteria
     outputs:
       - validated_tasks_json
     onComplete: DECOMPOSE_SUBTASKS
 
   # Step 3: Product Owner decomposes tasks into bite-sized subtasks
+  # NOTE: This step receives BOTH the parent tasks AND the project vision so
+  # subtask descriptions have the full project context (not just parent titles).
   - id: DECOMPOSE_SUBTASKS
     agent: eric
     outputSchema:
@@ -168,7 +191,7 @@ steps:
                   description: "Clear, specific subtask title"
                 description:
                   type: string
-                  description: "Detailed implementation instructions small enough for a single focused session"
+                  description: "Detailed implementation instructions with acceptance criteria. Must be specific enough for an AI agent with zero context to execute in 1-4 hours."
                 priority:
                   type: string
                   enum: ["P0", "P1", "P2", "P3"]
@@ -191,7 +214,14 @@ steps:
     input: |
       You are the Product Owner. Break down each validated task into 2-5 bite-sized subtasks.
       
-      Each subtask should be small enough for a junior developer (or AI agent) to complete in 1-4 hours.
+      Each subtask will be executed by an AI agent in a FRESH context window with NO prior
+      knowledge of the project. The subtask description is the ONLY context the agent gets
+      (besides the codebase). Write descriptions accordingly — be specific and explicit.
+
+      {% if project_vision %}
+      ## Project Vision (reference for context — do NOT repeat in every subtask)
+      {{project_vision}}
+      {% endif %}
       
       Validated Task Breakdown:
       {{validated_tasks_json}}
@@ -202,7 +232,13 @@ steps:
       - parentTaskTitle must EXACTLY match a task title from the input
       - Dependencies can reference subtask titles within the same parent OR across parents
       - Include setup, implementation, and testing subtasks where appropriate
-      - Be very specific in descriptions — these will be executed by AI agents
+      - Each subtask description MUST include:
+        1. What to build/change (specific files and functions when possible)
+        2. Acceptance criteria (what does "done" look like?)
+        3. Key constraints from the project vision that apply to this subtask
+      - Do NOT write vague descriptions like "implement the backend" — write
+        "Create POST /api/auth/login endpoint that validates credentials against
+        the users table and returns a JWT in an httpOnly cookie"
     outputs:
       - subtask_breakdown_json
     onComplete: VALIDATE_SUBTASKS
@@ -246,6 +282,11 @@ steps:
         additionalProperties: false
     input: |
       You are the Solutions Architect. Review and validate the subtask breakdown.
+
+      {% if project_vision %}
+      ## Project Vision
+      {{project_vision}}
+      {% endif %}
       
       Parent Tasks:
       {{validated_tasks_json}}
@@ -260,7 +301,11 @@ steps:
       4. No circular dependencies
       5. Dependencies reference exact subtask titles
       6. Complete coverage — no gaps in implementation
+      7. Descriptions are specific enough for an AI agent to execute without context
+      8. Acceptance criteria are present in every subtask description
       
       You may add, modify, or remove subtasks. Fix any issues.
+      If descriptions are too vague, rewrite them with specific file paths, 
+      API endpoints, data models, or implementation details from the project vision.
     outputs:
       - final_subtasks_json

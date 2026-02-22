@@ -12,6 +12,8 @@ import { createGitHubTools } from './djinnbot-tools/github.js';
 import { createPulseProjectsTools } from './djinnbot-tools/pulse-projects.js';
 import { createPulseTasksTools } from './djinnbot-tools/pulse-tasks.js';
 import { createSecretsTools } from './djinnbot-tools/secrets.js';
+import { createSlackTools } from './djinnbot-tools/slack.js';
+import { createSpawnExecutorTools } from './djinnbot-tools/spawn-executor.js';
 
 export interface DjinnBotToolsConfig {
   publisher: RedisPublisher;
@@ -77,10 +79,15 @@ export function createDjinnBotTools(config: DjinnBotToolsConfig): AgentTool[] {
 
     ...createSecretsTools({ agentId, apiBaseUrl }),
 
+    ...createSlackTools({ agentId, apiBaseUrl }),
+
     // Pulse/pipeline tools — always included (chat, pipeline, and pulse sessions)
     ...createPulseProjectsTools({ agentId, apiBaseUrl, pulseColumns }),
 
     ...createPulseTasksTools({ agentId, apiBaseUrl }),
+
+    // Spawn executor — available in pulse sessions for plan-then-execute workflow
+    ...createSpawnExecutorTools({ publisher, requestIdRef, agentId, apiBaseUrl }),
 
     // Onboarding tools — only for onboarding sessions (ONBOARDING_SESSION_ID is set)
     ...(isOnboardingSession ? createOnboardingTools({ agentId, apiBaseUrl }) : []),

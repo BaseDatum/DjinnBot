@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
+import { ProviderModelSelector } from '@/components/ui/ProviderModelSelector';
 import {
   Moon,
   Plus,
@@ -33,6 +34,8 @@ export function PulseRoutineEditor({ routine, agentId, onUpdated }: PulseRoutine
   const [blackouts, setBlackouts] = useState<PulseBlackout[]>(routine.blackouts);
   const [pulseColumns, setPulseColumns] = useState<string[] | null>(routine.pulseColumns);
   const [useCustomColumns, setUseCustomColumns] = useState(!!routine.pulseColumns);
+  const [planningModel, setPlanningModel] = useState(routine.planningModel || '');
+  const [executorModel, setExecutorModel] = useState(routine.executorModel || '');
 
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -86,8 +89,10 @@ export function PulseRoutineEditor({ routine, agentId, onUpdated }: PulseRoutine
       timeoutMs: timeoutMs ?? undefined,
       maxConcurrent,
       pulseColumns: useCustomColumns ? (pulseColumns ?? []) : undefined,
+      planningModel: planningModel || undefined,
+      executorModel: executorModel || undefined,
     });
-  }, [name, description, instructions, intervalMinutes, offsetMinutes, blackouts, timeoutMs, maxConcurrent, pulseColumns, useCustomColumns, save]);
+  }, [name, description, instructions, intervalMinutes, offsetMinutes, blackouts, timeoutMs, maxConcurrent, pulseColumns, useCustomColumns, planningModel, executorModel, save]);
 
   const markDirty = () => { dirty.current = true; };
 
@@ -275,6 +280,34 @@ export function PulseRoutineEditor({ routine, agentId, onUpdated }: PulseRoutine
         ) : (
           <p className="text-[10px] text-muted-foreground">No blackouts configured</p>
         )}
+      </div>
+
+      {/* Model overrides */}
+      <div>
+        <Label className="text-sm mb-2 block">Model Overrides</Label>
+        <p className="text-[10px] text-muted-foreground mb-3">
+          Override the agent-level planning and executor models for this routine. Leave empty to use agent defaults.
+        </p>
+        <div className="space-y-3">
+          <div>
+            <Label className="text-xs text-muted-foreground">Planning Model</Label>
+            <ProviderModelSelector
+              value={planningModel}
+              onChange={(v) => { setPlanningModel(v); markDirty(); }}
+              className="w-full mt-1"
+              placeholder="Inherit from agent config..."
+            />
+          </div>
+          <div>
+            <Label className="text-xs text-muted-foreground">Executor Model</Label>
+            <ProviderModelSelector
+              value={executorModel}
+              onChange={(v) => { setExecutorModel(v); markDirty(); }}
+              className="w-full mt-1"
+              placeholder="Inherit from agent config..."
+            />
+          </div>
+        </div>
       </div>
 
       {/* Pulse Columns override */}

@@ -213,6 +213,16 @@ export class AgentRegistry {
           parsed.thinking_model ||
           parsed.thinkingModel ||
           DEFAULT_AGENT_CONFIG.thinkingModel,
+        planningModel:
+          parsed.planning_model ||
+          parsed.planningModel ||
+          parsed.model ||  // Fall back to the agent's primary model
+          DEFAULT_AGENT_CONFIG.planningModel,
+        executorModel:
+          parsed.executor_model ||
+          parsed.executorModel ||
+          parsed.model ||  // Fall back to the agent's primary model
+          DEFAULT_AGENT_CONFIG.executorModel,
         maxConcurrentSteps:
           parsed.max_concurrent_steps ??
           DEFAULT_AGENT_CONFIG.maxConcurrentSteps,

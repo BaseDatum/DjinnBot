@@ -72,6 +72,10 @@ export interface PulseContext {
   routinePulseColumns?: string[];
   /** Override timeout for this routine */
   routineTimeoutMs?: number;
+  /** Override planning model for this routine (used for the pulse session itself) */
+  routinePlanningModel?: string;
+  /** Override executor model for this routine (passed to spawn_executor) */
+  routineExecutorModel?: string;
 }
 
 export interface PulseSessionResult {
@@ -507,6 +511,8 @@ export class AgentPulse {
               context.routineSourceFile = routine.sourceFile;
               context.routinePulseColumns = routine.pulseColumns;
               context.routineTimeoutMs = routine.timeoutMs;
+              context.routinePlanningModel = routine.planningModel;
+              context.routineExecutorModel = routine.executorModel;
             }
           } catch {
             // Non-fatal: the session runner can still fall back to defaults

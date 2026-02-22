@@ -335,6 +335,114 @@ async def _stop_agent_container(chat_session_id: str, agent_id: str) -> None:
 # ============================================================================
 
 
+def _synthesize_project_vision(project_name: str, accumulated_ctx: dict) -> str:
+    """Synthesize a structured Project Vision document from onboarding context.
+
+    This becomes the single source of truth that every agent reads before
+    starting work — via get_project_vision() in pulse routines and via
+    {{project_vision}} template variable in pipeline steps.
+
+    The vision document is designed to be:
+    - Dense enough to give agents full context in ~500 words
+    - Structured so agents can quickly find what they need
+    - Editable by users in the dashboard at any time
+    """
+    sections = []
+    sections.append(f"# Project Vision: {project_name}")
+    sections.append("")
+
+    # Goal / Purpose
+    goal = accumulated_ctx.get("goal", "")
+    if goal:
+        sections.append("## Goal")
+        sections.append(goal)
+        sections.append("")
+
+    # Target Customer
+    target = accumulated_ctx.get("target_customer", "")
+    if target:
+        sections.append("## Target Customer")
+        sections.append(target)
+        sections.append("")
+
+    # V1 Scope
+    scope = accumulated_ctx.get("v1_scope", "")
+    if scope:
+        sections.append("## V1 Scope")
+        sections.append(scope)
+        sections.append("")
+
+    # Technical Architecture / Preferences
+    arch = accumulated_ctx.get("architecture_summary", "")
+    tech = accumulated_ctx.get("tech_preferences", "")
+    planning_ctx = accumulated_ctx.get("planning_context", "")
+    if arch or tech or planning_ctx:
+        sections.append("## Technical Architecture")
+        if arch:
+            sections.append(arch)
+        if tech:
+            sections.append(f"\n**Tech Preferences:** {tech}")
+        if planning_ctx and not arch:
+            # planning_context is Finn's detailed output — use it if no arch summary
+            sections.append(planning_ctx)
+        sections.append("")
+
+    # Revenue / Business Model
+    revenue = accumulated_ctx.get("revenue_goal", "")
+    monetization = accumulated_ctx.get("monetization", "")
+    if revenue or monetization:
+        sections.append("## Business Model")
+        if revenue:
+            sections.append(f"**Revenue Goal:** {revenue}")
+        if monetization:
+            sections.append(f"**Monetization:** {monetization}")
+        sections.append("")
+
+    # Timeline
+    timeline = accumulated_ctx.get("timeline", "")
+    if timeline:
+        sections.append("## Timeline")
+        sections.append(timeline)
+        sections.append("")
+
+    # Repository
+    repo = accumulated_ctx.get("repo", "")
+    open_source = accumulated_ctx.get("open_source", "")
+    if repo or open_source:
+        sections.append("## Repository")
+        if repo:
+            sections.append(f"**Repository:** {repo}")
+        if open_source:
+            sections.append(f"**Open Source:** {open_source}")
+        sections.append("")
+
+    # Summary (catch-all from onboarding)
+    summary = accumulated_ctx.get("summary", "")
+    if summary and not goal:
+        # Only include summary if we don't have a proper goal
+        sections.append("## Summary")
+        sections.append(summary)
+        sections.append("")
+
+    # If somehow we got very little context, at least note it
+    if len(sections) <= 2:
+        sections.append("## Summary")
+        sections.append(
+            f"Project '{project_name}' was created via onboarding. "
+            "Additional details will be added as the project evolves."
+        )
+        sections.append("")
+
+    sections.append("---")
+    sections.append(
+        "*This document is the single source of truth for the project. "
+        "All agents read it before starting work. Edit it in the dashboard "
+        "to update the project's direction.*"
+    )
+
+    return "\n".join(sections)
+
+
 async def _create_project_with_columns(
     db: AsyncSession,
     project_name: str,
@@ -345,6 +453,10 @@ async def _create_project_with_columns(
 ) -> str:
     """Create a Project row and its default kanban columns. Returns project_id."""
     project_id = gen_id("proj_")
+
+    # Synthesize the project vision from accumulated onboarding context
+    vision = _synthesize_project_vision(project_name, accumulated_ctx)
+
     project = Project(
         id=project_id,
         name=project_name,
@@ -352,6 +464,7 @@ async def _create_project_with_columns(
         status="active",
         repository=repository if isinstance(repository, str) else None,
         onboarding_context=json.dumps(accumulated_ctx),
+        vision=vision,
         created_at=now,
         updated_at=now,
     )
@@ -387,6 +500,9 @@ async def _trigger_planning_pipeline(
         planning_run_id = str(uuid.uuid4())
         finn_planning_context: Optional[str] = accumulated_ctx.get("planning_context")  # type: ignore
 
+        # Synthesize the vision document — used as the primary context for planning
+        vision = _synthesize_project_vision(project_name, accumulated_ctx)
+
         if finn_planning_context:
             task_desc = f"Plan project: {project_name}\n\n{finn_planning_context}"
             additional_context_str = finn_planning_context
@@ -405,7 +521,9 @@ async def _trigger_planning_pipeline(
             if description:
                 ctx_parts.append(f"\n{description}")
             task_desc = "\n".join(ctx_parts)
-            additional_context_str = json.dumps(accumulated_ctx)
+            additional_context_str = finn_planning_context or json.dumps(
+                accumulated_ctx
+            )
 
         human_context = json.dumps(
             {
@@ -415,6 +533,7 @@ async def _trigger_planning_pipeline(
                 if isinstance(description, str)
                 else "",
                 "additional_context": additional_context_str,
+                "project_vision": vision,
                 "planning_run": True,
                 "onboarding_session_id": session_id,
             }

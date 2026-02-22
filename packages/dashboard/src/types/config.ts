@@ -37,6 +37,19 @@ export type ThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhi
 export interface AgentConfig {
   model: string;
   thinkingModel: string;
+  /**
+   * Model used for pulse routine planning (claim task, write execution prompt,
+   * review results). This is the "smart" model that does strategic thinking.
+   * Defaults to the working model if not set.
+   */
+  planningModel?: string;
+  /**
+   * Model used for spawned executor instances (plan-then-execute workflow).
+   * When an agent uses spawn_executor(), the executor container uses this model.
+   * Defaults to the working model if not set.
+   * Tip: Use a fast/cheap model here when the planning model writes thorough prompts.
+   */
+  executorModel?: string;
   /** Thinking level for the working model (off = disabled) */
   thinkingLevel?: ThinkingLevel;
   /** Thinking level for the decision/thinking model */

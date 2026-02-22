@@ -866,14 +866,23 @@ export class DjinnBot {
       // Build user prompt with current context
       const userPrompt = this.buildPulseUserPrompt(agentId, context);
       
-      // Get agent's persona for model selection
+      // Model resolution: routine.planningModel → agent.planningModel → agent.model → fallback
       const agent = this.agentRegistry.get(agentId);
-      const model = agent?.config?.model || 'openrouter/minimax/minimax-m2.5';
+      const model = context.routinePlanningModel
+        || agent?.config?.planningModel
+        || agent?.config?.model
+        || 'openrouter/minimax/minimax-m2.5';
 
       // Determine timeout: routine override > agent config > default
       const timeout = context.routineTimeoutMs
         ?? agent?.config?.pulseContainerTimeoutMs
         ?? 120000;
+
+      // Executor model resolution: routine.executorModel → agent.executorModel → agent.model → fallback
+      const executorModel = context.routineExecutorModel
+        || agent?.config?.executorModel
+        || agent?.config?.model
+        || 'openrouter/minimax/minimax-m2.5';
 
       // Run standalone session
       const result = await this.sessionRunner.runSession({
@@ -885,6 +894,7 @@ export class DjinnBot {
         timeout,
         source: 'pulse',
         pulseColumns,
+        executorModel,
       });
 
       console.log(`[DjinnBot] Pulse session for ${label} completed: ${result.success}`);

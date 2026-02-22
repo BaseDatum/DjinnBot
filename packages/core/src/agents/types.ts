@@ -17,6 +17,20 @@ export interface ParsedIdentity {
 export interface AgentRuntimeConfig {
   model: string;
   thinkingModel: string;
+  /**
+   * Model used for pulse routine planning (claim task, write execution prompt,
+   * review results). This is the "smart" model that does strategic work.
+   * Defaults to the agent's primary model.
+   * Example: planningModel=claude-sonnet-4
+   */
+  planningModel: string;
+  /**
+   * Model used for spawned executor instances (plan-then-execute workflow).
+   * Defaults to the agent's primary model. Use a fast/cheap model here when
+   * the planner is a strong model that writes thorough prompts.
+   * Example: executorModel=minimax-m2.5
+   */
+  executorModel: string;
   maxConcurrentSteps: number;
   slackDecisionTimeoutMs: number;
   /** Timeout in ms for pulse container execution. Default: 120000 (2 min). */
@@ -95,6 +109,8 @@ export interface AgentRegistryEntry {
 export const DEFAULT_AGENT_CONFIG: AgentRuntimeConfig = {
   model: 'openrouter/minimax/minimax-m2.5',
   thinkingModel: 'openrouter/minimax/minimax-m2.5',
+  planningModel: 'openrouter/minimax/minimax-m2.5',
+  executorModel: 'openrouter/minimax/minimax-m2.5',
   maxConcurrentSteps: 2,
   slackDecisionTimeoutMs: 15000,
   pulseContainerTimeoutMs: 120000,

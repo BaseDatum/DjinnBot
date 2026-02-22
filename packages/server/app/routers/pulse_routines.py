@@ -78,6 +78,8 @@ class CreatePulseRoutineRequest(BaseModel):
     maxConcurrent: int = Field(default=1, ge=1, le=10)
     pulseColumns: Optional[List[str]] = None
     color: Optional[str] = None
+    planningModel: Optional[str] = None
+    executorModel: Optional[str] = None
 
 
 class UpdatePulseRoutineRequest(BaseModel):
@@ -93,6 +95,8 @@ class UpdatePulseRoutineRequest(BaseModel):
     maxConcurrent: Optional[int] = Field(default=None, ge=1, le=10)
     pulseColumns: Optional[List[str]] = None
     color: Optional[str] = None
+    planningModel: Optional[str] = None
+    executorModel: Optional[str] = None
 
 
 class ReorderRequest(BaseModel):
@@ -147,6 +151,8 @@ def _model_to_response(r: PulseRoutine) -> dict:
         "timeoutMs": r.timeout_ms,
         "maxConcurrent": r.max_concurrent,
         "pulseColumns": r.pulse_columns,
+        "planningModel": r.planning_model,
+        "executorModel": r.executor_model,
         "sortOrder": r.sort_order,
         "lastRunAt": r.last_run_at,
         "totalRuns": r.total_runs,
@@ -258,6 +264,8 @@ async def create_pulse_routine(
         timeout_ms=req.timeoutMs,
         max_concurrent=req.maxConcurrent,
         pulse_columns=req.pulseColumns,
+        planning_model=req.planningModel,
+        executor_model=req.executorModel,
         sort_order=next_order,
         color=color,
         created_at=ts,
@@ -355,6 +363,14 @@ async def update_pulse_routine(
         update_fields["pulse_columns"] = req.pulseColumns
     if req.color is not None:
         update_fields["color"] = req.color
+    if req.planningModel is not None:
+        update_fields["planning_model"] = (
+            req.planningModel or None
+        )  # empty string → null
+    if req.executorModel is not None:
+        update_fields["executor_model"] = (
+            req.executorModel or None
+        )  # empty string → null
 
     if update_fields:
         update_fields["updated_at"] = now_ms()
