@@ -52,8 +52,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (cancelled) return;
         setAuthStatus(status);
 
-        // If auth is disabled, we're done — no login needed
+        // If auth is disabled, treat everyone as an anonymous admin
         if (!status.authEnabled) {
+          setUser({
+            id: 'anonymous',
+            email: null,
+            displayName: 'Anonymous',
+            isAdmin: true,
+            totpEnabled: false,
+          });
           setIsLoading(false);
           return;
         }
