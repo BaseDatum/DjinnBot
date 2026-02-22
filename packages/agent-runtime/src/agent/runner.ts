@@ -8,6 +8,7 @@ import { createContainerTools } from './tools.js';
 import { createMcpTools } from './mcp-tools.js';
 import { parseModelString, CUSTOM_PROVIDER_API } from '@djinnbot/core';
 import { buildAttachmentBlocks, type AttachmentMeta } from './attachments.js';
+import { authFetch } from '../api/auth-fetch.js';
 
 export interface StepResult {
   output?: string;
@@ -111,6 +112,11 @@ export class ContainerAgentRunner {
   private rawOutput = '';
   private turnCount = 0;
   private toolCallStartTimes = new Map<string, number>();
+
+  // ── LLM call logging ──────────────────────────────────────────────────
+  private turnStartTime = 0;
+  private turnToolCallCount = 0;
+  private turnHasThinking = false;
 
   constructor(private options: ContainerAgentRunnerOptions) {
     ensureInitialized();
@@ -253,6 +259,9 @@ export class ContainerAgentRunner {
     this.unsubscribeAgent = agent.subscribe(async (event: AgentEvent) => {
       if (event.type === 'turn_start') {
         console.log(`[AgentRunner] turn_start`);
+        this.turnStartTime = Date.now();
+        this.turnToolCallCount = 0;
+        this.turnHasThinking = false;
       }
       if (event.type === 'turn_end') {
         this.turnCount++;
@@ -267,6 +276,7 @@ export class ContainerAgentRunner {
         const toolCallId = (event as any).toolCallId ?? `tool_${Date.now()}`;
         const args = (event as any).args ?? {};
         console.log(`[AgentRunner] tool_execution_start: ${toolName}`);
+        this.turnToolCallCount++;
 
         this.toolCallStartTimes.set(toolCallId, Date.now());
 
@@ -311,6 +321,7 @@ export class ContainerAgentRunner {
           }
         }
         if (assistantEvent.type === 'thinking_delta') {
+          this.turnHasThinking = true;
           const thinking = (assistantEvent as any).delta ?? '';
           if (thinking) {
             this.options.publisher.publishEventFast({
@@ -328,8 +339,65 @@ export class ContainerAgentRunner {
           if (extracted && !this.rawOutput.includes(extracted)) {
             this.rawOutput = extracted;
           }
+
+          // ── Log this LLM call to the API ────────────────────────────────
+          this.logLlmCall(message as AssistantMessage);
         }
       }
+    });
+  }
+
+  // ── LLM call logging ──────────────────────────────────────────────────
+
+  /**
+   * Log a completed LLM API call to the backend.
+   * Called on every message_end event for assistant messages.
+   * Fire-and-forget — does not block the agent loop.
+   */
+  private logLlmCall(message: AssistantMessage): void {
+    const apiBaseUrl = process.env.DJINNBOT_API_URL || 'http://api:8000';
+    const model = this.getModel();
+    const usage = message.usage || { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, total: 0 } };
+    const cost = usage.cost || { input: 0, output: 0, total: 0 };
+    const durationMs = this.turnStartTime ? Date.now() - this.turnStartTime : undefined;
+
+    // Determine the session/run context from env vars injected by the engine
+    const sessionId = process.env.SESSION_ID || process.env.CHAT_SESSION_ID || undefined;
+    const runId = process.env.RUN_ID || undefined;
+
+    // Determine key source from env (injected by engine along with the keys)
+    const keySource = process.env.KEY_SOURCE || undefined;
+    const keyMasked = process.env.KEY_MASKED || undefined;
+
+    const payload = {
+      session_id: sessionId,
+      run_id: runId,
+      agent_id: this.options.agentId,
+      request_id: this.requestIdRef.current || undefined,
+      provider: String(model.provider),
+      model: model.id,
+      key_source: keySource,
+      key_masked: keyMasked,
+      input_tokens: usage.input || 0,
+      output_tokens: usage.output || 0,
+      cache_read_tokens: usage.cacheRead || 0,
+      cache_write_tokens: usage.cacheWrite || 0,
+      total_tokens: usage.totalTokens || 0,
+      cost_input: cost.input || undefined,
+      cost_output: cost.output || undefined,
+      cost_total: cost.total || undefined,
+      duration_ms: durationMs,
+      tool_call_count: this.turnToolCallCount,
+      has_thinking: this.turnHasThinking,
+      stop_reason: message.stopReason ? String(message.stopReason) : undefined,
+    };
+
+    authFetch(`${apiBaseUrl}/v1/internal/llm-calls`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }).catch(err => {
+      console.warn('[AgentRunner] Failed to log LLM call:', err);
     });
   }
 

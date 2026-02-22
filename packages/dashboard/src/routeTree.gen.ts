@@ -17,6 +17,7 @@ import { Route as MemoryRouteImport } from './routes/memory'
 import { Route as McpRouteImport } from './routes/mcp'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as ChatRouteImport } from './routes/chat'
+import { Route as UsageRouteImport } from './routes/usage'
 import { Route as AdminRouteImport } from './routes/admin'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as RunsIndexRouteImport } from './routes/runs/index'
@@ -69,6 +70,11 @@ const LoginRoute = LoginRouteImport.update({
 const ChatRoute = ChatRouteImport.update({
   id: '/chat',
   path: '/chat',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const UsageRoute = UsageRouteImport.update({
+  id: '/usage',
+  path: '/usage',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AdminRoute = AdminRouteImport.update({
@@ -148,6 +154,7 @@ export interface FileRoutesByFullPath {
   '/settings': typeof SettingsRoute
   '/setup': typeof SetupRoute
   '/skills': typeof SkillsRouteWithChildren
+  '/usage': typeof UsageRoute
   '/agents/$agentId': typeof AgentsAgentIdRoute
   '/auth/callback': typeof AuthCallbackRoute
   '/mcp/configure': typeof McpConfigureRoute
@@ -171,6 +178,7 @@ export interface FileRoutesByTo {
   '/settings': typeof SettingsRoute
   '/setup': typeof SetupRoute
   '/skills': typeof SkillsRouteWithChildren
+  '/usage': typeof UsageRoute
   '/agents/$agentId': typeof AgentsAgentIdRoute
   '/auth/callback': typeof AuthCallbackRoute
   '/mcp/configure': typeof McpConfigureRoute
@@ -195,6 +203,7 @@ export interface FileRoutesById {
   '/settings': typeof SettingsRoute
   '/setup': typeof SetupRoute
   '/skills': typeof SkillsRouteWithChildren
+  '/usage': typeof UsageRoute
   '/agents/$agentId': typeof AgentsAgentIdRoute
   '/auth/callback': typeof AuthCallbackRoute
   '/mcp/configure': typeof McpConfigureRoute
@@ -220,6 +229,7 @@ export interface FileRouteTypes {
     | '/settings'
     | '/setup'
     | '/skills'
+    | '/usage'
     | '/agents/$agentId'
     | '/auth/callback'
     | '/mcp/configure'
@@ -243,6 +253,7 @@ export interface FileRouteTypes {
     | '/settings'
     | '/setup'
     | '/skills'
+    | '/usage'
     | '/agents/$agentId'
     | '/auth/callback'
     | '/mcp/configure'
@@ -266,6 +277,7 @@ export interface FileRouteTypes {
     | '/settings'
     | '/setup'
     | '/skills'
+    | '/usage'
     | '/agents/$agentId'
     | '/auth/callback'
     | '/mcp/configure'
@@ -290,6 +302,7 @@ export interface RootRouteChildren {
   SettingsRoute: typeof SettingsRoute
   SetupRoute: typeof SetupRoute
   SkillsRoute: typeof SkillsRouteWithChildren
+  UsageRoute: typeof UsageRoute
   AgentsAgentIdRoute: typeof AgentsAgentIdRoute
   AuthCallbackRoute: typeof AuthCallbackRoute
   PipelinesPipelineIdRoute: typeof PipelinesPipelineIdRoute
@@ -357,6 +370,13 @@ declare module '@tanstack/react-router' {
       path: '/chat'
       fullPath: '/chat'
       preLoaderRoute: typeof ChatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/usage': {
+      id: '/usage'
+      path: '/usage'
+      fullPath: '/usage'
+      preLoaderRoute: typeof UsageRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/admin': {
@@ -485,6 +505,7 @@ const rootRouteChildren: RootRouteChildren = {
   SettingsRoute: SettingsRoute,
   SetupRoute: SetupRoute,
   SkillsRoute: SkillsRouteWithChildren,
+  UsageRoute: UsageRoute,
   AgentsAgentIdRoute: AgentsAgentIdRoute,
   AuthCallbackRoute: AuthCallbackRoute,
   PipelinesPipelineIdRoute: PipelinesPipelineIdRoute,

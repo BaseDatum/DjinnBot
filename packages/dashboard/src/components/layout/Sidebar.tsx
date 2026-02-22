@@ -18,6 +18,7 @@ import {
   LogOut,
   ChevronUp,
   ShieldCheck,
+  Activity,
 } from 'lucide-react';
 import { fetchAgents, fetchStatus } from '@/lib/api';
 import { useAuth } from '@/hooks/useAuth';
@@ -39,6 +40,7 @@ const navItems = [
   { to: '/chat', label: 'Chat', icon: MessagesSquare },
   { to: '/memory', label: 'Memory', icon: Brain },
   { to: '/runs', label: 'Runs', icon: Play },
+  { to: '/usage', label: 'Usage', icon: Activity },
   { to: '/settings', label: 'Settings', icon: Settings },
 ];
 
