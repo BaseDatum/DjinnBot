@@ -76,9 +76,22 @@ async def _issue_tokens(
     user: User,
     session: AsyncSession,
     request: Request,
+    *,
+    totp_verified: Optional[bool] = None,
 ) -> dict:
-    """Create access + refresh tokens and persist the refresh session."""
-    totp_verified = not user.totp_enabled  # If TOTP disabled, consider verified
+    """Create access + refresh tokens and persist the refresh session.
+
+    Args:
+        totp_verified: Override TOTP verification status in the access token.
+            - None (default): auto-determine — True when TOTP is disabled,
+              False when TOTP is enabled (used for fresh logins that haven't
+              completed the TOTP step yet).
+            - True: explicitly mark as TOTP-verified (used after TOTP/recovery
+              code verification, and during token refresh where the session
+              was already fully authenticated).
+    """
+    if totp_verified is None:
+        totp_verified = not user.totp_enabled  # If TOTP disabled, consider verified
     access_token = create_access_token(
         user_id=user.id,
         email=user.email,
@@ -351,39 +364,8 @@ async def login_totp(
         )
 
     # TOTP passed — issue full tokens with totp_verified=True
-    access_token = create_access_token(
-        user_id=user.id,
-        email=user.email,
-        is_admin=user.is_admin,
-        totp_verified=True,
-    )
-    raw_refresh, refresh_hash = create_refresh_token(user.id)
-    now = now_ms()
-    user_session = UserSession(
-        id=_generate_session_id(),
-        user_id=user.id,
-        refresh_token_hash=refresh_hash,
-        expires_at=now + (auth_settings.refresh_token_ttl_seconds * 1000),
-        created_at=now,
-        ip_address=request.client.host if request.client else None,
-        user_agent=request.headers.get("user-agent"),
-    )
-    session.add(user_session)
-
-    return {
-        "accessToken": access_token,
-        "refreshToken": raw_refresh,
-        "tokenType": "Bearer",
-        "expiresIn": auth_settings.access_token_ttl_seconds,
-        "user": {
-            "id": user.id,
-            "email": user.email,
-            "displayName": user.display_name,
-            "isAdmin": user.is_admin,
-            "totpEnabled": user.totp_enabled,
-            "slackId": user.slack_id,
-        },
-    }
+    tokens = await _issue_tokens(user, session, request, totp_verified=True)
+    return tokens
 
 
 @router.post("/login/recovery")
@@ -434,45 +416,16 @@ async def login_recovery(
     if not user:
         raise HTTPException(status_code=400, detail="User not found")
 
-    access_token = create_access_token(
-        user_id=user.id,
-        email=user.email,
-        is_admin=user.is_admin,
-        totp_verified=True,
-    )
-    raw_refresh, refresh_hash = create_refresh_token(user.id)
-    now = now_ms()
-    user_session = UserSession(
-        id=_generate_session_id(),
-        user_id=user.id,
-        refresh_token_hash=refresh_hash,
-        expires_at=now + (auth_settings.refresh_token_ttl_seconds * 1000),
-        created_at=now,
-        ip_address=request.client.host if request.client else None,
-        user_agent=request.headers.get("user-agent"),
-    )
-    session.add(user_session)
+    # Recovery code accepted — issue full tokens with totp_verified=True
+    tokens = await _issue_tokens(user, session, request, totp_verified=True)
 
     # Count remaining recovery codes
     remaining = sum(
         1 for rc in codes if rc.used_at is None and rc.id != matched_code.id
     )
 
-    return {
-        "accessToken": access_token,
-        "refreshToken": raw_refresh,
-        "tokenType": "Bearer",
-        "expiresIn": auth_settings.access_token_ttl_seconds,
-        "user": {
-            "id": user.id,
-            "email": user.email,
-            "displayName": user.display_name,
-            "isAdmin": user.is_admin,
-            "totpEnabled": user.totp_enabled,
-            "slackId": user.slack_id,
-        },
-        "remainingRecoveryCodes": remaining,
-    }
+    tokens["remainingRecoveryCodes"] = remaining
+    return tokens
 
 
 @router.post("/refresh")
@@ -518,7 +471,9 @@ async def refresh_tokens(
     await session.delete(user_session)
     await session.flush()
 
-    tokens = await _issue_tokens(user, session, request)
+    # The original login session was fully authenticated (including TOTP if
+    # enabled), so the refreshed tokens must preserve totp_verified=True.
+    tokens = await _issue_tokens(user, session, request, totp_verified=True)
     return tokens
 
 

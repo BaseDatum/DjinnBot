@@ -12,7 +12,7 @@ export const Route = createFileRoute('/setup')({
 type SetupStep = 'account' | 'recommend2fa' | 'totpSetup' | 'recoveryCodes';
 
 function SetupPage() {
-  const { authStatus, handleLoginSuccess, isAuthenticated } = useAuth();
+  const { authStatus, handleLoginSuccess, isAuthenticated, refreshUser } = useAuth();
   const navigate = useNavigate();
 
   // Account creation state
@@ -90,6 +90,11 @@ function SetupPage() {
     try {
       const result = await confirmTOTP(totpCode);
       setRecoveryCodes(result.recoveryCodes);
+      // Update auth context so user.totpEnabled reflects the new state
+      // immediately — without this, the React state stays stale until a
+      // full page reload, causing the profile page to show "enable 2FA"
+      // even though TOTP is already active in the database.
+      await refreshUser();
       toast.success('Two-factor authentication enabled');
       setStep('recoveryCodes');
     } catch (err: any) {
