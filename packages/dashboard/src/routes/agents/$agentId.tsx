@@ -25,7 +25,7 @@ import { fetchAgent, fetchAgentMemory, fetchAgentConfig, updateAgentConfig, upda
 import { useAutoSave } from '@/hooks/useAutoSave';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useChatSessions } from '@/components/chat/ChatSessionContext';
-import { MemoryGraph } from '@/components/MemoryGraph';
+import { MemoryGraphContainer } from '@/components/MemoryGraphContainer';
 import { MemoryExplorer } from '@/components/memory/MemoryExplorer';
 import { AgentInbox } from '@/components/inbox/AgentInbox';
 import { AgentActivity } from '@/components/activity/AgentActivity';
@@ -477,7 +477,7 @@ function AgentDetailPage() {
 
         {/* Graph Tab — intentionally full-width, no max-w constraint */}
         {activeTab === 'graph' && (
-          <MemoryGraph agentId={agentId} />
+          <MemoryGraphContainer agentId={agentId} />
         )}
 
         {/* Memory Tab */}

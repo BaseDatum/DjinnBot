@@ -1,47 +1,48 @@
 /**
- * MemoryGraph — orchestration shell for the knowledge graph workspace.
+ * MemoryGraph3D — 3D knowledge graph workspace using ForceGraph3D + Three.js.
  *
- * Layout:
- *   [FilterSidebar] | [Graph canvas] | [NodePanel (when selected)]
+ * Layout mirrors MemoryGraph.tsx:
+ *   [FilterSidebar] | [3D Graph canvas] | [NodePanel (when selected)]
  *                      [TimelineScrubber]
  *
- * All heavy logic lives in graph/* sub-modules.
+ * Reuses all existing sub-components (sidebar, panel, context menu, etc.)
+ * from graph/* — only the rendering layer is different.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import ForceGraph2DLib from 'react-force-graph-2d';
-// Cast to any to work around generic type inference issues with linkCanvasObject prop
-const ForceGraph2D = ForceGraph2DLib as any;
+import ForceGraph3DLib from 'react-force-graph-3d';
+const ForceGraph3D = ForceGraph3DLib as any;
+import * as THREE from 'three';
 import { toast } from 'sonner';
 
 import { CreateMemoryDialog } from '@/components/memory/CreateMemoryDialog';
 
 import { useGraphData } from './graph/useGraphData';
-import { useGraphInteraction } from './graph/useGraphInteraction';
+import { useGraphInteraction3D } from './graph/useGraphInteraction3d';
 import { COLORS_DARK, COLORS_LIGHT } from './graph/graphColors';
 import {
-  makeNodeCanvasObject,
-  makeNodePointerAreaPaint,
-  makeLinkColor,
-  makeLinkWidth,
-  makeLinkCanvasObject,
-} from './graph/graphRenderers';
+  makeNodeThreeObject,
+  makeLinkColor3D,
+  makeLinkWidth3D,
+  makeLinkParticles,
+  makeLinkParticleWidth,
+  computeNodeFz,
+} from './graph/graphRenderers3d';
+import type { Render3DRefs } from './graph/graphRenderers3d';
 import { GraphFilterSidebar } from './graph/GraphFilterSidebar';
 import { GraphNodePanel } from './graph/GraphNodePanel';
 import { GraphTimelineScrubber } from './graph/GraphTimelineScrubber';
 import { GraphContextMenu } from './graph/GraphContextMenu';
 import { GraphLinkDialog } from './graph/GraphLinkDialog';
 
-import type { GraphNode, GraphViewMode, ContextMenuState } from './graph/types';
+import type { GraphNode, GraphViewMode, ContextMenuState, ZAxisMode } from './graph/types';
 import type { ColorPalette } from './graph/graphColors';
-import type { RenderRefs } from './graph/graphRenderers';
 
-interface MemoryGraphProps {
+interface MemoryGraph3DProps {
   agentId: string;
-  /** Hide the personal/shared/combined view-mode selector (e.g. on the shared memory page). */
   hideViewMode?: boolean;
-  /** Callback to switch to 3D mode (provided by MemoryGraphContainer). */
-  onSwitchTo3D?: () => void;
+  /** Callback to switch back to 2D mode */
+  onSwitchTo2D?: () => void;
 }
 
 function useDarkMode() {
@@ -56,8 +57,7 @@ function useDarkMode() {
   return isDark;
 }
 
-// Resizable split pane.
-// `invert` flips the drag direction for panels anchored to the right edge.
+// Resizable split pane (same as 2D version)
 function useResizableSplit(initialPx: number, minPx: number, maxPx: number, invert = false) {
   const [width, setWidth] = useState(initialPx);
   const dragging = useRef(false);
@@ -87,7 +87,7 @@ function useResizableSplit(initialPx: number, minPx: number, maxPx: number, inve
   return { width, setWidth, onPointerDown, onPointerMove, onPointerUp };
 }
 
-export function MemoryGraph({ agentId, hideViewMode, onSwitchTo3D }: MemoryGraphProps) {
+export function MemoryGraph3D({ agentId, hideViewMode, onSwitchTo2D }: MemoryGraph3DProps) {
   const isDark = useDarkMode();
   const colors = isDark ? COLORS_DARK : COLORS_LIGHT;
   const colorsRef = useRef<ColorPalette>(colors);
@@ -103,11 +103,11 @@ export function MemoryGraph({ agentId, hideViewMode, onSwitchTo3D }: MemoryGraph
   const [linkTarget, setLinkTarget] = useState<GraphNode | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
+  const [zAxisMode, setZAxisMode] = useState<ZAxisMode>('force');
 
   const wrapperRef = useRef<HTMLDivElement>(null);
   const hasZoomedRef = useRef(false);
 
-  // Resizable right panel — invert drag direction (left = wider)
   const rightPanel = useResizableSplit(340, 240, 500, true);
 
   // ── Data ──────────────────────────────────────────────────────────────────
@@ -145,9 +145,9 @@ export function MemoryGraph({ agentId, hideViewMode, onSwitchTo3D }: MemoryGraph
     handleNodeRightClick,
     handleBackgroundRightClick,
     renderRefs,
-    zoomToNode,
+    flyToNode,
     zoomToFit,
-  } = useGraphInteraction({
+  } = useGraphInteraction3D({
     degreeMap,
     orphanSet,
     showOrphansOnly,
@@ -156,8 +156,8 @@ export function MemoryGraph({ agentId, hideViewMode, onSwitchTo3D }: MemoryGraph
       setContextMenu({ x, y, node: null, graphX: gx, graphY: gy }),
   });
 
-  // Keep refs in sync with latest palette
-  const fullRefs: RenderRefs = {
+  // Full refs including colors
+  const fullRefs: Render3DRefs = {
     ...renderRefs,
     colorsRef,
   };
@@ -167,30 +167,32 @@ export function MemoryGraph({ agentId, hideViewMode, onSwitchTo3D }: MemoryGraph
   renderRefs.orphanSetRef.current = orphanSet;
   renderRefs.showOrphansRef.current = showOrphansOnly;
 
-  // ── Stable canvas callbacks (memoized once — read from refs) ─────────────
-  // IMPORTANT: every function prop passed to ForceGraph2D MUST be a stable
-  // reference.  If a prop identity changes the library tears down and rebuilds
-  // its internal shadow canvas, resetting hover/pointer tracking.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const nodeCanvasObject = useMemo(() => makeNodeCanvasObject(fullRefs), []);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const nodePointerAreaPaint = useMemo(() => makeNodePointerAreaPaint(renderRefs), []);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const linkColorFn = useMemo(() => makeLinkColor(fullRefs), []);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const linkWidthFn = useMemo(() => makeLinkWidth(renderRefs), []);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const linkCanvasObjectFn = useMemo(() => makeLinkCanvasObject(fullRefs), []);
-  // Stable mode callbacks — must NOT be inline arrows or ForceGraph rebuilds
-  // its shadow canvas on every render.
-  const nodeCanvasObjectMode = useCallback(() => 'replace' as const, []);
-  const linkCanvasObjectMode = useCallback(() => 'replace' as const, []);
+  // ── Compute time range for Z-axis "time" mode ────────────────────────────
+  const timeRange = useMemo(() => {
+    if (!rawData) return undefined;
+    let min = Infinity;
+    let max = -Infinity;
+    for (const n of rawData.nodes) {
+      if (n.createdAt) {
+        if (n.createdAt < min) min = n.createdAt;
+        if (n.createdAt > max) max = n.createdAt;
+      }
+    }
+    if (!isFinite(min)) return undefined;
+    return { min, max };
+  }, [rawData]);
 
-  // ── Graph data for ForceGraph ──────────────────────────────────────────────
+  // ── Apply Z-axis constraints to graph data ────────────────────────────────
   const graphData = useMemo(() => {
     if (!filteredData) return { nodes: [], links: [] };
+
+    const nodes = filteredData.nodes.map((n) => ({
+      ...n,
+      fz: computeNodeFz(n, zAxisMode, timeRange),
+    }));
+
     return {
-      nodes: filteredData.nodes,
+      nodes,
       links: filteredData.edges.map((e) => ({
         source: e.source,
         target: e.target,
@@ -198,7 +200,19 @@ export function MemoryGraph({ agentId, hideViewMode, onSwitchTo3D }: MemoryGraph
         label: e.label,
       })),
     };
-  }, [filteredData]);
+  }, [filteredData, zAxisMode, timeRange]);
+
+  // ── Stable 3D rendering callbacks ────────────────────────────────────────
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const nodeThreeObjectFn = useMemo(() => makeNodeThreeObject(fullRefs), []);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const linkColorFn = useMemo(() => makeLinkColor3D(fullRefs), []);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const linkWidthFn = useMemo(() => makeLinkWidth3D(renderRefs), []);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const linkParticlesFn = useMemo(() => makeLinkParticles(renderRefs), []);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const linkParticleWidthFn = useMemo(() => makeLinkParticleWidth(renderRefs), []);
 
   // ── Connections for selected node ─────────────────────────────────────────
   const connections = useMemo(() => {
@@ -208,21 +222,46 @@ export function MemoryGraph({ agentId, hideViewMode, onSwitchTo3D }: MemoryGraph
       .filter((n): n is GraphNode => !!n);
   }, [selectedNode, neighborMap, filteredData]);
 
-  // ── Zoom to fit on first data load ────────────────────────────────────────
+  // ── Zoom to fit on first load ─────────────────────────────────────────────
   useEffect(() => {
     if (graphData.nodes.length > 0 && !hasZoomedRef.current && graphRef.current) {
-      setTimeout(() => { graphRef.current?.zoomToFit(600, 60); hasZoomedRef.current = true; }, 150);
+      setTimeout(() => {
+        graphRef.current?.zoomToFit(600, 60);
+        hasZoomedRef.current = true;
+      }, 300);
     }
   }, [graphData.nodes.length]);
 
   useEffect(() => { hasZoomedRef.current = false; }, [viewMode]);
 
-  // ── Resize observer for canvas dimensions ────────────────────────────────
+  // ── Scene setup: lighting and background ──────────────────────────────────
+  const sceneConfigured = useRef(false);
+  useEffect(() => {
+    if (!graphRef.current || sceneConfigured.current) return;
+    const scene = graphRef.current.scene?.();
+    if (!scene) return;
+
+    // Ambient light for consistent base illumination
+    const ambient = new THREE.AmbientLight(0xffffff, 0.6);
+    scene.add(ambient);
+
+    // Directional light from above-right for depth perception
+    const directional = new THREE.DirectionalLight(0xffffff, 0.8);
+    directional.position.set(50, 100, 50);
+    scene.add(directional);
+
+    sceneConfigured.current = true;
+  }, [graphData.nodes.length]);
+
+  // ── Resize observer ──────────────────────────────────────────────────────
   useEffect(() => {
     if (!wrapperRef.current) return;
     const ro = new ResizeObserver((entries) => {
       for (const e of entries) {
-        setDimensions({ width: Math.floor(e.contentRect.width), height: Math.floor(e.contentRect.height) });
+        setDimensions({
+          width: Math.floor(e.contentRect.width),
+          height: Math.floor(e.contentRect.height),
+        });
       }
     });
     ro.observe(wrapperRef.current);
@@ -233,8 +272,8 @@ export function MemoryGraph({ agentId, hideViewMode, onSwitchTo3D }: MemoryGraph
   const handleFocusNode = useCallback((node: GraphNode) => {
     enterFocusMode(node.id, 2);
     setSelectedNode(node);
-    zoomToNode(node);
-  }, [enterFocusMode, setSelectedNode, zoomToNode]);
+    flyToNode(node);
+  }, [enterFocusMode, setSelectedNode, flyToNode]);
 
   const handleDeleteNode = useCallback((node: GraphNode) => {
     setSelectedNode(node);
@@ -261,7 +300,7 @@ export function MemoryGraph({ agentId, hideViewMode, onSwitchTo3D }: MemoryGraph
     toast.success('Memory created');
   }, [refetch]);
 
-  // Keyboard shortcut: Escape to deselect / exit context menu
+  // Keyboard: Escape to deselect / exit context menu
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
@@ -272,6 +311,9 @@ export function MemoryGraph({ agentId, hideViewMode, onSwitchTo3D }: MemoryGraph
     document.addEventListener('keydown', handler);
     return () => document.removeEventListener('keydown', handler);
   }, [contextMenu, selectedNode, setSelectedNode]);
+
+  // Background color for the 3D scene
+  const bgColor = isDark ? '#0f172a' : '#f8fafc';
 
   return (
     <div
@@ -302,15 +344,18 @@ export function MemoryGraph({ agentId, hideViewMode, onSwitchTo3D }: MemoryGraph
           focusNodeId={focusNodeId}
           onExitFocus={exitFocusMode}
           nodeTypeCounts={rawData?.stats.nodeTypeCounts ?? {}}
-          is3D={false}
-          onSwitchDimension={onSwitchTo3D}
+          // 3D-specific props
+          is3D={true}
+          zAxisMode={zAxisMode}
+          onZAxisModeChange={setZAxisMode}
+          onSwitchDimension={onSwitchTo2D}
         />
 
-        {/* ── Center: graph canvas ── */}
+        {/* ── Center: 3D graph canvas ── */}
         <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
           <div ref={wrapperRef} className="flex-1 min-h-0 relative">
             {filteredData && filteredData.nodes.length > 0 ? (
-              <ForceGraph2D
+              <ForceGraph3D
                 ref={graphRef}
                 width={dimensions.width}
                 height={dimensions.height}
@@ -318,16 +363,15 @@ export function MemoryGraph({ agentId, hideViewMode, onSwitchTo3D }: MemoryGraph
                 nodeId="id"
                 linkSource="source"
                 linkTarget="target"
-                backgroundColor="transparent"
-                nodeRelSize={4}
-                autoPauseRedraw={false}
-                nodeCanvasObject={nodeCanvasObject}
-                nodeCanvasObjectMode={nodeCanvasObjectMode}
-                nodePointerAreaPaint={nodePointerAreaPaint}
+                backgroundColor={bgColor}
+                nodeThreeObject={nodeThreeObjectFn}
+                nodeThreeObjectExtend={false}
                 linkColor={linkColorFn}
                 linkWidth={linkWidthFn}
-                linkCanvasObject={linkCanvasObjectFn}
-                linkCanvasObjectMode={linkCanvasObjectMode}
+                linkOpacity={0.6}
+                linkDirectionalParticles={linkParticlesFn}
+                linkDirectionalParticleWidth={linkParticleWidthFn}
+                linkDirectionalParticleSpeed={0.005}
                 onNodeClick={handleNodeClick}
                 onNodeHover={handleNodeHover}
                 onBackgroundClick={handleBackgroundClick}
@@ -337,14 +381,21 @@ export function MemoryGraph({ agentId, hideViewMode, onSwitchTo3D }: MemoryGraph
                 d3AlphaDecay={0.02}
                 d3VelocityDecay={0.28}
                 enableNodeDrag={true}
+                controlType="orbit"
+                showNavInfo={false}
               />
             ) : (
               <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
                 {rawData === null
-                  ? 'Loading graph…'
+                  ? 'Loading 3D graph…'
                   : 'No nodes match the current filters'}
               </div>
             )}
+
+            {/* 3D mode indicator badge */}
+            <div className="absolute top-3 right-3 px-2 py-1 rounded bg-primary/10 text-primary text-xs font-medium backdrop-blur-sm border border-primary/20">
+              3D
+            </div>
           </div>
 
           {/* Timeline scrubber */}
@@ -358,7 +409,6 @@ export function MemoryGraph({ agentId, hideViewMode, onSwitchTo3D }: MemoryGraph
         {/* ── Right: node detail panel ── */}
         {selectedNode && (
           <>
-            {/* Drag handle */}
             <div
               onPointerDown={rightPanel.onPointerDown}
               onPointerMove={rightPanel.onPointerMove}
@@ -373,7 +423,7 @@ export function MemoryGraph({ agentId, hideViewMode, onSwitchTo3D }: MemoryGraph
                 connections={connections}
                 degreeMap={degreeMap}
                 onClose={() => setSelectedNode(null)}
-                onSelectNode={(n) => { setSelectedNode(n); zoomToNode(n); }}
+                onSelectNode={(n) => { setSelectedNode(n); flyToNode(n); }}
                 onLinkNode={(n) => setLinkTarget(n)}
                 onDeleted={handleNodeDeleted}
               />

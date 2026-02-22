@@ -12,10 +12,12 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as SkillsRouteImport } from './routes/skills'
 import { Route as SetupRouteImport } from './routes/setup'
 import { Route as SettingsRouteImport } from './routes/settings'
+import { Route as ProfileRouteImport } from './routes/profile'
 import { Route as MemoryRouteImport } from './routes/memory'
 import { Route as McpRouteImport } from './routes/mcp'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as ChatRouteImport } from './routes/chat'
+import { Route as AdminRouteImport } from './routes/admin'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as RunsIndexRouteImport } from './routes/runs/index'
 import { Route as ProjectsIndexRouteImport } from './routes/projects/index'
@@ -44,6 +46,11 @@ const SettingsRoute = SettingsRouteImport.update({
   path: '/settings',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ProfileRoute = ProfileRouteImport.update({
+  id: '/profile',
+  path: '/profile',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const MemoryRoute = MemoryRouteImport.update({
   id: '/memory',
   path: '/memory',
@@ -62,6 +69,11 @@ const LoginRoute = LoginRouteImport.update({
 const ChatRoute = ChatRouteImport.update({
   id: '/chat',
   path: '/chat',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminRoute = AdminRouteImport.update({
+  id: '/admin',
+  path: '/admin',
   getParentRoute: () => rootRouteImport,
 } as any)
 const IndexRoute = IndexRouteImport.update({
@@ -127,10 +139,12 @@ const AgentsAgentIdRoute = AgentsAgentIdRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/admin': typeof AdminRoute
   '/chat': typeof ChatRoute
   '/login': typeof LoginRoute
   '/mcp': typeof McpRouteWithChildren
   '/memory': typeof MemoryRoute
+  '/profile': typeof ProfileRoute
   '/settings': typeof SettingsRoute
   '/setup': typeof SetupRoute
   '/skills': typeof SkillsRouteWithChildren
@@ -148,10 +162,12 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/admin': typeof AdminRoute
   '/chat': typeof ChatRoute
   '/login': typeof LoginRoute
   '/mcp': typeof McpRouteWithChildren
   '/memory': typeof MemoryRoute
+  '/profile': typeof ProfileRoute
   '/settings': typeof SettingsRoute
   '/setup': typeof SetupRoute
   '/skills': typeof SkillsRouteWithChildren
@@ -170,10 +186,12 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/admin': typeof AdminRoute
   '/chat': typeof ChatRoute
   '/login': typeof LoginRoute
   '/mcp': typeof McpRouteWithChildren
   '/memory': typeof MemoryRoute
+  '/profile': typeof ProfileRoute
   '/settings': typeof SettingsRoute
   '/setup': typeof SetupRoute
   '/skills': typeof SkillsRouteWithChildren
@@ -193,10 +211,12 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/admin'
     | '/chat'
     | '/login'
     | '/mcp'
     | '/memory'
+    | '/profile'
     | '/settings'
     | '/setup'
     | '/skills'
@@ -214,10 +234,12 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/admin'
     | '/chat'
     | '/login'
     | '/mcp'
     | '/memory'
+    | '/profile'
     | '/settings'
     | '/setup'
     | '/skills'
@@ -235,10 +257,12 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/'
+    | '/admin'
     | '/chat'
     | '/login'
     | '/mcp'
     | '/memory'
+    | '/profile'
     | '/settings'
     | '/setup'
     | '/skills'
@@ -257,10 +281,12 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  AdminRoute: typeof AdminRoute
   ChatRoute: typeof ChatRoute
   LoginRoute: typeof LoginRoute
   McpRoute: typeof McpRouteWithChildren
   MemoryRoute: typeof MemoryRoute
+  ProfileRoute: typeof ProfileRoute
   SettingsRoute: typeof SettingsRoute
   SetupRoute: typeof SetupRoute
   SkillsRoute: typeof SkillsRouteWithChildren
@@ -298,6 +324,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/profile': {
+      id: '/profile'
+      path: '/profile'
+      fullPath: '/profile'
+      preLoaderRoute: typeof ProfileRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/memory': {
       id: '/memory'
       path: '/memory'
@@ -324,6 +357,13 @@ declare module '@tanstack/react-router' {
       path: '/chat'
       fullPath: '/chat'
       preLoaderRoute: typeof ChatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin': {
+      id: '/admin'
+      path: '/admin'
+      fullPath: '/admin'
+      preLoaderRoute: typeof AdminRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/': {
@@ -436,10 +476,12 @@ const SkillsRouteWithChildren =
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  AdminRoute: AdminRoute,
   ChatRoute: ChatRoute,
   LoginRoute: LoginRoute,
   McpRoute: McpRouteWithChildren,
   MemoryRoute: MemoryRoute,
+  ProfileRoute: ProfileRoute,
   SettingsRoute: SettingsRoute,
   SetupRoute: SetupRoute,
   SkillsRoute: SkillsRouteWithChildren,

@@ -1,7 +1,7 @@
 import { createFileRoute, useNavigate } from '@tanstack/react-router';
 import { Brain, Network } from 'lucide-react';
 import { MemoryExplorer } from '@/components/memory/MemoryExplorer';
-import { MemoryGraph } from '@/components/MemoryGraph';
+import { MemoryGraphContainer } from '@/components/MemoryGraphContainer';
 import { NestedSidebar } from '@/components/layout/NestedSidebar';
 import type { NestedSidebarItem } from '@/components/layout/NestedSidebar';
 
@@ -66,7 +66,7 @@ function SharedMemoryPage() {
         )}
 
         {/* Graph Tab — full-width, no max-w constraint */}
-        {activeTab === 'graph' && <MemoryGraph agentId={SHARED_VAULT_ID} hideViewMode />}
+        {activeTab === 'graph' && <MemoryGraphContainer agentId={SHARED_VAULT_ID} hideViewMode />}
       </NestedSidebar>
     </div>
   );
