@@ -43,6 +43,7 @@ export type { AgentScheduleEntry } from './pulse-scheduler.js';
 export type {
   PulseScheduleConfig,
   PulseBlackout,
+  PulseRoutine,
   ScheduledPulse,
   PulseConflict,
   PulseTimelineResponse,

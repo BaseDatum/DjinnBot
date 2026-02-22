@@ -611,10 +611,12 @@ export class DjinnBot {
         getUnreadMessages: (agentId) => this.agentInbox.getUnread(agentId) as any,
         runPulseSession: (agentId, context) => this.runPulseSession(agentId, context),
         getAgentPulseSchedule: async (agentId) => this.loadAgentPulseSchedule(agentId),
+        getAgentPulseRoutines: async (agentId) => this.fetchAgentPulseRoutines(agentId),
         getAssignedTasks: async (agentId) => this.fetchAssignedTasks(agentId),
         startPulseSession: (agentId, sessionId) => this.lifecycleManager.startPulseSession(agentId, sessionId),
         endPulseSession: (agentId, sessionId) => this.lifecycleManager.endPulseSession(agentId, sessionId),
         maxConcurrentPulseSessions: 2,
+        onRoutinePulseComplete: (routineId) => this.updateRoutineStats(routineId),
       },
     );
     await this.agentPulse.start();
@@ -737,13 +739,32 @@ export class DjinnBot {
               await this.agentPulse.reloadAgentSchedule(agentId);
             }
           }
+        } else if (channel === 'djinnbot:pulse:routine-updated') {
+          // A specific routine was created/updated/deleted — reload the agent
+          const agentId = data.agentId;
+          if (agentId && this.agentPulse) {
+            console.log(`[DjinnBot] Pulse routine updated for ${agentId}, reloading...`);
+            await this.agentPulse.reloadAgentSchedule(agentId);
+          }
+        } else if (channel === 'djinnbot:pulse:trigger-routine') {
+          // Manual trigger of a specific routine
+          const { agentId, routineId, routineName } = data;
+          if (agentId && routineId && this.agentPulse) {
+            console.log(`[DjinnBot] Manual trigger for routine ${routineName || routineId}`);
+            await this.agentPulse.triggerRoutine(agentId, routineId);
+          }
         }
       } catch (err) {
         console.error('[DjinnBot] Failed to process pulse schedule update:', err);
       }
     });
 
-    await subscriber.subscribe('djinnbot:pulse:schedule-updated', 'djinnbot:pulse:offsets-updated');
+    await subscriber.subscribe(
+      'djinnbot:pulse:schedule-updated',
+      'djinnbot:pulse:offsets-updated',
+      'djinnbot:pulse:routine-updated',
+      'djinnbot:pulse:trigger-routine',
+    );
     console.log('[DjinnBot] Subscribed to pulse schedule update channels');
   }
 
@@ -808,12 +829,16 @@ export class DjinnBot {
     }
   }
 
-  /** Run a pulse session - agent "wakes up" and reviews their workspace with tools */
+  /** Run a pulse session - agent "wakes up" and reviews their workspace with tools.
+   *  When context.routineId is set, uses the routine's custom instructions
+   *  instead of the default PULSE.md file.
+   */
   private async runPulseSession(
     agentId: string, 
     context: import('./runtime/agent-pulse.js').PulseContext
   ): Promise<import('./runtime/agent-pulse.js').PulseSessionResult> {
-    console.log(`[DjinnBot] Running pulse session for ${agentId}...`);
+    const label = context.routineName ? `${agentId}/${context.routineName}` : agentId;
+    console.log(`[DjinnBot] Running pulse session for ${label}...`);
     
     if (!this.sessionRunner) {
       return {
@@ -824,17 +849,17 @@ export class DjinnBot {
     }
 
     try {
-      // Load pulse columns from config.yml for column-gated task discovery
-      const pulseColumns = await this.loadAgentPulseColumns(agentId);
+      // Determine pulse columns: routine override > agent config.yml
+      const pulseColumns = context.routinePulseColumns?.length
+        ? context.routinePulseColumns
+        : await this.loadAgentPulseColumns(agentId);
 
-      // Build the full system prompt: persona (IDENTITY + SOUL + AGENTS + DECISION +
-      // MEMORY_TOOLS + skills manifest) assembled by PersonaLoader, then the
-      // agent-specific PULSE.md instructions appended after a separator.
+      // Load instructions: routine instructions > PULSE.md file
       const [persona, pulseInstructions] = await Promise.all([
         this.personaLoader.loadPersonaForSession(agentId, {
           sessionType: 'pulse',
         }),
-        this.loadPulsePrompt(agentId),
+        this.loadPulsePrompt(agentId, context),
       ]);
       const systemPrompt = `${persona.systemPrompt}\n\n---\n\n${pulseInstructions}`;
       
@@ -845,6 +870,11 @@ export class DjinnBot {
       const agent = this.agentRegistry.get(agentId);
       const model = agent?.config?.model || 'openrouter/minimax/minimax-m2.5';
 
+      // Determine timeout: routine override > agent config > default
+      const timeout = context.routineTimeoutMs
+        ?? agent?.config?.pulseContainerTimeoutMs
+        ?? 120000;
+
       // Run standalone session
       const result = await this.sessionRunner.runSession({
         agentId,
@@ -852,12 +882,12 @@ export class DjinnBot {
         userPrompt,
         model,
         maxTurns: 20,
-        timeout: agent?.config?.pulseContainerTimeoutMs ?? 120000,
+        timeout,
         source: 'pulse',
         pulseColumns,
       });
 
-      console.log(`[DjinnBot] Pulse session for ${agentId} completed: ${result.success}`);
+      console.log(`[DjinnBot] Pulse session for ${label} completed: ${result.success}`);
       
       return {
         success: result.success,
@@ -865,7 +895,7 @@ export class DjinnBot {
         output: result.output,
       };
     } catch (err) {
-      console.error(`[DjinnBot] Pulse session failed for ${agentId}:`, err);
+      console.error(`[DjinnBot] Pulse session failed for ${label}:`, err);
       return {
         success: false,
         actions: [],
@@ -874,24 +904,56 @@ export class DjinnBot {
     }
   }
 
-  /** Load the pulse prompt from PULSE.md, falling back to template */
-  private async loadPulsePrompt(agentId: string): Promise<string> {
-    const agentPulsePath = join(this.config.agentsDir, agentId, 'PULSE.md');
-    const templatePath = join(this.config.agentsDir, '_templates', 'PULSE.md');
-    
-    let template: string;
-    
-    try {
-      const { readFile } = await import('node:fs/promises');
-      template = await readFile(agentPulsePath, 'utf-8');
-    } catch {
-      // Fall back to template
+  /**
+   * Load the pulse prompt for a session.
+   * 
+   * Priority:
+   * 1. Routine instructions from DB (if context has routineInstructions and no sourceFile)
+   * 2. Routine sourceFile from disk (if sourceFile is set — means not yet edited in dashboard)
+   * 3. Agent's PULSE.md from disk (legacy)
+   * 4. Template PULSE.md
+   * 5. Hardcoded default
+   */
+  private async loadPulsePrompt(
+    agentId: string,
+    context?: import('./runtime/agent-pulse.js').PulseContext,
+  ): Promise<string> {
+    let template: string | undefined;
+
+    // Case 1: Routine with DB-stored instructions (sourceFile cleared by dashboard edit)
+    if (context?.routineId && context.routineInstructions && !context.routineSourceFile) {
+      template = context.routineInstructions;
+    }
+
+    // Case 2: Routine with sourceFile — read from disk so manual file edits are picked up
+    if (!template && context?.routineSourceFile) {
       try {
         const { readFile } = await import('node:fs/promises');
-        template = await readFile(templatePath, 'utf-8');
+        const filePath = join(this.config.agentsDir, agentId, context.routineSourceFile);
+        template = await readFile(filePath, 'utf-8');
       } catch {
-        // Hardcoded fallback
-        template = this.getDefaultPulsePrompt();
+        // File may have been removed — fall back to DB instructions
+        if (context.routineInstructions) {
+          template = context.routineInstructions;
+        }
+      }
+    }
+
+    // Case 3: No routine — legacy PULSE.md from disk
+    if (!template) {
+      const agentPulsePath = join(this.config.agentsDir, agentId, 'PULSE.md');
+      const templatePath = join(this.config.agentsDir, '_templates', 'PULSE.md');
+      
+      try {
+        const { readFile } = await import('node:fs/promises');
+        template = await readFile(agentPulsePath, 'utf-8');
+      } catch {
+        try {
+          const { readFile } = await import('node:fs/promises');
+          template = await readFile(templatePath, 'utf-8');
+        } catch {
+          template = this.getDefaultPulsePrompt();
+        }
       }
     }
     
@@ -901,6 +963,60 @@ export class DjinnBot {
     template = template.replace(/\{\{AGENT_EMOJI\}\}/g, agent?.identity?.emoji || '🤖');
     
     return template;
+  }
+
+  /**
+   * Fetch pulse routines for an agent from the API server.
+   * Returns an empty array if the agent has no routines (triggers legacy fallback).
+   */
+  private async fetchAgentPulseRoutines(agentId: string): Promise<import('./runtime/pulse-types.js').PulseRoutine[]> {
+    const apiUrl = process.env.DJINNBOT_API_URL || 'http://api:8000';
+    try {
+      const res = await authFetch(`${apiUrl}/v1/agents/${agentId}/pulse-routines`);
+      if (!res.ok) return [];
+      const data = await res.json() as any;
+      const rawRoutines: any[] = data.routines || [];
+      return rawRoutines.map((r: any) => ({
+        id: r.id,
+        agentId: r.agentId,
+        name: r.name,
+        description: r.description,
+        instructions: r.instructions,
+        sourceFile: r.sourceFile,
+        enabled: r.enabled,
+        intervalMinutes: r.intervalMinutes,
+        offsetMinutes: r.offsetMinutes,
+        blackouts: r.blackouts || [],
+        oneOffs: r.oneOffs || [],
+        timeoutMs: r.timeoutMs,
+        maxConcurrent: r.maxConcurrent ?? 1,
+        pulseColumns: r.pulseColumns,
+        sortOrder: r.sortOrder ?? 0,
+        color: r.color,
+        lastRunAt: r.lastRunAt,
+        totalRuns: r.totalRuns ?? 0,
+        createdAt: r.createdAt,
+        updatedAt: r.updatedAt,
+      }));
+    } catch (err) {
+      console.warn(`[DjinnBot] fetchAgentPulseRoutines failed for ${agentId}:`, err);
+      return [];
+    }
+  }
+
+  /**
+   * Update routine stats after a pulse run completes.
+   * Fires-and-forgets a PATCH to the API server.
+   */
+  private updateRoutineStats(routineId: string): void {
+    const apiUrl = process.env.DJINNBOT_API_URL || 'http://api:8000';
+    // We don't know the agentId here, so use a simple dedicated endpoint
+    // For now, fire-and-forget via direct DB or API call
+    authFetch(`${apiUrl}/v1/pulse-routines/${routineId}/record-run`, {
+      method: 'POST',
+    }).catch((err) => {
+      console.warn(`[DjinnBot] Failed to update routine stats for ${routineId}:`, err);
+    });
   }
 
   private getDefaultPulsePrompt(): string {

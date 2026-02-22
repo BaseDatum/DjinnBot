@@ -1,15 +1,22 @@
 /**
  * PulseScheduler - Computes upcoming pulses and detects conflicts.
  * 
- * Uses a priority queue approach: computes next pulse time for each agent,
- * maintains a sorted list, and fires pulses at the right time.
+ * Supports both legacy agent-level scheduling and routine-level scheduling.
+ * When routines are registered for an agent, they take priority over the
+ * agent-level schedule.
  * 
- * This is a pure computation module - actual pulse execution is handled by AgentPulse.
+ * Uses a priority queue approach: computes next pulse time for each
+ * routine (or legacy agent schedule), maintains a sorted list, and fires
+ * pulses at the right time.
+ * 
+ * This is a pure computation module - actual pulse execution is handled
+ * by AgentPulse.
  */
 
 import {
   PulseScheduleConfig,
   PulseBlackout,
+  PulseRoutine,
   ScheduledPulse,
   PulseConflict,
   PulseTimelineResponse,
@@ -22,13 +29,98 @@ export interface AgentScheduleEntry {
   schedule: PulseScheduleConfig;
 }
 
+/**
+ * Internal entry: either a legacy agent schedule or a routine schedule.
+ */
+interface ScheduleEntry {
+  agentId: string;
+  routineId?: string;
+  routineName?: string;
+  schedule: PulseScheduleConfig;
+}
+
 export class PulseScheduler {
+  /** Legacy agent-level schedules (used when no routines exist for the agent) */
   private agents: Map<string, PulseScheduleConfig> = new Map();
+  /** Routine-level schedules keyed by routineId */
+  private routines: Map<string, ScheduleEntry> = new Map();
+  /** Track which agents have routines registered */
+  private agentsWithRoutines: Set<string> = new Set();
   
   constructor() {}
   
+  // ============================================================================
+  // Routine-based API (preferred)
+  // ============================================================================
+  
   /**
-   * Register or update an agent's pulse schedule.
+   * Register or update a routine's schedule.
+   */
+  setRoutineSchedule(routine: PulseRoutine): void {
+    const schedule: PulseScheduleConfig = {
+      enabled: routine.enabled,
+      intervalMinutes: routine.intervalMinutes,
+      offsetMinutes: routine.offsetMinutes,
+      blackouts: routine.blackouts,
+      oneOffs: routine.oneOffs,
+      maxConsecutiveSkips: 5,
+    };
+    this.routines.set(routine.id, {
+      agentId: routine.agentId,
+      routineId: routine.id,
+      routineName: routine.name,
+      schedule,
+    });
+    this.agentsWithRoutines.add(routine.agentId);
+  }
+  
+  /**
+   * Remove a routine from the scheduler.
+   */
+  removeRoutine(routineId: string): void {
+    const entry = this.routines.get(routineId);
+    if (entry) {
+      this.routines.delete(routineId);
+      // Check if agent still has any routines
+      let hasOther = false;
+      for (const [, e] of this.routines) {
+        if (e.agentId === entry.agentId) {
+          hasOther = true;
+          break;
+        }
+      }
+      if (!hasOther) {
+        this.agentsWithRoutines.delete(entry.agentId);
+      }
+    }
+  }
+
+  /**
+   * Get all routine entries for an agent.
+   */
+  getAgentRoutines(agentId: string): ScheduleEntry[] {
+    const entries: ScheduleEntry[] = [];
+    for (const [, entry] of this.routines) {
+      if (entry.agentId === agentId) {
+        entries.push(entry);
+      }
+    }
+    return entries;
+  }
+
+  /**
+   * Check if an agent has any routines registered.
+   */
+  hasRoutines(agentId: string): boolean {
+    return this.agentsWithRoutines.has(agentId);
+  }
+  
+  // ============================================================================
+  // Legacy agent-level API (backward compatible)
+  // ============================================================================
+  
+  /**
+   * Register or update an agent's pulse schedule (legacy).
    */
   setAgentSchedule(agentId: string, schedule: Partial<PulseScheduleConfig>): void {
     const existing = this.agents.get(agentId) || { ...DEFAULT_PULSE_SCHEDULE };
@@ -47,42 +139,79 @@ export class PulseScheduler {
    */
   removeAgent(agentId: string): void {
     this.agents.delete(agentId);
+    // Also remove all routines for this agent
+    for (const [routineId, entry] of this.routines) {
+      if (entry.agentId === agentId) {
+        this.routines.delete(routineId);
+      }
+    }
+    this.agentsWithRoutines.delete(agentId);
   }
   
   /**
-   * Auto-assign offsets to all agents to minimize conflicts.
-   * Call this once at startup or when user requests auto-spread.
+   * Auto-assign offsets to all agents/routines to minimize conflicts.
    */
   autoAssignOffsets(): void {
-    const agentIds = Array.from(this.agents.keys()).sort();
-    const defaultInterval = 30; // Use most common interval
+    const entries = this.getAllScheduleEntries();
+    const defaultInterval = 30;
     
-    agentIds.forEach((agentId, index) => {
-      const schedule = this.agents.get(agentId)!;
-      // Spread agents evenly across the interval
-      const offset = Math.floor((index * defaultInterval) / agentIds.length);
-      this.agents.set(agentId, { ...schedule, offsetMinutes: offset });
+    entries.forEach((entry, index) => {
+      const offset = Math.floor((index * defaultInterval) / entries.length);
+      entry.schedule.offsetMinutes = offset;
+      
+      if (entry.routineId) {
+        this.routines.set(entry.routineId, entry);
+      } else {
+        this.agents.set(entry.agentId, entry.schedule);
+      }
     });
     
-    console.log(`[PulseScheduler] Auto-assigned offsets to ${agentIds.length} agents`);
+    console.log(`[PulseScheduler] Auto-assigned offsets to ${entries.length} entries`);
+  }
+  
+  // ============================================================================
+  // Unified scheduling
+  // ============================================================================
+  
+  /**
+   * Get all active schedule entries.  Routine entries are used for agents that
+   * have them; legacy agent entries are used for agents without routines.
+   */
+  private getAllScheduleEntries(): ScheduleEntry[] {
+    const entries: ScheduleEntry[] = [];
+    
+    for (const [, entry] of this.routines) {
+      entries.push(entry);
+    }
+    
+    for (const [agentId, schedule] of this.agents) {
+      if (!this.agentsWithRoutines.has(agentId)) {
+        entries.push({ agentId, schedule });
+      }
+    }
+    
+    return entries.sort((a, b) => {
+      if (a.agentId !== b.agentId) return a.agentId.localeCompare(b.agentId);
+      return (a.routineName || '').localeCompare(b.routineName || '');
+    });
   }
   
   /**
-   * Compute the next N pulses for a specific agent.
+   * Compute the next N pulses for a schedule entry.
    */
-  computeAgentPulses(
-    agentId: string,
+  private computeEntryPulses(
+    entry: ScheduleEntry,
     fromTime: number = Date.now(),
     count: number = 10
   ): ScheduledPulse[] {
-    const schedule = this.agents.get(agentId);
+    const { schedule, agentId, routineId, routineName } = entry;
     if (!schedule || !schedule.enabled) return [];
     
     const pulses: ScheduledPulse[] = [];
     let currentTime = fromTime;
-    const maxTime = fromTime + 7 * 24 * 60 * 60 * 1000; // Max 7 days ahead
+    const maxTime = fromTime + 7 * 24 * 60 * 60 * 1000;
     
-    // First, add all one-off pulses in the future
+    // One-off pulses
     for (const oneOff of schedule.oneOffs) {
       const oneOffTime = new Date(oneOff).getTime();
       if (oneOffTime > fromTime && oneOffTime < maxTime) {
@@ -91,32 +220,60 @@ export class PulseScheduler {
           scheduledAt: oneOffTime,
           source: 'one-off',
           status: 'scheduled',
+          routineId,
+          routineName,
         });
       }
     }
     
-    // Then compute recurring pulses until we have enough
+    // Recurring pulses
     while (pulses.length < count && currentTime < maxTime) {
       const nextPulse = this.computeNextRecurringPulse(schedule, currentTime);
       if (!nextPulse || nextPulse > maxTime) break;
       
-      // Check if this time is in a blackout
       if (!this.isInBlackout(schedule, nextPulse)) {
         pulses.push({
           agentId,
           scheduledAt: nextPulse,
           source: 'recurring',
           status: 'scheduled',
+          routineId,
+          routineName,
         });
       }
       
-      currentTime = nextPulse + 1; // Move past this pulse
+      currentTime = nextPulse + 1;
     }
     
-    // Sort by time and return requested count
     return pulses
       .sort((a, b) => a.scheduledAt - b.scheduledAt)
       .slice(0, count);
+  }
+  
+  /**
+   * Compute the next N pulses for a specific agent (aggregates across routines).
+   */
+  computeAgentPulses(
+    agentId: string,
+    fromTime: number = Date.now(),
+    count: number = 10
+  ): ScheduledPulse[] {
+    if (this.agentsWithRoutines.has(agentId)) {
+      const allPulses: ScheduledPulse[] = [];
+      for (const [, entry] of this.routines) {
+        if (entry.agentId === agentId) {
+          allPulses.push(...this.computeEntryPulses(entry, fromTime, count));
+        }
+      }
+      return allPulses
+        .sort((a, b) => a.scheduledAt - b.scheduledAt)
+        .slice(0, count);
+    }
+    
+    // Legacy
+    const schedule = this.agents.get(agentId);
+    if (!schedule) return [];
+    return this.computeEntryPulses({ agentId, schedule }, fromTime, count);
   }
   
   /**
@@ -129,18 +286,12 @@ export class PulseScheduler {
     const intervalMs = schedule.intervalMinutes * 60 * 1000;
     const offsetMs = schedule.offsetMinutes * 60 * 1000;
     
-    // Find the start of the current interval period
-    // We use intervals aligned to midnight UTC for consistency
     const dayStartMs = Math.floor(afterTime / (24 * 60 * 60 * 1000)) * (24 * 60 * 60 * 1000);
-    
-    // Find the interval slot after afterTime
     const msSinceDayStart = afterTime - dayStartMs;
     const currentSlot = Math.floor(msSinceDayStart / intervalMs);
     
-    // The pulse time for this slot
     let nextPulseInSlot = dayStartMs + (currentSlot * intervalMs) + offsetMs;
     
-    // If we've passed this slot's pulse, move to next slot
     if (nextPulseInSlot <= afterTime) {
       nextPulseInSlot += intervalMs;
     }
@@ -158,19 +309,15 @@ export class PulseScheduler {
     
     for (const blackout of schedule.blackouts) {
       if (blackout.type === 'recurring') {
-        // Check daily recurring blackout
         if (blackout.startTime && blackout.endTime) {
-          // Check day of week if specified
           if (blackout.daysOfWeek && !blackout.daysOfWeek.includes(dayOfWeek)) {
             continue;
           }
-          
           if (this.isTimeInRange(timeStr, blackout.startTime, blackout.endTime)) {
             return true;
           }
         }
       } else if (blackout.type === 'one-off') {
-        // Check one-off blackout
         if (blackout.start && blackout.end) {
           const startMs = new Date(blackout.start).getTime();
           const endMs = new Date(blackout.end).getTime();
@@ -186,10 +333,8 @@ export class PulseScheduler {
   
   /**
    * Check if a time string (HH:MM) is within a range.
-   * Handles overnight ranges (e.g., 23:00 to 07:00).
    */
   private isTimeInRange(time: string, start: string, end: string): boolean {
-    // Convert to minutes since midnight for easy comparison
     const toMinutes = (t: string) => {
       const [h, m] = t.split(':').map(Number);
       return h * 60 + m;
@@ -200,16 +345,14 @@ export class PulseScheduler {
     const endMin = toMinutes(end);
     
     if (startMin <= endMin) {
-      // Normal range (e.g., 09:00 to 17:00)
       return timeMin >= startMin && timeMin < endMin;
     } else {
-      // Overnight range (e.g., 23:00 to 07:00)
       return timeMin >= startMin || timeMin < endMin;
     }
   }
   
   /**
-   * Compute the pulse timeline for all agents over a time window.
+   * Compute the pulse timeline for all agents/routines over a time window.
    */
   computeTimeline(
     fromTime: number = Date.now(),
@@ -221,19 +364,17 @@ export class PulseScheduler {
     const allPulses: ScheduledPulse[] = [];
     const byAgent: Record<string, number> = {};
     
-    // Collect pulses from all agents
-    for (const [agentId] of this.agents) {
-      const agentPulses = this.computeAgentPulses(agentId, fromTime, 100)
+    const entries = this.getAllScheduleEntries();
+    
+    for (const entry of entries) {
+      const entryPulses = this.computeEntryPulses(entry, fromTime, 100)
         .filter(p => p.scheduledAt >= windowStart && p.scheduledAt < windowEnd);
       
-      allPulses.push(...agentPulses);
-      byAgent[agentId] = agentPulses.length;
+      allPulses.push(...entryPulses);
+      byAgent[entry.agentId] = (byAgent[entry.agentId] || 0) + entryPulses.length;
     }
     
-    // Sort all pulses by time
     allPulses.sort((a, b) => a.scheduledAt - b.scheduledAt);
-    
-    // Detect conflicts
     const conflicts = this.detectConflicts(allPulses);
     
     return {
@@ -260,7 +401,6 @@ export class PulseScheduler {
       const windowStart = pulse.scheduledAt;
       const windowEnd = pulse.scheduledAt + CONFLICT_WINDOW_MS;
       
-      // Find all pulses within the conflict window
       const conflicting = pulses.filter(p => 
         p.scheduledAt >= windowStart && 
         p.scheduledAt < windowEnd &&
@@ -268,7 +408,6 @@ export class PulseScheduler {
       );
       
       if (conflicting.length > 0) {
-        // Check if we already have a conflict for this window
         const existing = conflicts.find(c => 
           Math.abs(c.windowStart - windowStart) < CONFLICT_WINDOW_MS
         );
@@ -280,7 +419,6 @@ export class PulseScheduler {
             source: p.source,
           }));
           
-          // Dedupe by agentId (same agent can't conflict with itself)
           const uniqueAgents = agents.filter((a, idx, arr) => 
             arr.findIndex(x => x.agentId === a.agentId) === idx
           );
@@ -301,27 +439,33 @@ export class PulseScheduler {
   }
   
   /**
-   * Get the next pulse time for any agent (for the main scheduler to set timeout).
+   * Get the next pulse time for any agent/routine.
    */
-  getNextPulseTime(): { agentId: string; time: number } | null {
-    let nextPulse: { agentId: string; time: number } | null = null;
+  getNextPulseTime(): { agentId: string; routineId?: string; routineName?: string; time: number } | null {
+    let next: { agentId: string; routineId?: string; routineName?: string; time: number } | null = null;
     
-    for (const [agentId] of this.agents) {
-      const pulses = this.computeAgentPulses(agentId, Date.now(), 1);
+    const entries = this.getAllScheduleEntries();
+    
+    for (const entry of entries) {
+      const pulses = this.computeEntryPulses(entry, Date.now(), 1);
       if (pulses.length > 0) {
         const pulse = pulses[0];
-        if (!nextPulse || pulse.scheduledAt < nextPulse.time) {
-          nextPulse = { agentId, time: pulse.scheduledAt };
+        if (!next || pulse.scheduledAt < next.time) {
+          next = {
+            agentId: entry.agentId,
+            routineId: entry.routineId,
+            routineName: entry.routineName,
+            time: pulse.scheduledAt,
+          };
         }
       }
     }
     
-    return nextPulse;
+    return next;
   }
   
   /**
    * Suggest offset changes to eliminate conflicts.
-   * Returns a map of agentId -> suggested new offset.
    */
   suggestOffsetChanges(): Map<string, number> {
     const suggestions = new Map<string, number>();
@@ -331,14 +475,12 @@ export class PulseScheduler {
       return suggestions;
     }
     
-    // Simple greedy approach: for each conflict, move the second agent's offset
     const usedOffsets = new Set<number>();
     
     for (const [agentId, schedule] of this.agents) {
       if (!usedOffsets.has(schedule.offsetMinutes)) {
         usedOffsets.add(schedule.offsetMinutes);
       } else {
-        // Find an unused offset
         for (let i = 0; i < schedule.intervalMinutes; i++) {
           if (!usedOffsets.has(i)) {
             suggestions.set(agentId, i);

@@ -1341,6 +1341,127 @@ export async function autoSpreadOffsets(): Promise<AutoSpreadResult> {
   return handleResponse(res, 'Failed to auto-spread offsets');
 }
 
+// ── Pulse Routines ────────────────────────────────────────────────────────
+
+export interface PulseRoutine {
+  id: string;
+  agentId: string;
+  name: string;
+  description: string | null;
+  instructions: string;
+  sourceFile: string | null;
+  enabled: boolean;
+  intervalMinutes: number;
+  offsetMinutes: number;
+  blackouts: PulseBlackout[];
+  oneOffs: string[];
+  timeoutMs: number | null;
+  maxConcurrent: number;
+  pulseColumns: string[] | null;
+  sortOrder: number;
+  lastRunAt: number | null;
+  totalRuns: number;
+  color: string | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface CreatePulseRoutineRequest {
+  name: string;
+  description?: string;
+  instructions?: string;
+  enabled?: boolean;
+  intervalMinutes?: number;
+  offsetMinutes?: number;
+  blackouts?: PulseBlackout[];
+  timeoutMs?: number;
+  maxConcurrent?: number;
+  pulseColumns?: string[];
+  color?: string;
+}
+
+export interface UpdatePulseRoutineRequest {
+  name?: string;
+  description?: string;
+  instructions?: string;
+  enabled?: boolean;
+  intervalMinutes?: number;
+  offsetMinutes?: number;
+  blackouts?: PulseBlackout[];
+  oneOffs?: string[];
+  timeoutMs?: number;
+  maxConcurrent?: number;
+  pulseColumns?: string[];
+  color?: string;
+}
+
+export async function fetchPulseRoutines(agentId: string): Promise<{ routines: PulseRoutine[] }> {
+  const res = await authFetch(`${API_BASE}/agents/${agentId}/pulse-routines`);
+  return handleResponse(res, 'Failed to fetch pulse routines');
+}
+
+export async function createPulseRoutine(agentId: string, data: CreatePulseRoutineRequest): Promise<PulseRoutine> {
+  const res = await authFetch(`${API_BASE}/agents/${agentId}/pulse-routines`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+  return handleResponse(res, 'Failed to create pulse routine');
+}
+
+export async function updatePulseRoutine(agentId: string, routineId: string, data: UpdatePulseRoutineRequest): Promise<PulseRoutine> {
+  const res = await authFetch(`${API_BASE}/agents/${agentId}/pulse-routines/${routineId}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+  return handleResponse(res, 'Failed to update pulse routine');
+}
+
+export async function deletePulseRoutine(agentId: string, routineId: string): Promise<{ status: string }> {
+  const res = await authFetch(`${API_BASE}/agents/${agentId}/pulse-routines/${routineId}`, {
+    method: 'DELETE',
+  });
+  return handleResponse(res, 'Failed to delete pulse routine');
+}
+
+export async function togglePulseRoutine(agentId: string, routineId: string): Promise<{ id: string; enabled: boolean }> {
+  const res = await authFetch(`${API_BASE}/agents/${agentId}/pulse-routines/${routineId}/toggle`, {
+    method: 'PATCH',
+  });
+  return handleResponse(res, 'Failed to toggle pulse routine');
+}
+
+export async function triggerPulseRoutine(agentId: string, routineId: string): Promise<{ status: string }> {
+  const res = await authFetch(`${API_BASE}/agents/${agentId}/pulse-routines/${routineId}/trigger`, {
+    method: 'POST',
+  });
+  return handleResponse(res, 'Failed to trigger pulse routine');
+}
+
+export async function duplicatePulseRoutine(agentId: string, routineId: string): Promise<PulseRoutine> {
+  const res = await authFetch(`${API_BASE}/agents/${agentId}/pulse-routines/${routineId}/duplicate`, {
+    method: 'POST',
+  });
+  return handleResponse(res, 'Failed to duplicate pulse routine');
+}
+
+export async function reorderPulseRoutines(agentId: string, routineIds: string[]): Promise<{ status: string }> {
+  const res = await authFetch(`${API_BASE}/agents/${agentId}/pulse-routines/reorder`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ routineIds }),
+  });
+  return handleResponse(res, 'Failed to reorder pulse routines');
+}
+
+export async function seedPulseRoutines(agentId: string): Promise<{ seeded: boolean; routines: PulseRoutine[] }> {
+  const res = await authFetch(`${API_BASE}/agents/${agentId}/pulse-routines/seed`, {
+    method: 'POST',
+  });
+  return handleResponse(res, 'Failed to seed pulse routines');
+}
+
 // ── Project Agent Assignment ──────────────────────────────────────────────
 
 export interface ProjectAgent {
