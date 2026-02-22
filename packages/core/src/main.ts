@@ -289,7 +289,7 @@ async function handleSystemUpdate(targetVersion: string): Promise<void> {
         error: !!error,
         timestamp: Date.now(),
       };
-      await opsRedis.xadd('djinnbot:events:global', { data: JSON.stringify(event) }).catch(() => {});
+      await opsRedis.xadd('djinnbot:events:global', '*', 'data', JSON.stringify(event)).catch(() => {});
     }
     if (error) {
       console.error(`[Engine] Update ${stage}: ${message}`);
