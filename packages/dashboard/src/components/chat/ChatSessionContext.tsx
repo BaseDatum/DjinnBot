@@ -257,6 +257,26 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
 
         if (reconciledPanes.length > 0) {
           setPanes(reconciledPanes);
+
+          // Fetch key_resolution for restored panes that don't have it yet.
+          // key_resolution lives on the backend and is not persisted in localStorage.
+          for (const pane of reconciledPanes) {
+            if (pane.sessionId && !pane.keyResolution) {
+              getChatSession(pane.sessionId)
+                .then(session => {
+                  if (session.key_resolution) {
+                    setPanes(prev =>
+                      prev.map(p =>
+                        p.sessionId === pane.sessionId
+                          ? { ...p, keyResolution: session.key_resolution }
+                          : p,
+                      ),
+                    );
+                  }
+                })
+                .catch(() => {}); // Non-fatal
+            }
+          }
         } else {
           // No panes to restore — clear stale localStorage
           clearPanesStorage();
