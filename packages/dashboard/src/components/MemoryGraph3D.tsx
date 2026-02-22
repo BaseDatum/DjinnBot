@@ -27,6 +27,7 @@ import {
   makeLinkParticles,
   makeLinkParticleWidth,
   computeNodeFz,
+  updateLabelVisibility,
 } from './graph/graphRenderers3d';
 import type { Render3DRefs } from './graph/graphRenderers3d';
 import { GraphFilterSidebar } from './graph/GraphFilterSidebar';
@@ -92,6 +93,8 @@ export function MemoryGraph3D({ agentId, hideViewMode, onSwitchTo2D }: MemoryGra
   const colors = isDark ? COLORS_DARK : COLORS_LIGHT;
   const colorsRef = useRef<ColorPalette>(colors);
   colorsRef.current = colors;
+  const isDarkRef = useRef(isDark);
+  isDarkRef.current = isDark;
 
   // ── UI state ──────────────────────────────────────────────────────────────
   const [viewMode, setViewMode] = useState<GraphViewMode>('personal');
@@ -156,10 +159,11 @@ export function MemoryGraph3D({ agentId, hideViewMode, onSwitchTo2D }: MemoryGra
       setContextMenu({ x, y, node: null, graphX: gx, graphY: gy }),
   });
 
-  // Full refs including colors
+  // Full refs including colors and theme
   const fullRefs: Render3DRefs = {
     ...renderRefs,
     colorsRef,
+    isDarkRef,
   };
 
   // Sync degree/orphan refs
@@ -253,6 +257,27 @@ export function MemoryGraph3D({ agentId, hideViewMode, onSwitchTo2D }: MemoryGra
     sceneConfigured.current = true;
   }, [graphData.nodes.length]);
 
+  // ── Per-frame label distance fade ──────────────────────────────────────
+  useEffect(() => {
+    let frameId: number;
+    const tick = () => {
+      updateLabelVisibility(graphRef, renderRefs);
+      frameId = requestAnimationFrame(tick);
+    };
+    frameId = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frameId);
+  }, []); // stable refs — never recreated
+
+  // ── Refresh node objects when theme changes (label bg/text colors) ────
+  const prevDarkRef = useRef(isDark);
+  useEffect(() => {
+    if (prevDarkRef.current !== isDark && graphRef.current) {
+      prevDarkRef.current = isDark;
+      // Force ForceGraph3D to rebuild node three-objects
+      graphRef.current.refresh();
+    }
+  }, [isDark]);
+
   // ── Resize observer ──────────────────────────────────────────────────────
   useEffect(() => {
     if (!wrapperRef.current) return;
@@ -312,8 +337,8 @@ export function MemoryGraph3D({ agentId, hideViewMode, onSwitchTo2D }: MemoryGra
     return () => document.removeEventListener('keydown', handler);
   }, [contextMenu, selectedNode, setSelectedNode]);
 
-  // Background color for the 3D scene
-  const bgColor = isDark ? '#0f172a' : '#f8fafc';
+  // Background color for the 3D scene — match the site theme exactly
+  const bgColor = isDark ? '#000000' : '#ffffff';
 
   return (
     <div

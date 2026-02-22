@@ -18,7 +18,7 @@ interface MemoryGraphContainerProps {
 }
 
 export function MemoryGraphContainer({ agentId, hideViewMode }: MemoryGraphContainerProps) {
-  const [dimension, setDimension] = useState<GraphDimension>('2d');
+  const [dimension, setDimension] = useState<GraphDimension>('3d');
 
   if (dimension === '3d') {
     return (

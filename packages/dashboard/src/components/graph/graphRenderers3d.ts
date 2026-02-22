@@ -24,6 +24,7 @@ import type { GraphNode, ForceLink, ZAxisMode } from './types';
 
 export interface Render3DRefs {
   colorsRef: MutableRefObject<ColorPalette>;
+  isDarkRef: MutableRefObject<boolean>;
   hoveredNodeRef: MutableRefObject<GraphNode | null>;
   selectedNodeRef: MutableRefObject<GraphNode | null>;
   highlightNodesRef: MutableRefObject<Set<string>>;
@@ -78,22 +79,27 @@ function getGeometry(memoryType: string): THREE.BufferGeometry {
 
 // ── Label sprite factory ───────────────────────────────────────────────────
 
-function createLabelSprite(text: string, color: string): THREE.Sprite {
+function createLabelSprite(text: string, isDark: boolean): THREE.Sprite {
   const canvas = document.createElement('canvas');
   const ctx = canvas.getContext('2d')!;
   const fontSize = 48;
-  const font = `${fontSize}px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif`;
+  const font = `bold ${fontSize}px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif`;
   ctx.font = font;
-  const metrics = ctx.measureText(text);
+
+  // Truncate long labels
+  const maxChars = 28;
+  const displayText = text.length > maxChars ? text.slice(0, maxChars - 1) + '\u2026' : text;
+  const metrics = ctx.measureText(displayText);
   const textWidth = metrics.width;
 
-  const pad = 16;
+  const pad = 20;
   canvas.width = Math.ceil(textWidth + pad * 2);
   canvas.height = Math.ceil(fontSize * 1.4 + pad * 2);
 
-  // Background pill
-  ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
-  const r = 8;
+  // Background pill — theme-aware
+  const bgColor = isDark ? 'rgba(0, 0, 0, 0.8)' : 'rgba(255, 255, 255, 0.85)';
+  ctx.fillStyle = bgColor;
+  const r = 10;
   const w = canvas.width;
   const h = canvas.height;
   ctx.beginPath();
@@ -109,12 +115,12 @@ function createLabelSprite(text: string, color: string): THREE.Sprite {
   ctx.closePath();
   ctx.fill();
 
-  // Text
+  // Text — theme-aware
   ctx.font = font;
-  ctx.fillStyle = color;
+  ctx.fillStyle = isDark ? '#e2e8f0' : '#1e293b';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText(text, w / 2, h / 2);
+  ctx.fillText(displayText, w / 2, h / 2);
 
   const texture = new THREE.CanvasTexture(canvas);
   texture.needsUpdate = true;
@@ -123,8 +129,10 @@ function createLabelSprite(text: string, color: string): THREE.Sprite {
     map: texture,
     transparent: true,
     depthWrite: false,
+    opacity: 0, // Start invisible — the frame loop will fade in based on distance
   });
   const sprite = new THREE.Sprite(mat);
+  sprite.userData.isLabel = true;
   // Scale to reasonable world units
   const aspect = canvas.width / canvas.height;
   const scale = 4;
@@ -221,17 +229,12 @@ export function makeNodeThreeObject(refs: Render3DRefs) {
       group.add(ring);
     }
 
-    // ── Label sprite (shown for focus + highlighted nodes, or all when
-    //    the scene is zoomed in — but we can't check camera distance in
-    //    the factory, so show labels for non-dimmed nodes) ──────────────
-    const showLabel = isFocus || (isHighlighted && !!focus);
-    if (showLabel) {
-      const label = node.title || node.id;
-      const labelColor = isDimmed ? c.dimmedNode : c.labelText;
-      const sprite = createLabelSprite(label, labelColor);
-      sprite.position.set(0, r + 3, 0);
-      group.add(sprite);
-    }
+    // ── Label sprite — always attached, visibility managed per-frame
+    //    by updateLabelVisibility() based on camera distance ────────────
+    const label = node.title || node.id;
+    const sprite = createLabelSprite(label, refs.isDarkRef.current);
+    sprite.position.set(0, r + 3, 0);
+    group.add(sprite);
 
     return group;
   };
@@ -310,6 +313,86 @@ export function syncHighlights3D(
 
   refs.highlightNodesRef.current = nextNodes;
   refs.highlightLinksRef.current = nextLinks;
+}
+
+// ── Per-frame label visibility based on camera distance ────────────────────
+
+/** Distance thresholds for label fade-in/fade-out. */
+const LABEL_NEAR = 80;   // fully visible when closer than this
+const LABEL_FAR = 250;    // fully hidden when farther than this
+
+/**
+ * Call once per animation frame. Iterates every node's Three.js group,
+ * finds the label sprite (tagged `userData.isLabel`), and sets its opacity
+ * based on the camera distance to that node.
+ *
+ * Highlighted / focused nodes always show their label regardless of distance.
+ */
+export function updateLabelVisibility(
+  graphRef: { current: any | null },
+  refs: Pick<Render3DRefs, 'hoveredNodeRef' | 'selectedNodeRef' | 'highlightNodesRef'>
+) {
+  const fg = graphRef.current;
+  if (!fg) return;
+
+  const camera = fg.camera?.();
+  if (!camera) return;
+
+  const camPos = camera.position;
+
+  const data = fg.graphData?.();
+  if (!data?.nodes) return;
+
+  for (const node of data.nodes) {
+    const obj = node.__threeObj as THREE.Group | undefined;
+    if (!obj) continue;
+
+    // Find the label sprite child
+    let sprite: THREE.Sprite | null = null;
+    for (let i = 0; i < obj.children.length; i++) {
+      const child = obj.children[i];
+      if (child.userData?.isLabel) {
+        sprite = child as THREE.Sprite;
+        break;
+      }
+    }
+    if (!sprite) continue;
+
+    const mat = sprite.material as THREE.SpriteMaterial;
+
+    // Highlighted / focused nodes: always fully visible
+    const focus = refs.hoveredNodeRef.current ?? refs.selectedNodeRef.current;
+    const isHighlighted = refs.highlightNodesRef.current.has(node.id);
+    const isFocus = focus?.id === node.id;
+
+    if (isFocus || (isHighlighted && !!focus)) {
+      mat.opacity = 1;
+      continue;
+    }
+
+    // If a node is focused and this isn't in its neighborhood, hide label
+    if (focus && !isHighlighted) {
+      mat.opacity = 0;
+      continue;
+    }
+
+    // Distance-based fade
+    const nx = node.x ?? 0;
+    const ny = node.y ?? 0;
+    const nz = node.z ?? 0;
+    const dx = camPos.x - nx;
+    const dy = camPos.y - ny;
+    const dz = camPos.z - nz;
+    const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+
+    if (dist <= LABEL_NEAR) {
+      mat.opacity = 1;
+    } else if (dist >= LABEL_FAR) {
+      mat.opacity = 0;
+    } else {
+      mat.opacity = 1 - (dist - LABEL_NEAR) / (LABEL_FAR - LABEL_NEAR);
+    }
+  }
 }
 
 // ── Z-axis constraint helpers ──────────────────────────────────────────────

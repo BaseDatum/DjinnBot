@@ -22,7 +22,7 @@ export interface UseGraphInteraction3DReturn {
   handleBackgroundClick: (event: MouseEvent) => void;
   handleNodeRightClick: (node: any, event: MouseEvent) => void;
   handleBackgroundRightClick: (event: MouseEvent) => void;
-  renderRefs: Omit<Render3DRefs, 'colorsRef'>;
+  renderRefs: Omit<Render3DRefs, 'colorsRef' | 'isDarkRef'>;
   flyToNode: (node: GraphNode) => void;
   zoomToFit: () => void;
 }

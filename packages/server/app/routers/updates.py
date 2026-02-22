@@ -38,8 +38,15 @@ REDIS_CACHE_TTL = 3600  # 1 hour
 
 
 def _get_current_version() -> str:
-    """Return the running DjinnBot version from env or 'unknown'."""
-    return os.getenv("DJINNBOT_VERSION", "latest")
+    """Return the running DjinnBot version.
+
+    Prefer DJINNBOT_BUILD_VERSION (semver baked in at Docker build time via
+    ``--build-arg BUILD_VERSION=vX.Y.Z``).  Fall back to DJINNBOT_VERSION
+    (the image tag used in docker-compose, which is often just ``latest``).
+    """
+    return (
+        os.getenv("DJINNBOT_BUILD_VERSION") or os.getenv("DJINNBOT_VERSION") or "latest"
+    )
 
 
 def _parse_semver(tag: str) -> Optional[tuple[int, int, int]]:
