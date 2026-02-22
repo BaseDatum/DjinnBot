@@ -132,27 +132,27 @@ services:
       # Agent containers symlink /home/agent/.cache/qmd → /djinnbot-data/.cache/qmd so they
       # all share the same index without needing HOME overridden at the agent level.
       - HOME=/data
-      - SLACK_CHANNEL_ID=${SLACK_CHANNEL_ID}
-      - SLACK_CHIEKO_BOT_TOKEN=${SLACK_CHIEKO_BOT_TOKEN}
-      - SLACK_CHIEKO_APP_TOKEN=${SLACK_CHIEKO_APP_TOKEN}
-      - SLACK_ERIC_BOT_TOKEN=${SLACK_ERIC_BOT_TOKEN}
-      - SLACK_ERIC_APP_TOKEN=${SLACK_ERIC_APP_TOKEN}
-      - SLACK_FINN_BOT_TOKEN=${SLACK_FINN_BOT_TOKEN}
-      - SLACK_FINN_APP_TOKEN=${SLACK_FINN_APP_TOKEN}
-      - SLACK_HOLT_BOT_TOKEN=${SLACK_HOLT_BOT_TOKEN}
-      - SLACK_HOLT_APP_TOKEN=${SLACK_HOLT_APP_TOKEN}
-      - SLACK_JIM_BOT_TOKEN=${SLACK_JIM_BOT_TOKEN}
-      - SLACK_JIM_APP_TOKEN=${SLACK_JIM_APP_TOKEN}
-      - SLACK_LUKE_BOT_TOKEN=${SLACK_LUKE_BOT_TOKEN}
-      - SLACK_LUKE_APP_TOKEN=${SLACK_LUKE_APP_TOKEN}
-      - SLACK_SHIGEO_BOT_TOKEN=${SLACK_SHIGEO_BOT_TOKEN}
-      - SLACK_SHIGEO_APP_TOKEN=${SLACK_SHIGEO_APP_TOKEN}
-      - SLACK_STAS_BOT_TOKEN=${SLACK_STAS_BOT_TOKEN}
-      - SLACK_STAS_APP_TOKEN=${SLACK_STAS_APP_TOKEN}
-      - SLACK_YANG_BOT_TOKEN=${SLACK_YANG_BOT_TOKEN}
-      - SLACK_YANG_APP_TOKEN=${SLACK_YANG_APP_TOKEN}
-      - SLACK_YUKIHIRO_BOT_TOKEN=${SLACK_YUKIHIRO_BOT_TOKEN}
-      - SLACK_YUKIHIRO_APP_TOKEN=${SLACK_YUKIHIRO_APP_TOKEN}
+      - SLACK_CHANNEL_ID=${SLACK_CHANNEL_ID:-}
+      - SLACK_CHIEKO_BOT_TOKEN=${SLACK_CHIEKO_BOT_TOKEN:-}
+      - SLACK_CHIEKO_APP_TOKEN=${SLACK_CHIEKO_APP_TOKEN:-}
+      - SLACK_ERIC_BOT_TOKEN=${SLACK_ERIC_BOT_TOKEN:-}
+      - SLACK_ERIC_APP_TOKEN=${SLACK_ERIC_APP_TOKEN:-}
+      - SLACK_FINN_BOT_TOKEN=${SLACK_FINN_BOT_TOKEN:-}
+      - SLACK_FINN_APP_TOKEN=${SLACK_FINN_APP_TOKEN:-}
+      - SLACK_HOLT_BOT_TOKEN=${SLACK_HOLT_BOT_TOKEN:-}
+      - SLACK_HOLT_APP_TOKEN=${SLACK_HOLT_APP_TOKEN:-}
+      - SLACK_JIM_BOT_TOKEN=${SLACK_JIM_BOT_TOKEN:-}
+      - SLACK_JIM_APP_TOKEN=${SLACK_JIM_APP_TOKEN:-}
+      - SLACK_LUKE_BOT_TOKEN=${SLACK_LUKE_BOT_TOKEN:-}
+      - SLACK_LUKE_APP_TOKEN=${SLACK_LUKE_APP_TOKEN:-}
+      - SLACK_SHIGEO_BOT_TOKEN=${SLACK_SHIGEO_BOT_TOKEN:-}
+      - SLACK_SHIGEO_APP_TOKEN=${SLACK_SHIGEO_APP_TOKEN:-}
+      - SLACK_STAS_BOT_TOKEN=${SLACK_STAS_BOT_TOKEN:-}
+      - SLACK_STAS_APP_TOKEN=${SLACK_STAS_APP_TOKEN:-}
+      - SLACK_YANG_BOT_TOKEN=${SLACK_YANG_BOT_TOKEN:-}
+      - SLACK_YANG_APP_TOKEN=${SLACK_YANG_APP_TOKEN:-}
+      - SLACK_YUKIHIRO_BOT_TOKEN=${SLACK_YUKIHIRO_BOT_TOKEN:-}
+      - SLACK_YUKIHIRO_APP_TOKEN=${SLACK_YUKIHIRO_APP_TOKEN:-}
       # Unified sandbox directory - each agent gets /data/sandboxes/{agentId}/
       - SANDBOXES_DIR=/data/sandboxes
       # Project workspaces (git repos for each project)
@@ -261,6 +261,15 @@ services:
   #     - ./data/runs/${RUN_ID}:/workspace
   #   networks:
   #     - djinnbot
+
+  # Pull-only service — ensures the agent-runtime image is available locally.
+  # The engine spawns agent containers dynamically via Docker API, so this
+  # image is never started by Compose, but must be pre-pulled.
+  agent-runtime:
+    image: ${AGENT_RUNTIME_IMAGE:-ghcr.io/basedatum/djinnbot/agent-runtime:latest}
+    profiles:
+      - pull-only
+    entrypoint: ["true"]
 
 networks:
   djinnbot_default:

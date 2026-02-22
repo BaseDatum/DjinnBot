@@ -681,11 +681,23 @@ export class PipelineEngine {
 
     if (!loopState) {
       // First time entering this loop - initialize
+      if (!stepConfig.loop.over) {
+        console.error(`[PipelineEngine] Loop step ${stepConfig.id} missing required 'over' variable name`);
+        await this.failRun(runId, `Loop step ${stepConfig.id} missing required 'over' variable in configuration`);
+        return;
+      }
+
       const outputs = await Promise.resolve(this.store.getOutputs(runId));
+      if (!outputs) {
+        console.error(`[PipelineEngine] Failed to retrieve outputs for run ${runId}`);
+        await this.failRun(runId, `Failed to retrieve outputs for run ${runId}`);
+        return;
+      }
+
       const overData = outputs[stepConfig.loop.over];
 
       if (!overData) {
-        console.error(`[PipelineEngine] Loop variable ${stepConfig.loop.over} not found`);
+        console.error(`[PipelineEngine] Loop variable ${stepConfig.loop.over} not found in outputs [${Object.keys(outputs).join(', ')}]`);
         await this.failRun(runId, `Loop variable ${stepConfig.loop.over} not found`);
         return;
       }
