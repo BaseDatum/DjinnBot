@@ -35,6 +35,7 @@ router = APIRouter()
 class UpdateChatSessionRequest(BaseModel):
     model: Optional[str] = None
     status: Optional[str] = None
+    key_resolution: Optional[str] = None
 
 
 class ChatSessionResponse(BaseModel):
@@ -49,6 +50,7 @@ class ChatSessionResponse(BaseModel):
     completed_at: Optional[int]
     error: Optional[str]
     message_count: int = 0
+    key_resolution: Optional[dict] = None
 
 
 class ChatMessageResponse(BaseModel):
@@ -135,6 +137,9 @@ async def list_chat_sessions(
                 completed_at=s.completed_at,
                 error=s.error,
                 message_count=message_counts.get(s.id, 0),
+                key_resolution=json.loads(s.key_resolution)
+                if getattr(s, "key_resolution", None)
+                else None,
             )
             for s in sessions
         ],
@@ -174,6 +179,9 @@ async def get_chat_session(
         completed_at=session.completed_at,
         error=session.error,
         message_count=len(session.messages),
+        key_resolution=json.loads(session.key_resolution)
+        if getattr(session, "key_resolution", None)
+        else None,
         messages=[
             ChatMessageResponse(
                 id=m.id,
@@ -218,6 +226,9 @@ async def update_chat_session(
     # Apply updates
     if request.model is not None:
         session.model = request.model
+
+    if request.key_resolution is not None:
+        session.key_resolution = request.key_resolution
 
     if request.status is not None:
         old_status = session.status
@@ -268,6 +279,9 @@ async def update_chat_session(
         completed_at=session.completed_at,
         error=session.error,
         message_count=message_count,
+        key_resolution=json.loads(session.key_resolution)
+        if getattr(session, "key_resolution", None)
+        else None,
     )
 
 
@@ -385,6 +399,9 @@ async def list_chat_sessions_internal(
                 completed_at=s.completed_at,
                 error=s.error,
                 message_count=message_counts.get(s.id, 0),
+                key_resolution=json.loads(s.key_resolution)
+                if getattr(s, "key_resolution", None)
+                else None,
             )
             for s in sessions
         ],

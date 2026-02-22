@@ -43,6 +43,7 @@ import { useChatSessions } from './ChatSessionContext';
 import { listChatSessions, startChatSession, getChatSession } from '@/lib/api';
 import { DEFAULT_CHAT_MODEL } from '@/lib/constants';
 import { formatModelChip } from '@/lib/format';
+import { KeySourceBadge } from '@/components/ui/KeySourceBadge';
 import { Link } from '@tanstack/react-router';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -657,6 +658,7 @@ export function FloatingChatWidget() {
               <span className="text-[10px] text-muted-foreground">
                 {formatModelChip(activePane.model)}
               </span>
+              {activePane.keyResolution && <KeySourceBadge keyResolution={activePane.keyResolution} />}
             </div>
           )}
 
