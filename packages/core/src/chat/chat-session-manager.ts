@@ -301,7 +301,7 @@ You are the **first agent**. The user is starting a **brand-new onboarding sessi
 
 **What you MUST do:**
 - Ask the user for the project name and repo situation — always, unconditionally.
-- Do NOT call `recall()` before asking your first question.
+- Do NOT call \`recall()\` before asking your first question.
 - Do NOT pre-fill the project name, repo, or any other detail from shared memory.
 
 Once the user tells you the project name, THEN you may recall to check if there are existing memories for that specific project (e.g. if they're continuing a half-finished onboarding for the same project). But the default assumption is: **this is a brand-new project the user is telling you about for the first time.**
