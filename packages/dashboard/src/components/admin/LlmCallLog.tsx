@@ -55,8 +55,13 @@ interface LlmCallListResponse {
     callCount: number;
     totalInputTokens: number;
     totalOutputTokens: number;
+    totalCacheReadTokens: number;
+    totalCacheWriteTokens: number;
     totalTokens: number;
     totalCost: number;
+    totalCostInput: number;
+    totalCostOutput: number;
+    avgDurationMs: number;
   } | null;
 }
 
@@ -151,23 +156,30 @@ export function LlmCallLog({ sessionId, runId, agentId, admin = false, maxHeight
     <div className="space-y-3">
       {/* Summary bar */}
       {summary && summary.callCount > 0 && (
-        <div className="flex flex-wrap gap-4 text-xs text-muted-foreground bg-muted/30 rounded-md px-3 py-2">
+        <div className="flex flex-wrap gap-x-5 gap-y-1 text-xs text-muted-foreground bg-muted/30 rounded-md px-3 py-2">
           <span className="flex items-center gap-1">
             <Zap className="h-3 w-3" />
             {summary.callCount} call{summary.callCount !== 1 ? 's' : ''}
           </span>
           <span className="flex items-center gap-1">
             <Hash className="h-3 w-3" />
-            {formatTokens(summary.totalTokens)} tokens
+            {formatTokens(summary.totalTokens)} total
           </span>
-          <span className="flex items-center gap-1" title={`Input: ${formatTokens(summary.totalInputTokens)} / Output: ${formatTokens(summary.totalOutputTokens)}`}>
-            In: {formatTokens(summary.totalInputTokens)} / Out: {formatTokens(summary.totalOutputTokens)}
-          </span>
+          <span>In: {formatTokens(summary.totalInputTokens)}</span>
+          <span>Out: {formatTokens(summary.totalOutputTokens)}</span>
+          {(summary.totalCacheReadTokens > 0 || summary.totalCacheWriteTokens > 0) && (
+            <span title={`Cache read: ${summary.totalCacheReadTokens.toLocaleString()} / Cache write: ${summary.totalCacheWriteTokens.toLocaleString()}`}>
+              Cache R: {formatTokens(summary.totalCacheReadTokens)} / W: {formatTokens(summary.totalCacheWriteTokens)}
+            </span>
+          )}
           {summary.totalCost > 0 && (
-            <span className="flex items-center gap-1">
+            <span className="flex items-center gap-1" title={`Input: ${formatCost(summary.totalCostInput)} / Output: ${formatCost(summary.totalCostOutput)}`}>
               <Coins className="h-3 w-3" />
               {formatCost(summary.totalCost)}
             </span>
+          )}
+          {summary.avgDurationMs > 0 && (
+            <span>Avg: {formatDuration(summary.avgDurationMs)}</span>
           )}
         </div>
       )}
@@ -181,7 +193,9 @@ export function LlmCallLog({ sessionId, runId, agentId, admin = false, maxHeight
               <th className="text-left px-3 py-1.5 font-medium">Time</th>
               <th className="text-left px-3 py-1.5 font-medium">Model</th>
               <th className="text-left px-3 py-1.5 font-medium">Key</th>
-              <th className="text-right px-3 py-1.5 font-medium">Tokens</th>
+              <th className="text-right px-3 py-1.5 font-medium">In</th>
+              <th className="text-right px-3 py-1.5 font-medium">Out</th>
+              <th className="text-right px-3 py-1.5 font-medium">Cache</th>
               <th className="text-right px-3 py-1.5 font-medium">Cost</th>
               <th className="text-right px-3 py-1.5 font-medium">Duration</th>
               <th className="text-center px-3 py-1.5 font-medium">Info</th>
@@ -217,7 +231,15 @@ export function LlmCallLog({ sessionId, runId, agentId, admin = false, maxHeight
                         <span className="text-muted-foreground">-</span>
                       )}
                     </td>
-                    <td className="px-3 py-1.5 text-right font-mono">{formatTokens(call.total_tokens)}</td>
+                    <td className="px-3 py-1.5 text-right font-mono">{formatTokens(call.input_tokens)}</td>
+                    <td className="px-3 py-1.5 text-right font-mono">{formatTokens(call.output_tokens)}</td>
+                    <td className="px-3 py-1.5 text-right font-mono text-muted-foreground">
+                      {(call.cache_read_tokens > 0 || call.cache_write_tokens > 0)
+                        ? <span title={`Read: ${call.cache_read_tokens.toLocaleString()} / Write: ${call.cache_write_tokens.toLocaleString()}`}>
+                            R:{formatTokens(call.cache_read_tokens)} W:{formatTokens(call.cache_write_tokens)}
+                          </span>
+                        : '-'}
+                    </td>
                     <td className="px-3 py-1.5 text-right font-mono">{formatCost(call.cost_total)}</td>
                     <td className="px-3 py-1.5 text-right font-mono">{formatDuration(call.duration_ms)}</td>
                     <td className="px-3 py-1.5 text-center">
@@ -236,7 +258,7 @@ export function LlmCallLog({ sessionId, runId, agentId, admin = false, maxHeight
                   </tr>
                   {isExpanded && (
                     <tr key={`${call.id}-detail`}>
-                      <td colSpan={8} className="px-3 py-2 bg-muted/20">
+                      <td colSpan={10} className="px-3 py-2 bg-muted/20">
                         <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-[10px]">
                           <div><span className="text-muted-foreground">ID:</span> <span className="font-mono">{call.id}</span></div>
                           <div><span className="text-muted-foreground">Request:</span> <span className="font-mono">{call.request_id || '-'}</span></div>

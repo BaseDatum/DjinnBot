@@ -153,8 +153,13 @@ async def _build_summary(db: AsyncSession, query) -> dict:
         func.count(LlmCallLog.id).label("call_count"),
         func.sum(LlmCallLog.input_tokens).label("total_input_tokens"),
         func.sum(LlmCallLog.output_tokens).label("total_output_tokens"),
+        func.sum(LlmCallLog.cache_read_tokens).label("total_cache_read_tokens"),
+        func.sum(LlmCallLog.cache_write_tokens).label("total_cache_write_tokens"),
         func.sum(LlmCallLog.total_tokens).label("total_tokens"),
         func.sum(LlmCallLog.cost_total).label("total_cost"),
+        func.sum(LlmCallLog.cost_input).label("total_cost_input"),
+        func.sum(LlmCallLog.cost_output).label("total_cost_output"),
+        func.avg(LlmCallLog.duration_ms).label("avg_duration_ms"),
     ).select_from(query.subquery())
     result = await db.execute(summary_query)
     row = result.one()
@@ -162,8 +167,13 @@ async def _build_summary(db: AsyncSession, query) -> dict:
         "callCount": row.call_count or 0,
         "totalInputTokens": row.total_input_tokens or 0,
         "totalOutputTokens": row.total_output_tokens or 0,
+        "totalCacheReadTokens": row.total_cache_read_tokens or 0,
+        "totalCacheWriteTokens": row.total_cache_write_tokens or 0,
         "totalTokens": row.total_tokens or 0,
         "totalCost": round(row.total_cost or 0, 6),
+        "totalCostInput": round(row.total_cost_input or 0, 6),
+        "totalCostOutput": round(row.total_cost_output or 0, 6),
+        "avgDurationMs": round(row.avg_duration_ms or 0),
     }
 
 
