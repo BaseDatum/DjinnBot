@@ -13,7 +13,7 @@ import {
   useRef,
   useState,
 } from 'react';
-import { fetchAgents, listChatSessions, endChatSession, startChatSession, restartChatSession, getChatSessionStatus, type AgentListItem } from '@/lib/api';
+import { fetchAgents, listChatSessions, endChatSession, startChatSession, restartChatSession, getChatSessionStatus, getChatSession, type AgentListItem } from '@/lib/api';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -36,6 +36,7 @@ export interface ChatPane {
     source?: string;
     userId?: string | null;
     resolvedProviders?: string[];
+    providerSources?: Record<string, { source: string; masked_key: string }>;
   } | null;
 }
 
@@ -329,6 +330,33 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
                   : p,
               ),
             );
+            // Fetch key_resolution once the engine has had time to write it.
+            // The engine patches key_resolution asynchronously after container start,
+            // so we poll a few times with increasing delay.
+            const fetchKeyResolution = (sessionId: string, attempt: number) => {
+              if (attempt > 4) return; // Give up after ~12s total
+              const delay = attempt === 0 ? 2000 : 3000;
+              setTimeout(async () => {
+                try {
+                  const session = await getChatSession(sessionId);
+                  if (session.key_resolution) {
+                    setPanes(prev =>
+                      prev.map(p =>
+                        p.paneId === paneId
+                          ? { ...p, keyResolution: session.key_resolution }
+                          : p,
+                      ),
+                    );
+                  } else {
+                    // Not available yet — retry
+                    fetchKeyResolution(sessionId, attempt + 1);
+                  }
+                } catch {
+                  // Non-fatal — key badge just won't appear
+                }
+              }, delay);
+            };
+            fetchKeyResolution(result.sessionId, 0);
           })
           .catch(err => {
             console.error('Failed to start chat session:', err);
@@ -395,13 +423,36 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
       ),
     );
 
-    restartChatSession(pane.agentId, pane.sessionId)
+    const sessionId = pane.sessionId;
+    restartChatSession(pane.agentId, sessionId)
       .then(() => {
         setPanes(prev =>
           prev.map(p =>
-            p.paneId === paneId ? { ...p, sessionStatus: 'starting' } : p,
+            p.paneId === paneId ? { ...p, sessionStatus: 'starting', keyResolution: null } : p,
           ),
         );
+        // Re-fetch key_resolution for the restarted session
+        const fetchKeyResolution = (attempt: number) => {
+          if (attempt > 4) return;
+          const delay = attempt === 0 ? 2000 : 3000;
+          setTimeout(async () => {
+            try {
+              const session = await getChatSession(sessionId);
+              if (session.key_resolution) {
+                setPanes(prev =>
+                  prev.map(p =>
+                    p.paneId === paneId
+                      ? { ...p, keyResolution: session.key_resolution }
+                      : p,
+                  ),
+                );
+              } else {
+                fetchKeyResolution(attempt + 1);
+              }
+            } catch { /* non-fatal */ }
+          }, delay);
+        };
+        fetchKeyResolution(0);
       })
       .catch(err => {
         console.error('Failed to restart session:', err);

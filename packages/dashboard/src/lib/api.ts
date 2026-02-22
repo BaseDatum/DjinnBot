@@ -1158,6 +1158,12 @@ export async function getChatSession(sessionId: string): Promise<{
   created_at: number;
   last_activity_at: number;
   message_count: number;
+  key_resolution?: {
+    source?: string;
+    userId?: string | null;
+    resolvedProviders?: string[];
+    providerSources?: Record<string, { source: string; masked_key: string }>;
+  } | null;
   messages: Array<{
     id: string;
     role: string;
