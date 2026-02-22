@@ -109,6 +109,7 @@ export class ApiClient {
         outputs: r.outputs || {},
         currentStepId: r.current_step,
         humanContext: r.human_context,
+        userId: r.key_user_id ?? undefined,
         createdAt: r.created_at,
         updatedAt: r.updated_at,
         completedAt: r.completed_at,

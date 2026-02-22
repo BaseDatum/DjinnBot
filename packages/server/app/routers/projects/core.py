@@ -185,6 +185,7 @@ async def get_project(
         "default_pipeline_id": project.default_pipeline_id,
         "slack_channel_id": project.slack_channel_id,
         "slack_notify_user_id": project.slack_notify_user_id,
+        "key_user_id": project.key_user_id,
         "onboarding_context": project.onboarding_context,
         "created_at": project.created_at,
         "updated_at": project.updated_at,
@@ -341,3 +342,40 @@ async def update_project_slack_settings(
         "slack_channel_id": project.slack_channel_id,
         "slack_notify_user_id": project.slack_notify_user_id,
     }
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# API KEY USER (multi-user: whose keys are used for automated runs)
+# ══════════════════════════════════════════════════════════════════════════
+
+
+class KeyUserRequest(BaseModel):
+    key_user_id: Optional[str] = None
+
+
+@router.get("/{project_id}/key-user")
+async def get_project_key_user(
+    project_id: str, session: AsyncSession = Depends(get_async_session)
+):
+    """Get the API key user for automated runs in this project."""
+    project = await get_project_or_404(session, project_id)
+    return {"key_user_id": project.key_user_id}
+
+
+@router.put("/{project_id}/key-user")
+async def set_project_key_user(
+    project_id: str,
+    req: KeyUserRequest,
+    session: AsyncSession = Depends(get_async_session),
+):
+    """Set or clear the API key user for automated runs.
+
+    When set, pipeline steps and pulse sessions in this project will use
+    the specified user's API keys (resolved via the per-user key chain).
+    When null/empty, system-level instance keys are used.
+    """
+    project = await get_project_or_404(session, project_id)
+    project.key_user_id = req.key_user_id or None
+    project.updated_at = now_ms()
+    await session.commit()
+    return {"status": "updated", "key_user_id": project.key_user_id}

@@ -115,14 +115,15 @@ export class PiMonoRunner implements AgentRunner {
    * Called on every runAgent() so UI-set keys are picked up without restart.
    * Falls back to this.config.providerApiKeys if apiBaseUrl is not configured.
    */
-  private async fetchAndInjectProviderApiKeys(): Promise<void> {
+  private async fetchAndInjectProviderApiKeys(userId?: string): Promise<void> {
     const apiBaseUrl = this.config.apiBaseUrl
       || process.env.DJINNBOT_API_URL
       || null;
 
     if (apiBaseUrl) {
+      const userParam = userId ? `?user_id=${encodeURIComponent(userId)}` : '';
       try {
-        const res = await authFetch(`${apiBaseUrl}/v1/settings/providers/keys/all`);
+        const res = await authFetch(`${apiBaseUrl}/v1/settings/providers/keys/all${userParam}`);
         if (res.ok) {
           const data = await res.json() as { keys: Record<string, string>; extra?: Record<string, string> };
           const keys = data.keys ?? {};

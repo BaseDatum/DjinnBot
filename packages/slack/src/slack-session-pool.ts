@@ -24,6 +24,7 @@
 
 import type { WebClient } from '@slack/web-api';
 import type { ChatSessionManager } from '@djinnbot/core/chat';
+import { SlackUserResolver } from './slack-user-resolver.js';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -48,6 +49,11 @@ export interface SlackSessionPoolConfig {
   threadIdleTimeoutMs?: number;
   /** Model to use when starting Slack sessions */
   defaultModel: string;
+  /**
+   * Base URL of the DjinnBot API server. Used by the Slack user resolver
+   * to cross-reference Slack user IDs with DjinnBot user accounts.
+   */
+  apiBaseUrl?: string;
 }
 
 export interface SlackAttachmentMeta {
@@ -89,10 +95,19 @@ export class SlackSessionPool {
   private readonly DM_IDLE_MS: number;
   private readonly THREAD_IDLE_MS: number;
 
+  private userResolver: SlackUserResolver | null = null;
+
   constructor(config: SlackSessionPoolConfig) {
     this.config = config;
     this.DM_IDLE_MS = config.dmIdleTimeoutMs ?? 20 * 60 * 1000;
     this.THREAD_IDLE_MS = config.threadIdleTimeoutMs ?? 10 * 60 * 1000;
+    // Create user resolver if API base URL is available
+    const apiBaseUrl = config.apiBaseUrl
+      || process.env.DJINNBOT_API_URL
+      || null;
+    if (apiBaseUrl) {
+      this.userResolver = new SlackUserResolver(apiBaseUrl);
+    }
   }
 
   // ─── Public API ─────────────────────────────────────────────────────────────
@@ -125,6 +140,47 @@ export class SlackSessionPool {
       this.sessions.delete(key);
     }
 
+    // ── Slack user → DjinnBot user cross-reference ────────────────────────
+    // Resolve the Slack user to a DjinnBot user ID for per-user key resolution.
+    // If the Slack user isn't linked, send them an error message via Slack
+    // and abort the session creation.
+    let djinnbotUserId: string | undefined;
+    if (this.userResolver && opts.userId) {
+      const resolved = await this.userResolver.resolve(opts.userId);
+      if (!resolved.userId && resolved.errorMessage) {
+        // User not linked — send error message in thread and abort
+        try {
+          await opts.client.chat.postMessage({
+            channel: opts.channelId,
+            text: resolved.errorMessage,
+            thread_ts: opts.threadTs,
+          });
+        } catch (err) {
+          console.warn(`[SlackSessionPool] Failed to send user-not-linked message:`, err);
+        }
+        // Return a dummy session ID — no container started
+        return `slack_unlinked_${Date.now()}`;
+      }
+      if (resolved.userId) {
+        djinnbotUserId = resolved.userId;
+        // Check if user has a provider key for the model
+        const model = opts.model ?? this.config.defaultModel;
+        const keyError = await this.userResolver.checkUserHasProviderKey(resolved.userId, model);
+        if (keyError) {
+          try {
+            await opts.client.chat.postMessage({
+              channel: opts.channelId,
+              text: keyError,
+              thread_ts: opts.threadTs,
+            });
+          } catch (err) {
+            console.warn(`[SlackSessionPool] Failed to send no-provider-key message:`, err);
+          }
+          return `slack_nokey_${Date.now()}`;
+        }
+      }
+    }
+
     // Pre-generate sessionId and register the entry SYNCHRONOUSLY before any
     // async work. This ensures getSessionLocation() can resolve the sessionId
     // immediately — critical for the SlackStreamer timing (the streamer is keyed
@@ -145,7 +201,7 @@ export class SlackSessionPool {
 
     // Return sessionId immediately so the caller can register the streamer
     // before the async cold-start completes.
-    this.coldStartAsync(key, sessionId, opts).catch(err => {
+    this.coldStartAsync(key, sessionId, opts, djinnbotUserId).catch(err => {
       console.error(`[SlackSessionPool] coldStartAsync failed for ${sessionId}:`, err);
       clearTimeout(entry.idleTimer);
       this.sessions.delete(key);
@@ -231,7 +287,7 @@ export class SlackSessionPool {
    * and sends the triggering message. Called fire-and-forget from sendMessage()
    * after the sessionId has already been pre-registered synchronously.
    */
-  private async coldStartAsync(key: string, sessionId: string, opts: SendMessageOptions): Promise<void> {
+  private async coldStartAsync(key: string, sessionId: string, opts: SendMessageOptions, djinnbotUserId?: string): Promise<void> {
     const idleTimeoutMs = opts.source === 'dm' ? this.DM_IDLE_MS : this.THREAD_IDLE_MS;
 
     console.log(
@@ -272,6 +328,9 @@ export class SlackSessionPool {
       agentId: opts.agentId,
       model: opts.model ?? this.config.defaultModel,
       externalHistory: externalHistory && externalHistory.length > 0 ? externalHistory : undefined,
+      // Pass the DjinnBot user ID for per-user provider key resolution.
+      // When set, the engine fetches API keys scoped to this user.
+      userId: djinnbotUserId,
     });
 
     // Send the triggering message now that the container is ready

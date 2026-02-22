@@ -22,6 +22,7 @@ export interface AuthUserInfo {
   displayName: string | null;
   isAdmin: boolean;
   totpEnabled: boolean;
+  slackId?: string | null;
 }
 
 export interface AuthTokens {

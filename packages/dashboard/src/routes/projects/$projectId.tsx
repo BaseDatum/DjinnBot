@@ -23,6 +23,7 @@ import { PlanDialog } from '@/components/projects/PlanDialog';
 import { TeamPanel } from '@/components/projects/TeamPanel';
 import { RepositorySettings } from '@/components/projects/RepositorySettings';
 import { SlackSettings } from '@/components/projects/SlackSettings';
+import { KeyUserSettings } from '@/components/projects/KeyUserSettings';
 import { ProjectActivityFeed, type ActivityEntry } from '@/components/projects/ProjectActivityFeed';
 import { DependencyGraph } from '@/components/DependencyGraph';
 import { GanttChart } from '@/components/GanttChart';
@@ -405,6 +406,11 @@ function ProjectBoardPage() {
               <RepositorySettings
                 projectId={projectId}
                 currentRepoUrl={project.repository}
+                onUpdate={loadProject}
+              />
+              <KeyUserSettings
+                projectId={projectId}
+                currentKeyUserId={project.key_user_id ?? null}
                 onUpdate={loadProject}
               />
               <SlackSettings

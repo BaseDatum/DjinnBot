@@ -23,6 +23,7 @@ export interface AgentExecutorConfig {
   getRunTask?: (runId: string) => string | Promise<string>;
   getRunHumanContext?: (runId: string) => string | undefined | Promise<string | undefined>;
   getRunProjectId?: (runId: string) => string | undefined | Promise<string | undefined>;
+  getRunUserId?: (runId: string) => string | undefined | Promise<string | undefined>;
   getRunTaskBranch?: (runId: string) => string | undefined | Promise<string | undefined>;
   getLoopState?: (runId: string, stepId: string) => { currentIndex: number; items: Array<{ data: string; status: string }> } | null;
   contextAssembler?: ContextAssembler;
@@ -65,6 +66,8 @@ export interface RunAgentOptions {
   pulseColumns?: string[];
   /** Thinking level to pass to the Agent ('off'|'minimal'|'low'|'medium'|'high'|'xhigh') */
   thinkingLevel?: string;
+  /** DjinnBot user ID who initiated this run — for per-user provider key resolution. */
+  userId?: string;
 }
 
 export interface AgentRunResult {
@@ -89,6 +92,7 @@ export class AgentExecutor {
   private getRunTask?: AgentExecutorConfig['getRunTask'];
   private getRunHumanContext?: AgentExecutorConfig['getRunHumanContext'];
   private getRunProjectId?: AgentExecutorConfig['getRunProjectId'];
+  private getRunUserId?: AgentExecutorConfig['getRunUserId'];
   private getRunTaskBranch?: AgentExecutorConfig['getRunTaskBranch'];
   private getLoopState?: AgentExecutorConfig['getLoopState'];
   private contextAssembler?: ContextAssembler;
@@ -111,6 +115,7 @@ export class AgentExecutor {
     this.getRunTask = config.getRunTask;
     this.getRunHumanContext = config.getRunHumanContext;
     this.getRunProjectId = config.getRunProjectId;
+    this.getRunUserId = config.getRunUserId;
     this.getRunTaskBranch = config.getRunTaskBranch;
     this.getLoopState = config.getLoopState;
     this.workspaceManager = config.workspaceManager;
@@ -483,8 +488,9 @@ export class AgentExecutor {
       const workspacesDir = process.env.WORKSPACES_DIR || '/data/workspaces';
       workspacePath = `${workspacesDir}/${agentId}`;
 
-      // Get projectId once — used for both workspace setup and container config
+      // Get projectId and userId once — used for workspace setup and per-user key resolution
       const projectId = this.getRunProjectId ? await this.getRunProjectId(runId) : undefined;
+      const userId = this.getRunUserId ? await this.getRunUserId(runId) : undefined;
 
       if (this.workspaceManager) {
         try {
@@ -580,6 +586,7 @@ export class AgentExecutor {
           signal: abortController.signal,
           maxTurns: stepConfig.maxTurns ?? pipeline.defaults.maxTurns ?? 50,
           projectId,
+          userId,
         });
 
         // Parse the output (prefer parsedOutputs from tools, fall back to parsing)

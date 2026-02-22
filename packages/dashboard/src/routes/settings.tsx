@@ -1,13 +1,12 @@
 import { createFileRoute, useNavigate } from '@tanstack/react-router';
 import { useState, useEffect } from 'react';
-import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Settings, Cpu, Brain, MessageSquare, Layers, Database, Github, Lock, Zap, Puzzle, Workflow, Shield, Container } from 'lucide-react';
+import { Settings, Cpu, Brain, MessageSquare, Layers, Database, Github, Lock, Zap, Puzzle, Workflow } from 'lucide-react';
 import { toast } from 'sonner';
 import { ModelProvidersSettings } from '@/components/settings/ModelProvidersSettings';
 import { MemorySearchSettings } from '@/components/settings/MemorySearchSettings';
 import { SecretsSettings } from '@/components/settings/SecretsSettings';
-import { AuthSettings } from '@/components/settings/AuthSettings';
+import { useAuth } from '@/hooks/useAuth';
 import { ProviderModelSelector } from '@/components/ui/ProviderModelSelector';
 import { GitHubAppInstallations } from '@/components/github/GitHubAppInstallations';
 import { API_BASE } from '@/lib/api';
@@ -33,8 +32,8 @@ interface GlobalSettings {
   agentRuntimeImage: string;
 }
 
-type SettingsTab = 'providers' | 'memory' | 'models' | 'runtime' | 'slack' | 'github' | 'secrets' | 'auth' | 'skills' | 'mcp' | 'pipelines';
-const VALID_TABS: SettingsTab[] = ['providers', 'memory', 'models', 'runtime', 'slack', 'github', 'secrets', 'auth', 'skills', 'mcp', 'pipelines'];
+type SettingsTab = 'providers' | 'memory' | 'models' | 'github' | 'secrets' | 'skills' | 'mcp' | 'pipelines';
+const VALID_TABS: SettingsTab[] = ['providers', 'memory', 'models', 'github', 'secrets', 'skills', 'mcp', 'pipelines'];
 
 export const Route = createFileRoute('/settings')({
   validateSearch: (search: Record<string, unknown>) => ({
@@ -43,15 +42,17 @@ export const Route = createFileRoute('/settings')({
   component: SettingsPage,
 });
 
-const NAV_ITEMS: NestedSidebarItem[] = [
+// Admin-only nav items (system-level config)
+const ADMIN_NAV_ITEMS: NestedSidebarItem[] = [
   { key: 'providers',  label: 'Model Providers', icon: Layers },
   { key: 'memory',     label: 'Memory Search',   icon: Database },
   { key: 'models',     label: 'Default Models',  icon: Cpu },
-  { key: 'runtime',    label: 'Agent Runtime',   icon: Container },
-  { key: 'slack',      label: 'Slack',           icon: MessageSquare },
-  { key: 'github',     label: 'GitHub App',      icon: Github },
   { key: 'secrets',    label: 'Secrets',         icon: Lock },
-  { key: 'auth',       label: 'Authentication',  icon: Shield },
+];
+
+// Nav items visible to all users
+const SHARED_NAV_ITEMS: NestedSidebarItem[] = [
+  { key: 'github',     label: 'GitHub App',      icon: Github },
   { key: 'skills',     label: 'Skills',          icon: Zap },
   { key: 'mcp',        label: 'MCP Servers',     icon: Puzzle },
   { key: 'pipelines',  label: 'Pipelines',       icon: Workflow },
@@ -60,6 +61,11 @@ const NAV_ITEMS: NestedSidebarItem[] = [
 function SettingsPage() {
   const { tab: activeTab } = Route.useSearch();
   const navigate = useNavigate();
+  const { user } = useAuth();
+  const isAdmin = user?.isAdmin ?? false;
+  const navItems = isAdmin
+    ? [...ADMIN_NAV_ITEMS, ...SHARED_NAV_ITEMS]
+    : SHARED_NAV_ITEMS;
   const [settings, setSettings] = useState<GlobalSettings | null>(null);
   const [loading, setLoading] = useState(true);
   const [settingsUserEdited, setSettingsUserEdited] = useState(false);
@@ -160,7 +166,7 @@ function SettingsPage() {
 
       {/* Nested sidebar + content */}
       <NestedSidebar
-        items={NAV_ITEMS}
+        items={navItems}
         activeKey={activeTab}
         onSelect={(key) => setActiveTab(key as SettingsTab)}
       >
@@ -198,95 +204,6 @@ function SettingsPage() {
           </div>
         )}
 
-        {/* ── Agent Runtime ── */}
-        {activeTab === 'runtime' && (
-          <div className="max-w-5xl mx-auto space-y-6">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <h2 className="text-lg font-semibold flex items-center gap-2">
-                  <Container className="h-5 w-5" />
-                  Agent Runtime
-                </h2>
-                <p className="text-sm text-muted-foreground mt-1">
-                  Configure the Docker image used to spawn agent sandbox containers.
-                  Leave blank to use the default GHCR image built by CI.
-                </p>
-              </div>
-              {settingsSaveState === 'saving' && (
-                <span className="text-xs text-muted-foreground animate-pulse shrink-0 mt-1">Saving…</span>
-              )}
-              {settingsSaveState === 'saved' && (
-                <span className="text-xs text-green-500 shrink-0 mt-1">&#x2713; Saved</span>
-              )}
-              {settingsSaveState === 'error' && (
-                <span className="text-xs text-destructive shrink-0 mt-1">Failed to save</span>
-              )}
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="agentRuntimeImage" className="flex items-center gap-2">
-                Agent Runtime Image
-              </Label>
-              <p className="text-xs text-muted-foreground mb-2">
-                Docker image reference for agent containers (e.g.{' '}
-                <code className="bg-muted px-1 py-0.5 rounded text-xs">ghcr.io/basedatum/djinnbot/agent-runtime:latest</code>).
-                When empty, the engine uses the GHCR image built by GitHub Actions.
-                Changes take effect on the next agent execution.
-              </p>
-              <Input
-                id="agentRuntimeImage"
-                value={settings.agentRuntimeImage || ''}
-                onChange={(e) => handleSettingsChange({ ...settings, agentRuntimeImage: e.target.value })}
-                placeholder="ghcr.io/basedatum/djinnbot/agent-runtime:latest"
-                className="max-w-lg font-mono"
-              />
-            </div>
-          </div>
-        )}
-
-        {/* ── Slack ── */}
-        {activeTab === 'slack' && (
-          <div className="max-w-5xl mx-auto space-y-6">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <h2 className="text-lg font-semibold flex items-center gap-2">
-                  <MessageSquare className="h-5 w-5" />
-                  Slack
-                </h2>
-                <p className="text-sm text-muted-foreground mt-1">
-                  Configure Slack integration settings for agent escalation.
-                </p>
-              </div>
-              {settingsSaveState === 'saving' && (
-                <span className="text-xs text-muted-foreground animate-pulse shrink-0 mt-1">Saving…</span>
-              )}
-              {settingsSaveState === 'saved' && (
-                <span className="text-xs text-green-500 shrink-0 mt-1">&#x2713; Saved</span>
-              )}
-              {settingsSaveState === 'error' && (
-                <span className="text-xs text-destructive shrink-0 mt-1">Failed to save</span>
-              )}
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="userSlackId" className="flex items-center gap-2">
-                User Slack ID
-              </Label>
-              <p className="text-xs text-muted-foreground mb-2">
-                Your Slack member ID (e.g. U0123456789). Agents use this to send you direct messages
-                when they need human attention. Find it in Slack under your profile → "Copy member ID".
-              </p>
-              <Input
-                id="userSlackId"
-                value={settings.userSlackId || ''}
-                onChange={(e) => handleSettingsChange({ ...settings, userSlackId: e.target.value })}
-                placeholder="U0123456789"
-                className="max-w-sm font-mono"
-              />
-            </div>
-          </div>
-        )}
-
         {/* ── GitHub App ── */}
         {activeTab === 'github' && (
           <div className="max-w-5xl mx-auto">
@@ -308,22 +225,6 @@ function SettingsPage() {
               </p>
             </div>
             <SecretsSettings />
-          </div>
-        )}
-
-        {/* ── Authentication ── */}
-        {activeTab === 'auth' && (
-          <div className="max-w-5xl mx-auto space-y-4">
-            <div>
-              <h2 className="text-lg font-semibold flex items-center gap-2">
-                <Shield className="h-5 w-5" />
-                Authentication
-              </h2>
-              <p className="text-sm text-muted-foreground mt-1">
-                Manage two-factor authentication, OIDC providers, and API keys.
-              </p>
-            </div>
-            <AuthSettings />
           </div>
         )}
 

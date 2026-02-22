@@ -21,6 +21,8 @@ export interface PipelineRun {
   updatedAt: number;
   completedAt: number | null;
   humanContext?: string;
+  /** DjinnBot user whose API keys are used for this run (per-user key resolution). */
+  userId?: string;
 }
 
 export interface StepExecution {

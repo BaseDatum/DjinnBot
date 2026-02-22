@@ -40,6 +40,12 @@ class Project(Base, TimestampWithCompletedMixin):
     slack_notify_user_id: Mapped[Optional[str]] = mapped_column(
         String(64), nullable=True
     )
+    # Multi-user: DjinnBot user whose API keys are used for automated runs
+    # (pipeline steps, pulse sessions) in this project. When NULL, the system
+    # falls back to instance-level keys.
+    key_user_id: Mapped[Optional[str]] = mapped_column(
+        String(64), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
 
     # Relationships
     columns: Mapped[list["KanbanColumn"]] = relationship(

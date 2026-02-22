@@ -1,5 +1,5 @@
-import { Link, useRouterState } from '@tanstack/react-router';
-import { useState, useEffect } from 'react';
+import { Link, useRouterState, useNavigate } from '@tanstack/react-router';
+import { useState, useEffect, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { cn } from '@/lib/utils';
 import {
@@ -14,8 +14,13 @@ import {
   FolderKanban,
   Settings,
   MessagesSquare,
+  User,
+  LogOut,
+  ChevronUp,
+  ShieldCheck,
 } from 'lucide-react';
 import { fetchAgents } from '@/lib/api';
+import { useAuth } from '@/hooks/useAuth';
 import { DashboardQuickActionsDesktop } from '@/components/DashboardQuickActions';
 import {
   ProjectSidebarFlyoutDesktop,
@@ -36,11 +41,31 @@ const navItems = [
   { to: '/settings', label: 'Settings', icon: Settings },
 ];
 
+const adminNavItems = [
+  { to: '/admin', label: 'Admin Panel', icon: ShieldCheck },
+];
+
 export function Sidebar() {
   const { location } = useRouterState();
+  const navigate = useNavigate();
+  const { user, handleLogout, authStatus } = useAuth();
   const isDashboard = location.pathname === '/';
   const isProjectPage = /^\/projects\/[^/]+/.test(location.pathname);
   const isChatPage = location.pathname === '/chat';
+  const isAdmin = user?.isAdmin ?? false;
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const userMenuRef = useRef<HTMLDivElement>(null);
+
+  // Close user menu on outside click
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (userMenuRef.current && !userMenuRef.current.contains(e.target as Node)) {
+        setUserMenuOpen(false);
+      }
+    }
+    if (userMenuOpen) document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [userMenuOpen]);
 
   const [isDark, setIsDark] = useState(() => {
     if (typeof window !== 'undefined') {
@@ -76,11 +101,17 @@ export function Sidebar() {
     setMobileOpen(false);
   }, [location.pathname]);
 
+  const allNavItems = isAdmin ? [...navItems, ...adminNavItems] : navItems;
+
+  const userInitials = user?.displayName
+    ? user.displayName.slice(0, 2).toUpperCase()
+    : user?.email?.slice(0, 2).toUpperCase() ?? '?';
+
   const sidebarContent = (
     <>
       <nav className="flex-1 p-4">
         <ul className="space-y-1">
-          {navItems.map((item) => {
+          {allNavItems.map((item) => {
             const Icon = item.icon;
             const isActive =
               location.pathname === item.to ||
@@ -106,7 +137,57 @@ export function Sidebar() {
         </ul>
       </nav>
 
-      <div className="border-t p-4">
+      <div className="border-t p-2 space-y-1">
+        {/* ── User indicator ── */}
+        {user && authStatus?.authEnabled && (
+          <div className="relative" ref={userMenuRef}>
+            <button
+              onClick={() => setUserMenuOpen(!userMenuOpen)}
+              className="flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+            >
+              <div className="flex h-7 w-7 items-center justify-center rounded-full bg-primary/10 text-primary text-xs font-bold shrink-0">
+                {userInitials}
+              </div>
+              <div className="flex-1 text-left min-w-0">
+                <div className="truncate text-sm font-medium text-foreground">
+                  {user.displayName || user.email}
+                </div>
+                {user.displayName && user.email && (
+                  <div className="truncate text-xs text-muted-foreground">
+                    {user.email}
+                  </div>
+                )}
+              </div>
+              <ChevronUp className={cn('h-4 w-4 shrink-0 transition-transform', userMenuOpen ? '' : 'rotate-180')} />
+            </button>
+
+            {userMenuOpen && (
+              <div className="absolute bottom-full left-0 right-0 mb-1 rounded-md border bg-popover p-1 shadow-md z-50">
+                <Link
+                  to={'/profile' as any}
+                  onClick={() => setUserMenuOpen(false)}
+                  className="flex items-center gap-2 rounded-sm px-3 py-2 text-sm hover:bg-accent hover:text-accent-foreground w-full"
+                >
+                  <User className="h-4 w-4" />
+                  Profile
+                </Link>
+                <button
+                  onClick={async () => {
+                    setUserMenuOpen(false);
+                    await handleLogout();
+                    navigate({ to: '/login' as any });
+                  }}
+                  className="flex items-center gap-2 rounded-sm px-3 py-2 text-sm hover:bg-accent hover:text-accent-foreground w-full text-left text-destructive"
+                >
+                  <LogOut className="h-4 w-4" />
+                  Log out
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── Theme toggle ── */}
         <button
           onClick={() => setIsDark(!isDark)}
           className="flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"

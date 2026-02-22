@@ -110,6 +110,7 @@ async def _issue_tokens(
             "displayName": user.display_name,
             "isAdmin": user.is_admin,
             "totpEnabled": user.totp_enabled,
+            "slackId": user.slack_id,
         },
     }
 
@@ -380,6 +381,7 @@ async def login_totp(
             "displayName": user.display_name,
             "isAdmin": user.is_admin,
             "totpEnabled": user.totp_enabled,
+            "slackId": user.slack_id,
         },
     }
 
@@ -467,6 +469,7 @@ async def login_recovery(
             "displayName": user.display_name,
             "isAdmin": user.is_admin,
             "totpEnabled": user.totp_enabled,
+            "slackId": user.slack_id,
         },
         "remainingRecoveryCodes": remaining,
     }
@@ -725,8 +728,17 @@ async def oidc_callback(
 
 
 @router.get("/me")
-async def get_me(user: AuthUser = Depends(get_current_user)):
+async def get_me(
+    user: AuthUser = Depends(get_current_user),
+    session: AsyncSession = Depends(get_async_session),
+):
     """Get the current authenticated user's info."""
+    # Fetch full user from DB to get slack_id
+    slack_id = None
+    if not user.is_service and user.id != "anonymous":
+        db_user = await session.get(User, user.id)
+        if db_user:
+            slack_id = db_user.slack_id
     return {
         "id": user.id,
         "email": user.email,
@@ -734,6 +746,7 @@ async def get_me(user: AuthUser = Depends(get_current_user)):
         "isAdmin": user.is_admin,
         "isService": user.is_service,
         "totpEnabled": user.totp_enabled,
+        "slackId": slack_id,
     }
 
 

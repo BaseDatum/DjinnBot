@@ -236,10 +236,23 @@ async def get_run(run_id: str, session: AsyncSession = Depends(get_async_session
     # Sort steps by rowid
     sorted_steps = sorted(run.steps, key=lambda s: getattr(s, "rowid", 0) or 0)
 
+    # Resolve the project's key_user_id for per-user key resolution in the engine.
+    key_user_id = None
+    if run.project_id:
+        from app.models.project import Project
+
+        proj_result = await session.execute(
+            select(Project.key_user_id).where(Project.id == run.project_id)
+        )
+        proj_row = proj_result.scalar_one_or_none()
+        if proj_row:
+            key_user_id = proj_row
+
     return {
         "id": run.id,
         "pipeline_id": run.pipeline_id,
         "project_id": run.project_id,  # CRITICAL: Engine needs this for worktree creation
+        "key_user_id": key_user_id,  # Multi-user: whose API keys to use for this run
         "task": run.task_description,
         "status": run.status,
         "current_step": run.current_step_id,

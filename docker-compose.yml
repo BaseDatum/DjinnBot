@@ -69,6 +69,7 @@ services:
       - AUTH_ENABLED=${AUTH_ENABLED:-false}
       - AUTH_SECRET_KEY=${AUTH_SECRET_KEY:-}
       - AUTH_TOTP_ISSUER=${AUTH_TOTP_ISSUER:-DjinnBot}
+      - SECRET_ENCRYPTION_KEY=${SECRET_ENCRYPTION_KEY:-}
       - CORS_ORIGINS=${CORS_ORIGINS:-*}
     volumes:
       # NOTE: We mount only djinnbot-data to /data. The sandboxes, workspaces, and runs

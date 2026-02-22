@@ -53,6 +53,17 @@ class McpServer(Base):
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     # Which agent ran the setup session, if any
     setup_agent_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+
+    # Approval workflow: admin-created servers are auto-approved; user-submitted
+    # servers start as 'pending' and require admin approval.
+    approval_status: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="approved"
+    )
+    # The user who submitted this MCP server (NULL for admin-created).
+    submitted_by_user_id: Mapped[Optional[str]] = mapped_column(
+        String(64), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+
     created_at: Mapped[int] = mapped_column(BigInteger, nullable=False)
     updated_at: Mapped[int] = mapped_column(BigInteger, nullable=False)
 

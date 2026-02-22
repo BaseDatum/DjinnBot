@@ -72,13 +72,15 @@ export class PipelineEngine {
   }
 
   // Start a new pipeline run
-  async startRun(
+   async startRun(
     pipelineId: string, 
     taskDescription: string, 
     humanContext?: string, 
     projectId?: string,
     repoUrl?: string,
     taskBranch?: string,
+    /** DjinnBot user whose API keys are used for this run (per-user key resolution). */
+    userId?: string,
   ): Promise<string> {
     const pipeline = this.pipelines.get(pipelineId);
     if (!pipeline) {
@@ -106,6 +108,7 @@ export class PipelineEngine {
       updatedAt: now,
       completedAt: null,
       humanContext,
+      userId,
     };
 
     // Store the run (implementation depends on store)

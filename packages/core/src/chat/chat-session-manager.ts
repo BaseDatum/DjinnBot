@@ -52,6 +52,13 @@ export interface ChatSessionConfig {
    * Values: 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'
    */
   thinkingLevel?: string;
+  /**
+   * DjinnBot user ID who initiated this chat session.
+   * Used for per-user provider key resolution.  When set, the engine fetches
+   * API keys scoped to this user (own keys > admin-shared > nothing).
+   * When null/undefined, system-level instance keys are used (backward compat).
+   */
+  userId?: string;
 }
 
 interface ToolCall {
@@ -74,6 +81,7 @@ interface ActiveSession {
   accumulatedThinking: string;  // Accumulate thinking during response
   accumulatedToolCalls: ToolCall[];  // Accumulate tool calls during response
   lastActivityAt: number;  // Timestamp of last activity — used by idle reaper
+  userId?: string;  // DjinnBot user who owns this session — for per-user key resolution
 }
 
 interface ConversationMessage {
@@ -922,17 +930,22 @@ export class ChatSessionManager {
    * The settings endpoint already does this server-side, so this is just a
    * pass-through; we keep process.env as an additional local fallback.
    */
-  private async fetchProviderEnvVars(): Promise<Record<string, string>> {
+  private async fetchProviderEnvVars(userId?: string): Promise<Record<string, string>> {
     // Start with whatever is already in process.env (primary API keys only)
     const result: Record<string, string> = {};
-    for (const envVar of Object.values(PROVIDER_ENV_MAP)) {
-      const val = process.env[envVar];
-      if (val) result[envVar] = val;
+    // When fetching for a specific user, don't seed from process.env —
+    // strict mode means only user-owned or admin-shared keys are used.
+    if (!userId) {
+      for (const envVar of Object.values(PROVIDER_ENV_MAP)) {
+        const val = process.env[envVar];
+        if (val) result[envVar] = val;
+      }
     }
 
     // Overlay with DB-stored keys and extra env vars (these take precedence over local env)
+    const userParam = userId ? `?user_id=${encodeURIComponent(userId)}` : '';
     try {
-      const res = await authFetch(`${this.apiBaseUrl}/v1/settings/providers/keys/all`);
+      const res = await authFetch(`${this.apiBaseUrl}/v1/settings/providers/keys/all${userParam}`);
       if (res.ok) {
         const data = await res.json() as { keys: Record<string, string>; extra?: Record<string, string> };
         // Primary API keys
@@ -1001,7 +1014,7 @@ export class ChatSessionManager {
    * Start a new chat session - creates and starts a container.
    */
   async startSession(config: ChatSessionConfig): Promise<void> {
-    const { sessionId, agentId, model, sessionType, onboardingSessionId, greetingMessageId, systemPromptSupplement, systemPromptOverride, externalHistory, thinkingLevel } = config;
+    const { sessionId, agentId, model, sessionType, onboardingSessionId, greetingMessageId, systemPromptSupplement, systemPromptOverride, externalHistory, thinkingLevel, userId } = config;
     
     const sessionTypeTag = sessionType === 'onboarding'
       ? ` [ONBOARDING, onbId=${onboardingSessionId ?? 'unknown'}${greetingMessageId ? `, greetingMsg=${greetingMessageId}` : ''}]`
@@ -1105,9 +1118,10 @@ export class ChatSessionManager {
       }
 
       // Fetch all provider API keys from settings (DB + env vars)
-      // and the current runtime image (may have been changed via dashboard)
+      // and the current runtime image (may have been changed via dashboard).
+      // When userId is provided, keys are resolved per-user (strict mode).
       const [providerEnvVars, runtimeImage] = await Promise.all([
-        this.fetchProviderEnvVars(),
+        this.fetchProviderEnvVars(userId),
         this.fetchRuntimeImage(),
       ]);
 

@@ -48,18 +48,22 @@ export class ContainerRunner implements AgentRunner {
    * as { ENV_VAR_NAME: value } ready to spread into a container env block.
    * DB-stored values override process.env.
    */
-  private async fetchProviderEnvVars(): Promise<Record<string, string>> {
+  private async fetchProviderEnvVars(userId?: string): Promise<Record<string, string>> {
     const result: Record<string, string> = {};
-    // Seed from process.env (primary API keys only)
-    for (const envVar of Object.values(ContainerRunner.PROVIDER_ENV_MAP)) {
-      const val = process.env[envVar];
-      if (val) result[envVar] = val;
+    // When fetching for a specific user, don't seed from process.env —
+    // strict mode means only user-owned or admin-shared keys are used.
+    if (!userId) {
+      for (const envVar of Object.values(ContainerRunner.PROVIDER_ENV_MAP)) {
+        const val = process.env[envVar];
+        if (val) result[envVar] = val;
+      }
     }
     const apiBaseUrl = this.config.apiBaseUrl
       || process.env.DJINNBOT_API_URL
       || 'http://api:8000';
+    const userParam = userId ? `?user_id=${encodeURIComponent(userId)}` : '';
     try {
-      const res = await authFetch(`${apiBaseUrl}/v1/settings/providers/keys/all`);
+      const res = await authFetch(`${apiBaseUrl}/v1/settings/providers/keys/all${userParam}`);
       if (res.ok) {
         const data = await res.json() as { keys: Record<string, string>; extra?: Record<string, string> };
         // Inject primary API keys
@@ -144,6 +148,7 @@ export class ContainerRunner implements AgentRunner {
       maxTurns = 50,
       projectId,
       pulseColumns,
+      userId,
     } = options;
 
     const sessionId = `session_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
@@ -171,9 +176,10 @@ export class ContainerRunner implements AgentRunner {
       console.log(`[ContainerRunner] Creating container for run ${runId} (agent: ${agentId})`);
       
       // Fetch all provider API keys (DB + env vars) and the current
-      // runtime image (may have been changed via dashboard since engine start)
+      // runtime image (may have been changed via dashboard since engine start).
+      // When userId is set, keys are resolved per-user (strict mode).
       const [fetchedProviderEnvVars, runtimeImage] = await Promise.all([
-        this.fetchProviderEnvVars(),
+        this.fetchProviderEnvVars(userId),
         this.fetchRuntimeImage(),
       ]);
       providerEnvVars = fetchedProviderEnvVars;

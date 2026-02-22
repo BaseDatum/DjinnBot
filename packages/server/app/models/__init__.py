@@ -59,6 +59,11 @@ from app.models.skill import Skill, AgentSkill
 from app.models.secret import Secret, AgentSecretGrant
 from app.models.mcp import McpServer, AgentMcpTool
 from app.models.auth import User, UserRecoveryCode, OIDCProvider, APIKey, UserSession
+from app.models.user_provider import (
+    UserModelProvider,
+    AdminSharedProvider,
+    UserSecretGrant,
+)
 
 __all__ = [
     # Pydantic models (backward compatibility)
@@ -117,4 +122,8 @@ __all__ = [
     "OIDCProvider",
     "APIKey",
     "UserSession",
+    # Multi-user models
+    "UserModelProvider",
+    "AdminSharedProvider",
+    "UserSecretGrant",
 ]

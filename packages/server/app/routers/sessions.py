@@ -30,6 +30,7 @@ class CreateSessionRequest(BaseModel):
     agentId: str
     source: str
     sourceId: Optional[str] = None
+    userId: Optional[str] = None  # DjinnBot user who initiated this session
     userPrompt: str
     model: str
 
@@ -74,6 +75,7 @@ async def create_session(
         db_session = Session(
             id=request.id,
             agent_id=request.agentId,
+            user_id=request.userId,
             source=request.source,
             source_id=request.sourceId,
             status="starting",
@@ -86,6 +88,7 @@ async def create_session(
     else:
         # Re-run: reset the existing session to a clean starting state.
         db_session.agent_id = request.agentId
+        db_session.user_id = request.userId
         db_session.source = request.source
         db_session.source_id = request.sourceId
         db_session.status = "starting"

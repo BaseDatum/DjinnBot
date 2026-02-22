@@ -917,34 +917,106 @@ async def remove_provider(
 
 @router.get("/providers/keys/all")
 async def get_all_provider_keys(
+    user_id: Optional[str] = None,
     session: AsyncSession = Depends(get_async_session),
 ) -> dict:
     """
-    Return all configured API keys and extra env vars from the DB.
-    Used by the engine/containers to inject provider credentials.
+    Return configured API keys and extra env vars for engine/container injection.
+
+    When ``user_id`` is provided, applies **strict** per-user key resolution:
+      1. User's own key (from ``user_model_providers``)
+      2. Admin-shared key (from ``admin_shared_providers`` → ``model_providers``)
+      3. Nothing — no fallback to global instance keys
+
+    When ``user_id`` is omitted (system/webhook triggers), returns all
+    instance-level keys from ``model_providers`` (backward-compatible).
 
     Returns:
       keys: { provider_id: api_key } — primary API keys
       extra: { ENV_VAR_NAME: value } — flat map of all extra env vars across all providers
     """
-    result = await session.execute(select(ModelProvider))
-    rows = result.scalars().all()
+    from sqlalchemy import or_
+    from app.models.user_provider import UserModelProvider, AdminSharedProvider
 
-    keys = {row.provider_id: row.api_key for row in rows if row.api_key}
-
-    # Flatten all extra_config dicts into a single env var map.
-    # Exclude internal metadata keys (DISPLAY_NAME) — they are not env vars.
     _INTERNAL_EXTRA_KEYS = {"DISPLAY_NAME"}
+
+    if not user_id:
+        # ── System mode: return all instance-level keys (backward compat) ──
+        result = await session.execute(select(ModelProvider))
+        rows = result.scalars().all()
+
+        keys = {row.provider_id: row.api_key for row in rows if row.api_key}
+        extra: Dict[str, str] = {}
+        for row in rows:
+            if row.extra_config:
+                try:
+                    ec = json.loads(row.extra_config)
+                    for k, v in ec.items():
+                        if v and k not in _INTERNAL_EXTRA_KEYS:
+                            extra[k] = v
+                except (json.JSONDecodeError, TypeError):
+                    pass
+        return {"keys": keys, "extra": extra}
+
+    # ── Per-user mode: strict resolution ──────────────────────────────────
+
+    # 1. Load user's own provider configs
+    result = await session.execute(
+        select(UserModelProvider).where(UserModelProvider.user_id == user_id)
+    )
+    user_providers = {row.provider_id: row for row in result.scalars().all()}
+
+    # 2. Load admin-shared provider grants for this user (specific + broadcast)
+    result = await session.execute(
+        select(AdminSharedProvider).where(
+            or_(
+                AdminSharedProvider.target_user_id == user_id,
+                AdminSharedProvider.target_user_id == None,  # broadcast
+            )
+        )
+    )
+    shared_provider_ids = {row.provider_id for row in result.scalars().all()}
+
+    # 3. Load instance-level provider configs (needed for admin-shared keys)
+    result = await session.execute(select(ModelProvider))
+    instance_providers = {row.provider_id: row for row in result.scalars().all()}
+
+    keys: Dict[str, str] = {}
     extra: Dict[str, str] = {}
-    for row in rows:
-        if row.extra_config:
-            try:
-                ec = json.loads(row.extra_config)
-                for k, v in ec.items():
-                    if v and k not in _INTERNAL_EXTRA_KEYS:
-                        extra[k] = v
-            except (json.JSONDecodeError, TypeError):
-                pass
+
+    # Collect all provider IDs the user has access to
+    all_provider_ids = set(user_providers.keys()) | shared_provider_ids
+
+    for provider_id in all_provider_ids:
+        # Priority 1: user's own key
+        user_row = user_providers.get(provider_id)
+        if user_row and user_row.api_key:
+            keys[provider_id] = user_row.api_key
+            if user_row.extra_config:
+                try:
+                    ec = json.loads(user_row.extra_config)
+                    for k, v in ec.items():
+                        if v and k not in _INTERNAL_EXTRA_KEYS:
+                            extra[k] = v
+                except (json.JSONDecodeError, TypeError):
+                    pass
+            continue
+
+        # Priority 2: admin-shared instance key
+        if provider_id in shared_provider_ids:
+            instance_row = instance_providers.get(provider_id)
+            if instance_row and instance_row.api_key:
+                keys[provider_id] = instance_row.api_key
+                if instance_row.extra_config:
+                    try:
+                        ec = json.loads(instance_row.extra_config)
+                        for k, v in ec.items():
+                            if v and k not in _INTERNAL_EXTRA_KEYS:
+                                extra[k] = v
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+
+        # Priority 3: NOTHING — strict mode, no instance fallback
 
     return {"keys": keys, "extra": extra}
 

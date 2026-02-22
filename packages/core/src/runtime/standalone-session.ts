@@ -17,6 +17,8 @@ export interface StandaloneSessionOptions {
   sourceId?: string;
   /** Kanban column names this agent is allowed to work from (passed to pulse tools). */
   pulseColumns?: string[];
+  /** DjinnBot user whose API keys are used for this session (per-user key resolution). */
+  userId?: string;
 }
 
 export interface StandaloneSessionResult {
@@ -86,6 +88,7 @@ export class StandaloneSessionRunner {
         maxTurns: opts.maxTurns || 30,
         timeout: opts.timeout || 120000,
         pulseColumns: opts.pulseColumns,
+        userId: opts.userId,
       });
 
       console.log(`[StandaloneSessionRunner] Session ${sessionId} completed`);

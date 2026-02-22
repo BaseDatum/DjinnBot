@@ -63,6 +63,15 @@ class Secret(Base, TimestampMixin):
     # Short preview for display: first 4 + "..." + last 4 chars of the plaintext
     masked_preview: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
 
+    # Multi-user scoping:
+    #   'instance' — created by admin, available to granted users (via user_secret_grants)
+    #   'user'     — created by a regular user, only that user can manage/grant it
+    scope: Mapped[str] = mapped_column(String(16), nullable=False, default="instance")
+    # Owner user ID — set for user-scoped secrets; NULL for instance-scoped secrets.
+    owner_user_id: Mapped[Optional[str]] = mapped_column(
+        String(64), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+
     # Relationships
     grants: Mapped[list["AgentSecretGrant"]] = relationship(
         back_populates="secret", cascade="all, delete-orphan"

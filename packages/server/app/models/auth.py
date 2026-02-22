@@ -30,6 +30,10 @@ class User(Base):
     # Optional: OIDC subject identifier for linking (provider_id:sub)
     oidc_subject: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
 
+    # Slack member ID for cross-referencing Slack messages to DjinnBot users.
+    # e.g. "U0123456789". Users set this in their profile.
+    slack_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+
     created_at: Mapped[int] = mapped_column(BigInteger, nullable=False)
     updated_at: Mapped[int] = mapped_column(BigInteger, nullable=False)
 

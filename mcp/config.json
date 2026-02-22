@@ -1,5 +1,18 @@
 {
   "mcpServers": {
+    "time": {
+      "command": "uvx",
+      "args": [
+        "mcp-server-time",
+        "--local-timezone=Europe/Lisbon"
+      ]
+    },
+    "grokipedia": {
+      "command": "uvx",
+      "args": [
+        "grokipedia-mcp"
+      ]
+    },
     "fetch": {
       "command": "npx",
       "args": [
@@ -20,19 +33,6 @@
       "env": {
         "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_TOKEN}"
       }
-    },
-    "time": {
-      "command": "uvx",
-      "args": [
-        "mcp-server-time",
-        "--local-timezone=Europe/Lisbon"
-      ]
-    },
-    "grokipedia": {
-      "command": "uvx",
-      "args": [
-        "grokipedia-mcp"
-      ]
     }
   }
 }

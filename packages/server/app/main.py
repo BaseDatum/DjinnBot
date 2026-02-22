@@ -45,6 +45,8 @@ from app.routers import secrets
 from app.routers import mcp
 from app.routers import attachments
 from app.routers import auth as auth_router
+from app.routers import users as users_router
+from app.routers import admin as admin_router
 
 
 async def _handle_task_run_event(run_id: str, event_type: str):
@@ -617,6 +619,8 @@ app.include_router(skills.router, prefix="/v1/skills", tags=["skills"])
 app.include_router(channels.router, prefix="/v1/agents", tags=["channels"])
 app.include_router(secrets.router, prefix="/v1/secrets", tags=["secrets"])
 app.include_router(mcp.router, prefix="/v1/mcp", tags=["mcp"])
+app.include_router(users_router.router, prefix="/v1/users", tags=["users"])
+app.include_router(admin_router.router, prefix="/v1/admin", tags=["admin"])
 
 
 @app.get("/v1/status")

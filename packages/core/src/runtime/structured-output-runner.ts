@@ -96,15 +96,16 @@ export class StructuredOutputRunner {
    * Fetch provider API keys from the DB and inject them into process.env.
    * This ensures UI-set keys are available to resolveModel() without restart.
    */
-  private async injectProviderApiKeys(): Promise<void> {
+  private async injectProviderApiKeys(userId?: string): Promise<void> {
     const apiBaseUrl = this.config.apiBaseUrl
       || process.env.DJINNBOT_API_URL
       || null;
 
     if (!apiBaseUrl) return;
 
+    const userParam = userId ? `?user_id=${encodeURIComponent(userId)}` : '';
     try {
-      const res = await authFetch(`${apiBaseUrl}/v1/settings/providers/keys/all`);
+      const res = await authFetch(`${apiBaseUrl}/v1/settings/providers/keys/all${userParam}`);
       if (res.ok) {
         const data = await res.json() as { keys: Record<string, string> };
         for (const [providerId, apiKey] of Object.entries(data.keys ?? {})) {

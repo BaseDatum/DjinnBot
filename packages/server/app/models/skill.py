@@ -51,6 +51,20 @@ class Skill(Base):
     # True when the skill has companion files on disk at SKILLS_DIR/{id}/
     has_files: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_by: Mapped[str] = mapped_column(String(128), nullable=False, default="ui")
+
+    # Approval workflow: admin-created skills are auto-approved; user-submitted
+    # skills start as 'pending' and require admin approval.
+    #   'approved'  — active and usable by agents
+    #   'pending'   — submitted by user, awaiting admin review
+    #   'rejected'  — admin rejected the submission
+    approval_status: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="approved"
+    )
+    # The user who submitted this skill (NULL for system/disk-imported skills).
+    submitted_by_user_id: Mapped[Optional[str]] = mapped_column(
+        String(64), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+
     created_at: Mapped[int] = mapped_column(BigInteger, nullable=False)
     updated_at: Mapped[int] = mapped_column(BigInteger, nullable=False)
 
