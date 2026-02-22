@@ -1230,6 +1230,14 @@ export class ChatSessionManager {
           ...(getAgentApiKey(agentId) ? { AGENT_API_KEY: getAgentApiKey(agentId)! } : {}),
           // Extended thinking level — passed through to the agent runtime's Agent constructor.
           ...(thinkingLevel && thinkingLevel !== 'off' ? { AGENT_THINKING_LEVEL: thinkingLevel } : {}),
+          // LLM call logging context — used by the runtime to tag each API call
+          CHAT_SESSION_ID: sessionId,
+          ...(() => {
+            // Extract provider from model string (e.g. "anthropic/claude-sonnet-4" → "anthropic")
+            const provider = model.includes('/') ? model.split('/')[0] : model;
+            const ks = this._lastKeySources[provider];
+            return ks ? { KEY_SOURCE: ks.source, KEY_MASKED: ks.masked_key } : {} as Record<string, string>;
+          })(),
           // MCP / mcpo: inject base URL and API key so agents can call tools directly.
           // These are only set if the engine has mcpo configured.
           ...(process.env.MCPO_BASE_URL ? { MCPO_BASE_URL: process.env.MCPO_BASE_URL } : {}),

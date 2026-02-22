@@ -14,6 +14,7 @@ import { getStatusVariant, formatDuration } from '@/lib/format';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { MarkdownRenderer } from '@/components/MarkdownRenderer';
 import { KeySourceBadge } from '@/components/ui/KeySourceBadge';
+import { LlmCallLog } from '@/components/admin/LlmCallLog';
 import { ToolCallCard } from '@/components/ToolCallCard';
 import { AgentActivityBar } from '@/components/AgentActivityBar';
 import { ContainerStatusCard } from '@/components/container/ContainerStatus';
@@ -739,6 +740,16 @@ function RunDetailPage() {
                 </dl>
               </CardContent>
             </Card>
+            {/* LLM Call Log */}
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm">LLM API Calls</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <LlmCallLog runId={runId} maxHeight="350px" />
+              </CardContent>
+            </Card>
+
             {(slackMessages.length > 0 || run.status === 'running') && (
               <SlackChatFeed messages={slackMessages} />
             )}

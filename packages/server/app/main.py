@@ -50,6 +50,7 @@ from app.routers import admin as admin_router
 from app.routers import waitlist as waitlist_router
 from app.routers import updates as updates_router
 from app.routers import pulse_routines
+from app.routers import llm_calls
 
 
 async def _handle_task_run_event(run_id: str, event_type: str):
@@ -632,6 +633,7 @@ app.include_router(secrets.router, prefix="/v1/secrets", tags=["secrets"])
 app.include_router(mcp.router, prefix="/v1/mcp", tags=["mcp"])
 app.include_router(users_router.router, prefix="/v1/users", tags=["users"])
 app.include_router(admin_router.router, prefix="/v1/admin", tags=["admin"])
+app.include_router(llm_calls.router, prefix="/v1", tags=["llm-calls"])
 app.include_router(waitlist_router.router, prefix="/v1/waitlist", tags=["waitlist"])
 app.include_router(updates_router.router, prefix="/v1/system/updates", tags=["updates"])
 

@@ -28,6 +28,7 @@ import { Badge } from '@/components/ui/badge';
 import { API_BASE } from '@/lib/api';
 import { authFetch } from '@/lib/auth';
 import { useSSE } from '@/hooks/useSSE';
+import { LlmCallLog } from './LlmCallLog';
 import { toast } from 'sonner';
 
 interface ProviderSource {
@@ -532,6 +533,17 @@ function UsageItemDetail({ item }: { item: UsageItem }) {
           </div>
         </div>
       )}
+
+      {/* LLM Call Log */}
+      <div>
+        <div className="text-muted-foreground font-medium mb-1.5">LLM API Calls</div>
+        <LlmCallLog
+          sessionId={item.type === 'chat' ? item.id : undefined}
+          runId={item.type === 'run' ? item.id : undefined}
+          admin
+          maxHeight="300px"
+        />
+      </div>
     </div>
   );
 }

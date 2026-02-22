@@ -7,6 +7,7 @@ import { Loader2, Brain, ChevronDown, ChevronRight, AlertCircle, CheckCircle, Ke
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
 import { KeySourceBadge } from '@/components/ui/KeySourceBadge';
+import { LlmCallLog } from '@/components/admin/LlmCallLog';
 import { useState, useEffect, useRef, useCallback } from 'react';
 import type { SessionEvent } from '@/types/session';
 
@@ -395,6 +396,15 @@ export function SessionDetail({ sessionId }: SessionDetailProps) {
               <KeySourceBadge keyResolution={session.key_resolution} showProviders showKeyDetails />
             </div>
           )}
+
+          {/* LLM API Calls */}
+          <div>
+            <h4 className="text-sm font-semibold mb-2 flex items-center gap-2">
+              <Key className="h-4 w-4" />
+              LLM API Calls
+            </h4>
+            <LlmCallLog sessionId={sessionId} maxHeight="250px" />
+          </div>
 
           {/* User Prompt */}
           {session.user_prompt && (

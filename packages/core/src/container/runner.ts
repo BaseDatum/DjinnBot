@@ -246,6 +246,13 @@ export class ContainerRunner implements AgentRunner {
           // MCP / mcpo: agent-runtime calls createMcpTools() on each turn using these.
           ...(process.env.MCPO_BASE_URL ? { MCPO_BASE_URL: process.env.MCPO_BASE_URL } : {}),
           ...(process.env.MCPO_API_KEY ? { MCPO_API_KEY: process.env.MCPO_API_KEY } : {}),
+          // LLM call logging context — used by the runtime to tag each API call
+          RUN_ID: runId,
+          ...(() => {
+            const provider = model.includes('/') ? model.split('/')[0] : model;
+            const ks = this._lastKeySources[provider];
+            return ks ? { KEY_SOURCE: ks.source, KEY_MASKED: ks.masked_key } : {} as Record<string, string>;
+          })(),
         },
       };
 
