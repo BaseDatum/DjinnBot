@@ -262,6 +262,15 @@ services:
   #   networks:
   #     - djinnbot
 
+  # Pull-only service — ensures the agent-runtime image is available locally.
+  # The engine spawns agent containers dynamically via Docker API, so this
+  # image is never started by Compose, but must be pre-pulled.
+  agent-runtime:
+    image: ${AGENT_RUNTIME_IMAGE:-ghcr.io/basedatum/djinnbot/agent-runtime:latest}
+    profiles:
+      - pull-only
+    entrypoint: ["true"]
+
 networks:
   djinnbot_default:
     driver: bridge

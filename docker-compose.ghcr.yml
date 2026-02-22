@@ -215,6 +215,15 @@ services:
       api:
         condition: service_healthy
 
+  # Pull-only service — ensures the agent-runtime image is available locally.
+  # The engine spawns agent containers dynamically via Docker API, so this
+  # image is never started by Compose, but must be pre-pulled.
+  agent-runtime:
+    image: ghcr.io/basedatum/djinnbot/agent-runtime:${DJINNBOT_VERSION:-latest}
+    profiles:
+      - pull-only
+    entrypoint: ["true"]
+
 networks:
   djinnbot_default:
     driver: bridge
