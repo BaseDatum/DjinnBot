@@ -31,7 +31,7 @@ export const agentStepCommandSchema = baseMessageSchema.extend({
   requestId: z.string(),
   prompt: z.string(),
   tools: z.array(z.string()).default([]),
-  maxSteps: z.number().default(100),
+  maxSteps: z.number().default(999),
   attachments: z.array(attachmentMetaSchema).optional(),
 });
 

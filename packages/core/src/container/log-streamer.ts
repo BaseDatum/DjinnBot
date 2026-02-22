@@ -162,7 +162,7 @@ export class ContainerLogStreamer {
   // ─── Docker event monitoring ──────────────────────────────────────────────
 
   private startDockerEventMonitor(): void {
-    this.docker.getEvents({ filters: { type: ['container'] } }, (err: Error | null, stream: NodeJS.ReadableStream | null) => {
+    this.docker.getEvents({ filters: { type: ['container'] } }, (err: Error | null, stream?: NodeJS.ReadableStream) => {
       if (err) {
         console.warn('[LogStreamer] Docker events unavailable:', err.message);
         // Retry after a delay

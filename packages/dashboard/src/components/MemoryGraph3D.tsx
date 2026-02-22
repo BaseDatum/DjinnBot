@@ -110,6 +110,10 @@ export function MemoryGraph3D({ agentId, hideViewMode, onSwitchTo2D }: MemoryGra
 
   const wrapperRef = useRef<HTMLDivElement>(null);
   const hasZoomedRef = useRef(false);
+  // Holds the live nodes array passed to ForceGraph3D.
+  // The library mutates these objects in place (__threeObj, x, y, z, etc.),
+  // so we keep a ref to read them in the per-frame label visibility loop.
+  const graphDataNodesRef = useRef<any[]>([]);
 
   const rightPanel = useResizableSplit(340, 240, 500, true);
 
@@ -188,12 +192,19 @@ export function MemoryGraph3D({ agentId, hideViewMode, onSwitchTo2D }: MemoryGra
 
   // ── Apply Z-axis constraints to graph data ────────────────────────────────
   const graphData = useMemo(() => {
-    if (!filteredData) return { nodes: [], links: [] };
+    if (!filteredData) {
+      graphDataNodesRef.current = [];
+      return { nodes: [], links: [] };
+    }
 
     const nodes = filteredData.nodes.map((n) => ({
       ...n,
       fz: computeNodeFz(n, zAxisMode, timeRange),
     }));
+
+    // Keep ref in sync — the library mutates these node objects in place
+    // (__threeObj, x, y, z), so the per-frame label loop can read them.
+    graphDataNodesRef.current = nodes;
 
     return {
       nodes,
@@ -238,7 +249,7 @@ export function MemoryGraph3D({ agentId, hideViewMode, onSwitchTo2D }: MemoryGra
 
   useEffect(() => { hasZoomedRef.current = false; }, [viewMode]);
 
-  // ── Scene setup: lighting and background ──────────────────────────────────
+  // ── Scene setup: lighting, background, and orbit controls ─────────────────
   const sceneConfigured = useRef(false);
   useEffect(() => {
     if (!graphRef.current || sceneConfigured.current) return;
@@ -254,6 +265,14 @@ export function MemoryGraph3D({ agentId, hideViewMode, onSwitchTo2D }: MemoryGra
     directional.position.set(50, 100, 50);
     scene.add(directional);
 
+    // Set minimum zoom distance on OrbitControls so the camera can't get
+    // so close to the target that zoom-out steps become infinitesimally
+    // small (geometric zoom). Without this the user gets permanently stuck.
+    const controls = graphRef.current.controls?.();
+    if (controls && 'minDistance' in controls) {
+      controls.minDistance = 10;
+    }
+
     sceneConfigured.current = true;
   }, [graphData.nodes.length]);
 
@@ -261,7 +280,7 @@ export function MemoryGraph3D({ agentId, hideViewMode, onSwitchTo2D }: MemoryGra
   useEffect(() => {
     let frameId: number;
     const tick = () => {
-      updateLabelVisibility(graphRef, renderRefs);
+      updateLabelVisibility(graphRef, renderRefs, graphDataNodesRef);
       frameId = requestAnimationFrame(tick);
     };
     frameId = requestAnimationFrame(tick);

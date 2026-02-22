@@ -248,7 +248,7 @@ export class ContainerAgentRunner {
   private setupSubscription(agent: Agent): void {
     if (this.unsubscribeAgent) return; // Already subscribed
 
-    const maxTurns = process.env.ONBOARDING_SESSION_ID ? 999 : 30;
+    const maxTurns = 999;
 
     this.unsubscribeAgent = agent.subscribe(async (event: AgentEvent) => {
       if (event.type === 'turn_start') {

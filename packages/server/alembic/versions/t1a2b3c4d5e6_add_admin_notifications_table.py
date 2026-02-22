@@ -29,7 +29,9 @@ def upgrade() -> None:
         sa.Column("level", sa.String(16), nullable=False, server_default="info"),
         sa.Column("title", sa.String(256), nullable=False),
         sa.Column("detail", sa.Text(), nullable=True),
-        sa.Column("read", sa.Boolean(), nullable=False, server_default=sa.text("0")),
+        sa.Column(
+            "read", sa.Boolean(), nullable=False, server_default=sa.text("false")
+        ),
         sa.Column("created_at", sa.BigInteger(), nullable=False),
     )
     op.create_index(

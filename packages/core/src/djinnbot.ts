@@ -881,7 +881,7 @@ export class DjinnBot {
         systemPrompt,
         userPrompt,
         model,
-        maxTurns: 20,
+        maxTurns: 999,
         timeout,
         source: 'pulse',
         pulseColumns,
@@ -1239,7 +1239,7 @@ Start now.`;
           model: opts.model,
           workspacePath: opts.workspacePath || join(this.config.dataDir, 'workspaces', opts.agentId),
           vaultPath: opts.vaultPath || join(this.config.dataDir, 'vaults', opts.agentId),
-          maxTurns: 30,
+          maxTurns: 999,
           timeout: 180000, // 3 minutes for complex Slack tasks
           source: opts.source,
           sourceId: opts.sourceId,

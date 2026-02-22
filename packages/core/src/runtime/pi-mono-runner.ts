@@ -426,7 +426,7 @@ export class PiMonoRunner implements AgentRunner {
       console.log(`[PiMonoRunner] Agent created for step ${options.stepId}. Model: ${model.id}, Tools: [${tools.map(t => t.name).join(', ')}], maxTokens: ${model.maxTokens}, reasoning: ${model.reasoning}`);
 
       // Track turns for maxTurns limit
-      const maxTurns = options.maxTurns ?? 50;
+      const maxTurns = options.maxTurns ?? 999;
       let turnCount = 0;
 
       // Track tool call durations

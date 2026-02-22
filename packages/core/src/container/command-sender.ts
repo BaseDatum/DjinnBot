@@ -34,7 +34,7 @@ export class CommandSender {
       requestId,
       prompt,
       tools: options.tools ?? [],
-      maxSteps: options.maxSteps ?? 100,
+      maxSteps: options.maxSteps ?? 999,
       timestamp: createTimestamp(),
       ...(options.attachments?.length ? { attachments: options.attachments } : {}),
     };

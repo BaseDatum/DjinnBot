@@ -327,10 +327,17 @@ const LABEL_FAR = 250;    // fully hidden when farther than this
  * based on the camera distance to that node.
  *
  * Highlighted / focused nodes always show their label regardless of distance.
+ *
+ * NOTE: We accept a `nodesRef` rather than calling `fg.graphData()` because
+ * `graphData` is NOT exposed through the React component ref (it is not in
+ * `methodNames`). The nodes array passed to ForceGraph3D is mutated in-place
+ * by the library (adding `__threeObj`, `x`, `y`, `z`, etc.), so a ref to that
+ * same array gives us direct access to the live data.
  */
 export function updateLabelVisibility(
   graphRef: { current: any | null },
-  refs: Pick<Render3DRefs, 'hoveredNodeRef' | 'selectedNodeRef' | 'highlightNodesRef'>
+  refs: Pick<Render3DRefs, 'hoveredNodeRef' | 'selectedNodeRef' | 'highlightNodesRef'>,
+  nodesRef: { current: any[] },
 ) {
   const fg = graphRef.current;
   if (!fg) return;
@@ -340,10 +347,10 @@ export function updateLabelVisibility(
 
   const camPos = camera.position;
 
-  const data = fg.graphData?.();
-  if (!data?.nodes) return;
+  const nodes = nodesRef.current;
+  if (!nodes || nodes.length === 0) return;
 
-  for (const node of data.nodes) {
+  for (const node of nodes) {
     const obj = node.__threeObj as THREE.Group | undefined;
     if (!obj) continue;
 

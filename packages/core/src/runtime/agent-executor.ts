@@ -64,7 +64,7 @@ export interface RunAgentOptions {
   projectWorkspacePath?: string;
   vaultPath?: string;        // Path to agent's ClawVault for sandbox mount
   signal?: AbortSignal;      // Abort signal for cancellation
-  maxTurns?: number;         // Max agent turns before forced stop (default: 50)
+  maxTurns?: number;         // Max agent turns before forced stop (default: 999)
   projectId?: string;        // Project ID for git worktree support in sandbox
   /** Kanban column names this agent is allowed to work from (for pulse sessions). */
   pulseColumns?: string[];
@@ -623,7 +623,7 @@ export class AgentExecutor {
           projectWorkspacePath,
           vaultPath: `${process.env.VAULTS_DIR || '/data/vaults'}/${agentId}`,
           signal: abortController.signal,
-          maxTurns: stepConfig.maxTurns ?? pipeline.defaults.maxTurns ?? 50,
+          maxTurns: stepConfig.maxTurns ?? pipeline.defaults.maxTurns ?? 999,
           projectId,
           userId,
         });

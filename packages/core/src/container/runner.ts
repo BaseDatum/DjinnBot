@@ -145,7 +145,7 @@ export class ContainerRunner implements AgentRunner {
       projectWorkspacePath,
       vaultPath,
       signal,
-      maxTurns = 50,
+      maxTurns = 999,
       projectId,
       pulseColumns,
       userId,

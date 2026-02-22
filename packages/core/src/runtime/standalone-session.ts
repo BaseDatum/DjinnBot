@@ -85,7 +85,7 @@ export class StandaloneSessionRunner {
         model: opts.model,
         workspacePath,
         vaultPath,
-        maxTurns: opts.maxTurns || 30,
+        maxTurns: opts.maxTurns || 999,
         timeout: opts.timeout || 120000,
         pulseColumns: opts.pulseColumns,
         userId: opts.userId,
