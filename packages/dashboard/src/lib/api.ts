@@ -1183,6 +1183,11 @@ export async function listChatSessions(agentId: string, params?: {
     model: string;
     created_at: number;
     message_count: number;
+    key_resolution?: {
+      source?: string;
+      userId?: string | null;
+      resolvedProviders?: string[];
+    } | null;
   }>;
   total: number;
   has_more: boolean;

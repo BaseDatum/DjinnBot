@@ -2,12 +2,13 @@ import { createFileRoute, Link } from '@tanstack/react-router';
 import { Card, CardHeader, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Play, Search, Trash2, ChevronDown, Square, Loader2 } from 'lucide-react';
+import { Play, Search, Trash2, ChevronDown, Square, Loader2, Key } from 'lucide-react';
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { fetchRuns, deleteRun, bulkDeleteRuns, cancelRun, API_BASE } from '@/lib/api';
 import { useSSE } from '@/hooks/useSSE';
 import { getStatusVariant, formatDuration } from '@/lib/format';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
+import { KeySourceBadge } from '@/components/ui/KeySourceBadge';
 
 interface Run {
   id: string;
@@ -17,6 +18,12 @@ interface Run {
   created_at: number;
   completed_at?: number | null;
   duration?: string;
+  key_resolution?: {
+    source?: string;
+    userId?: string | null;
+    resolvedProviders?: string[];
+  } | null;
+  initiated_by_user_id?: string | null;
 }
 
 export const Route = createFileRoute('/runs/')({
@@ -304,6 +311,9 @@ function RunsList() {
                     <Badge variant={getStatusVariant(run.status) as 'success' | 'destructive' | 'default' | 'outline'}>
                       {run.status}
                     </Badge>
+                    {run.key_resolution && (
+                      <KeySourceBadge keyResolution={run.key_resolution} />
+                    )}
                     {(run.status === 'running' || run.status === 'pending') && (
                       <Button
                         variant="ghost"

@@ -27,6 +27,7 @@ import {
 import { AgentChat } from './AgentChat';
 import { useChatSessions, type ChatPane } from './ChatSessionContext';
 import { formatModelChip } from '@/lib/format';
+import { KeySourceBadge } from '@/components/ui/KeySourceBadge';
 import styles from './ChatWorkspace.module.css';
 
 const MAX_VISIBLE = 3;
@@ -244,6 +245,7 @@ function ChatPaneWrapper({ pane, onClose, onHide, onSessionEnd }: ChatPaneWrappe
           <span className={styles.paneAgentName}>{pane.agentName}</span>
           <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${statusDot}`} />
           <span className={styles.paneModelChip}>{formatModelChip(pane.model)}</span>
+          {pane.keyResolution && <KeySourceBadge keyResolution={pane.keyResolution} />}
         </div>
         <div className={styles.paneHeaderActions}>
           <button

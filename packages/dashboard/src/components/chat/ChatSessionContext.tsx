@@ -31,6 +31,12 @@ export interface ChatPane {
   sessionStatus: SessionStatus;
   /** Whether this pane is currently "visible" in the tiled layout */
   visible: boolean;
+  /** Key resolution info — which API keys are powering this session */
+  keyResolution?: {
+    source?: string;
+    userId?: string | null;
+    resolvedProviders?: string[];
+  } | null;
 }
 
 interface ChatSessionContextValue {
@@ -243,6 +249,7 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
               sessionId: session.id,
               sessionStatus: 'running',
               visible: visibleCount < MAX_VISIBLE,
+              keyResolution: session.key_resolution ?? null,
             });
           }
         }

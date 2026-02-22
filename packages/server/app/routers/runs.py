@@ -87,6 +87,9 @@ class UpdateRunRequest(BaseModel):
     current_step_id: str | None = None
     human_context: str | None = None
     completed_at: int | None = None
+    key_resolution: str | None = None
+    initiated_by_user_id: str | None = None
+    model_override: str | None = None
 
 
 @router.post("/")
@@ -204,6 +207,10 @@ async def list_runs(
             "updated_at": r.updated_at,
             "completed_at": r.completed_at,
             "human_context": r.human_context,
+            "key_resolution": json.loads(r.key_resolution)
+            if getattr(r, "key_resolution", None)
+            else None,
+            "initiated_by_user_id": getattr(r, "initiated_by_user_id", None),
         }
         for r in runs
     ]
@@ -321,6 +328,12 @@ async def update_run(
         run.human_context = req.human_context
     if req.completed_at is not None:
         run.completed_at = req.completed_at
+    if req.key_resolution is not None:
+        run.key_resolution = req.key_resolution
+    if req.initiated_by_user_id is not None:
+        run.initiated_by_user_id = req.initiated_by_user_id
+    if req.model_override is not None:
+        run.model_override = req.model_override
 
     run.updated_at = now_ms()
 

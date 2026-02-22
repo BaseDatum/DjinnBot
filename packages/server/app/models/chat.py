@@ -69,6 +69,10 @@ class ChatSession(Base):
         Text, nullable=True
     )  # Error message if failed
 
+    # JSON blob recording which API keys were resolved for this session
+    # e.g. {"source": "executing_user", "userId": "...", "resolvedProviders": ["anthropic", "openai"]}
+    key_resolution: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
     # Relationships
     messages: Mapped[List["ChatMessage"]] = relationship(
         back_populates="session",

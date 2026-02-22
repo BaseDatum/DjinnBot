@@ -6,27 +6,24 @@ import { authFetch } from '@/lib/auth';
 import { toast } from 'sonner';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { User, MessageSquare, Shield, Layers, Lock } from 'lucide-react';
+import { User, MessageSquare, Shield } from 'lucide-react';
 import { NestedSidebar } from '@/components/layout/NestedSidebar';
 import type { NestedSidebarItem } from '@/components/layout/NestedSidebar';
 import { TwoFactorSettings } from '@/components/settings/TwoFactorSettings';
 import { APIKeySettings } from '@/components/settings/APIKeySettings';
-import { UserProviderSettings } from '@/components/settings/UserProviderSettings';
-import { SecretsSettings } from '@/components/settings/SecretsSettings';
 import { useAutoSave } from '@/hooks/useAutoSave';
 
 export const Route = createFileRoute('/profile')({
   component: ProfilePage,
 });
 
-type ProfileTab = 'info' | 'slack' | 'auth' | 'providers' | 'secrets';
+type ProfileTab = 'info' | 'slack' | 'auth';
 
+// Profile is identity-only. Credentials and configuration live in /settings.
 const NAV_ITEMS: NestedSidebarItem[] = [
   { key: 'info', label: 'Profile Info', icon: User },
   { key: 'slack', label: 'Slack', icon: MessageSquare },
   { key: 'auth', label: 'Authentication', icon: Shield },
-  { key: 'providers', label: 'Model Providers', icon: Layers },
-  { key: 'secrets', label: 'My Secrets', icon: Lock },
 ];
 
 interface UserProfile {
@@ -96,7 +93,7 @@ function ProfilePage() {
           <User className="h-8 w-8" />
           <div>
             <h1 className="text-2xl md:text-3xl font-bold tracking-tight">Profile</h1>
-            <p className="text-muted-foreground">Manage your account and preferences</p>
+            <p className="text-muted-foreground">Your account identity</p>
           </div>
         </div>
       </div>
@@ -205,40 +202,6 @@ function ProfilePage() {
             <div className="border-t pt-6">
               <APIKeySettings />
             </div>
-          </div>
-        )}
-
-        {/* ── Model Providers ── */}
-        {activeTab === 'providers' && (
-          <div className="max-w-5xl mx-auto space-y-4">
-            <div>
-              <h2 className="text-lg font-semibold flex items-center gap-2">
-                <Layers className="h-5 w-5" />
-                My Model Providers
-              </h2>
-              <p className="text-sm text-muted-foreground mt-1">
-                Configure your personal API keys for AI model providers.
-                These keys are used when your sessions run. Admin-shared
-                keys are shown as read-only.
-              </p>
-            </div>
-            <UserProviderSettings />
-          </div>
-        )}
-
-        {/* ── My Secrets ── */}
-        {activeTab === 'secrets' && (
-          <div className="max-w-5xl mx-auto space-y-4">
-            <div>
-              <h2 className="text-lg font-semibold flex items-center gap-2">
-                <Lock className="h-5 w-5" />
-                My Secrets
-              </h2>
-              <p className="text-sm text-muted-foreground mt-1">
-                Manage your personal secrets and view instance secrets shared with you.
-              </p>
-            </div>
-            <SecretsSettings />
           </div>
         )}
       </NestedSidebar>

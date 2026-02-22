@@ -13,6 +13,7 @@ import { SlackChatFeed, type SlackMessage } from '@/components/SlackChatFeed';
 import { getStatusVariant, formatDuration } from '@/lib/format';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { MarkdownRenderer } from '@/components/MarkdownRenderer';
+import { KeySourceBadge } from '@/components/ui/KeySourceBadge';
 import { ToolCallCard } from '@/components/ToolCallCard';
 import { AgentActivityBar } from '@/components/AgentActivityBar';
 import { ContainerStatusCard } from '@/components/container/ContainerStatus';
@@ -30,6 +31,7 @@ interface Step {
   retry_count: number;
   started_at: number | null;
   completed_at: number | null;
+  model_used?: string | null;
 }
 
 interface RunDetail {
@@ -124,6 +126,11 @@ function StepTimeline({ steps, onRestartStep }: { steps: Step[]; onRestartStep: 
             }`} />
             <span className="font-mono">{step.step_id}</span>
             <span className="text-zinc-600">{step.agent_id}</span>
+            {step.model_used && (
+              <span className="text-zinc-600 font-mono text-[10px]" title={step.model_used}>
+                {step.model_used.length > 20 ? step.model_used.slice(0, 20) + '...' : step.model_used}
+              </span>
+            )}
           </button>
         </Fragment>
       ))}
@@ -724,18 +731,8 @@ function RunDetailPage() {
                   {run.key_resolution && (
                     <div className="flex flex-col gap-1">
                       <dt className="text-sm text-muted-foreground">Keys Used</dt>
-                      <dd className="text-sm">
-                        <span className="text-xs">
-                          {run.key_resolution.source === 'executing_user' && 'User keys'}
-                          {run.key_resolution.source === 'project_key_user' && 'Project key user'}
-                          {run.key_resolution.source === 'system' && 'System (instance keys)'}
-                          {!run.key_resolution.source && 'Unknown'}
-                        </span>
-                        {run.key_resolution.resolvedProviders && run.key_resolution.resolvedProviders.length > 0 && (
-                          <span className="text-xs text-muted-foreground ml-1">
-                            ({run.key_resolution.resolvedProviders.join(', ')})
-                          </span>
-                        )}
+                      <dd>
+                        <KeySourceBadge keyResolution={run.key_resolution} showProviders />
                       </dd>
                     </div>
                   )}

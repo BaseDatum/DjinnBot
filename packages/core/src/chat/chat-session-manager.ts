@@ -1173,6 +1173,28 @@ export class ChatSessionManager {
         this.fetchRuntimeImage(),
       ]);
 
+      // Record key resolution metadata on the chat session (non-blocking).
+      // This mirrors what ContainerRunner does for pipeline runs.
+      const resolvedProviders = Object.keys(providerEnvVars)
+        .filter(k => k.endsWith('_API_KEY') || k.endsWith('_TOKEN'))
+        .map(k => {
+          for (const [pid, env] of Object.entries(PROVIDER_ENV_MAP)) {
+            if (env === k) return pid;
+          }
+          return k;
+        });
+      authFetch(`${this.apiBaseUrl}/v1/chat/sessions/${sessionId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          key_resolution: JSON.stringify({
+            userId: userId ?? null,
+            source: userId ? 'executing_user' : 'system',
+            resolvedProviders,
+          }),
+        }),
+      }).catch(() => {}); // Non-fatal — don't block container creation
+
       // Create container config
       const containerConfig: ContainerConfig = {
         runId: sessionId,  // Use sessionId as runId for container
