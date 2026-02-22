@@ -15,6 +15,7 @@ import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { MarkdownRenderer } from '@/components/MarkdownRenderer';
 import { KeySourceBadge } from '@/components/ui/KeySourceBadge';
 import { LlmCallLog } from '@/components/admin/LlmCallLog';
+import { SessionTokenStats } from '@/components/ui/SessionTokenStats';
 import { ToolCallCard } from '@/components/ToolCallCard';
 import { AgentActivityBar } from '@/components/AgentActivityBar';
 import { ContainerStatusCard } from '@/components/container/ContainerStatus';
@@ -737,6 +738,11 @@ function RunDetailPage() {
                       </dd>
                     </div>
                   )}
+                  {/* Token usage summary */}
+                  <div className="flex flex-col gap-1">
+                    <dt className="text-sm text-muted-foreground">Token Usage</dt>
+                    <dd><SessionTokenStats runId={runId} compact={false} /></dd>
+                  </div>
                 </dl>
               </CardContent>
             </Card>
@@ -746,7 +752,7 @@ function RunDetailPage() {
                 <CardTitle className="text-sm">LLM API Calls</CardTitle>
               </CardHeader>
               <CardContent>
-                <LlmCallLog runId={runId} maxHeight="350px" />
+                <LlmCallLog runId={runId} maxHeight="350px" live={run.status === 'running' || run.status === 'pending'} />
               </CardContent>
             </Card>
 

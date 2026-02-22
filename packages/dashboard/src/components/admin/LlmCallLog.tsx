@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import { API_BASE } from '@/lib/api';
 import { authFetch } from '@/lib/auth';
+import { useSSE } from '@/hooks/useSSE';
 
 interface LlmCall {
   id: string;
@@ -73,6 +74,8 @@ interface LlmCallLogProps {
   admin?: boolean;
   /** Max height for the container */
   maxHeight?: string;
+  /** Enable auto-refresh polling (e.g. while session is running) */
+  live?: boolean;
 }
 
 const KEY_SOURCE_BADGES: Record<string, { label: string; color: string; icon: typeof Key }> = {
@@ -104,7 +107,7 @@ function formatTime(ts: number): string {
   return new Date(ts).toLocaleTimeString();
 }
 
-export function LlmCallLog({ sessionId, runId, agentId, admin = false, maxHeight = '400px' }: LlmCallLogProps) {
+export function LlmCallLog({ sessionId, runId, agentId, admin = false, maxHeight = '400px', live = false }: LlmCallLogProps) {
   const [data, setData] = useState<LlmCallListResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -133,6 +136,95 @@ export function LlmCallLog({ sessionId, runId, agentId, admin = false, maxHeight
   useEffect(() => {
     fetchCalls();
   }, [fetchCalls]);
+
+  // Real-time SSE: append new calls as they arrive
+  const handleSSE = useCallback((event: any) => {
+    if (event?.type !== 'llm_call') return;
+
+    // Filter: only append if this call belongs to our scope
+    if (sessionId && event.session_id !== sessionId) return;
+    if (runId && event.run_id !== runId) return;
+    if (agentId && event.agent_id !== agentId) return;
+
+    const newCall: LlmCall = {
+      id: event.id,
+      session_id: event.session_id,
+      run_id: event.run_id,
+      agent_id: event.agent_id,
+      request_id: event.request_id,
+      provider: event.provider,
+      model: event.model,
+      key_source: event.key_source,
+      key_masked: event.key_masked,
+      input_tokens: event.input_tokens ?? 0,
+      output_tokens: event.output_tokens ?? 0,
+      cache_read_tokens: event.cache_read_tokens ?? 0,
+      cache_write_tokens: event.cache_write_tokens ?? 0,
+      total_tokens: event.total_tokens ?? 0,
+      cost_input: event.cost_input,
+      cost_output: event.cost_output,
+      cost_total: event.cost_total,
+      duration_ms: event.duration_ms,
+      tool_call_count: event.tool_call_count ?? 0,
+      has_thinking: event.has_thinking ?? false,
+      stop_reason: event.stop_reason,
+      created_at: event.created_at,
+    };
+
+    setData(prev => {
+      if (!prev) {
+        return {
+          calls: [newCall],
+          total: 1,
+          hasMore: false,
+          summary: {
+            callCount: 1,
+            totalInputTokens: newCall.input_tokens,
+            totalOutputTokens: newCall.output_tokens,
+            totalCacheReadTokens: newCall.cache_read_tokens,
+            totalCacheWriteTokens: newCall.cache_write_tokens,
+            totalTokens: newCall.total_tokens,
+            totalCost: newCall.cost_total ?? 0,
+            totalCostInput: newCall.cost_input ?? 0,
+            totalCostOutput: newCall.cost_output ?? 0,
+            avgDurationMs: newCall.duration_ms ?? 0,
+          },
+        };
+      }
+
+      // Deduplicate
+      if (prev.calls.some(c => c.id === newCall.id)) return prev;
+
+      const calls = [newCall, ...prev.calls]; // newest first
+      const s = prev.summary!;
+      const newCount = s.callCount + 1;
+      return {
+        ...prev,
+        calls,
+        total: prev.total + 1,
+        summary: {
+          callCount: newCount,
+          totalInputTokens: s.totalInputTokens + newCall.input_tokens,
+          totalOutputTokens: s.totalOutputTokens + newCall.output_tokens,
+          totalCacheReadTokens: s.totalCacheReadTokens + newCall.cache_read_tokens,
+          totalCacheWriteTokens: s.totalCacheWriteTokens + newCall.cache_write_tokens,
+          totalTokens: s.totalTokens + newCall.total_tokens,
+          totalCost: +(s.totalCost + (newCall.cost_total ?? 0)).toFixed(6),
+          totalCostInput: +(s.totalCostInput + (newCall.cost_input ?? 0)).toFixed(6),
+          totalCostOutput: +(s.totalCostOutput + (newCall.cost_output ?? 0)).toFixed(6),
+          avgDurationMs: Math.round(
+            ((s.avgDurationMs * s.callCount) + (newCall.duration_ms ?? 0)) / newCount
+          ),
+        },
+      };
+    });
+  }, [sessionId, runId, agentId]);
+
+  useSSE({
+    url: `${API_BASE}/events/llm-calls`,
+    onMessage: handleSSE,
+    enabled: live,
+  });
 
   if (loading) {
     return (

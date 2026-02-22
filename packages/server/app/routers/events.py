@@ -489,3 +489,55 @@ async def stream_session_events(
             "X-Accel-Buffering": "no",
         },
     )
+
+
+@router.get("/llm-calls")
+async def stream_llm_calls():
+    """SSE endpoint — streams LLM call log events in real-time.
+
+    Subscribes to Redis channel: djinnbot:llm-calls:live
+    Each event contains the full LLM call record so clients can append
+    directly without re-fetching.
+    """
+    if not dependencies.redis_client:
+        raise HTTPException(status_code=503, detail="Redis not connected")
+
+    channel = "djinnbot:llm-calls:live"
+
+    async def event_generator():
+        pubsub = dependencies.redis_client.pubsub()
+        await pubsub.subscribe(channel)
+
+        try:
+            while True:
+                try:
+                    message = await asyncio.wait_for(
+                        pubsub.get_message(
+                            ignore_subscribe_messages=True, timeout=None
+                        ),
+                        timeout=20.0,
+                    )
+                    if message and message["type"] == "message":
+                        data_str = message["data"]
+                        if isinstance(data_str, bytes):
+                            data_str = data_str.decode()
+                        yield f"data: {data_str}\n\n"
+                    else:
+                        yield ": heartbeat\n\n"
+                except asyncio.TimeoutError:
+                    yield ": heartbeat\n\n"
+                except asyncio.CancelledError:
+                    break
+        finally:
+            await pubsub.unsubscribe(channel)
+            await pubsub.close()
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )

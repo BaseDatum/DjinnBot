@@ -403,7 +403,7 @@ export function SessionDetail({ sessionId }: SessionDetailProps) {
               <Key className="h-4 w-4" />
               LLM API Calls
             </h4>
-            <LlmCallLog sessionId={sessionId} maxHeight="250px" />
+            <LlmCallLog sessionId={sessionId} maxHeight="250px" live={session.status === 'running' || session.status === 'starting'} />
           </div>
 
           {/* User Prompt */}

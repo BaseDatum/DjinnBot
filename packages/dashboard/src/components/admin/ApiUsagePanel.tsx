@@ -542,6 +542,7 @@ function UsageItemDetail({ item }: { item: UsageItem }) {
           runId={item.type === 'run' ? item.id : undefined}
           admin
           maxHeight="300px"
+          live={item.status === 'running' || item.status === 'starting' || item.status === 'pending'}
         />
       </div>
     </div>

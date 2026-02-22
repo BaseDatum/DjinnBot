@@ -9,6 +9,7 @@ import { useSSE } from '@/hooks/useSSE';
 import { getStatusVariant, formatDuration } from '@/lib/format';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { KeySourceBadge } from '@/components/ui/KeySourceBadge';
+import { SessionTokenStats } from '@/components/ui/SessionTokenStats';
 
 interface Run {
   id: string;
@@ -315,6 +316,7 @@ function RunsList() {
                     {run.key_resolution && (
                       <KeySourceBadge keyResolution={run.key_resolution} />
                     )}
+                    <SessionTokenStats runId={run.id} />
                     {(run.status === 'running' || run.status === 'pending') && (
                       <Button
                         variant="ghost"

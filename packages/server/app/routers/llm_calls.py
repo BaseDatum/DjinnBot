@@ -114,6 +114,43 @@ async def record_llm_call(
     )
     db.add(call)
     await db.commit()
+
+    # Publish to Redis for real-time SSE streaming
+    from app import dependencies
+
+    if dependencies.redis_client:
+        try:
+            payload = json.dumps(
+                {
+                    "type": "llm_call",
+                    "id": call.id,
+                    "session_id": call.session_id,
+                    "run_id": call.run_id,
+                    "agent_id": call.agent_id,
+                    "request_id": call.request_id,
+                    "provider": call.provider,
+                    "model": call.model,
+                    "key_source": call.key_source,
+                    "key_masked": call.key_masked,
+                    "input_tokens": call.input_tokens,
+                    "output_tokens": call.output_tokens,
+                    "cache_read_tokens": call.cache_read_tokens,
+                    "cache_write_tokens": call.cache_write_tokens,
+                    "total_tokens": call.total_tokens,
+                    "cost_input": call.cost_input,
+                    "cost_output": call.cost_output,
+                    "cost_total": call.cost_total,
+                    "duration_ms": call.duration_ms,
+                    "tool_call_count": call.tool_call_count,
+                    "has_thinking": call.has_thinking,
+                    "stop_reason": call.stop_reason,
+                    "created_at": call.created_at,
+                }
+            )
+            await dependencies.redis_client.publish("djinnbot:llm-calls:live", payload)
+        except Exception as e:
+            logger.warning(f"Failed to publish LLM call event: {e}")
+
     return {"ok": True, "id": call.id}
 
 
