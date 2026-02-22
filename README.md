@@ -6,6 +6,8 @@ DjinnBot is an open-core agent orchestration platform that deploys a full team o
 
 Self-hosted is free. One command to install, one command to run.
 
+**[Join the waitlist for DjinnBot Cloud](https://app.djinn.bot)** — managed hosting so you don't have to self-host.
+
 **Docs:** [docs.djinn.bot](https://docs.djinn.bot) | **License:** [FSL-1.1-ALv2](LICENSE) (free to use, converts to Apache 2.0 after 2 years)
 
 ---
@@ -390,6 +392,7 @@ cd packages/dashboard && npm run dev
 
 ## Links
 
+- **Join the Waitlist:** [app.djinn.bot](https://app.djinn.bot)
 - **Documentation:** [docs.djinn.bot](https://docs.djinn.bot)
 - **Website:** [djinn.bot](https://djinn.bot)
 - **GitHub:** [github.com/BaseDatum/djinnbot](https://github.com/BaseDatum/djinnbot)

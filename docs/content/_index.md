@@ -16,7 +16,8 @@ layout: hextra-home
 </div>
 
 <div class="hx-mb-6">
-{{< hextra/hero-button text="Get Started" link="docs/getting-started/" >}}
+{{< hextra/hero-button text="Join the Waitlist" link="https://app.djinn.bot" >}}
+{{< hextra/hero-button text="Get Started" link="docs/getting-started/" style="alt" >}}
 {{< hextra/hero-button text="GitHub" link="https://github.com/BaseDatum/djinnbot" style="alt" >}}
 </div>
 
