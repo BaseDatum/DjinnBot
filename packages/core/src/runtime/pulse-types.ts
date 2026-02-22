@@ -96,6 +96,56 @@ export interface ScheduledPulse {
   
   /** Duration in ms if completed */
   durationMs?: number;
+
+  /** Routine ID (if scheduled via a named routine) */
+  routineId?: string;
+
+  /** Routine name for display purposes */
+  routineName?: string;
+}
+
+/**
+ * A named pulse routine belonging to an agent.
+ * Each routine has its own instructions (prompt), schedule, and config.
+ */
+export interface PulseRoutine {
+  id: string;
+  agentId: string;
+  name: string;
+  description?: string;
+
+  /** The markdown prompt used as the pulse instructions for this routine */
+  instructions: string;
+
+  /**
+   * If set, the runtime reads instructions from this file on disk instead of
+   * the `instructions` field — until the user edits instructions via the
+   * dashboard, at which point this is cleared.
+   */
+  sourceFile?: string;
+
+  /** Schedule config */
+  enabled: boolean;
+  intervalMinutes: number;
+  offsetMinutes: number;
+  blackouts: PulseBlackout[];
+  oneOffs: string[];
+
+  /** Execution config */
+  timeoutMs?: number;
+  maxConcurrent: number;
+  pulseColumns?: string[];
+
+  /** Display */
+  sortOrder: number;
+  color?: string;
+
+  /** Stats */
+  lastRunAt?: number;
+  totalRuns: number;
+
+  createdAt: number;
+  updatedAt: number;
 }
 
 export interface PulseConflict {

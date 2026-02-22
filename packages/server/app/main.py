@@ -49,6 +49,7 @@ from app.routers import users as users_router
 from app.routers import admin as admin_router
 from app.routers import waitlist as waitlist_router
 from app.routers import updates as updates_router
+from app.routers import pulse_routines
 
 
 async def _handle_task_run_event(run_id: str, event_type: str):
@@ -623,6 +624,7 @@ app.include_router(chat.router, prefix="/v1", tags=["chat"])
 app.include_router(chat_sessions.router, prefix="/v1", tags=["chat-sessions"])
 app.include_router(attachments.router, prefix="/v1", tags=["attachments"])
 app.include_router(pulses.router, prefix="/v1/pulses", tags=["pulses"])
+app.include_router(pulse_routines.router, prefix="/v1", tags=["pulse-routines"])
 app.include_router(onboarding.router, prefix="/v1/onboarding", tags=["onboarding"])
 app.include_router(skills.router, prefix="/v1/skills", tags=["skills"])
 app.include_router(channels.router, prefix="/v1/agents", tags=["channels"])
