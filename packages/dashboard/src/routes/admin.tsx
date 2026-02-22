@@ -31,6 +31,7 @@ import {
   Cpu,
   Brain,
   MessageSquare,
+  ScrollText,
 } from 'lucide-react';
 import {
   Dialog,
@@ -51,12 +52,13 @@ import type { ComboboxOption } from '@/components/ui/SearchableCombobox';
 import { fetchModelProviders, type ModelProvider } from '@/lib/api';
 import { ProviderModelSelector } from '@/components/ui/ProviderModelSelector';
 import { useAutoSave } from '@/hooks/useAutoSave';
+import { ContainerLogs } from '@/components/admin/ContainerLogs';
 
 export const Route = createFileRoute('/admin')({
   component: AdminPage,
 });
 
-type AdminTab = 'users' | 'providers' | 'sharing' | 'memory' | 'models' | 'approvals' | 'runtime' | 'secrets' | 'waitlist' | 'email';
+type AdminTab = 'users' | 'providers' | 'sharing' | 'memory' | 'models' | 'approvals' | 'runtime' | 'secrets' | 'waitlist' | 'email' | 'logs';
 
 const NAV_ITEMS: NestedSidebarItem[] = [
   { key: 'users', label: 'Users', icon: Users },
@@ -69,6 +71,7 @@ const NAV_ITEMS: NestedSidebarItem[] = [
   { key: 'approvals', label: 'Approvals', icon: CheckCircle },
   { key: 'runtime', label: 'Agent Runtime', icon: Container },
   { key: 'secrets', label: 'Instance Secrets', icon: Lock },
+  { key: 'logs', label: 'Container Logs', icon: ScrollText },
 ];
 
 interface UserItem {
@@ -1304,6 +1307,13 @@ function AdminPage() {
                 </div>
               </>
             )}
+          </div>
+        )}
+
+        {/* ── Container Logs ── */}
+        {activeTab === 'logs' && (
+          <div className="max-w-full mx-auto">
+            <ContainerLogs />
           </div>
         )}
       </NestedSidebar>

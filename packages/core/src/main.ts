@@ -17,6 +17,7 @@ import { ChatSessionManager } from './chat/chat-session-manager.js';
 import { ChatListener } from './chat/chat-listener.js';
 import { VaultEmbedWatcher } from './memory/vault-embed-watcher.js';
 import { McpoManager } from './mcp/mcpo-manager.js';
+import { ContainerLogStreamer } from './container/log-streamer.js';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { PROVIDER_ENV_MAP } from './constants.js';
@@ -57,6 +58,7 @@ let chatListener: ChatListener | null = null;
 let vaultEmbedWatcher: VaultEmbedWatcher | null = null;
 let graphRebuildSub: Redis | null = null;
 let mcpoManager: McpoManager | null = null;
+let containerLogStreamer: ContainerLogStreamer | null = null;
 
 const VAULTS_DIR = process.env.VAULTS_DIR || '/data/vaults';
 const CLAWVAULT_BIN = '/usr/local/bin/clawvault';
@@ -512,6 +514,11 @@ async function shutdown(signal: string): Promise<void> {
     // Stop MCP manager
     if (mcpoManager) {
       mcpoManager.stop();
+    }
+
+    // Stop container log streamer
+    if (containerLogStreamer) {
+      await containerLogStreamer.stop();
     }
 
     // Stop vault embed watcher
@@ -1034,6 +1041,14 @@ async function main(): Promise<void> {
     } else {
       console.log('[Engine] MCPO_BASE_URL not set, skipping MCP manager');
     }
+
+    // Start container log streamer (streams all Docker container logs to Redis)
+    // Uses its own dedicated Redis connection — completely isolated from engine operations
+    containerLogStreamer = new ContainerLogStreamer({ redisUrl: CONFIG.redisUrl });
+    containerLogStreamer.start().catch((err) => {
+      console.error('[Engine] ContainerLogStreamer start error:', err);
+    });
+    console.log('[Engine] Container log streamer started');
 
     // Start vault embed watcher (handles qmd semantic search indexing)
     vaultEmbedWatcher = new VaultEmbedWatcher(CONFIG.redisUrl, VAULTS_DIR);

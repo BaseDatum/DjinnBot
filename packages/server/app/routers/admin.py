@@ -1,4 +1,4 @@
-"""Admin panel API — user management, key sharing, approvals, instance secrets.
+"""Admin panel API — user management, key sharing, approvals, instance secrets, logs.
 
 All endpoints require admin access (``get_current_admin`` dependency).
 
@@ -24,15 +24,25 @@ Endpoints:
   Instance secrets:
     POST   /v1/admin/secrets/{secret_id}/grant-user/{user_id}   grant instance secret to user
     DELETE /v1/admin/secrets/{secret_id}/grant-user/{user_id}   revoke
+
+  Container logs:
+    GET    /v1/admin/logs/containers                  list tracked containers
+    GET    /v1/admin/logs/stream/{container_name}     SSE stream for single container
+    GET    /v1/admin/logs/stream/merged               SSE merged stream for all containers
 """
 
 import uuid
-from typing import Optional, List
+import json
+import asyncio
+import os
+from typing import Optional, List, AsyncGenerator
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
+import redis.asyncio as aioredis
 
 from app.database import get_async_session
 from app.auth.dependencies import get_current_admin, AuthUser
@@ -46,6 +56,11 @@ from app.models.base import now_ms
 from app.logging_config import get_logger
 
 logger = get_logger(__name__)
+
+# Redis stream constants (must match packages/core/src/container/log-streamer.ts)
+_LOG_STREAM_PREFIX = "djinnbot:logs:"
+_MERGED_LOG_STREAM = "djinnbot:logs:merged"
+_CONTAINER_LIST_KEY = "djinnbot:logs:containers"
 
 router = APIRouter()
 
@@ -553,4 +568,209 @@ async def revoke_instance_secret_from_user(
     await session.commit()
     logger.info(
         f"Admin {admin.id} revoked instance secret {secret_id} from user {user_id}"
+    )
+
+
+# ── Container Logs ────────────────────────────────────────────────────────────
+
+
+def _get_redis_url() -> str:
+    """Return the Redis URL from environment (same as used by the engine)."""
+    return os.environ.get("REDIS_URL", "redis://redis:6379")
+
+
+@router.get("/logs/containers")
+async def list_log_containers(
+    admin: AuthUser = Depends(get_current_admin),
+):
+    """List all containers currently being tracked by the log streamer.
+
+    Returns the container list published by the engine's ContainerLogStreamer.
+    """
+    redis_url = _get_redis_url()
+    r = aioredis.from_url(redis_url, decode_responses=True)
+    try:
+        data = await r.get(_CONTAINER_LIST_KEY)
+        if not data:
+            return {"containers": []}
+        containers = json.loads(data)
+        return {"containers": containers}
+    except Exception as e:
+        logger.warning(f"Failed to read container list: {e}")
+        return {"containers": []}
+    finally:
+        await r.aclose()
+
+
+@router.get("/logs/stream/merged")
+async def stream_merged_logs(
+    admin: AuthUser = Depends(get_current_admin),
+    tail: int = Query(
+        200, ge=0, le=5000, description="Number of recent lines to backfill"
+    ),
+):
+    """SSE stream of merged logs from all containers.
+
+    Each container's log lines are interleaved in arrival order.
+    Uses a dedicated Redis connection per SSE client — no impact on engine.
+    """
+    redis_url = _get_redis_url()
+
+    async def event_generator() -> AsyncGenerator[str, None]:
+        r = aioredis.from_url(redis_url, decode_responses=True)
+        try:
+            # Send initial connected event
+            yield "event: connected\ndata: {}\n\n"
+
+            last_id = "$"
+
+            # Backfill: read the last N entries
+            if tail > 0:
+                try:
+                    entries = await r.xrevrange(
+                        _MERGED_LOG_STREAM, "+", "-", count=tail
+                    )
+                    # xrevrange returns newest-first, reverse for chronological order
+                    for msg_id, fields in reversed(entries):
+                        last_id = msg_id
+                        payload = json.dumps(
+                            {
+                                "line": fields.get("line", ""),
+                                "level": fields.get("level", "info"),
+                                "ts": fields.get("ts", ""),
+                                "container": fields.get("container", ""),
+                                "service": fields.get("service", ""),
+                            }
+                        )
+                        yield f"event: log\ndata: {payload}\n\n"
+                except Exception as e:
+                    logger.warning(f"Log backfill failed: {e}")
+
+            # Live stream
+            while True:
+                try:
+                    messages = await r.xread(
+                        {_MERGED_LOG_STREAM: last_id}, count=50, block=3000
+                    )
+                    if not messages:
+                        yield ": keepalive\n\n"
+                        continue
+
+                    for _stream_name, stream_messages in messages:
+                        for msg_id, fields in stream_messages:
+                            last_id = msg_id
+                            payload = json.dumps(
+                                {
+                                    "line": fields.get("line", ""),
+                                    "level": fields.get("level", "info"),
+                                    "ts": fields.get("ts", ""),
+                                    "container": fields.get("container", ""),
+                                    "service": fields.get("service", ""),
+                                }
+                            )
+                            yield f"event: log\ndata: {payload}\n\n"
+
+                except asyncio.CancelledError:
+                    break
+                except Exception as e:
+                    logger.warning(f"Merged log SSE error: {e}")
+                    yield f"event: error\ndata: {json.dumps({'error': str(e)})}\n\n"
+                    await asyncio.sleep(2)
+        finally:
+            await r.aclose()
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@router.get("/logs/stream/{container_name}")
+async def stream_container_logs(
+    container_name: str,
+    admin: AuthUser = Depends(get_current_admin),
+    tail: int = Query(
+        200, ge=0, le=5000, description="Number of recent lines to backfill"
+    ),
+):
+    """SSE stream of logs for a single container.
+
+    Uses a dedicated Redis connection per SSE client — no impact on engine.
+    """
+    redis_url = _get_redis_url()
+    stream_key = f"{_LOG_STREAM_PREFIX}{container_name}"
+
+    async def event_generator() -> AsyncGenerator[str, None]:
+        r = aioredis.from_url(redis_url, decode_responses=True)
+        try:
+            # Send initial connected event
+            yield "event: connected\ndata: {}\n\n"
+
+            last_id = "$"
+
+            # Backfill
+            if tail > 0:
+                try:
+                    entries = await r.xrevrange(stream_key, "+", "-", count=tail)
+                    for msg_id, fields in reversed(entries):
+                        last_id = msg_id
+                        payload = json.dumps(
+                            {
+                                "line": fields.get("line", ""),
+                                "level": fields.get("level", "info"),
+                                "ts": fields.get("ts", ""),
+                                "container": fields.get("container", container_name),
+                                "service": fields.get("service", ""),
+                            }
+                        )
+                        yield f"event: log\ndata: {payload}\n\n"
+                except Exception as e:
+                    logger.warning(f"Container log backfill failed: {e}")
+
+            # Live stream
+            while True:
+                try:
+                    messages = await r.xread(
+                        {stream_key: last_id}, count=50, block=3000
+                    )
+                    if not messages:
+                        yield ": keepalive\n\n"
+                        continue
+
+                    for _stream_name, stream_messages in messages:
+                        for msg_id, fields in stream_messages:
+                            last_id = msg_id
+                            payload = json.dumps(
+                                {
+                                    "line": fields.get("line", ""),
+                                    "level": fields.get("level", "info"),
+                                    "ts": fields.get("ts", ""),
+                                    "container": fields.get(
+                                        "container", container_name
+                                    ),
+                                    "service": fields.get("service", ""),
+                                }
+                            )
+                            yield f"event: log\ndata: {payload}\n\n"
+
+                except asyncio.CancelledError:
+                    break
+                except Exception as e:
+                    logger.warning(f"Container log SSE error: {e}")
+                    yield f"event: error\ndata: {json.dumps({'error': str(e)})}\n\n"
+                    await asyncio.sleep(2)
+        finally:
+            await r.aclose()
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
     )
