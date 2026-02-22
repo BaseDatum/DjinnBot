@@ -51,7 +51,7 @@ function CopyButton({ getText, className }: { getText: () => string; className?:
 
 export interface ChatMessageData {
   id: string;
-  type: 'user' | 'assistant' | 'thinking' | 'tool_call' | 'system' | 'error';
+  type: 'user' | 'assistant' | 'thinking' | 'tool_call' | 'system' | 'error' | 'handoff';
   content?: string;
   toolName?: string;
   args?: Record<string, unknown>;
@@ -64,6 +64,18 @@ export interface ChatMessageData {
   toolCalls?: any[];
   /** Attachment IDs for user messages (from upload) */
   attachments?: string[];
+
+  // ── Onboarding agent metadata (optional — only present in onboarding) ───
+  /** Which agent produced this message (e.g. "stas", "jim") */
+  agentId?: string;
+  /** Display name of the agent */
+  agentName?: string;
+  /** Emoji avatar of the agent */
+  agentEmoji?: string;
+  /** For handoff messages: the target agent being handed off to */
+  handoffTo?: string;
+  /** For handoff messages: context keys that were transferred */
+  handoffContextKeys?: string[];
 }
 
 interface ChatMessageProps {

@@ -82,6 +82,10 @@ class HandoffRequest(BaseModel):
     # If the current agent has already changed (handoff already succeeded),
     # a retry is detected and the endpoint returns 200 with status=already_handed_off.
     from_agent_id: Optional[str] = None
+    # 2-4 conversational details the next agent uses to show continuity.
+    # Stored in session context under "conversation_highlights" so the
+    # next agent's system prompt supplement can reference them.
+    conversation_highlights: Optional[List[str]] = None
 
 
 class FinalizeRequest(BaseModel):
@@ -268,6 +272,19 @@ async def _start_agent_container(
                 'recall("project context", { scope: "shared" })\n'
                 "```"
             )
+
+            # Inject conversation highlights from the previous agent so the
+            # greeting feels like a seamless continuation, not a cold restart.
+            highlights = onboarding_context.get("conversation_highlights")
+            if highlights and isinstance(highlights, list):
+                supplement += (
+                    "\n\n## Conversation Highlights from Previous Agent\n\n"
+                    "The user specifically mentioned these things during the "
+                    "previous phase. Reference 1-2 of them naturally in your "
+                    "opening message to show you were listening:\n\n"
+                    + "\n".join(f"- {h}" for h in highlights[:4])
+                )
+
             payload["system_prompt_supplement"] = supplement
 
     await dependencies.redis_client.xadd(
@@ -909,6 +926,18 @@ async def handoff_onboarding_agent(
         existing_ctx.update(req.context_update)
         onb.context = json.dumps(existing_ctx)
 
+    # Store conversation highlights so the next agent's supplement can
+    # reference them for a seamless, personality-aware greeting.
+    if req.conversation_highlights:
+        ctx: dict = {}
+        if onb.context:
+            try:
+                ctx = json.loads(onb.context)
+            except Exception:
+                pass
+        ctx["conversation_highlights"] = req.conversation_highlights
+        onb.context = json.dumps(ctx)
+
     # ── Auto-finalize when next_agent is "done" ──────────────────────────
     # "done" is not a real agent — it signals that the relay is complete.
     # Instead of starting a container for a non-existent agent, we finalize
@@ -1003,14 +1032,21 @@ async def handoff_onboarding_agent(
     prev_name, prev_emoji = _agent_meta(prev_agent_id)
     next_name, next_emoji = _agent_meta(req.next_agent_id)
 
+    # Build the handoff system message with context keys appended for the
+    # frontend to render as "knowledge transferred" pills.
+    handoff_text = (
+        f"{prev_emoji} {prev_name} is handing off to {next_emoji} {next_name}."
+        + (f" {req.summary}" if req.summary else "")
+    )
+    ctx_keys = list((req.context_update or {}).keys())
+    if ctx_keys:
+        handoff_text += f"\n[context: {', '.join(ctx_keys)}]"
+
     handoff_msg = OnboardingMessage(
         id=gen_id("ombm_"),
         session_id=session_id,
         role="system",
-        content=(
-            f"{prev_emoji} {prev_name} is handing off to {next_emoji} {next_name}."
-            + (f" {req.summary}" if req.summary else "")
-        ),
+        content=handoff_text,
         agent_id=prev_agent_id,
         agent_name=prev_name,
         agent_emoji=prev_emoji,
