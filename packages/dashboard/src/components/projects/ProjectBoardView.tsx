@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect, useMemo } from 'react';
 import {
   DndContext,
   DragOverlay,
@@ -11,7 +11,7 @@ import {
   type DragEndEvent,
 } from '@dnd-kit/core';
 import { Badge } from '@/components/ui/badge';
-import { moveTask } from '@/lib/api';
+import { moveTask, fetchSwarms } from '@/lib/api';
 import { KanbanColumn } from './KanbanColumn';
 import { PRIORITY_COLORS } from './constants';
 import type { Task, Project } from './types';
@@ -46,6 +46,25 @@ export function ProjectBoardView({
   onRefresh,
 }: ProjectBoardViewProps) {
   const [activeId, setActiveId] = useState<string | null>(null);
+  const [swarmTaskMap, setSwarmTaskMap] = useState<Map<string, string>>(new Map());
+
+  // Fetch active swarms and build task_id → swarm_id map
+  useEffect(() => {
+    fetchSwarms()
+      .then((data: any) => {
+        const map = new Map<string, string>();
+        for (const swarm of data.swarms || []) {
+          if (swarm.status !== 'running') continue;
+          for (const task of swarm.tasks || []) {
+            if (task.task_id && (task.status === 'running' || task.status === 'ready' || task.status === 'pending')) {
+              map.set(task.task_id, swarm.swarm_id);
+            }
+          }
+        }
+        setSwarmTaskMap(map);
+      })
+      .catch(() => {});
+  }, []);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 3 } }),
@@ -142,6 +161,7 @@ export function ProjectBoardView({
               onTaskClick={onTaskClick}
               onTaskCreated={onRefresh}
               columnAgents={getColumnAgents(column.name)}
+              swarmTaskMap={swarmTaskMap}
             />
           ))}
         </div>

@@ -34,6 +34,8 @@ export type ActivityEventType =
   | 'task_claimed'
   | 'task_completed'
   | 'executor_spawned'
+  | 'swarm_started'
+  | 'swarm_completed'
   // Meta events from the SSE endpoint
   | 'connected'
   | 'current_state'

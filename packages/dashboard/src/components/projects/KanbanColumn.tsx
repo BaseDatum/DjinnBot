@@ -25,6 +25,8 @@ interface KanbanColumnProps {
   onTaskCreated: () => void;
   /** Agents whose pulse_columns include this column */
   columnAgents?: TeamAgent[];
+  /** Map of task_id → swarm_id for tasks in active swarms */
+  swarmTaskMap?: Map<string, string>;
 }
 
 export function KanbanColumn({
@@ -35,6 +37,7 @@ export function KanbanColumn({
   onTaskClick,
   onTaskCreated,
   columnAgents = [],
+  swarmTaskMap,
 }: KanbanColumnProps) {
   const [showAdd, setShowAdd] = useState(false);
   const [newTitle, setNewTitle] = useState('');
@@ -120,6 +123,7 @@ export function KanbanColumn({
               task={task}
               dependencies={dependencies}
               onClick={() => onTaskClick(task)}
+              swarmId={swarmTaskMap?.get(task.id)}
             />
           ))}
         </SortableContext>

@@ -64,6 +64,10 @@ let graphRebuildSub: Redis | null = null;
 let mcpoManager: McpoManager | null = null;
 let containerLogStreamer: ContainerLogStreamer | null = null;
 let swarmManager: SwarmSessionManager | null = null;
+/** Lifecycle tracker for swarm activity feed events. Initialized in main(). */
+let swarmLifecycle: AgentLifecycleTracker | null = null;
+/** Maps swarmId → agentId for activity feed attribution. */
+const swarmAgentMap = new Map<string, string>();
 
 const VAULTS_DIR = process.env.VAULTS_DIR || '/data/vaults';
 const CLAWVAULT_BIN = '/usr/local/bin/clawvault';
@@ -290,6 +294,11 @@ function initSwarmManager(): SwarmSessionManager {
   // Dedicated Redis for swarm state persistence and progress publishing
   const swarmRedis = new Redis(CONFIG.redisUrl);
 
+  // Initialize the module-level lifecycle tracker (if not already)
+  if (!swarmLifecycle) {
+    swarmLifecycle = new AgentLifecycleTracker({ redis: new Redis(CONFIG.redisUrl) });
+  }
+
   const deps: SwarmSessionDeps = {
     spawnExecutor: async (params) => {
       const res = await authFetch(`${apiUrl}/v1/internal/spawn-executor`, {
@@ -328,6 +337,37 @@ function initSwarmManager(): SwarmSessionManager {
 
     publishProgress: async (swarmId, event) => {
       await swarmRedis.publish(swarmChannel(swarmId), JSON.stringify(event));
+
+      // Publish key swarm milestones to the agent's activity feed
+      const agentId = swarmAgentMap.get(swarmId);
+      if (!agentId) return;
+
+      if (event.type === 'swarm:task_started' || event.type === 'swarm:task_completed' || event.type === 'swarm:task_failed') {
+        // Individual task events — too noisy for the feed, skip
+        return;
+      }
+
+      if (event.type === 'swarm:completed' || event.type === 'swarm:failed') {
+        const summary = 'summary' in event ? event.summary : undefined;
+        if (swarmLifecycle) {
+          await swarmLifecycle.addTimelineEvent(agentId, {
+            id: `swarm_done_${swarmId}`,
+            timestamp: event.timestamp,
+            type: 'swarm_completed' as any,
+            data: {
+              swarmId,
+              status: event.type === 'swarm:completed' ? 'success' : 'failed',
+              totalTasks: summary?.totalTasks,
+              completed: summary?.completed,
+              failed: summary?.failed,
+              skipped: summary?.skipped,
+              durationMs: summary?.totalDurationMs,
+            },
+          });
+        }
+        // Clean up map entry
+        swarmAgentMap.delete(swarmId);
+      }
     },
 
     persistState: async (swarmId, state) => {
@@ -449,6 +489,21 @@ async function listenForSwarmEvents(): Promise<void> {
 
                 await swarmManager.startSwarm(payload.swarm_id, request);
                 console.log(`[Engine] Swarm ${payload.swarm_id} started`);
+
+                // Track for activity feed and publish swarm_started event
+                swarmAgentMap.set(payload.swarm_id, payload.agent_id);
+                if (swarmLifecycle) {
+                  await swarmLifecycle.addTimelineEvent(payload.agent_id, {
+                    id: `swarm_start_${payload.swarm_id}`,
+                    timestamp: Date.now(),
+                    type: 'swarm_started' as any,
+                    data: {
+                      swarmId: payload.swarm_id,
+                      totalTasks: payload.tasks.length,
+                      maxConcurrent: payload.maxConcurrent ?? 3,
+                    },
+                  });
+                }
               } else {
                 console.error(`[Engine] SwarmSessionManager not initialized`);
               }

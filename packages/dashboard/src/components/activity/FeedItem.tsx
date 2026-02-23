@@ -23,8 +23,10 @@ import {
   CheckSquare,
   GitBranch,
   ChevronDown,
+  Network,
   type LucideIcon,
 } from 'lucide-react';
+import { Link } from '@tanstack/react-router';
 import { cn } from '@/lib/utils';
 import type { ActivityEvent } from '@/hooks/useActivityStream';
 
@@ -99,6 +101,10 @@ function getEventConfig(type: string): EventConfig {
       return { icon: CheckSquare, color: 'text-emerald-400', borderColor: 'border-l-emerald-500', label: 'Task Completed' };
     case 'executor_spawned':
       return { icon: GitBranch, color: 'text-violet-400', borderColor: 'border-l-violet-500', label: 'Executor Spawned' };
+    case 'swarm_started':
+      return { icon: Network, color: 'text-indigo-400', borderColor: 'border-l-indigo-500', label: 'Swarm Started' };
+    case 'swarm_completed':
+      return { icon: Network, color: 'text-emerald-400', borderColor: 'border-l-emerald-500', label: 'Swarm Done' };
     case 'tool_install':
       return { icon: Wrench, color: 'text-amber-400', borderColor: 'border-l-amber-500', label: 'Tool Installed' };
     case 'sandbox_reset':
@@ -179,6 +185,14 @@ function getSummary(event: ActivityEvent): string {
       return d.promptPreview
         ? `Spawned executor \u2014 "${d.promptPreview}"`
         : 'Spawned a new executor';
+    case 'swarm_started':
+      return `Swarm started \u2014 ${d.totalTasks || '?'} tasks (max ${d.maxConcurrent || 3} parallel)`;
+    case 'swarm_completed': {
+      const parts = [`Swarm ${d.status === 'success' ? 'completed' : 'failed'}`];
+      if (d.completed != null) parts.push(`\u2014 ${d.completed}/${d.totalTasks || '?'} tasks`);
+      if (d.durationMs) parts.push(`in ${formatDuration(d.durationMs)}`);
+      return parts.join(' ');
+    }
     case 'tool_install':
       return d.toolName
         ? `Installed tool: ${d.toolName}`
@@ -207,6 +221,9 @@ function getDetail(event: ActivityEvent): string | null {
       return d.messagePreview || null;
     case 'executor_spawned':
       return d.promptPreview || null;
+    case 'swarm_started':
+    case 'swarm_completed':
+      return d.swarmId || null;
     case 'inbox_received':
       return d.subject || null;
     case 'work_failed':
@@ -268,6 +285,16 @@ export function FeedItem({ event, isNew }: FeedItemProps) {
               <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
                 {sourceBadge}
               </span>
+            )}
+            {(event.type === 'swarm_started' || event.type === 'swarm_completed') && event.data?.swarmId && (
+              <Link
+                to="/runs/swarm/$swarmId"
+                params={{ swarmId: event.data.swarmId }}
+                onClick={(e) => e.stopPropagation()}
+                className="shrink-0 text-[10px] text-indigo-400 hover:text-indigo-300 hover:underline"
+              >
+                View swarm
+              </Link>
             )}
           </div>
 

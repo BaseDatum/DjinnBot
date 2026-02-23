@@ -1,6 +1,6 @@
 import { Link } from '@tanstack/react-router';
 import { Badge } from '@/components/ui/badge';
-import { GripVertical, Link2, Lock, GitBranch, GitPullRequest } from 'lucide-react';
+import { GripVertical, Link2, Lock, GitBranch, GitPullRequest, Network } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
@@ -11,12 +11,15 @@ interface SortableTaskCardProps {
   task: Task;
   dependencies: Dependency[];
   onClick: () => void;
+  /** If set, this task is part of an active swarm */
+  swarmId?: string;
 }
 
 export function SortableTaskCard({
   task,
   dependencies,
   onClick,
+  swarmId,
 }: SortableTaskCardProps) {
   const {
     attributes,
@@ -92,14 +95,25 @@ export function SortableTaskCard({
                   Running
                 </span>
               )}
-              {task.run_id && task.status !== 'in_progress' && (
+              {task.run_id && task.status !== 'in_progress' && !swarmId && (
                 <Link
                   to="/runs/$runId"
                   params={{ runId: task.run_id }}
                   onClick={(e) => e.stopPropagation()}
                   className="text-primary hover:underline"
                 >
-                  View run →
+                  View run
+                </Link>
+              )}
+              {swarmId && (
+                <Link
+                  to="/runs/swarm/$swarmId"
+                  params={{ swarmId }}
+                  onClick={(e) => e.stopPropagation()}
+                  className="flex items-center gap-0.5 text-indigo-400 hover:text-indigo-300"
+                >
+                  <Network className="h-3 w-3" />
+                  <span className="animate-pulse">In swarm</span>
                 </Link>
               )}
             </div>

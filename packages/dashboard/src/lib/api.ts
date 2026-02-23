@@ -152,6 +152,11 @@ export async function fetchRuns(params?: { pipeline_id?: string; status?: string
   return handleResponse(res, 'Failed to fetch runs');
 }
 
+export async function fetchSwarms(): Promise<any> {
+  const res = await authFetch(`${API_BASE}/internal/swarms`);
+  return handleResponse(res, 'Failed to fetch swarms');
+}
+
 export async function fetchRun(runId: string) {
   const res = await authFetch(`${API_BASE}/runs/${runId}`);
   return handleResponse(res, 'Failed to fetch run');

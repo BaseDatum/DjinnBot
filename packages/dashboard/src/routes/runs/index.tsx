@@ -2,9 +2,9 @@ import { createFileRoute, Link } from '@tanstack/react-router';
 import { Card, CardHeader, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Play, Search, Trash2, ChevronDown, Square, Loader2, Key } from 'lucide-react';
+import { Play, Search, Trash2, ChevronDown, Square, Loader2, Key, Network } from 'lucide-react';
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { fetchRuns, deleteRun, bulkDeleteRuns, cancelRun, API_BASE } from '@/lib/api';
+import { fetchRuns, fetchSwarms, deleteRun, bulkDeleteRuns, cancelRun, API_BASE } from '@/lib/api';
 import { useSSE } from '@/hooks/useSSE';
 import { getStatusVariant, formatDuration } from '@/lib/format';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
@@ -40,6 +40,7 @@ function RunsList() {
   const [showCleanup, setShowCleanup] = useState(false);
   const [confirmAction, setConfirmAction] = useState<{ title: string; desc: string; action: () => void } | null>(null);
   const [stoppingRuns, setStoppingRuns] = useState<Set<string>>(new Set());
+  const [swarms, setSwarms] = useState<any[]>([]);
 
   // Debounce ref for SSE updates
   const refreshTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -68,8 +69,12 @@ function RunsList() {
       try {
         setLoading(true);
         setError(null);
-        const response = await fetchRuns();
-        setRuns(Array.isArray(response) ? response : response.runs || []);
+        const [runsResponse, swarmsResponse] = await Promise.all([
+          fetchRuns(),
+          fetchSwarms().catch(() => ({ swarms: [] })),
+        ]);
+        setRuns(Array.isArray(runsResponse) ? runsResponse : runsResponse.runs || []);
+        setSwarms(swarmsResponse.swarms || []);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load runs');
       } finally {
@@ -250,6 +255,67 @@ function RunsList() {
           </Button>
         </div>
       </div>
+
+      {/* Active Swarms */}
+      {swarms.length > 0 && (
+        <Card className="mb-4">
+          <CardHeader>
+            <div className="flex items-center gap-2">
+              <Network className="h-4 w-4 text-indigo-400" />
+              <span className="text-sm font-semibold">Swarm Executions</span>
+              <Badge variant="outline" className="text-[10px]">{swarms.length}</Badge>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-2">
+              {swarms.map((swarm: any) => {
+                const isActive = swarm.status === 'running';
+                const isFailed = swarm.status === 'failed';
+                const variant = isActive ? 'default' : isFailed ? 'destructive' : 'outline';
+                const doneCount = (swarm.completed_count || 0) + (swarm.failed_count || 0);
+                const total = swarm.total_count || 0;
+                const elapsed = swarm.created_at ? Date.now() - swarm.created_at : 0;
+                const elapsedStr = elapsed > 60000 ? `${Math.floor(elapsed / 60000)}m` : `${Math.floor(elapsed / 1000)}s`;
+
+                return (
+                  <Link
+                    key={swarm.swarm_id}
+                    to="/runs/swarm/$swarmId"
+                    params={{ swarmId: swarm.swarm_id }}
+                    className="group flex items-center justify-between gap-3 rounded-lg border p-3 transition-colors hover:bg-accent"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="flex h-10 w-10 items-center justify-center rounded-full bg-indigo-500/10">
+                        <Network className="h-4 w-4 text-indigo-400" />
+                      </div>
+                      <div>
+                        <p className="font-medium font-mono text-sm">{swarm.swarm_id}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {swarm.agent_id} — {total} tasks, max {swarm.max_concurrent || 3} parallel
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-4">
+                      <div className="text-right">
+                        <p className="text-xs text-muted-foreground">Progress</p>
+                        <p className="text-sm font-mono">{doneCount}/{total}</p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-xs text-muted-foreground">Elapsed</p>
+                        <p className="text-sm">{elapsedStr}</p>
+                      </div>
+                      <Badge variant={variant as any}>
+                        {isActive && <Loader2 className="h-3 w-3 mr-1 animate-spin" />}
+                        {swarm.status}
+                      </Badge>
+                    </div>
+                  </Link>
+                );
+              })}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       <Card>
         <CardHeader>

@@ -215,6 +215,46 @@ async def swarm_execute(
     }
 
 
+@router.get("/swarms")
+async def list_swarms():
+    """List recent swarm sessions (from Redis).
+
+    Scans for djinnbot:swarm:*:state keys. Results are ephemeral
+    (TTL 1 hour) — only active and recently-finished swarms appear.
+    """
+    if not dependencies.redis_client:
+        raise HTTPException(status_code=503, detail="Redis not available")
+
+    try:
+        swarms = []
+        cursor = 0
+        while True:
+            cursor, keys = await dependencies.redis_client.scan(
+                cursor, match="djinnbot:swarm:*:state", count=100
+            )
+            for key in keys:
+                raw = await dependencies.redis_client.get(key)
+                if raw:
+                    try:
+                        state = json.loads(
+                            raw if isinstance(raw, str) else raw.decode("utf-8")
+                        )
+                        swarms.append(state)
+                    except (json.JSONDecodeError, AttributeError):
+                        pass
+            if cursor == 0:
+                break
+
+        # Sort by created_at descending (most recent first)
+        swarms.sort(key=lambda s: s.get("created_at", 0), reverse=True)
+        return {"swarms": swarms}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to list swarms: {e}")
+        raise HTTPException(status_code=500, detail="Failed to list swarms")
+
+
 @router.get("/swarm/{swarm_id}")
 async def get_swarm_state(swarm_id: str):
     """Get the current state of a swarm execution session.
