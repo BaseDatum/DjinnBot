@@ -25,6 +25,8 @@ import { PROVIDER_ENV_MAP } from './constants.js';
 import { parseModelString } from './runtime/model-resolver.js';
 import { authFetch } from './api/auth-fetch.js';
 import { ensureAgentKeys } from './api/agent-key-manager.js';
+import { SwarmSessionManager, type SwarmSessionDeps } from './runtime/swarm-session.js';
+import { type SwarmRequest, type SwarmProgressEvent, swarmChannel, swarmStateKey } from './runtime/swarm-types.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -44,6 +46,7 @@ const CONFIG: DjinnBotConfig = {
 };
 
 const REDIS_STREAM = 'djinnbot:events:new_runs';
+const SWARM_STREAM = 'djinnbot:events:new_swarms';
 const CONSUMER_GROUP = 'djinnbot-engine';
 const CONSUMER_NAME = `worker-${process.pid}`;
 
@@ -60,6 +63,7 @@ let vaultEmbedWatcher: VaultEmbedWatcher | null = null;
 let graphRebuildSub: Redis | null = null;
 let mcpoManager: McpoManager | null = null;
 let containerLogStreamer: ContainerLogStreamer | null = null;
+let swarmManager: SwarmSessionManager | null = null;
 
 const VAULTS_DIR = process.env.VAULTS_DIR || '/data/vaults';
 const CLAWVAULT_BIN = '/usr/local/bin/clawvault';
@@ -86,13 +90,24 @@ async function initRedis(): Promise<Redis> {
   
   console.log(`[Engine] Connected to Redis at ${CONFIG.redisUrl}`);
   
-  // Create consumer group if it doesn't exist
+  // Create consumer groups if they don't exist
   try {
     await client.xgroup('CREATE', REDIS_STREAM, CONSUMER_GROUP, '0', 'MKSTREAM');
-    console.log(`[Engine] Created consumer group: ${CONSUMER_GROUP}`);
+    console.log(`[Engine] Created consumer group: ${CONSUMER_GROUP} on ${REDIS_STREAM}`);
   } catch (err: any) {
     if (err.message?.includes('BUSYGROUP')) {
-      console.log(`[Engine] Consumer group already exists: ${CONSUMER_GROUP}`);
+      console.log(`[Engine] Consumer group already exists: ${CONSUMER_GROUP} on ${REDIS_STREAM}`);
+    } else {
+      throw err;
+    }
+  }
+
+  try {
+    await client.xgroup('CREATE', SWARM_STREAM, CONSUMER_GROUP, '0', 'MKSTREAM');
+    console.log(`[Engine] Created consumer group: ${CONSUMER_GROUP} on ${SWARM_STREAM}`);
+  } catch (err: any) {
+    if (err.message?.includes('BUSYGROUP')) {
+      console.log(`[Engine] Consumer group already exists: ${CONSUMER_GROUP} on ${SWARM_STREAM}`);
     } else {
       throw err;
     }
@@ -262,6 +277,200 @@ async function listenForGlobalEvents(): Promise<void> {
       await new Promise(resolve => setTimeout(resolve, 1000));
     }
   }
+}
+
+// ── Swarm Executor System ──────────────────────────────────────────────────
+
+/**
+ * Initialize the SwarmSessionManager with dependencies wired to the API.
+ */
+function initSwarmManager(): SwarmSessionManager {
+  const apiUrl = CONFIG.apiUrl || 'http://api:8000';
+
+  // Dedicated Redis for swarm state persistence and progress publishing
+  const swarmRedis = new Redis(CONFIG.redisUrl);
+
+  const deps: SwarmSessionDeps = {
+    spawnExecutor: async (params) => {
+      const res = await authFetch(`${apiUrl}/v1/internal/spawn-executor`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          agent_id: params.agentId,
+          project_id: params.projectId,
+          task_id: params.taskId,
+          execution_prompt: params.executionPrompt,
+          deviation_rules: params.deviationRules,
+          model_override: params.modelOverride,
+          timeout_seconds: params.timeoutSeconds,
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({})) as { detail?: string };
+        throw new Error(err.detail || `Spawn failed: ${res.status}`);
+      }
+      const data = await res.json() as { run_id: string };
+      return data.run_id;
+    },
+
+    pollRun: async (runId) => {
+      const res = await authFetch(`${apiUrl}/v1/runs/${runId}`);
+      if (!res.ok) {
+        throw new Error(`Poll failed: ${res.status}`);
+      }
+      const data = await res.json() as {
+        status: string;
+        outputs?: Record<string, string>;
+        error?: string;
+      };
+      return data;
+    },
+
+    publishProgress: async (swarmId, event) => {
+      await swarmRedis.publish(swarmChannel(swarmId), JSON.stringify(event));
+    },
+
+    persistState: async (swarmId, state) => {
+      // Convert camelCase state to snake_case for the Python API layer and
+      // agent-runtime tool, which both expect snake_case field names.
+      const snakeState = {
+        swarm_id: state.swarmId,
+        agent_id: state.agentId,
+        status: state.status,
+        tasks: state.tasks.map(t => ({
+          key: t.key,
+          title: t.title,
+          task_id: t.taskId,
+          project_id: t.projectId,
+          status: t.status,
+          run_id: t.runId,
+          dependencies: t.dependencies,
+          outputs: t.outputs,
+          error: t.error,
+          started_at: t.startedAt,
+          completed_at: t.completedAt,
+        })),
+        max_concurrent: state.maxConcurrent,
+        active_count: state.activeCount,
+        completed_count: state.completedCount,
+        failed_count: state.failedCount,
+        total_count: state.totalCount,
+        created_at: state.createdAt,
+        updated_at: state.updatedAt,
+      };
+      // Persist for 1 hour (polling fallback + debugging)
+      await swarmRedis.setex(swarmStateKey(swarmId), 3600, JSON.stringify(snakeState));
+    },
+  };
+
+  return new SwarmSessionManager(deps);
+}
+
+/**
+ * Listen for new swarm dispatch events from Redis stream.
+ * Runs in the background alongside listenForNewRuns.
+ */
+async function listenForSwarmEvents(): Promise<void> {
+  if (!opsRedis) return;
+
+  // Dedicated Redis connections — stream reader blocks on XREADGROUP,
+  // cancel subscriber uses pub/sub. Both need separate connections.
+  const swarmRedis = new Redis(CONFIG.redisUrl);
+  const cancelSub = new Redis(CONFIG.redisUrl);
+
+  console.log(`[Engine] Listening for swarm events on stream: ${SWARM_STREAM}`);
+
+  // Subscribe to cancel commands using pattern matching.
+  // The server publishes to djinnbot:swarm:{swarmId}:control
+  cancelSub.on('pmessage', (_pattern: string, channel: string, message: string) => {
+    const match = channel.match(/^djinnbot:swarm:(.+):control$/);
+    if (!match) return;
+    const swarmId = match[1];
+
+    try {
+      const data = JSON.parse(message);
+      if (data.action === 'cancel' && swarmManager) {
+        console.log(`[Engine] Received cancel command for swarm ${swarmId}`);
+        swarmManager.cancelSwarm(swarmId).catch(err => {
+          console.error(`[Engine] Failed to cancel swarm ${swarmId}:`, err);
+        });
+      }
+    } catch {
+      // Ignore malformed messages
+    }
+  });
+
+  await cancelSub.psubscribe('djinnbot:swarm:*:control');
+  console.log('[Engine] Subscribed to swarm cancel commands (pattern: djinnbot:swarm:*:control)');
+
+  while (!isShuttingDown) {
+    try {
+      const messages: any = await swarmRedis.xreadgroup(
+        'GROUP', CONSUMER_GROUP, CONSUMER_NAME,
+        'COUNT', 5,
+        'BLOCK', 5000,
+        'STREAMS', SWARM_STREAM, '>',
+      );
+
+      if (!messages || messages.length === 0) continue;
+
+      for (const streamData of messages) {
+        const [, streamMessages] = streamData;
+
+        for (const messageData of streamMessages) {
+          const [id, fields] = messageData;
+
+          const data: Record<string, string> = {};
+          for (let i = 0; i < fields.length; i += 2) {
+            data[fields[i]] = fields[i + 1];
+          }
+
+          if (data.payload) {
+            try {
+              const payload = JSON.parse(data.payload) as {
+                swarm_id: string;
+                agent_id: string;
+                tasks: any[];
+                maxConcurrent?: number;
+                deviationRules?: string;
+                globalTimeoutSeconds?: number;
+              };
+
+              console.log(`[Engine] Processing new swarm: ${payload.swarm_id} (${payload.tasks.length} tasks)`);
+
+              if (swarmManager) {
+                const request: SwarmRequest = {
+                  agentId: payload.agent_id,
+                  tasks: payload.tasks,
+                  maxConcurrent: payload.maxConcurrent,
+                  deviationRules: payload.deviationRules,
+                  globalTimeoutSeconds: payload.globalTimeoutSeconds,
+                };
+
+                await swarmManager.startSwarm(payload.swarm_id, request);
+                console.log(`[Engine] Swarm ${payload.swarm_id} started`);
+              } else {
+                console.error(`[Engine] SwarmSessionManager not initialized`);
+              }
+            } catch (err) {
+              console.error(`[Engine] Error processing swarm:`, err);
+            }
+          }
+
+          await swarmRedis.xack(SWARM_STREAM, CONSUMER_GROUP, id);
+        }
+      }
+    } catch (err) {
+      if (isShuttingDown) break;
+      console.error('[Engine] Error reading swarm events:', err);
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    }
+  }
+
+  await cancelSub.punsubscribe('djinnbot:swarm:*:control').catch(() => {});
+  await cancelSub.quit().catch(() => {});
+  await swarmRedis.quit().catch(() => {});
+  console.log('[Engine] Stopped listening for swarm events');
 }
 
 /**
@@ -1218,12 +1427,21 @@ async function main(): Promise<void> {
       }
     }
 
+    // Initialize swarm executor system
+    swarmManager = initSwarmManager();
+    console.log('[Engine] SwarmSessionManager initialized');
+
     // Start listening for new run events
     console.log('[Engine] Ready to process runs');
     
     // Start listening for global events (pulse triggers, etc.) in background
     listenForGlobalEvents().catch(err => {
       console.error('[Engine] Global events listener error:', err);
+    });
+
+    // Start listening for swarm dispatch events in background
+    listenForSwarmEvents().catch(err => {
+      console.error('[Engine] Swarm events listener error:', err);
     });
     
     // Listen for runs (blocking)
