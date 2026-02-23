@@ -331,8 +331,35 @@ function initSwarmManager(): SwarmSessionManager {
     },
 
     persistState: async (swarmId, state) => {
+      // Convert camelCase state to snake_case for the Python API layer and
+      // agent-runtime tool, which both expect snake_case field names.
+      const snakeState = {
+        swarm_id: state.swarmId,
+        agent_id: state.agentId,
+        status: state.status,
+        tasks: state.tasks.map(t => ({
+          key: t.key,
+          title: t.title,
+          task_id: t.taskId,
+          project_id: t.projectId,
+          status: t.status,
+          run_id: t.runId,
+          dependencies: t.dependencies,
+          outputs: t.outputs,
+          error: t.error,
+          started_at: t.startedAt,
+          completed_at: t.completedAt,
+        })),
+        max_concurrent: state.maxConcurrent,
+        active_count: state.activeCount,
+        completed_count: state.completedCount,
+        failed_count: state.failedCount,
+        total_count: state.totalCount,
+        created_at: state.createdAt,
+        updated_at: state.updatedAt,
+      };
       // Persist for 1 hour (polling fallback + debugging)
-      await swarmRedis.setex(swarmStateKey(swarmId), 3600, JSON.stringify(state));
+      await swarmRedis.setex(swarmStateKey(swarmId), 3600, JSON.stringify(snakeState));
     },
   };
 
@@ -346,10 +373,35 @@ function initSwarmManager(): SwarmSessionManager {
 async function listenForSwarmEvents(): Promise<void> {
   if (!opsRedis) return;
 
-  // Use a dedicated Redis connection for swarm stream reading
+  // Dedicated Redis connections — stream reader blocks on XREADGROUP,
+  // cancel subscriber uses pub/sub. Both need separate connections.
   const swarmRedis = new Redis(CONFIG.redisUrl);
+  const cancelSub = new Redis(CONFIG.redisUrl);
 
   console.log(`[Engine] Listening for swarm events on stream: ${SWARM_STREAM}`);
+
+  // Subscribe to cancel commands using pattern matching.
+  // The server publishes to djinnbot:swarm:{swarmId}:control
+  cancelSub.on('pmessage', (_pattern: string, channel: string, message: string) => {
+    const match = channel.match(/^djinnbot:swarm:(.+):control$/);
+    if (!match) return;
+    const swarmId = match[1];
+
+    try {
+      const data = JSON.parse(message);
+      if (data.action === 'cancel' && swarmManager) {
+        console.log(`[Engine] Received cancel command for swarm ${swarmId}`);
+        swarmManager.cancelSwarm(swarmId).catch(err => {
+          console.error(`[Engine] Failed to cancel swarm ${swarmId}:`, err);
+        });
+      }
+    } catch {
+      // Ignore malformed messages
+    }
+  });
+
+  await cancelSub.psubscribe('djinnbot:swarm:*:control');
+  console.log('[Engine] Subscribed to swarm cancel commands (pattern: djinnbot:swarm:*:control)');
 
   while (!isShuttingDown) {
     try {
@@ -415,6 +467,8 @@ async function listenForSwarmEvents(): Promise<void> {
     }
   }
 
+  await cancelSub.punsubscribe('djinnbot:swarm:*:control').catch(() => {});
+  await cancelSub.quit().catch(() => {});
   await swarmRedis.quit().catch(() => {});
   console.log('[Engine] Stopped listening for swarm events');
 }

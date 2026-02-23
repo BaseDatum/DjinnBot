@@ -10,7 +10,6 @@
  * 6. When all tasks are done (or global timeout), swarm:completed is published
  */
 
-import { Redis } from 'ioredis';
 import {
   type SwarmRequest,
   type SwarmTaskDef,

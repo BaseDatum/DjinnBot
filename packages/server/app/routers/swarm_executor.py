@@ -18,26 +18,18 @@ resolution, and cascade skipping automatically.
 """
 
 import json
-import os
 import uuid
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import get_async_session
-from app.models import Task, Project
 from app import dependencies
-from app.utils import now_ms
 from app.logging_config import get_logger
 
 logger = get_logger(__name__)
 
 router = APIRouter()
-
-VAULTS_DIR = os.getenv("VAULTS_DIR", "/data/vaults")
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -78,34 +70,6 @@ class SwarmExecuteRequest(BaseModel):
     global_timeout_seconds: int = Field(
         default=1800, ge=60, le=3600, description="Global timeout for the entire swarm"
     )
-
-
-class SwarmTaskStateResponse(BaseModel):
-    key: str
-    title: str
-    task_id: str
-    project_id: str
-    status: str
-    run_id: Optional[str] = None
-    dependencies: list[str]
-    outputs: Optional[dict] = None
-    error: Optional[str] = None
-    started_at: Optional[int] = None
-    completed_at: Optional[int] = None
-
-
-class SwarmStateResponse(BaseModel):
-    swarm_id: str
-    agent_id: str
-    status: str
-    tasks: list[SwarmTaskStateResponse]
-    max_concurrent: int
-    active_count: int
-    completed_count: int
-    failed_count: int
-    total_count: int
-    created_at: int
-    updated_at: int
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -173,7 +137,6 @@ def _validate_dag(tasks: list[SwarmTaskDefModel]) -> list[str]:
 @router.post("/swarm-execute")
 async def swarm_execute(
     req: SwarmExecuteRequest,
-    session: AsyncSession = Depends(get_async_session),
 ):
     """Create a parallel swarm execution session.
 
