@@ -363,26 +363,76 @@ async def ingest_meeting(
     return result
 
 
-@router.post("/note")
-async def ingest_note(
-    request: IngestNoteRequest,
+# ============================================================================
+# Briefing
+# ============================================================================
+
+
+class BriefingRequest(BaseModel):
+    """Pre-meeting briefing request from Dialog."""
+
+    participants: list[str]
+    meetingTitle: Optional[str] = None
+
+
+class BriefingResponse(BaseModel):
+    """Pre-meeting briefing response."""
+
+    briefing: str
+    status: str = "ok"
+
+
+@router.post("/briefing")
+async def generate_briefing(
+    request: BriefingRequest,
     db: AsyncSession = Depends(get_async_session),
 ):
-    """Ingest a standalone note from Dialog.
+    """Generate a pre-meeting context briefing from Grace's knowledge graph.
 
-    Routes to Grace for memory extraction of any actionable content.
+    Accepts participant names and optionally a meeting title. Grace searches
+    her vault for prior meetings, open commitments, and relationship context
+    involving those participants.
     """
-    logger.info(f"ingest_note: title={request.title!r} notes_len={len(request.notes)}")
+    if not request.participants:
+        raise HTTPException(
+            status_code=400, detail="At least one participant is required"
+        )
 
-    if not request.notes.strip():
-        raise HTTPException(status_code=400, detail="Notes content is required")
+    logger.info(
+        f"briefing: participants={request.participants} title={request.meetingTitle!r}"
+    )
 
+    prompt = _format_briefing_prompt(request)
     session_id = await _get_or_create_grace_session(db)
-    prompt = _format_note_prompt(request)
     result = await _send_to_grace(session_id, prompt, db)
 
-    status_code = 200 if result["status"] == "processed" else 202
-    return result
+    briefing_text = result.get("summary") or ""
+    return BriefingResponse(
+        briefing=briefing_text,
+        status=result["status"],
+    )
+
+
+def _format_briefing_prompt(req: BriefingRequest) -> str:
+    """Build the structured prompt Grace receives for a pre-meeting briefing."""
+    parts = [
+        "The user is about to start a meeting. Prepare a concise pre-meeting "
+        "briefing by searching your memory vault. Include:\n"
+        "- Prior meetings with these participants\n"
+        "- Open commitments involving these participants\n"
+        "- Relevant project status\n"
+        "- Relationship context (titles, companies, how they connect)\n"
+        "- Any follow-ups that were promised\n\n"
+        "Be concise. Use bullet points. Only include information you actually "
+        "have in your memory vault — do not invent context.\n",
+    ]
+
+    parts.append(f"**Participants:** {', '.join(req.participants)}")
+
+    if req.meetingTitle:
+        parts.append(f"**Meeting Title:** {req.meetingTitle}")
+
+    return "\n\n".join(parts)
 
 
 @router.post("/dictation")

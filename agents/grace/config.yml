@@ -6,8 +6,8 @@ pulse_blackouts:
   type: recurring
 pulse_columns: []
 pulse_container_timeout_ms: 120000
-pulse_enabled: false
-pulse_interval_minutes: 60
+pulse_enabled: true
+pulse_interval_minutes: 120
 pulse_max_consecutive_skips: 5
 pulse_offset_minutes: 0
 pulse_one_offs: []
