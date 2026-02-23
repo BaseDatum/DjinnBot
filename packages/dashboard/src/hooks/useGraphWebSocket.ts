@@ -56,15 +56,23 @@ export function useGraphWebSocket({ agentId, enabled = true, onInit, onUpdate }:
       } catch {}
     });
 
-    ws.addEventListener('close', () => {
+    ws.addEventListener('close', (ev) => {
       setConnected(false);
       wsRef.current = null;
       if (enabledRef.current) {
+        // If the server closed with 4004 (vault not found), use a short
+        // fixed delay instead of exponential backoff — the vault will appear
+        // soon during onboarding and we want to connect quickly.
+        const delay = ev.code === 4004
+          ? WS_RECONNECT_BASE_MS
+          : reconnectDelayRef.current;
         reconnectTimerRef.current = setTimeout(() => {
           reconnectTimerRef.current = null;
           connect();
-        }, reconnectDelayRef.current);
-        reconnectDelayRef.current = Math.min(WS_RECONNECT_MAX_MS, Math.round(reconnectDelayRef.current * 1.8));
+        }, delay);
+        if (ev.code !== 4004) {
+          reconnectDelayRef.current = Math.min(WS_RECONNECT_MAX_MS, Math.round(reconnectDelayRef.current * 1.8));
+        }
       }
     });
 

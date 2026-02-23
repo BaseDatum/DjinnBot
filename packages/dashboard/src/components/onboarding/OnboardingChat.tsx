@@ -516,6 +516,11 @@ export function OnboardingChat({ onClose, onProjectCreated, resumeSessionId }: O
   const chatStream = useChatStream({
     sessionId: chatSessionId,
     enabled: !!chatSessionId,
+    agentMeta: useMemo(() => session ? {
+      agentId: session.current_agent_id,
+      agentName: session.current_agent_name,
+      agentEmoji: session.current_agent_emoji,
+    } : undefined, [session?.current_agent_id, session?.current_agent_name, session?.current_agent_emoji]),
     onTurnEnd: useCallback(() => {
       setIsAgentStarting(false);
       setIsWaitingForAgent(false);
@@ -525,6 +530,14 @@ export function OnboardingChat({ onClose, onProjectCreated, resumeSessionId }: O
       // The complete_onboarding_message endpoint publishes a second
       // turn_end AFTER the DB write, so content is guaranteed to exist.
       refreshSessionRef.current?.();
+    }, []),
+    onResponseAborted: useCallback(() => {
+      // Clear composing indicators — the turn is over. Note: onTurnEnd is
+      // intentionally suppressed after an abort (useChatStream skips it to
+      // prevent refreshSession from wiping the locally-committed partial
+      // response), so we must clear these flags here instead.
+      setIsAgentStarting(false);
+      setIsWaitingForAgent(false);
     }, []),
     // NOTE: container_ready should NOT clear isAgentStarting. The proactive
     // greeting hasn't started yet when container_ready fires — the 1500ms
@@ -990,14 +1003,14 @@ export function OnboardingChat({ onClose, onProjectCreated, resumeSessionId }: O
       <div className="flex flex-1 min-h-0">
         {/* Left panel: Diagram + Mini Memory Graph */}
         {session && (
-          <div className={`flex flex-col min-h-0 shrink-0 transition-all duration-200 ${diagramCollapsed ? 'w-10' : 'w-80'}`}>
+          <div className={`flex flex-col min-h-0 shrink-0 transition-all duration-200 ${diagramCollapsed ? 'w-10' : 'w-[60%]'}`}>
             <OnboardingDiagramPanel
               diagramState={diagramState}
               collapsed={diagramCollapsed}
               onToggleCollapse={() => setDiagramCollapsed((c) => !c)}
             />
             {!diagramCollapsed && (
-              <OnboardingMiniMemoryGraph height={180} />
+              <OnboardingMiniMemoryGraph />
             )}
           </div>
         )}

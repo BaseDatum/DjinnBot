@@ -55,6 +55,14 @@ export interface StreamingSSEEvent {
   };
 }
 
+/** Agent identity metadata — attached to streaming placeholder messages so
+ *  the UI can render the agent's emoji/name even before the DB refresh. */
+export interface AgentMeta {
+  agentId?: string;
+  agentName?: string;
+  agentEmoji?: string;
+}
+
 export interface UseChatStreamOptions {
   /** The backend session id to stream from. Empty string disables. */
   sessionId: string;
@@ -73,6 +81,11 @@ export interface UseChatStreamOptions {
   /** When true, suppress the "Agent is ready" system message on container_ready.
    *  Useful for onboarding where a composing indicator is shown instead. */
   suppressReadyMessage?: boolean;
+  /** Current agent identity — stamped onto streaming placeholder messages so
+   *  the renderer can show the agent's emoji/name during live streaming. The
+   *  value is read from a ref on each event so it can change mid-session
+   *  (e.g. onboarding agent handoffs) without recreating the SSE handler. */
+  agentMeta?: AgentMeta;
 }
 
 export interface UseChatStreamReturn {
@@ -159,6 +172,7 @@ export function useChatStream({
   onContainerReady,
   onSessionError,
   suppressReadyMessage = false,
+  agentMeta,
 }: UseChatStreamOptions): UseChatStreamReturn {
   const [messages, setMessages] = useState<ChatMessageData[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
@@ -184,6 +198,13 @@ export function useChatStream({
 
   // Track in-flight tool calls by toolCallId → message id for reliable pairing
   const inflightToolsRef = useRef<Map<string, string>>(new Map());
+
+  // Set true when response_aborted is processed. The subsequent turn_end
+  // (which the engine often fires after an abort) must NOT trigger onTurnEnd
+  // — that would call refreshSession() which replaces local state with DB
+  // messages. Since the aborted streaming content was never persisted to the
+  // DB, the refresh would wipe the locally-committed partial response.
+  const abortedRef = useRef(false);
 
   // ── rAF batching ──────────────────────────────────────────────────────────
   const rafRef = useRef<number | null>(null);
@@ -266,11 +287,13 @@ export function useChatStream({
   const onResponseAbortedRef = useRef(onResponseAborted);
   const onContainerReadyRef = useRef(onContainerReady);
   const onSessionErrorRef = useRef(onSessionError);
+  const agentMetaRef = useRef(agentMeta);
   useEffect(() => { onTurnEndRef.current = onTurnEnd; }, [onTurnEnd]);
   useEffect(() => { onSessionCompleteRef.current = onSessionComplete; }, [onSessionComplete]);
   useEffect(() => { onResponseAbortedRef.current = onResponseAborted; }, [onResponseAborted]);
   useEffect(() => { onContainerReadyRef.current = onContainerReady; }, [onContainerReady]);
   useEffect(() => { onSessionErrorRef.current = onSessionError; }, [onSessionError]);
+  useEffect(() => { agentMetaRef.current = agentMeta; }, [agentMeta]);
 
   // ── Commit streaming content into messages (called on turn_end, abort, etc.) ──
   const commitStreaming = useCallback(() => {
@@ -283,6 +306,10 @@ export function useChatStream({
 
     const thinkingText = streamingThinkingRef.current;
     const outputText = streamingTextRef.current;
+
+    // Agent fields for fallback message creation (when no placeholder exists)
+    const m = agentMetaRef.current;
+    const af = m?.agentId ? { agentId: m.agentId, agentName: m.agentName, agentEmoji: m.agentEmoji } : {};
 
     setMessages(prev => {
       let next = [...prev];
@@ -304,6 +331,7 @@ export function useChatStream({
             type: 'thinking' as const,
             content: thinkingText,
             timestamp: Date.now(),
+            ...af,
           });
         }
       }
@@ -324,6 +352,7 @@ export function useChatStream({
             type: 'assistant' as const,
             content: outputText,
             timestamp: Date.now(),
+            ...af,
           });
         }
       }
@@ -355,6 +384,16 @@ export function useChatStream({
 
       const eventData = event.data || {};
 
+      // Helper: current agent identity fields to stamp onto placeholder messages.
+      // Read from the ref so callers always get the latest value even after
+      // handoffs, without forcing the entire processEvent to be recreated.
+      const meta = agentMetaRef.current;
+      const agentFields = meta?.agentId ? {
+        agentId: meta.agentId,
+        agentName: meta.agentName,
+        agentEmoji: meta.agentEmoji,
+      } : {};
+
       switch (event.type) {
         // ── High-frequency token events → mutable refs, rAF flush ──────
         case 'thinking': {
@@ -383,6 +422,7 @@ export function useChatStream({
                   type: 'assistant' as const,
                   content: text,
                   timestamp: Date.now(),
+                  ...agentFields,
                 });
               }
               return next;
@@ -399,6 +439,7 @@ export function useChatStream({
               type: 'thinking' as const,
               content: '',
               timestamp: Date.now(),
+              ...agentFields,
             }]);
           }
 
@@ -431,6 +472,7 @@ export function useChatStream({
                   type: 'thinking' as const,
                   content: thinkText,
                   timestamp: Date.now(),
+                  ...agentFields,
                 });
               }
               return next;
@@ -447,6 +489,7 @@ export function useChatStream({
               type: 'assistant' as const,
               content: '',
               timestamp: Date.now(),
+              ...agentFields,
             }]);
           }
 
@@ -476,6 +519,7 @@ export function useChatStream({
                   type: 'assistant' as const,
                   content: text,
                   timestamp: Date.now(),
+                  ...agentFields,
                 });
               }
               return next;
@@ -499,6 +543,7 @@ export function useChatStream({
                   type: 'thinking' as const,
                   content: thinkText,
                   timestamp: Date.now(),
+                  ...agentFields,
                 });
               }
               return next;
@@ -523,6 +568,7 @@ export function useChatStream({
               toolName: eventData.toolName || 'unknown',
               args: eventData.args,
               timestamp: Date.now(),
+              ...agentFields,
             },
           ]);
           break;
@@ -591,6 +637,18 @@ export function useChatStream({
           commitStreaming();
           setIsStreaming(false);
 
+          // If this turn_end follows a response_aborted, skip calling
+          // onTurnEnd. The abort handler already committed the partial
+          // streaming content to local state; calling onTurnEnd would
+          // trigger refreshSession() which replaces local state with DB
+          // messages — and the DB still has the empty assistant placeholder
+          // (partial content was never persisted), so the agent's response
+          // would vanish.
+          if (abortedRef.current) {
+            abortedRef.current = false;
+            break;
+          }
+
           // If turn failed with no error already shown, add generic error
           if (turnSuccess === false) {
             setMessages(prev => {
@@ -620,6 +678,7 @@ export function useChatStream({
           break;
 
         case 'response_aborted': {
+          abortedRef.current = true;
           commitStreaming();
           // Append [stopped] to the last assistant message
           setMessages(prev => {
@@ -793,6 +852,7 @@ export function useChatStream({
     streamingThinkingRef.current = '';
     activeBlockRef.current = 'none';
     inflightToolsRef.current.clear();
+    abortedRef.current = false;
     historyLoadedRef.current = false;
     eventQueueRef.current = [];
     setIsStreaming(false);

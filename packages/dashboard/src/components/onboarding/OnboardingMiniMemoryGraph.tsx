@@ -1,18 +1,19 @@
 /**
- * OnboardingMiniMemoryGraph — Compact 2D force graph showing the shared
+ * OnboardingMiniMemoryGraph — Compact 3D force graph showing the shared
  * memory graph being built in real time during onboarding.
  *
- * Uses react-force-graph-2d (Canvas2D) for lightweight rendering at small
- * sizes. Connects to the shared vault WebSocket for instant live updates
- * (no polling). New nodes animate in with a brief glow effect.
+ * Uses react-force-graph-3d (Three.js/WebGL) for immersive rendering.
+ * Connects to the shared vault WebSocket for instant live updates
+ * (no polling). New nodes animate in with a brief emissive glow.
  *
- * This is a stripped-down version of MemoryGraph — no sidebar, no panel,
+ * This is a stripped-down 3D version — no sidebar, no panel,
  * no filters, no context menu. Just the graph with minimal chrome.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import ForceGraph2DLib from 'react-force-graph-2d';
-const ForceGraph2D = ForceGraph2DLib as any;
+import ForceGraph3DLib from 'react-force-graph-3d';
+const ForceGraph3D = ForceGraph3DLib as any;
+import * as THREE from 'three';
 import { Share2 } from 'lucide-react';
 
 import { useGraphWebSocket } from '@/hooks/useGraphWebSocket';
@@ -28,8 +29,10 @@ interface MiniGraphNode {
   // Force-graph mutable fields
   x?: number;
   y?: number;
+  z?: number;
   fx?: number;
   fy?: number;
+  fz?: number;
 }
 
 interface MiniGraphLink {
@@ -38,26 +41,23 @@ interface MiniGraphLink {
   label?: string;
 }
 
-interface OnboardingMiniMemoryGraphProps {
-  /** Height of the graph container in px */
-  height?: number;
-}
+interface OnboardingMiniMemoryGraphProps {}
 
 // ── Category colors ──────────────────────────────────────────────────────────
 
-const CATEGORY_COLORS: Record<string, string> = {
-  fact: '#60a5fa',        // blue
-  decision: '#f59e0b',    // amber
-  architecture: '#10b981', // emerald
-  requirement: '#8b5cf6', // violet
-  persona: '#ec4899',     // pink
-  context: '#06b6d4',     // cyan
-  reference: '#6366f1',   // indigo
-  plan: '#f97316',        // orange
+const CATEGORY_COLORS: Record<string, number> = {
+  fact: 0x60a5fa,        // blue
+  decision: 0xf59e0b,    // amber
+  architecture: 0x10b981, // emerald
+  requirement: 0x8b5cf6, // violet
+  persona: 0xec4899,     // pink
+  context: 0x06b6d4,     // cyan
+  reference: 0x6366f1,   // indigo
+  plan: 0xf97316,        // orange
 };
-const DEFAULT_COLOR = '#94a3b8'; // slate
+const DEFAULT_COLOR = 0x94a3b8; // slate
 
-function getNodeColor(category?: string): string {
+function getNodeColorHex(category?: string): number {
   if (!category) return DEFAULT_COLOR;
   return CATEGORY_COLORS[category.toLowerCase()] ?? DEFAULT_COLOR;
 }
@@ -68,9 +68,28 @@ const GLOW_DURATION_MS = 3000;
 
 // ── Component ────────────────────────────────────────────────────────────────
 
-export function OnboardingMiniMemoryGraph({ height = 200 }: OnboardingMiniMemoryGraphProps) {
+export function OnboardingMiniMemoryGraph({}: OnboardingMiniMemoryGraphProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const fgRef = useRef<any>(null);
+  const sceneConfigured = useRef(false);
+  const [dimensions, setDimensions] = useState<{ width: number; height: number }>({ width: 400, height: 200 });
+
+  // Track container size
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const { width, height } = entry.contentRect;
+        if (width > 0 && height > 0) {
+          setDimensions({ width: Math.round(width), height: Math.round(height) });
+        }
+      }
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
   const [graphData, setGraphData] = useState<{ nodes: MiniGraphNode[]; links: MiniGraphLink[] }>({
     nodes: [],
     links: [],
@@ -78,11 +97,16 @@ export function OnboardingMiniMemoryGraph({ height = 200 }: OnboardingMiniMemory
   const [nodeCount, setNodeCount] = useState(0);
   const recentNodeIds = useRef<Map<string, number>>(new Map()); // id -> timestamp added
 
-  // Transform API graph data to force-graph format
+  // Track existing node IDs via ref to avoid stale closures and
+  // unnecessary re-creation of the transform callback.
+  const existingIdsRef = useRef<Set<string>>(new Set());
+
+  // Transform API graph data to force-graph format.
+  // This is intentionally dependency-free (stable reference) — it reads
+  // the mutable existingIdsRef instead of depending on graphData.nodes.
   const transformGraph = useCallback(
-    (raw: GraphData) => {
+    (raw: GraphData, _opts?: { isInit?: boolean }) => {
       const now = Date.now();
-      const existingIds = new Set(graphData.nodes.map((n) => n.id));
 
       const nodes: MiniGraphNode[] = (raw.nodes ?? []).map((n: any) => ({
         id: `shared/${n.id}`,
@@ -98,7 +122,7 @@ export function OnboardingMiniMemoryGraph({ height = 200 }: OnboardingMiniMemory
 
       // Track newly added nodes for glow effect
       for (const n of nodes) {
-        if (!existingIds.has(n.id)) {
+        if (!existingIdsRef.current.has(n.id)) {
           recentNodeIds.current.set(n.id, now);
         }
       }
@@ -107,19 +131,32 @@ export function OnboardingMiniMemoryGraph({ height = 200 }: OnboardingMiniMemory
         if (now - ts > GLOW_DURATION_MS) recentNodeIds.current.delete(id);
       }
 
+      // Update the tracking set for next time
+      existingIdsRef.current = new Set(nodes.map((n) => n.id));
+
       setNodeCount(nodes.length);
       return { nodes, links };
     },
-    [graphData.nodes],
+    [], // stable — no deps
   );
 
   // WebSocket callbacks
   const handleInit = useCallback(
-    (graph: GraphData) => setGraphData(transformGraph(graph)),
+    (graph: GraphData) => setGraphData(transformGraph(graph, { isInit: true })),
     [transformGraph],
   );
   const handleUpdate = useCallback(
-    (graph: GraphData) => setGraphData(transformGraph(graph)),
+    (graph: GraphData) => {
+      // Never regress from a populated graph to empty — the server may
+      // be sending stale data while waiting for the graph rebuild.
+      const nodes = graph.nodes ?? [];
+      setGraphData((prev) => {
+        if (prev.nodes.length > 0 && nodes.length === 0) {
+          return prev; // keep current data
+        }
+        return transformGraph(graph);
+      });
+    },
     [transformGraph],
   );
 
@@ -130,69 +167,87 @@ export function OnboardingMiniMemoryGraph({ height = 200 }: OnboardingMiniMemory
     onUpdate: handleUpdate,
   });
 
-  // Node canvas renderer
-  const paintNode = useCallback(
-    (node: MiniGraphNode, ctx: CanvasRenderingContext2D, globalScale: number) => {
-      const r = 4;
-      const color = getNodeColor(node.category);
+  // Detect dark mode
+  const [isDark, setIsDark] = useState(() => document.documentElement.classList.contains('dark'));
+  useEffect(() => {
+    const obs = new MutationObserver(() =>
+      setIsDark(document.documentElement.classList.contains('dark'))
+    );
+    obs.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
+    return () => obs.disconnect();
+  }, []);
+
+  const bgColor = isDark ? '#000000' : '#ffffff';
+
+  // 3D node renderer — creates a sphere with category color + emissive glow for recent nodes
+  const nodeThreeObject = useCallback(
+    (node: MiniGraphNode) => {
+      const color = getNodeColorHex(node.category);
       const now = Date.now();
       const addedAt = recentNodeIds.current.get(node.id);
       const isRecent = addedAt && now - addedAt < GLOW_DURATION_MS;
 
-      // Glow effect for recent nodes
+      const geo = new THREE.SphereGeometry(3, 16, 12);
+      const mat = new THREE.MeshLambertMaterial({
+        color,
+        emissive: isRecent ? color : 0x000000,
+        emissiveIntensity: isRecent ? 0.8 : 0,
+        transparent: true,
+        opacity: 0.9,
+      });
+      const mesh = new THREE.Mesh(geo, mat);
+
+      // Outer glow ring for recently added nodes
       if (isRecent) {
-        const progress = (now - addedAt!) / GLOW_DURATION_MS;
-        const glowAlpha = 0.6 * (1 - progress);
-        const glowRadius = r + 8 * (1 - progress);
-        ctx.beginPath();
-        ctx.arc(node.x!, node.y!, glowRadius, 0, 2 * Math.PI);
-        ctx.fillStyle = color.replace(')', `, ${glowAlpha})`).replace('rgb', 'rgba');
-        ctx.fill();
+        const glowGeo = new THREE.SphereGeometry(5, 16, 12);
+        const glowMat = new THREE.MeshBasicMaterial({
+          color,
+          transparent: true,
+          opacity: 0.25,
+        });
+        const glowMesh = new THREE.Mesh(glowGeo, glowMat);
+        mesh.add(glowMesh);
       }
 
-      // Node circle
-      ctx.beginPath();
-      ctx.arc(node.x!, node.y!, r, 0, 2 * Math.PI);
-      ctx.fillStyle = color;
-      ctx.fill();
-
-      // Label (only at high zoom)
-      if (globalScale > 1.5 && node.label) {
-        ctx.font = `${Math.max(3, 8 / globalScale)}px -apple-system, sans-serif`;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'top';
-        ctx.fillStyle = '#aaa';
-        ctx.fillText(node.label.slice(0, 20), node.x!, node.y! + r + 2);
-      }
+      return mesh;
     },
-    [],
+    [graphData], // rebuild when graph changes so glow state updates
   );
+
+  // Scene setup: add lights on first render
+  useEffect(() => {
+    if (!fgRef.current || sceneConfigured.current) return;
+    const scene = fgRef.current.scene?.();
+    if (!scene) return;
+
+    const ambient = new THREE.AmbientLight(0xffffff, 0.6);
+    scene.add(ambient);
+    const directional = new THREE.DirectionalLight(0xffffff, 0.8);
+    directional.position.set(50, 100, 50);
+    scene.add(directional);
+
+    // Prevent getting stuck at extreme zoom
+    const controls = fgRef.current.controls?.();
+    if (controls && 'minDistance' in controls) {
+      controls.minDistance = 20;
+    }
+
+    sceneConfigured.current = true;
+  }, [graphData.nodes.length]);
 
   // Auto-zoom to fit on data change
   useEffect(() => {
     if (fgRef.current && graphData.nodes.length > 0) {
       setTimeout(() => {
-        fgRef.current?.zoomToFit?.(400, 20);
+        fgRef.current?.zoomToFit?.(400, 40);
       }, 300);
     }
   }, [graphData.nodes.length]);
 
-  // Request animation frame for glow updates
-  const [, setTick] = useState(0);
-  useEffect(() => {
-    if (recentNodeIds.current.size === 0) return;
-    const interval = setInterval(() => setTick((t) => t + 1), 50);
-    const timeout = setTimeout(() => clearInterval(interval), GLOW_DURATION_MS + 100);
-    return () => {
-      clearInterval(interval);
-      clearTimeout(timeout);
-    };
-  }, [graphData]);
-
   const isEmpty = graphData.nodes.length === 0;
 
   return (
-    <div className="flex flex-col border-t bg-card/20" ref={containerRef}>
+    <div className="flex flex-col border-t bg-card/20 h-[40%] min-h-0">
       {/* Header */}
       <div className="flex items-center gap-2 px-3 py-1.5 border-b bg-card/50 shrink-0">
         <Share2 className="h-3 w-3 text-muted-foreground" />
@@ -206,7 +261,7 @@ export function OnboardingMiniMemoryGraph({ height = 200 }: OnboardingMiniMemory
       </div>
 
       {/* Graph or empty state */}
-      <div style={{ height }} className="relative overflow-hidden">
+      <div className="relative overflow-hidden flex-1 min-h-0" ref={containerRef}>
         {isEmpty ? (
           <div className="flex items-center justify-center h-full">
             <p className="text-[10px] text-muted-foreground/50 italic">
@@ -214,28 +269,31 @@ export function OnboardingMiniMemoryGraph({ height = 200 }: OnboardingMiniMemory
             </p>
           </div>
         ) : (
-          <ForceGraph2D
+          <ForceGraph3D
             ref={fgRef}
             graphData={graphData}
-            width={320}
-            height={height}
-            backgroundColor="transparent"
-            nodeCanvasObject={paintNode}
-            nodePointerAreaPaint={(node: MiniGraphNode, color: string, ctx: CanvasRenderingContext2D) => {
-              ctx.beginPath();
-              ctx.arc(node.x!, node.y!, 6, 0, 2 * Math.PI);
-              ctx.fillStyle = color;
-              ctx.fill();
-            }}
-            linkColor={() => 'rgba(100,116,139,0.2)'}
-            linkWidth={0.5}
+            width={dimensions.width}
+            height={dimensions.height}
+            backgroundColor={bgColor}
+            nodeThreeObject={nodeThreeObject}
+            nodeThreeObjectExtend={false}
+            linkColor={() => isDark ? 'rgba(100,116,139,0.3)' : 'rgba(100,116,139,0.2)'}
+            linkWidth={0.3}
+            linkOpacity={0.5}
             enableNodeDrag={false}
-            enableZoomInteraction={true}
-            enablePanInteraction={true}
-            cooldownTicks={60}
-            d3VelocityDecay={0.4}
+            enableNavigationControls={true}
+            controlType="orbit"
+            showNavInfo={false}
+            cooldownTicks={80}
+            d3AlphaDecay={0.03}
+            d3VelocityDecay={0.3}
           />
         )}
+
+        {/* 3D badge */}
+        <div className="absolute top-2 right-2 px-1.5 py-0.5 rounded bg-primary/10 text-primary text-[9px] font-medium backdrop-blur-sm border border-primary/20 pointer-events-none">
+          3D
+        </div>
       </div>
     </div>
   );

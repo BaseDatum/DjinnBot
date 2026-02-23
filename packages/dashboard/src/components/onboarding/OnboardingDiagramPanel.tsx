@@ -195,7 +195,7 @@ export function OnboardingDiagramPanel({
   }
 
   return (
-    <div className="relative flex flex-col border-r bg-card/30 w-80 shrink-0 min-h-0">
+    <div className="relative flex flex-col border-r bg-card/30 w-full shrink-0 min-h-0 h-[60%]">
       {onToggleCollapse && <CollapseBtn />}
 
       {/* Header */}

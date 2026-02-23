@@ -142,6 +142,11 @@ export function AgentChat({
   const chatStream = useChatStream({
     sessionId,
     enabled: sessionStatus !== 'idle' && sessionStatus !== 'stopping',
+    agentMeta: useMemo(() => ({
+      agentId: agentId,
+      agentName: agentName,
+      agentEmoji: agentEmoji ?? undefined,
+    }), [agentId, agentName, agentEmoji]),
     onTurnEnd: useCallback(() => {
       setIsResponding(false);
 

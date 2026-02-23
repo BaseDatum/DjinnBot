@@ -398,6 +398,7 @@ class VaultWatcher:
         self.clients: set[WebSocket] = set()
         self._watch_task: asyncio.Task | None = None
         self._redis_task: asyncio.Task | None = None
+        self._rebuilt_task: asyncio.Task | None = None
         self._last_graph: dict | None = None
         self._version = 0
         # Event used to wake the watch loop immediately when Redis notifies
@@ -417,6 +418,7 @@ class VaultWatcher:
         if len(self.clients) == 1:
             self._watch_task = asyncio.create_task(self._watch_loop())
             self._redis_task = asyncio.create_task(self._redis_listener())
+            self._rebuilt_task = asyncio.create_task(self._graph_rebuilt_listener())
 
     def remove_client(self, ws: WebSocket):
         self.clients.discard(ws)
@@ -427,6 +429,9 @@ class VaultWatcher:
             if self._redis_task:
                 self._redis_task.cancel()
                 self._redis_task = None
+            if self._rebuilt_task:
+                self._rebuilt_task.cancel()
+                self._rebuilt_task = None
             self._last_graph = None
 
     def _build_graph(self) -> dict:
@@ -446,6 +451,14 @@ class VaultWatcher:
         if not os.path.isdir(self.vault_path):
             return ""
         try:
+            # Include graph-index.json mtime so we detect when the engine
+            # finishes rebuilding (it lives inside .clawvault/ which is
+            # excluded from the .md walk below).
+            graph_idx = os.path.join(self.vault_path, ".clawvault", "graph-index.json")
+            if os.path.isfile(graph_idx):
+                st = os.stat(graph_idx)
+                h.update(f"__graph_index__:{st.st_mtime_ns}".encode())
+
             for root_dir, dirs, files in os.walk(self.vault_path):
                 dirs[:] = [
                     d
@@ -463,20 +476,31 @@ class VaultWatcher:
         return h.hexdigest()
 
     async def _broadcast_update(self) -> None:
-        """Rebuild the graph and broadcast to all connected clients."""
-        # Trigger graph rebuild via Redis (engine picks it up)
-        if dependencies.redis_client:
-            try:
-                await dependencies.redis_client.publish(
-                    "djinnbot:graph:rebuild", json.dumps({"agent_id": self.agent_id})
-                )
-                # Short wait for the rebuild — graph-index.json needs to exist
-                await asyncio.sleep(0.5)
-            except Exception:
-                pass
+        """Read the current graph-index.json and broadcast to all clients.
+
+        The engine rebuilds graph-index.json asynchronously and publishes
+        ``djinnbot:graph:rebuilt`` when done (handled by
+        ``_graph_rebuilt_listener``).  This method simply reads whatever is
+        on disk right now.  If the file hasn't been rebuilt yet we may get
+        stale data — that's OK because ``_graph_rebuilt_listener`` will
+        trigger another broadcast once the fresh index lands.
+
+        We guard against regressing: if the new graph is empty but we
+        previously had a non-empty graph, we skip the broadcast so the
+        client doesn't flash back to the empty state.
+        """
+        new_graph = self._build_graph()
+
+        # Don't overwrite a populated graph with an empty one — the
+        # rebuild hasn't finished yet; a follow-up broadcast will arrive
+        # once graph-index.json is actually written.
+        prev_nodes = (self._last_graph or {}).get("nodes", [])
+        new_nodes = new_graph.get("nodes", [])
+        if len(prev_nodes) > 0 and len(new_nodes) == 0:
+            return
 
         self._version += 1
-        self._last_graph = self._build_graph()
+        self._last_graph = new_graph
         msg = {
             "type": "graph:update",
             "payload": {"version": self._version, "graph": self._last_graph},
@@ -536,6 +560,45 @@ class VaultWatcher:
                 except Exception:
                     pass
 
+    async def _graph_rebuilt_listener(self) -> None:
+        """Subscribe to ``djinnbot:graph:rebuilt`` — published by the engine
+        after it finishes running ``clawvault graph --refresh``.
+
+        This gives us a *reliable* signal that graph-index.json is fresh,
+        eliminating the timing race between the rebuild and the file read.
+        """
+        if not dependencies.redis_client:
+            return
+        pubsub = None
+        try:
+            pubsub = dependencies.redis_client.pubsub()
+            await pubsub.subscribe("djinnbot:graph:rebuilt")
+            async for message in pubsub.listen():
+                if not self.clients:
+                    break
+                if message["type"] != "message":
+                    continue
+                try:
+                    payload = json.loads(message["data"])
+                    rebuilt_agent = payload.get("agent_id", "")
+                    if rebuilt_agent == self.agent_id:
+                        await self._broadcast_update()
+                except Exception:
+                    pass
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            print(
+                f"[VaultWatcher] graph:rebuilt listener failed for {self.agent_id}: {e}"
+            )
+        finally:
+            if pubsub:
+                try:
+                    await pubsub.unsubscribe("djinnbot:graph:rebuilt")
+                    await pubsub.aclose()
+                except Exception:
+                    pass
+
     async def _watch_loop(self):
         last_hash = self._hash_vault()
         try:
@@ -552,6 +615,19 @@ class VaultWatcher:
                 current_hash = self._hash_vault()
                 if current_hash != last_hash:
                     last_hash = current_hash
+                    # Request a graph rebuild from the engine — it will publish
+                    # graph:rebuilt when done, which triggers another broadcast
+                    # with fresh data via _graph_rebuilt_listener.
+                    if dependencies.redis_client:
+                        try:
+                            await dependencies.redis_client.publish(
+                                "djinnbot:graph:rebuild",
+                                json.dumps({"agent_id": self.agent_id}),
+                            )
+                        except Exception:
+                            pass
+                    # Broadcast whatever we have now (may be stale but the
+                    # rebuilt listener will follow up with fresh data).
                     await self._broadcast_update()
         except asyncio.CancelledError:
             pass
@@ -562,13 +638,28 @@ _vault_watchers: dict[str, VaultWatcher] = {}
 
 @router.websocket("/vaults/{agent_id}/ws")
 async def vault_graph_ws(websocket: WebSocket, agent_id: str):
-    """WebSocket endpoint for live graph updates."""
+    """WebSocket endpoint for live graph updates.
+
+    During onboarding the shared vault may not exist yet when the dashboard
+    first mounts the mini graph.  Instead of rejecting with 4004 (which
+    forces the client into exponential-backoff reconnects), we accept the
+    connection and poll briefly until the vault directory appears.
+    """
     vault_path = os.path.join(VAULTS_DIR, agent_id)
-    if not os.path.isdir(vault_path):
-        await websocket.close(code=4004, reason="Vault not found")
-        return
 
     await websocket.accept()
+
+    # Wait up to ~30 seconds for the vault directory to appear (onboarding
+    # creates it when the first agent writes a shared memory).
+    if not os.path.isdir(vault_path):
+        for _ in range(30):
+            await asyncio.sleep(1)
+            if os.path.isdir(vault_path):
+                break
+        else:
+            # Still not there — close cleanly so the client can retry.
+            await websocket.close(code=4004, reason="Vault not found")
+            return
 
     if agent_id not in _vault_watchers:
         _vault_watchers[agent_id] = VaultWatcher(agent_id, vault_path)

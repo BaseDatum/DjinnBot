@@ -139,18 +139,31 @@ export const ChatMessage = memo(function ChatMessage({
       ? streamingContent
       : (message.content || '');
 
+    const hasAgentEmoji = !!message.agentEmoji;
+
     return (
       <div className="group flex gap-3">
-        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/10">
-          <Bot className="h-4 w-4 text-primary" />
+        <div className={cn(
+          'flex h-8 w-8 shrink-0 items-center justify-center rounded-full',
+          hasAgentEmoji ? 'bg-primary/10 ring-1 ring-primary/20' : 'bg-primary/10',
+        )}>
+          {hasAgentEmoji ? (
+            <span className="text-base leading-none">{message.agentEmoji}</span>
+          ) : (
+            <Bot className="h-4 w-4 text-primary" />
+          )}
         </div>
         <div className="max-w-[80%] rounded-2xl rounded-tl-sm bg-muted px-4 py-2 overflow-hidden">
-          {message.model && (
+          {(message.model || message.agentName) && (
             <div className="flex items-center gap-2 mb-2">
-              <span className="font-medium text-xs text-muted-foreground">Assistant</span>
-              <Badge variant="outline" className="text-xs">
-                {message.model.split('/').pop()}
-              </Badge>
+              <span className="font-medium text-xs text-muted-foreground">
+                {message.agentName || 'Assistant'}
+              </span>
+              {message.model && (
+                <Badge variant="outline" className="text-xs">
+                  {message.model.split('/').pop()}
+                </Badge>
+              )}
             </div>
           )}
           <div className="text-sm break-words overflow-hidden" style={{ overflowWrap: 'anywhere' }}>

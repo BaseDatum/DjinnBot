@@ -63,6 +63,7 @@ let containerLogStreamer: ContainerLogStreamer | null = null;
 const VAULTS_DIR = process.env.VAULTS_DIR || '/data/vaults';
 const CLAWVAULT_BIN = '/usr/local/bin/clawvault';
 const GRAPH_REBUILD_CHANNEL = 'djinnbot:graph:rebuild';
+const GRAPH_REBUILT_CHANNEL = 'djinnbot:graph:rebuilt';
 
 /**
  * Initialize Redis client for listening to new run events
@@ -571,6 +572,18 @@ async function rebuildGraphIndex(agentId: string): Promise<void> {
       timeout: 30_000,
     });
     console.log(`[Engine] Graph index rebuilt for ${agentId}`);
+    // Notify the API server that graph-index.json has been updated so it can
+    // broadcast fresh data to WebSocket clients immediately.
+    if (opsRedis) {
+      try {
+        await opsRedis.publish(
+          GRAPH_REBUILT_CHANNEL,
+          JSON.stringify({ agent_id: agentId }),
+        );
+      } catch {
+        // Non-fatal — the file-polling fallback will eventually pick it up
+      }
+    }
   } catch (err: any) {
     console.error(`[Engine] clawvault graph rebuild failed for ${agentId}:`, err.message);
   }
