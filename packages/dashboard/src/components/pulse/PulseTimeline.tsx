@@ -12,6 +12,9 @@ interface ScheduledPulse {
   scheduledAt: number;
   source: 'recurring' | 'one-off';
   status: string;
+  routineId?: string | null;
+  routineName?: string | null;
+  routineColor?: string | null;
 }
 
 interface PulseConflict {
@@ -227,7 +230,8 @@ export function PulseTimeline({ hours = 24, showHeader = true, className = '' }:
             <TooltipProvider>
               {data.pulses.map((pulse, idx) => {
                 const pos = getPulsePosition(pulse.scheduledAt);
-                const color = getAgentColor(pulse.agentId);
+                // Use routine color if available, otherwise fall back to agent color
+                const color = pulse.routineColor || getAgentColor(pulse.agentId);
                 
                 return (
                   <Tooltip key={idx}>
@@ -245,6 +249,15 @@ export function PulseTimeline({ hours = 24, showHeader = true, className = '' }:
                     <TooltipContent>
                       <div className="text-sm">
                         <p className="font-medium">{pulse.agentId}</p>
+                        {pulse.routineName && (
+                          <p className="text-xs flex items-center gap-1">
+                            <span
+                              className="inline-block w-2 h-2 rounded-full"
+                              style={{ backgroundColor: pulse.routineColor || color }}
+                            />
+                            {pulse.routineName}
+                          </p>
+                        )}
                         <p className="text-muted-foreground">
                           {formatTime(pulse.scheduledAt)} ({formatRelativeTime(pulse.scheduledAt)})
                         </p>
@@ -305,9 +318,14 @@ export function PulseTimeline({ hours = 24, showHeader = true, className = '' }:
                   <div className="flex items-center gap-2 min-w-0">
                     <div 
                       className="w-2 h-2 rounded-full shrink-0"
-                      style={{ backgroundColor: getAgentColor(pulse.agentId) }}
+                      style={{ backgroundColor: pulse.routineColor || getAgentColor(pulse.agentId) }}
                     />
                     <span className="font-medium truncate">{pulse.agentId}</span>
+                    {pulse.routineName && (
+                      <span className="text-muted-foreground truncate text-[10px] sm:text-xs">
+                        {pulse.routineName}
+                      </span>
+                    )}
                     {pulse.source === 'one-off' && (
                       <Badge variant="outline" className="text-[10px] px-1 shrink-0">one-off</Badge>
                     )}

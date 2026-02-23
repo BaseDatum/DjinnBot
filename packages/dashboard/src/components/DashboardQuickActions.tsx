@@ -1,7 +1,8 @@
 import { useState, useRef } from 'react';
 import { cn } from '@/lib/utils';
-import { MessagesSquare, Activity, Bot, ChevronRight, X } from 'lucide-react';
-import { triggerAgentPulse, fetchAgentConfig } from '@/lib/api';
+import { MessagesSquare, Activity, Bot, ChevronRight, X, Loader2 } from 'lucide-react';
+import { fetchAgentConfig, fetchPulseRoutines, triggerPulseRoutine } from '@/lib/api';
+import type { PulseRoutine } from '@/lib/api';
 import { useChatSessions } from '@/components/chat/ChatSessionContext';
 import { toast } from 'sonner';
 
@@ -26,9 +27,12 @@ const ROW_H = 32;
 // ─────────────────────────────────────────────────────────────────────────────
 export function DashboardQuickActionsDesktop({ agents }: DashboardQuickActionsProps) {
   const { openChat, setWidgetOpen } = useChatSessions();
-  const [pulsing, setPulsing] = useState<Record<string, boolean>>({});
   const [chatting, setChatting] = useState<Record<string, boolean>>({});
   const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
+  const [pulseHover, setPulseHover] = useState(false);
+  const [routinesCache, setRoutinesCache] = useState<Record<string, PulseRoutine[]>>({});
+  const [routinesLoading, setRoutinesLoading] = useState<Record<string, boolean>>({});
+  const [triggeringRoutine, setTriggeringRoutine] = useState<Record<string, boolean>>({});
   const clearRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   if (agents.length === 0) return null;
@@ -41,16 +45,31 @@ export function DashboardQuickActionsDesktop({ agents }: DashboardQuickActionsPr
     if (clearRef.current) clearTimeout(clearRef.current);
   };
 
-  const handleForcePulse = async (agentId: string, agentName: string) => {
-    if (pulsing[agentId]) return;
-    setPulsing((p) => ({ ...p, [agentId]: true }));
+  const loadRoutines = async (agentId: string) => {
+    if (routinesCache[agentId] || routinesLoading[agentId]) return;
+    setRoutinesLoading((l) => ({ ...l, [agentId]: true }));
     try {
-      await triggerAgentPulse(agentId);
-      toast.info(`Pulse triggered for ${agentName}`);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : `Failed to trigger pulse for ${agentName}`);
+      const data = await fetchPulseRoutines(agentId);
+      setRoutinesCache((c) => ({ ...c, [agentId]: data.routines }));
+    } catch {
+      // Silently fail — show empty list
+      setRoutinesCache((c) => ({ ...c, [agentId]: [] }));
     } finally {
-      setPulsing((p) => ({ ...p, [agentId]: false }));
+      setRoutinesLoading((l) => ({ ...l, [agentId]: false }));
+    }
+  };
+
+  const handleTriggerRoutine = async (agentId: string, routineId: string, routineName: string) => {
+    const key = `${agentId}:${routineId}`;
+    if (triggeringRoutine[key]) return;
+    setTriggeringRoutine((t) => ({ ...t, [key]: true }));
+    try {
+      await triggerPulseRoutine(agentId, routineId);
+      toast.info(`Triggered "${routineName}"`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : `Failed to trigger "${routineName}"`);
+    } finally {
+      setTriggeringRoutine((t) => ({ ...t, [key]: false }));
     }
   };
 
@@ -83,7 +102,7 @@ export function DashboardQuickActionsDesktop({ agents }: DashboardQuickActionsPr
      */
     <div
       className="group relative flex flex-col h-full border-l overflow-visible transition-[max-width] duration-200 ease-in-out max-w-[1.5rem] hover:max-w-xs"
-      onMouseLeave={() => schedule(() => setHoveredIdx(null))}
+      onMouseLeave={() => { schedule(() => { setHoveredIdx(null); setPulseHover(false); }); }}
     >
       {/* Clipping wrapper — needed so the expanding width clips the content
           without clipping the sub-flyout (which is a sibling below) */}
@@ -104,8 +123,8 @@ export function DashboardQuickActionsDesktop({ agents }: DashboardQuickActionsPr
           {agents.map((agent, i) => (
             <li key={agent.id} style={{ minHeight: ROW_H }}>
               <button
-                onMouseEnter={() => { cancel(); setHoveredIdx(i); }}
-                onMouseLeave={() => schedule(() => setHoveredIdx(null))}
+                onMouseEnter={() => { cancel(); setHoveredIdx(i); setPulseHover(false); loadRoutines(agent.id); }}
+                onMouseLeave={() => schedule(() => { setHoveredIdx(null); setPulseHover(false); })}
                 className={cn(
                   'flex w-full items-center gap-1.5 px-1.5 py-2 transition-colors h-full',
                   hoveredIdx === i
@@ -131,7 +150,7 @@ export function DashboardQuickActionsDesktop({ agents }: DashboardQuickActionsPr
       {hoveredAgent && hoveredIdx !== null && (
         <div
           onMouseEnter={() => cancel()}
-          onMouseLeave={() => schedule(() => setHoveredIdx(null))}
+          onMouseLeave={() => schedule(() => { setHoveredIdx(null); setPulseHover(false); })}
           style={{ top: SUB_FLYOUT_OFFSET + hoveredIdx * ROW_H }}
           className={cn(
             'absolute left-full z-50 ml-1',
@@ -150,14 +169,69 @@ export function DashboardQuickActionsDesktop({ agents }: DashboardQuickActionsPr
             <MessagesSquare className={cn('h-3.5 w-3.5 shrink-0', chatting[hoveredAgent.id] && 'animate-pulse')} />
             {chatting[hoveredAgent.id] ? 'Opening…' : 'Chat'}
           </button>
-          <button
-            onClick={() => handleForcePulse(hoveredAgent.id, hoveredAgent.name)}
-            disabled={!!pulsing[hoveredAgent.id]}
-            className="flex items-center gap-2 rounded-sm px-2 py-1.5 text-xs hover:bg-accent hover:text-accent-foreground transition-colors text-left w-full disabled:opacity-50 disabled:cursor-not-allowed"
+          {/* Pulse Routines — hover to expand sub-flyout */}
+          <div
+            className="relative"
+            onMouseEnter={() => { cancel(); setPulseHover(true); loadRoutines(hoveredAgent.id); }}
+            onMouseLeave={() => schedule(() => setPulseHover(false))}
           >
-            <Activity className={cn('h-3.5 w-3.5 shrink-0', pulsing[hoveredAgent.id] && 'animate-pulse')} />
-            {pulsing[hoveredAgent.id] ? 'Pulsing…' : 'Force Pulse'}
-          </button>
+            <button
+              className="flex items-center gap-2 rounded-sm px-2 py-1.5 text-xs hover:bg-accent hover:text-accent-foreground transition-colors text-left w-full"
+            >
+              <Activity className="h-3.5 w-3.5 shrink-0" />
+              <span className="flex-1">Pulse</span>
+              <ChevronRight className="h-3 w-3 shrink-0 text-muted-foreground" />
+            </button>
+            {/* Routine sub-flyout */}
+            {pulseHover && (
+              <div
+                onMouseEnter={() => cancel()}
+                onMouseLeave={() => schedule(() => setPulseHover(false))}
+                className={cn(
+                  'absolute left-full top-0 z-50 ml-1',
+                  'flex flex-col gap-0.5 p-1.5',
+                  'rounded-md border bg-popover shadow-lg min-w-[160px]',
+                )}
+              >
+                <div className="px-2 py-1 text-[10px] font-semibold text-muted-foreground border-b mb-0.5 whitespace-nowrap">
+                  Pulse Routines
+                </div>
+                {routinesLoading[hoveredAgent.id] && (
+                  <div className="flex items-center gap-2 px-2 py-1.5 text-xs text-muted-foreground">
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                    Loading...
+                  </div>
+                )}
+                {!routinesLoading[hoveredAgent.id] && (routinesCache[hoveredAgent.id] || []).length === 0 && (
+                  <div className="px-2 py-1.5 text-xs text-muted-foreground">
+                    No routines configured
+                  </div>
+                )}
+                {!routinesLoading[hoveredAgent.id] && (routinesCache[hoveredAgent.id] || []).map((routine) => {
+                  const key = `${hoveredAgent.id}:${routine.id}`;
+                  const triggering = !!triggeringRoutine[key];
+                  return (
+                    <button
+                      key={routine.id}
+                      onClick={() => handleTriggerRoutine(hoveredAgent.id, routine.id, routine.name)}
+                      disabled={triggering || !routine.enabled}
+                      className="flex items-center gap-2 rounded-sm px-2 py-1.5 text-xs hover:bg-accent hover:text-accent-foreground transition-colors text-left w-full disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      <div
+                        className="w-2 h-2 rounded-full shrink-0"
+                        style={{ backgroundColor: routine.color || '#6366f1' }}
+                      />
+                      <span className="flex-1 truncate">{routine.name}</span>
+                      {triggering && <Loader2 className="h-3 w-3 animate-spin shrink-0" />}
+                      {!routine.enabled && (
+                        <span className="text-[10px] text-muted-foreground shrink-0">off</span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         </div>
       )}
     </div>
@@ -173,21 +247,38 @@ export function DashboardQuickActionsMobile({
 }: DashboardQuickActionsProps) {
   const { openChat, setWidgetOpen } = useChatSessions();
   const [open, setOpen] = useState(false);
-  const [pulsing, setPulsing] = useState<Record<string, boolean>>({});
   const [chatting, setChatting] = useState<Record<string, boolean>>({});
+  const [expandedPulse, setExpandedPulse] = useState<string | null>(null);
+  const [routinesCache, setRoutinesCache] = useState<Record<string, PulseRoutine[]>>({});
+  const [routinesLoading, setRoutinesLoading] = useState<Record<string, boolean>>({});
+  const [triggeringRoutine, setTriggeringRoutine] = useState<Record<string, boolean>>({});
 
   if (agents.length === 0) return null;
 
-  const handleForcePulse = async (agentId: string, agentName: string) => {
-    if (pulsing[agentId]) return;
-    setPulsing((p) => ({ ...p, [agentId]: true }));
+  const loadRoutines = async (agentId: string) => {
+    if (routinesCache[agentId] || routinesLoading[agentId]) return;
+    setRoutinesLoading((l) => ({ ...l, [agentId]: true }));
     try {
-      await triggerAgentPulse(agentId);
-      toast.info(`Pulse triggered for ${agentName}`);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : `Failed to trigger pulse for ${agentName}`);
+      const data = await fetchPulseRoutines(agentId);
+      setRoutinesCache((c) => ({ ...c, [agentId]: data.routines }));
+    } catch {
+      setRoutinesCache((c) => ({ ...c, [agentId]: [] }));
     } finally {
-      setPulsing((p) => ({ ...p, [agentId]: false }));
+      setRoutinesLoading((l) => ({ ...l, [agentId]: false }));
+    }
+  };
+
+  const handleTriggerRoutine = async (agentId: string, routineId: string, routineName: string) => {
+    const key = `${agentId}:${routineId}`;
+    if (triggeringRoutine[key]) return;
+    setTriggeringRoutine((t) => ({ ...t, [key]: true }));
+    try {
+      await triggerPulseRoutine(agentId, routineId);
+      toast.info(`Triggered "${routineName}"`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : `Failed to trigger "${routineName}"`);
+    } finally {
+      setTriggeringRoutine((t) => ({ ...t, [key]: false }));
     }
   };
 
@@ -204,6 +295,15 @@ export function DashboardQuickActionsMobile({
       toast.error(err instanceof Error ? err.message : 'Failed to open chat');
     } finally {
       setChatting((c) => ({ ...c, [agentId]: false }));
+    }
+  };
+
+  const togglePulseExpand = (agentId: string) => {
+    if (expandedPulse === agentId) {
+      setExpandedPulse(null);
+    } else {
+      setExpandedPulse(agentId);
+      loadRoutines(agentId);
     }
   };
 
@@ -264,14 +364,55 @@ export function DashboardQuickActionsMobile({
                   {chatting[agent.id] ? 'Opening…' : 'Chat'}
                 </button>
                 <button
-                  onClick={() => handleForcePulse(agent.id, agent.name)}
-                  disabled={!!pulsing[agent.id]}
-                  className="flex flex-1 items-center justify-center gap-2 rounded-md border px-3 py-2 text-xs font-medium hover:bg-accent hover:text-accent-foreground transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  onClick={() => togglePulseExpand(agent.id)}
+                  className={cn(
+                    'flex flex-1 items-center justify-center gap-2 rounded-md border px-3 py-2 text-xs font-medium hover:bg-accent hover:text-accent-foreground transition-colors',
+                    expandedPulse === agent.id && 'bg-accent text-accent-foreground',
+                  )}
                 >
-                  <Activity className={cn('h-3.5 w-3.5 shrink-0', pulsing[agent.id] && 'animate-pulse')} />
-                  {pulsing[agent.id] ? 'Pulsing…' : 'Force Pulse'}
+                  <Activity className="h-3.5 w-3.5 shrink-0" />
+                  Pulse
+                  <ChevronRight className={cn('h-3 w-3 transition-transform', expandedPulse === agent.id && 'rotate-90')} />
                 </button>
               </div>
+              {/* Expanded pulse routines list */}
+              {expandedPulse === agent.id && (
+                <div className="px-4 pb-2 space-y-1">
+                  {routinesLoading[agent.id] && (
+                    <div className="flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground">
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                      Loading routines...
+                    </div>
+                  )}
+                  {!routinesLoading[agent.id] && (routinesCache[agent.id] || []).length === 0 && (
+                    <div className="px-3 py-2 text-xs text-muted-foreground">
+                      No routines configured
+                    </div>
+                  )}
+                  {!routinesLoading[agent.id] && (routinesCache[agent.id] || []).map((routine) => {
+                    const key = `${agent.id}:${routine.id}`;
+                    const triggering = !!triggeringRoutine[key];
+                    return (
+                      <button
+                        key={routine.id}
+                        onClick={() => handleTriggerRoutine(agent.id, routine.id, routine.name)}
+                        disabled={triggering || !routine.enabled}
+                        className="flex w-full items-center gap-2 rounded-md border px-3 py-2 text-xs font-medium hover:bg-accent hover:text-accent-foreground transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        <div
+                          className="w-2 h-2 rounded-full shrink-0"
+                          style={{ backgroundColor: routine.color || '#6366f1' }}
+                        />
+                        <span className="flex-1 truncate text-left">{routine.name}</span>
+                        {triggering && <Loader2 className="h-3 w-3 animate-spin shrink-0" />}
+                        {!routine.enabled && (
+                          <span className="text-[10px] text-muted-foreground shrink-0">off</span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
             </li>
           ))}
         </ul>

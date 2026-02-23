@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { 
@@ -11,11 +10,10 @@ import {
   Clock, 
   CheckCircle2, 
   XCircle,
-  Loader2 
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useSSE } from '@/hooks/useSSE';
-import { fetchAgentPulseStatus, triggerAgentPulse, API_BASE } from '@/lib/api';
+import { fetchAgentPulseStatus, API_BASE } from '@/lib/api';
 
 interface PulseCheck {
   name: string;
@@ -72,7 +70,6 @@ interface PulseControlsProps {
 export function PulseControls({ agentId }: PulseControlsProps) {
   const [status, setStatus] = useState<PulseStatusData | null>(null);
   const [loading, setLoading] = useState(true);
-  const [pulsing, setPulsing] = useState(false);
   const [resultsOpen, setResultsOpen] = useState(false);
 
   useEffect(() => {
@@ -85,7 +82,6 @@ export function PulseControls({ agentId }: PulseControlsProps) {
     onMessage: (event) => {
       if (event.type === 'AGENT_PULSE_COMPLETED' && event.agentId === agentId) {
         loadStatus(); // Refresh status after pulse
-        setPulsing(false);
         toast.success('Pulse completed');
       }
     },
@@ -100,21 +96,6 @@ export function PulseControls({ agentId }: PulseControlsProps) {
       toast.error('Failed to load pulse status');
     } finally {
       setLoading(false);
-    }
-  };
-
-  const handleForcePulse = async () => {
-    setPulsing(true);
-    try {
-      await triggerAgentPulse(agentId);
-      toast.info('Pulse triggered');
-      // Status will update via SSE when pulse completes
-    } catch (error) {
-      console.error('Failed to trigger pulse:', error);
-      toast.error(
-        error instanceof Error ? error.message : 'Failed to trigger pulse'
-      );
-      setPulsing(false);
     }
   };
 
@@ -167,31 +148,12 @@ export function PulseControls({ agentId }: PulseControlsProps) {
       {/* Pulse Status Card */}
       <Card>
         <CardHeader className="pb-3">
-          <div className="flex items-start justify-between">
-            <div className="flex items-center gap-2">
-              <Activity className="h-5 w-5" />
-              <CardTitle className="text-lg">Pulse System</CardTitle>
-              <Badge variant={status.enabled ? 'success' : 'secondary'}>
-                {status.enabled ? 'Enabled' : 'Disabled'}
-              </Badge>
-            </div>
-            <Button
-              size="sm"
-              onClick={handleForcePulse}
-              disabled={pulsing || !status.enabled}
-            >
-              {pulsing ? (
-                <>
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  Running...
-                </>
-              ) : (
-                <>
-                  <Activity className="h-4 w-4 mr-2" />
-                  Force Pulse
-                </>
-              )}
-            </Button>
+          <div className="flex items-center gap-2">
+            <Activity className="h-5 w-5" />
+            <CardTitle className="text-lg">Pulse System</CardTitle>
+            <Badge variant={status.enabled ? 'success' : 'secondary'}>
+              {status.enabled ? 'Enabled' : 'Disabled'}
+            </Badge>
           </div>
         </CardHeader>
         <CardContent>
@@ -307,8 +269,8 @@ export function PulseControls({ agentId }: PulseControlsProps) {
 
       {/* Help Text */}
       <p className="text-xs text-muted-foreground">
-        The pulse system runs periodic health checks like inbox monitoring, memory
-        consolidation, and cleanup tasks. Use &quot;Force Pulse&quot; to run immediately.
+        The pulse system runs periodic routines like inbox monitoring, memory
+        consolidation, and cleanup tasks. Trigger individual routines from the cards below.
       </p>
     </div>
   );
