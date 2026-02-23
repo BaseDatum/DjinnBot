@@ -12,6 +12,7 @@ import { CommandSender } from '../container/command-sender.js';
 import { EventReceiver } from '../container/event-receiver.js';
 import { PersonaLoader } from '../runtime/persona-loader.js';
 import { PROVIDER_ENV_MAP } from '../constants.js';
+import { AgentLifecycleTracker } from '../lifecycle/agent-lifecycle-tracker.js';
 
 export interface ChatSessionConfig {
   sessionId: string;
@@ -81,6 +82,7 @@ interface ActiveSession {
   accumulatedThinking: string;  // Accumulate thinking during response
   accumulatedToolCalls: ToolCall[];  // Accumulate tool calls during response
   lastActivityAt: number;  // Timestamp of last activity — used by idle reaper
+  startedAt: number;  // Timestamp when session became ready — used to compute duration
   userId?: string;  // DjinnBot user who owns this session — for per-user key resolution
 }
 
@@ -100,6 +102,9 @@ export interface ChatSessionManagerConfig {
   idleTimeoutMs?: number;
   /** How often to check for idle sessions. Default: 60 seconds. */
   reaperIntervalMs?: number;
+  /** Optional lifecycle tracker — when provided, session start/complete/failed events
+   *  are recorded to the agent's activity timeline so the Activity tab shows chat activity. */
+  lifecycleTracker?: AgentLifecycleTracker;
 }
 
 /**
@@ -934,6 +939,7 @@ export class ChatSessionManager {
   private idleTimeoutMs: number;
   private reaperIntervalMs: number;
   private reaperTimer: ReturnType<typeof setInterval> | null = null;
+  private lifecycleTracker?: AgentLifecycleTracker;
 
   // ─── External event hooks ────────────────────────────────────────────────────
   // Registered by SlackBridge to pipe session output into live Slack streamers.
@@ -987,6 +993,11 @@ export class ChatSessionManager {
     // behind slow XADD/EXPIRE/SET operations on the main connection.
     this.publishRedis = new Redis(config.redis.options);
     
+    // Wire optional lifecycle tracker for activity feed integration
+    if (config.lifecycleTracker) {
+      this.lifecycleTracker = config.lifecycleTracker;
+    }
+
     // Start the idle session reaper
     this.startReaper();
   }
@@ -1118,6 +1129,7 @@ export class ChatSessionManager {
       accumulatedThinking: '',
       accumulatedToolCalls: [],
       lastActivityAt: Date.now(),
+      startedAt: Date.now(),
     };
     this.activeSessions.set(sessionId, session);
     
@@ -1308,6 +1320,7 @@ export class ChatSessionManager {
       await this.containerManager.startContainer(sessionId);
       
       session.status = 'ready';
+      session.startedAt = Date.now();
       session.containerId = sessionId;  // Container uses sessionId as its ID
       
       // Subscribe to command channel for this session
@@ -1317,6 +1330,15 @@ export class ChatSessionManager {
       await this.updateSessionContainer(sessionId, sessionId, 'running');
       
       console.log(`[ChatSessionManager] Session ${sessionId} ready`);
+
+      // Record session started in the agent's activity timeline.
+      // This makes the chat session visible in the Activity tab immediately
+      // when the container is ready — before any user message is sent.
+      if (this.lifecycleTracker) {
+        const source = sessionType === 'onboarding' ? 'onboarding' : 'chat';
+        this.lifecycleTracker.recordSessionStarted(agentId, sessionId, source, '', model)
+          .catch(err => console.warn(`[ChatSessionManager] Failed to record session_started for ${sessionId}:`, err));
+      }
 
       // For onboarding sessions: send a proactive first message so the agent
       // introduces itself and starts the interview without waiting for the user.
@@ -1563,6 +1585,9 @@ export class ChatSessionManager {
    */
   async stopSession(sessionId: string): Promise<void> {
     const session = this.activeSessions.get(sessionId);
+    // Capture session metadata before it may be removed from activeSessions
+    const sessionAgentId = session?.agentId;
+    const sessionStartedAt = session?.startedAt ?? Date.now();
     
     console.log(`[ChatSessionManager] Stopping session ${sessionId}${session ? '' : ' (untracked — stopping container directly)'}`);
     
@@ -1612,10 +1637,29 @@ export class ChatSessionManager {
           console.warn(`[ChatSessionManager] Failed to mark onboarding session abandoned: ${err}`)
         );
       }
+
+      // Record session completed in the agent's activity timeline.
+      if (this.lifecycleTracker && sessionAgentId) {
+        const durationMs = Date.now() - sessionStartedAt;
+        this.lifecycleTracker.recordSessionCompleted(sessionAgentId, sessionId, {
+          durationMs,
+          success: true,
+        }).catch(err => console.warn(`[ChatSessionManager] Failed to record session_completed for ${sessionId}:`, err));
+      }
       
     } catch (err) {
       console.error(`[ChatSessionManager] Error stopping session ${sessionId}:`, err);
       await this.updateSessionStatus(sessionId, 'failed', String(err));
+
+      // Record session failed in the agent's activity timeline.
+      if (this.lifecycleTracker && sessionAgentId) {
+        const durationMs = Date.now() - sessionStartedAt;
+        this.lifecycleTracker.recordSessionCompleted(sessionAgentId, sessionId, {
+          durationMs,
+          success: false,
+          error: String(err),
+        }).catch(e => console.warn(`[ChatSessionManager] Failed to record session_failed for ${sessionId}:`, e));
+      }
     } finally {
       this.activeSessions.delete(sessionId);
     }

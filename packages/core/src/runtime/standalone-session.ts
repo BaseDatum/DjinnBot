@@ -2,6 +2,7 @@ import type { AgentRunner, RunAgentOptions, AgentRunResult } from './agent-execu
 import type { AgentMemoryManager } from '../memory/agent-memory.js';
 import type { AgentInbox } from '../events/agent-inbox.js';
 import type { SessionPersister } from '../sessions/session-persister.js';
+import type { AgentLifecycleTracker } from '../lifecycle/agent-lifecycle-tracker.js';
 import { join } from 'node:path';
 
 export interface StandaloneSessionOptions {
@@ -37,6 +38,9 @@ export class StandaloneSessionRunner {
       dataDir: string;
       agentsDir: string;
       sessionPersister?: SessionPersister;
+      /** Optional lifecycle tracker — records session_started/completed events
+       *  for Slack and other standalone sessions so the Activity tab shows them. */
+      lifecycleTracker?: AgentLifecycleTracker;
     }
   ) {}
 
@@ -47,13 +51,28 @@ export class StandaloneSessionRunner {
 
     console.log(`[StandaloneSessionRunner] Starting session ${sessionId} for ${opts.agentId}`);
 
+    // Record session started in the agent's activity timeline (skip 'pulse' — AgentPulse
+    // records pulse_started/complete separately with richer context).
+    const source = opts.source || 'api';
+    if (this.config.lifecycleTracker && source !== 'pulse') {
+      this.config.lifecycleTracker.recordSessionStarted(
+        opts.agentId,
+        sessionId,
+        source,
+        opts.userPrompt.slice(0, 200),
+        opts.model,
+      ).catch(err =>
+        console.warn(`[StandaloneSessionRunner] Failed to record session_started for ${sessionId}:`, err)
+      );
+    }
+
     // Create session in DB
     if (this.config.sessionPersister) {
       try {
         await this.config.sessionPersister.createSession({
           id: sessionId,
           agentId: opts.agentId,
-          source: opts.source || 'api',
+          source,
           sourceId: opts.sourceId,
           userPrompt: opts.userPrompt,
           model: opts.model,
@@ -110,6 +129,19 @@ export class StandaloneSessionRunner {
         }
       }
 
+      // Record session completed in the agent's activity timeline.
+      if (this.config.lifecycleTracker && source !== 'pulse') {
+        const durationMs = Date.now() - sessionTimestamp;
+        this.config.lifecycleTracker.recordSessionCompleted(opts.agentId, sessionId, {
+          durationMs,
+          outputPreview: result.output?.slice(0, 200),
+          success: result.success,
+          error: result.error,
+        }).catch(err =>
+          console.warn(`[StandaloneSessionRunner] Failed to record session_completed for ${sessionId}:`, err)
+        );
+      }
+
       return {
         success: result.success,
         output: result.output,
@@ -126,6 +158,18 @@ export class StandaloneSessionRunner {
         } catch (persistErr) {
           console.error(`[StandaloneSessionRunner] Failed to mark session as failed in DB:`, persistErr);
         }
+      }
+
+      // Record session failed in the agent's activity timeline.
+      if (this.config.lifecycleTracker && source !== 'pulse') {
+        const durationMs = Date.now() - sessionTimestamp;
+        this.config.lifecycleTracker.recordSessionCompleted(opts.agentId, sessionId, {
+          durationMs,
+          success: false,
+          error: String(err),
+        }).catch(e =>
+          console.warn(`[StandaloneSessionRunner] Failed to record session_failed for ${sessionId}:`, e)
+        );
       }
 
       return {

@@ -18,6 +18,7 @@ import { ChatListener } from './chat/chat-listener.js';
 import { VaultEmbedWatcher } from './memory/vault-embed-watcher.js';
 import { McpoManager } from './mcp/mcpo-manager.js';
 import { ContainerLogStreamer } from './container/log-streamer.js';
+import { AgentLifecycleTracker } from './lifecycle/agent-lifecycle-tracker.js';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { PROVIDER_ENV_MAP } from './constants.js';
@@ -1070,12 +1071,17 @@ async function main(): Promise<void> {
     // Initialize chat session support if enabled
     if (process.env.ENABLE_CHAT !== 'false') {
       console.log('[Engine] Initializing chat session support...');
+      // Create a lifecycle tracker for chat sessions so the Activity tab reflects
+      // chat activity (session_started, session_completed, session_failed events).
+      // Uses the same Redis client as the rest of the engine.
+      const chatLifecycleTracker = new AgentLifecycleTracker({ redis: redisClient });
       chatSessionManager = new ChatSessionManager({
         redis: redisClient,
         apiBaseUrl: CONFIG.apiUrl || 'http://api:8000',
         dataPath: CONFIG.dataDir,
         agentsDir: CONFIG.agentsDir,
         containerImage: process.env.AGENT_RUNTIME_IMAGE,
+        lifecycleTracker: chatLifecycleTracker,
       });
       
       chatListener = new ChatListener({

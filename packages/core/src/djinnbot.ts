@@ -675,6 +675,7 @@ export class DjinnBot {
         dataDir: this.config.dataDir,
         agentsDir: this.config.agentsDir,
         sessionPersister: this.sessionPersister,
+        lifecycleTracker: this.lifecycleTracker,
       }
     );
     console.log('[DjinnBot] Standalone session runner initialized');
@@ -907,6 +908,15 @@ export class DjinnBot {
       };
     }
 
+    // Record pulse started in the agent's activity timeline.
+    if (this.lifecycleTracker) {
+      this.lifecycleTracker.recordPulseStarted(agentId).catch(err =>
+        console.warn(`[DjinnBot] Failed to record pulse_started for ${agentId}:`, err)
+      );
+    }
+
+    const pulseStartTime = Date.now();
+
     try {
       // Determine pulse columns: routine override > agent config.yml
       const pulseColumns = context.routinePulseColumns?.length
@@ -957,7 +967,20 @@ export class DjinnBot {
       });
 
       console.log(`[DjinnBot] Pulse session for ${label} completed: ${result.success}`);
-      
+
+      // Record pulse completed in the agent's activity timeline.
+      if (this.lifecycleTracker) {
+        const durationMs = Date.now() - pulseStartTime;
+        const summary = context.routineName
+          ? `Routine "${context.routineName}" completed`
+          : (result.actions?.length
+            ? result.actions.slice(0, 3).join('; ')
+            : result.output?.slice(0, 200) || 'Pulse complete');
+        this.lifecycleTracker.recordPulseComplete(agentId, summary, 1, durationMs).catch(err =>
+          console.warn(`[DjinnBot] Failed to record pulse_complete for ${agentId}:`, err)
+        );
+      }
+
       return {
         success: result.success,
         actions: result.actions || [],
@@ -965,6 +988,15 @@ export class DjinnBot {
       };
     } catch (err) {
       console.error(`[DjinnBot] Pulse session failed for ${label}:`, err);
+
+      // Record pulse completed (failed) in the agent's activity timeline.
+      if (this.lifecycleTracker) {
+        const durationMs = Date.now() - pulseStartTime;
+        this.lifecycleTracker.recordPulseComplete(agentId, `Pulse failed: ${err}`, 0, durationMs).catch(e =>
+          console.warn(`[DjinnBot] Failed to record pulse_complete (failed) for ${agentId}:`, e)
+        );
+      }
+
       return {
         success: false,
         actions: [],
