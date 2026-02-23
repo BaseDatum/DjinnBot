@@ -19,10 +19,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_async_session
 from app.database import AsyncSessionLocal
 from app.models.chat import ChatSession, ChatMessage
+from app.models.settings import GlobalSetting
 from app import dependencies
 from app.logging_config import get_logger
 from app.utils import gen_id, now_ms
 from app.constants import DEFAULT_CHAT_MODEL
+from app.services.agent_config import get_agent_config
 
 logger = get_logger(__name__)
 router = APIRouter()
@@ -95,7 +97,27 @@ async def start_chat_session(
     # Generate session ID
     now = now_ms()
     session_id = f"chat_{agent_id}_{now}"
-    model = (request and request.model) or DEFAULT_CHAT_MODEL
+
+    # Resolve model: explicit request > agent config.yml > instance default > hardcoded fallback
+    model = (request and request.model) or None
+    if not model:
+        try:
+            agent_config = await get_agent_config(agent_id)
+            model = agent_config.get("model") or None
+        except Exception:
+            pass
+    if not model:
+        try:
+            result = await db.execute(
+                select(GlobalSetting).where(GlobalSetting.key == "defaultWorkingModel")
+            )
+            row = result.scalar_one_or_none()
+            if row and row.value and row.value.strip():
+                model = row.value.strip()
+        except Exception:
+            pass
+    if not model:
+        model = DEFAULT_CHAT_MODEL
 
     # Create session in database
     chat_session = ChatSession(

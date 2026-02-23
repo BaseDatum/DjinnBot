@@ -56,8 +56,13 @@ function useSpawnForm() {
   const [loadingSessions, setLoadingSessions] = useState(false);
   const [spawning, setSpawning] = useState(false);
 
+  // When agent changes, auto-populate model from agent's configured default
   useEffect(() => {
     if (!agentId) { setExistingSessions([]); setSessionChoice('__new__'); return; }
+    const agent = agents.find(a => a.id === agentId);
+    if (agent?.model) {
+      setModel(agent.model);
+    }
     setLoadingSessions(true);
     listChatSessions(agentId, { limit: 10 })
       .then(data => {
@@ -69,7 +74,7 @@ function useSpawnForm() {
       })
       .catch(() => { setExistingSessions([]); setSessionChoice('__new__'); })
       .finally(() => setLoadingSessions(false));
-  }, [agentId]);
+  }, [agentId, agents]);
 
   const handleOpen = async (onDone?: () => void) => {
     if (!agentId || spawning) return;

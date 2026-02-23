@@ -105,6 +105,22 @@ def _parse_frontmatter(content: str) -> Tuple[dict, str]:
     return meta, body
 
 
+def _read_agent_config_model(agent_id: str) -> Optional[str]:
+    """Read the model field from an agent's config.yml, if present."""
+    config_path = os.path.join(AGENTS_DIR, agent_id, "config.yml")
+    try:
+        if not os.path.isfile(config_path):
+            return None
+        with open(config_path, "r", encoding="utf-8") as f:
+            config = yaml.safe_load(f) or {}
+        model = config.get("model")
+        if model and isinstance(model, str) and model.strip():
+            return model.strip()
+    except Exception:
+        pass
+    return None
+
+
 def _build_agent(agent_id: str) -> dict:
     logger.debug(f"Building agent: {agent_id}")
     agent_dir = os.path.join(AGENTS_DIR, agent_id)
@@ -137,6 +153,7 @@ def _build_agent(agent_id: str) -> dict:
         "persona_files": persona_files,
         "slack_connected": slack_connected,
         "memory_count": _count_vault_files(agent_id),
+        "model": _read_agent_config_model(agent_id),
     }
 
 

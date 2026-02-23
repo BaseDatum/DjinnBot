@@ -1,4 +1,13 @@
-model: xai/grok-4-1-fast-reasoning
+coordination:
+  max_concurrent_pulse_sessions: 2
+  wake_guardrails:
+    cooldown_seconds: 300
+    max_daily_session_minutes: 120
+    max_wakes_per_day: 12
+    max_wakes_per_pair_per_day: 5
+executor_model: openrouter/x-ai/grok-4.1-fast
+model: openrouter/x-ai/grok-4.1-fast
+planning_model: openrouter/x-ai/grok-4.1-fast
 pulse_blackouts:
 - end_time: 07:00
   label: Nighttime
@@ -14,6 +23,6 @@ pulse_one_offs: []
 pulse_transitions_to: []
 skills_disabled: []
 thinking_level: 'off'
-thinking_model: xai/grok-4-1-fast-reasoning
+thinking_model: openrouter/x-ai/grok-4.1-fast
 thinking_model_thinking_level: 'off'
 thread_mode: passive

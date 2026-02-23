@@ -318,12 +318,16 @@ export function FloatingChatWidget() {
   // Show unread badge
   const activeCount = panes.length;
 
-  // Load sessions when agent is selected
+  // Load sessions when agent is selected and auto-populate model from agent config
   useEffect(() => {
     if (!spawnAgentId) {
       setExistingSessions([]);
       setSpawnSessionId('__new__');
       return;
+    }
+    const agent = agents.find(a => a.id === spawnAgentId);
+    if (agent?.model) {
+      setSpawnModel(agent.model);
     }
     setLoadingSessions(true);
     listChatSessions(spawnAgentId, { limit: 10 })
@@ -336,7 +340,7 @@ export function FloatingChatWidget() {
       })
       .catch(() => { setExistingSessions([]); setSpawnSessionId('__new__'); })
       .finally(() => setLoadingSessions(false));
-  }, [spawnAgentId]);
+  }, [spawnAgentId, agents]);
 
   const handleOpenChat = async () => {
     if (!spawnAgentId || spawning) return;

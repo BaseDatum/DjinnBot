@@ -220,6 +220,8 @@ export interface AgentListItem {
   emoji: string | null;
   role: string | null;
   pulse_enabled?: boolean;
+  /** Agent's configured working model from config.yml (e.g. "anthropic/claude-sonnet-4"). */
+  model?: string | null;
 }
 
 export async function fetchAgents(): Promise<AgentListItem[]> {
