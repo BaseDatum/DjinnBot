@@ -88,6 +88,7 @@ export function useLogStream({
     }
 
     setStatus('connecting');
+    setLines([]);
 
     try {
       // Build URL
@@ -175,7 +176,6 @@ export function useLogStream({
 
   const reconnect = useCallback(() => {
     reconnectCountRef.current = 0;
-    setLines([]);
     connect();
   }, [connect]);
 
