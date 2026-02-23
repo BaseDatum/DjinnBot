@@ -179,6 +179,8 @@ function AdminPage() {
   // Default models state (moved from Settings to Admin)
   interface GlobalSettings {
     defaultWorkingModel: string;
+    defaultPlanningModel: string;
+    defaultExecutorModel: string;
     defaultThinkingModel: string;
     defaultSlackDecisionModel: string;
     defaultWorkingModelThinkingLevel: string;
@@ -845,7 +847,7 @@ function AdminPage() {
                 Default Working Model
               </Label>
               <p className="text-xs text-muted-foreground mb-2">
-                Used for pipeline execution, code generation, and complex tasks
+                The universal fallback model — used for pipeline steps, chat, and any role without an explicit model set.
               </p>
               <ProviderModelSelector
                 value={globalSettings.defaultWorkingModel}
@@ -856,6 +858,56 @@ function AdminPage() {
                 placeholder="Select working model..."
               />
               <p className="text-xs text-muted-foreground font-mono mt-1">{globalSettings.defaultWorkingModel}</p>
+            </div>
+
+            <div className="space-y-2">
+              <Label className="flex items-center gap-2">
+                <Brain className="h-4 w-4" />
+                Default Planning Model
+              </Label>
+              <p className="text-xs text-muted-foreground mb-2">
+                Used during pulse routines for strategic work — claiming tasks, writing execution prompts, reviewing results.
+                Should be your smartest model. Falls back to Working Model if not set.
+              </p>
+              <ProviderModelSelector
+                value={globalSettings.defaultPlanningModel}
+                onChange={(v) => handleGlobalSettingsChange({ ...globalSettings, defaultPlanningModel: v })}
+                className="w-full sm:w-full"
+                placeholder="Defaults to working model if not set..."
+              />
+              {globalSettings.defaultPlanningModel && (
+                <p className="text-xs text-muted-foreground font-mono mt-1">{globalSettings.defaultPlanningModel}</p>
+              )}
+              {!globalSettings.defaultPlanningModel && globalSettings.defaultWorkingModel && (
+                <p className="text-xs text-muted-foreground mt-1">
+                  Using working model: <span className="font-mono">{globalSettings.defaultWorkingModel}</span>
+                </p>
+              )}
+            </div>
+
+            <div className="space-y-2">
+              <Label className="flex items-center gap-2">
+                <Brain className="h-4 w-4" />
+                Default Executor Model
+              </Label>
+              <p className="text-xs text-muted-foreground mb-2">
+                Used when agents spawn executors via <code className="text-xs bg-muted px-1 rounded">spawn_executor()</code> — implements tasks in a fresh context window.
+                Use a fast/cheap model here to optimize cost. Falls back to Working Model if not set.
+              </p>
+              <ProviderModelSelector
+                value={globalSettings.defaultExecutorModel}
+                onChange={(v) => handleGlobalSettingsChange({ ...globalSettings, defaultExecutorModel: v })}
+                className="w-full sm:w-full"
+                placeholder="Defaults to working model if not set..."
+              />
+              {globalSettings.defaultExecutorModel && (
+                <p className="text-xs text-muted-foreground font-mono mt-1">{globalSettings.defaultExecutorModel}</p>
+              )}
+              {!globalSettings.defaultExecutorModel && globalSettings.defaultWorkingModel && (
+                <p className="text-xs text-muted-foreground mt-1">
+                  Using working model: <span className="font-mono">{globalSettings.defaultWorkingModel}</span>
+                </p>
+              )}
             </div>
 
             <div className="space-y-2">

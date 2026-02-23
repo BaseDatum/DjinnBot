@@ -182,7 +182,64 @@ async def sse_agent_events():
     Test with: curl -N http://localhost:8000/api/agents/events
     """
     return StreamingResponse(
-        lifecycle_event_generator(),
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@router.get("/work-locks/{agent_id}")
+async def stream_work_locks(agent_id: str):
+    """SSE endpoint — streams work lock changes for a specific agent in real-time.
+
+    Subscribes to Redis channel: djinnbot:agent:{agent_id}:work_locks:live
+    Events are published by the agent-runtime when locks are acquired or released.
+
+    Event types:
+    - lock_acquired: A new work lock was acquired
+    - lock_released: A work lock was released or expired
+
+    Test with: curl -N http://localhost:8000/api/events/work-locks/chieko
+    """
+    if not dependencies.redis_client:
+        raise HTTPException(status_code=503, detail="Redis not connected")
+
+    channel = f"djinnbot:agent:{agent_id}:work_locks:live"
+
+    async def event_generator():
+        pubsub = dependencies.redis_client.pubsub()
+        await pubsub.subscribe(channel)
+
+        try:
+            while True:
+                try:
+                    message = await asyncio.wait_for(
+                        pubsub.get_message(
+                            ignore_subscribe_messages=True, timeout=None
+                        ),
+                        timeout=20.0,
+                    )
+                    if message and message["type"] == "message":
+                        data_str = message["data"]
+                        if isinstance(data_str, bytes):
+                            data_str = data_str.decode()
+                        yield f"data: {data_str}\n\n"
+                    else:
+                        yield ": heartbeat\n\n"
+                except asyncio.TimeoutError:
+                    yield ": heartbeat\n\n"
+                except asyncio.CancelledError:
+                    break
+        finally:
+            await pubsub.unsubscribe(channel)
+            await pubsub.close()
+
+    return StreamingResponse(
+        event_generator(),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

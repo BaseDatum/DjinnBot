@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Label } from '@/components/ui/label';
@@ -12,10 +12,11 @@ import {
   Clock,
   AlertTriangle,
 } from 'lucide-react';
-import { fetchAgentWorkLedger, fetchAgentWakeStats } from '@/lib/api';
+import { fetchAgentWorkLedger, fetchAgentWakeStats, API_BASE } from '@/lib/api';
 import type { WorkLockEntry, WakeStatsResponse } from '@/lib/api';
 import type { AgentConfig, CoordinationConfig } from '@/types/config';
 import { COORDINATION_DEFAULTS } from '@/types/config';
+import { useSSE } from '@/hooks/useSSE';
 
 interface AgentCoordinationTabProps {
   agentId: string;
@@ -28,15 +29,12 @@ export function AgentCoordinationTab({ agentId, config, onConfigChange }: AgentC
   const [locksLoading, setLocksLoading] = useState(true);
   const [wakeStats, setWakeStats] = useState<WakeStatsResponse | null>(null);
 
-  // Refresh interval for live data
-  const refreshTimer = useRef<ReturnType<typeof setInterval> | null>(null);
-
   const coordination = config.coordination ?? COORDINATION_DEFAULTS;
   const guardrails = coordination.wakeGuardrails;
 
   // ── Load live data ─────────────────────────────────────────────────────
 
-  const loadLiveData = async () => {
+  const loadLiveData = useCallback(async () => {
     try {
       const [ledger, stats] = await Promise.all([
         fetchAgentWorkLedger(agentId),
@@ -49,16 +47,24 @@ export function AgentCoordinationTab({ agentId, config, onConfigChange }: AgentC
     } finally {
       setLocksLoading(false);
     }
-  };
+  }, [agentId]);
 
+  // Initial fetch
   useEffect(() => {
     loadLiveData();
-    // Refresh every 15 seconds
-    refreshTimer.current = setInterval(loadLiveData, 15000);
-    return () => {
-      if (refreshTimer.current) clearInterval(refreshTimer.current);
-    };
-  }, [agentId]);
+  }, [loadLiveData]);
+
+  // ── Real-time SSE updates for work lock changes ────────────────────────
+
+  const handleWorkLockEvent = useCallback(() => {
+    // Refetch the full ledger on any lock change event
+    loadLiveData();
+  }, [loadLiveData]);
+
+  const { status: sseStatus } = useSSE<{ type: string; agentId: string }>({
+    url: `${API_BASE}/events/work-locks/${agentId}`,
+    onMessage: handleWorkLockEvent,
+  });
 
   // ── Config update helpers ──────────────────────────────────────────────
 
@@ -255,9 +261,20 @@ export function AgentCoordinationTab({ agentId, config, onConfigChange }: AgentC
                 {locks.length}
               </Badge>
             </CardTitle>
-            <p className="text-[10px] text-muted-foreground">
-              Refreshes every 15s
-            </p>
+            <div className="flex items-center gap-1.5">
+              <span
+                className={`inline-block h-1.5 w-1.5 rounded-full ${
+                  sseStatus === 'connected'
+                    ? 'bg-green-500'
+                    : sseStatus === 'connecting'
+                    ? 'bg-yellow-500 animate-pulse'
+                    : 'bg-red-500'
+                }`}
+              />
+              <p className="text-[10px] text-muted-foreground">
+                {sseStatus === 'connected' ? 'Live' : sseStatus === 'connecting' ? 'Connecting...' : 'Disconnected'}
+              </p>
+            </div>
           </div>
         </CardHeader>
         <CardContent>

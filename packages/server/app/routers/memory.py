@@ -505,44 +505,6 @@ class VaultWatcher:
             # redis.asyncio.Redis.pubsub() returns a PubSub that shares the
             # connection pool, so no extra connection config is needed.
             pubsub = dependencies.redis_client.pubsub()
-            await pubsub.subscribe('djinnbot:vault:updated')
-            async for message in pubsub.listen():
-                if not self.clients:
-                    break
-                if message['type'] != 'message':
-                    continue
-                try:
-                    payload = json.loads(message['data'])
-                    agent_id = payload.get('agentId', '')
-                    shared_updated = payload.get('sharedUpdated', False)
-                    # Match: either this is our agent's vault, or we're the
-                    # shared watcher and a shared write happened.
-                    if agent_id == self.agent_id or (self.agent_id == 'shared' and shared_updated):
-                        # Wake the watch loop to broadcast immediately
-                        self._notify_event.set()
-                except Exception:
-                    pass
-        except asyncio.CancelledError:
-            pass
-        except Exception as e:
-            print(
-                f"[VaultWatcher] Redis listener failed for {self.agent_id}: {e}"
-            )
-        finally:
-            if pubsub:
-                try:
-                    await pubsub.unsubscribe('djinnbot:vault:updated')
-                    await pubsub.aclose()
-                except Exception:
-                    pass
-            )
-            redis_port = (
-                dependencies.redis_client.connection_pool.connection_kwargs.get(
-                    "port", 6379
-                )
-            )
-            sub = aioredis.Redis(host=redis_url, port=redis_port, decode_responses=True)
-            pubsub = sub.pubsub()
             await pubsub.subscribe("djinnbot:vault:updated")
             async for message in pubsub.listen():
                 if not self.clients:
@@ -562,12 +524,17 @@ class VaultWatcher:
                         self._notify_event.set()
                 except Exception:
                     pass
-            await pubsub.unsubscribe("djinnbot:vault:updated")
-            await sub.aclose()
         except asyncio.CancelledError:
             pass
         except Exception as e:
             print(f"[VaultWatcher] Redis listener failed for {self.agent_id}: {e}")
+        finally:
+            if pubsub:
+                try:
+                    await pubsub.unsubscribe("djinnbot:vault:updated")
+                    await pubsub.aclose()
+                except Exception:
+                    pass
 
     async def _watch_loop(self):
         last_hash = self._hash_vault()

@@ -22,6 +22,8 @@ router = APIRouter()
 
 DEFAULT_SETTINGS: Dict[str, str] = {
     "defaultWorkingModel": "openrouter/moonshotai/kimi-k2.5",
+    "defaultPlanningModel": "",
+    "defaultExecutorModel": "",
     "defaultThinkingModel": "openrouter/minimax/minimax-m2.5",
     "defaultSlackDecisionModel": "openrouter/minimax/minimax-m2.5",
     "defaultWorkingModelThinkingLevel": "off",
@@ -482,6 +484,8 @@ def _build_custom_catalog_entry(provider_id: str, row: "ModelProvider") -> dict:
 
 class GlobalSettings(BaseModel):
     defaultWorkingModel: str = "openrouter/moonshotai/kimi-k2.5"
+    defaultPlanningModel: str = ""
+    defaultExecutorModel: str = ""
     defaultThinkingModel: str = "openrouter/minimax/minimax-m2.5"
     defaultSlackDecisionModel: str = "openrouter/minimax/minimax-m2.5"
     defaultWorkingModelThinkingLevel: str = "off"
@@ -680,6 +684,8 @@ async def get_settings(
 
     return GlobalSettings(
         defaultWorkingModel=_get("defaultWorkingModel"),
+        defaultPlanningModel=_get("defaultPlanningModel"),
+        defaultExecutorModel=_get("defaultExecutorModel"),
         defaultThinkingModel=_get("defaultThinkingModel"),
         defaultSlackDecisionModel=_get("defaultSlackDecisionModel"),
         defaultWorkingModelThinkingLevel=_get("defaultWorkingModelThinkingLevel"),
@@ -703,6 +709,8 @@ async def update_settings(
     now = now_ms()
     updates = {
         "defaultWorkingModel": settings.defaultWorkingModel,
+        "defaultPlanningModel": settings.defaultPlanningModel,
+        "defaultExecutorModel": settings.defaultExecutorModel,
         "defaultThinkingModel": settings.defaultThinkingModel,
         "defaultSlackDecisionModel": settings.defaultSlackDecisionModel,
         "pulseIntervalMinutes": str(settings.pulseIntervalMinutes),

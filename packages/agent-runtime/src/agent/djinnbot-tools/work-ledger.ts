@@ -58,6 +58,10 @@ function ledgerSetKey(agentId: string): string {
   return `djinnbot:agent:${agentId}:work_ledger`;
 }
 
+function workLocksChannel(agentId: string): string {
+  return `djinnbot:agent:${agentId}:work_locks:live`;
+}
+
 // ── Tool factories ─────────────────────────────────────────────────────────
 
 export function createWorkLedgerTools(config: WorkLedgerToolsConfig): AgentTool[] {
@@ -98,6 +102,16 @@ export function createWorkLedgerTools(config: WorkLedgerToolsConfig): AgentTool[
         if (result === 'OK') {
           // Also track in the ledger set (for get_active_work queries)
           await redis.sadd(ledger, p.key);
+          // Notify dashboard SSE subscribers of lock change
+          await redis.publish(workLocksChannel(agentId), JSON.stringify({
+            type: 'lock_acquired',
+            agentId,
+            key: p.key,
+            sessionId,
+            description: p.description,
+            acquiredAt: entry.acquiredAt,
+            ttlSeconds: ttl,
+          }));
           return {
             content: [{
               type: 'text',
@@ -154,6 +168,13 @@ export function createWorkLedgerTools(config: WorkLedgerToolsConfig): AgentTool[
         const existingRaw = await redis.get(lk);
         if (!existingRaw) {
           await redis.srem(ledger, p.key);
+          // Notify dashboard even for expired/already-released locks
+          await redis.publish(workLocksChannel(agentId), JSON.stringify({
+            type: 'lock_released',
+            agentId,
+            key: p.key,
+            sessionId,
+          }));
           return {
             content: [{ type: 'text', text: `Lock "${p.key}" was already expired or released.` }],
             details: {},
@@ -175,6 +196,13 @@ export function createWorkLedgerTools(config: WorkLedgerToolsConfig): AgentTool[
 
         await redis.del(lk);
         await redis.srem(ledger, p.key);
+        // Notify dashboard SSE subscribers of lock change
+        await redis.publish(workLocksChannel(agentId), JSON.stringify({
+          type: 'lock_released',
+          agentId,
+          key: p.key,
+          sessionId,
+        }));
 
         return {
           content: [{ type: 'text', text: `Work lock released: "${p.key}"` }],
