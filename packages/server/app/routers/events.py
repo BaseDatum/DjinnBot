@@ -548,6 +548,143 @@ async def stream_session_events(
     )
 
 
+@router.get("/activity/{agent_id}")
+async def stream_agent_activity(
+    agent_id: str,
+    limit: int = Query(50, ge=1, le=200, description="Number of backfill events"),
+):
+    """SSE endpoint -- multiplexed activity feed for a specific agent.
+
+    Two-phase delivery:
+      1. **Backfill**: Reads the last `limit` events from the agent's timeline
+         sorted set and emits them oldest-first.
+      2. **Live**: Subscribes to two Redis pub/sub channels:
+         - ``djinnbot:agent:{agent_id}:activity:live`` -- per-agent activity
+           events published by the lifecycle tracker (enriched events).
+         - ``djinnbot:events:lifecycle`` -- global lifecycle events filtered
+           to this agent (state changes, work queued, pulse, etc.).
+
+    Every event is a JSON object with at least ``{type, timestamp}``.
+    The backfill phase wraps events with ``{phase: "backfill"}``.
+
+    Test with: ``curl -N http://localhost:8000/api/events/activity/chieko``
+    """
+    import logging
+
+    _logger = logging.getLogger(__name__)
+    _logger.info(f"[SSE] Activity stream connecting for agent: {agent_id}")
+
+    if not dependencies.redis_client:
+        raise HTTPException(status_code=503, detail="Redis not connected")
+
+    timeline_key = f"djinnbot:agent:{agent_id}:timeline"
+    activity_channel = f"djinnbot:agent:{agent_id}:activity:live"
+    lifecycle_channel = "djinnbot:events:lifecycle"
+
+    async def activity_event_generator():
+        # ── Phase 1: backfill from sorted set ──────────────────────────
+        try:
+            raw_events = await dependencies.redis_client.zrevrange(
+                timeline_key, 0, limit - 1, withscores=True
+            )
+            backfill = []
+            for event_data, score in raw_events:
+                if isinstance(event_data, bytes):
+                    event_data = event_data.decode("utf-8")
+                try:
+                    parsed = json.loads(event_data)
+                    parsed["timestamp"] = int(score)
+                    parsed["phase"] = "backfill"
+                    backfill.append(parsed)
+                except (json.JSONDecodeError, TypeError):
+                    continue
+
+            # Emit oldest first
+            for evt in reversed(backfill):
+                yield f"data: {json.dumps(evt)}\n\n"
+
+            _logger.debug(f"[SSE] Backfilled {len(backfill)} events for {agent_id}")
+        except Exception as e:
+            _logger.warning(f"[SSE] Backfill failed for {agent_id}: {e}")
+
+        # ── Also backfill current lifecycle state ──────────────────────
+        try:
+            state_key = f"djinnbot:agent:{agent_id}:state"
+            state_data = await dependencies.redis_client.get(state_key)
+            if state_data:
+                if isinstance(state_data, bytes):
+                    state_data = state_data.decode("utf-8")
+                state = json.loads(state_data)
+                yield f"data: {json.dumps({'type': 'current_state', 'phase': 'backfill', 'timestamp': state.get('lastActive') or 0, 'data': state})}\n\n"
+        except Exception:
+            pass
+
+        # ── Phase 2: live pub/sub ──────────────────────────────────────
+        pubsub = dependencies.redis_client.pubsub()
+        await pubsub.subscribe(activity_channel, lifecycle_channel)
+        _logger.info(f"[SSE] Subscribed to {activity_channel} and {lifecycle_channel}")
+
+        yield f"data: {json.dumps({'type': 'connected', 'agentId': agent_id})}\n\n"
+
+        HEARTBEAT_INTERVAL = 20.0
+
+        try:
+            while True:
+                try:
+                    message = await asyncio.wait_for(
+                        pubsub.get_message(
+                            ignore_subscribe_messages=True, timeout=None
+                        ),
+                        timeout=HEARTBEAT_INTERVAL,
+                    )
+
+                    if message and message["type"] == "message":
+                        data_str = message["data"]
+                        if isinstance(data_str, bytes):
+                            data_str = data_str.decode("utf-8")
+
+                        msg_channel = message.get("channel")
+                        if isinstance(msg_channel, bytes):
+                            msg_channel = msg_channel.decode("utf-8")
+
+                        try:
+                            data = json.loads(data_str)
+                        except json.JSONDecodeError:
+                            continue
+
+                        # Filter global lifecycle events to this agent
+                        if msg_channel == lifecycle_channel:
+                            if data.get("agentId") != agent_id:
+                                continue
+
+                        data["phase"] = "live"
+                        yield f"data: {json.dumps(data)}\n\n"
+                    else:
+                        yield ": heartbeat\n\n"
+
+                except asyncio.TimeoutError:
+                    yield ": heartbeat\n\n"
+                except asyncio.CancelledError:
+                    raise
+
+        except asyncio.CancelledError:
+            _logger.info(f"[SSE] Activity stream disconnected for {agent_id}")
+            raise
+        finally:
+            await pubsub.unsubscribe(activity_channel, lifecycle_channel)
+            await pubsub.close()
+
+    return StreamingResponse(
+        activity_event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
 @router.get("/llm-calls")
 async def stream_llm_calls():
     """SSE endpoint — streams LLM call log events in real-time.

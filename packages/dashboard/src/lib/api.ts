@@ -853,6 +853,19 @@ export async function fetchAgentActivity(
   return handleResponse(res, 'Failed to fetch activity');
 }
 
+export interface ActivityStats {
+  sessionsToday: number;
+  sessionsThisWeek: number;
+  totalTokens: number;
+  totalCost: number;
+  errorCount: number;
+}
+
+export async function fetchAgentActivityStats(agentId: string): Promise<ActivityStats> {
+  const res = await authFetch(`${API_BASE}/agents/${agentId}/activity/stats`);
+  return handleResponse(res, 'Failed to fetch activity stats');
+}
+
 // ── Queue API ─────────────────────────────────────────────────────────────
 
 export type QueuePriority = 'normal' | 'high' | 'urgent';

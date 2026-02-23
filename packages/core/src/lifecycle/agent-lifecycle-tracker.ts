@@ -39,7 +39,16 @@ export type TimelineEventType =
   | 'tool_install'
   | 'sandbox_reset'
   | 'message_sent'
-  | 'message_received';
+  | 'message_received'
+  // Enriched event types for the activity feed
+  | 'session_started'
+  | 'session_completed'
+  | 'session_failed'
+  | 'slack_reply_sent'
+  | 'inbox_received'
+  | 'task_claimed'
+  | 'task_completed'
+  | 'executor_spawned';
 
 export interface TimelineEvent {
   id: string;
@@ -138,6 +147,18 @@ export class AgentLifecycleTracker {
     // Remove events older than retention period
     const cutoff = Date.now() - this.retentionMs;
     await this.redis.zremrangebyscore(timelineKey, '-inf', cutoff);
+
+    // Publish to per-agent activity channel for real-time SSE streaming
+    const activityChannel = `djinnbot:agent:${agentId}:activity:live`;
+    const livePayload = JSON.stringify({
+      id: event.id,
+      type: event.type,
+      timestamp: event.timestamp,
+      data: event.data,
+    });
+    this.redis.publish(activityChannel, livePayload).catch(() => {
+      // Non-critical — SSE clients will miss this event but can backfill
+    });
   }
 
   async getTimeline(agentId: string, options?: { limit?: number; since?: number }): Promise<TimelineEvent[]> {
@@ -274,6 +295,143 @@ export class AgentLifecycleTracker {
       timestamp: Date.now(),
       type: 'pulse_complete',
       data: { summary, checksCompleted, durationMs },
+    });
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // Enriched Activity Events
+  // ─────────────────────────────────────────────────────────────
+
+  async recordSessionStarted(
+    agentId: string,
+    sessionId: string,
+    source: string,
+    userPrompt: string,
+    model?: string
+  ): Promise<void> {
+    await this.addTimelineEvent(agentId, {
+      id: `session_start_${sessionId}`,
+      timestamp: Date.now(),
+      type: 'session_started',
+      data: {
+        sessionId,
+        source,
+        userPrompt: userPrompt.length > 200 ? userPrompt.slice(0, 200) + '...' : userPrompt,
+        model,
+      },
+    });
+  }
+
+  async recordSessionCompleted(
+    agentId: string,
+    sessionId: string,
+    opts: {
+      durationMs: number;
+      outputPreview?: string;
+      toolCallCount?: number;
+      tokenCount?: number;
+      cost?: number;
+      success: boolean;
+      error?: string;
+    }
+  ): Promise<void> {
+    const type = opts.success ? 'session_completed' : 'session_failed';
+    await this.addTimelineEvent(agentId, {
+      id: `session_end_${sessionId}`,
+      timestamp: Date.now(),
+      type,
+      data: {
+        sessionId,
+        durationMs: opts.durationMs,
+        outputPreview: opts.outputPreview
+          ? opts.outputPreview.length > 200
+            ? opts.outputPreview.slice(0, 200) + '...'
+            : opts.outputPreview
+          : undefined,
+        toolCallCount: opts.toolCallCount,
+        tokenCount: opts.tokenCount,
+        cost: opts.cost,
+        error: opts.error,
+      },
+    });
+  }
+
+  async recordSlackReplySent(
+    agentId: string,
+    channel: string,
+    threadTs: string,
+    messagePreview: string
+  ): Promise<void> {
+    await this.addTimelineEvent(agentId, {
+      id: `slack_reply_${Date.now()}_${generateShortId()}`,
+      timestamp: Date.now(),
+      type: 'slack_reply_sent',
+      data: {
+        channel,
+        threadTs,
+        messagePreview: messagePreview.length > 200
+          ? messagePreview.slice(0, 200) + '...'
+          : messagePreview,
+      },
+    });
+  }
+
+  async recordInboxReceived(
+    agentId: string,
+    fromAgent: string,
+    subject: string
+  ): Promise<void> {
+    await this.addTimelineEvent(agentId, {
+      id: `inbox_${Date.now()}_${generateShortId()}`,
+      timestamp: Date.now(),
+      type: 'inbox_received',
+      data: { fromAgent, subject },
+    });
+  }
+
+  async recordTaskClaimed(
+    agentId: string,
+    projectId: string,
+    taskId: string,
+    taskTitle: string
+  ): Promise<void> {
+    await this.addTimelineEvent(agentId, {
+      id: `task_claim_${taskId}`,
+      timestamp: Date.now(),
+      type: 'task_claimed',
+      data: { projectId, taskId, taskTitle },
+    });
+  }
+
+  async recordTaskCompleted(
+    agentId: string,
+    projectId: string,
+    taskId: string,
+    taskTitle: string
+  ): Promise<void> {
+    await this.addTimelineEvent(agentId, {
+      id: `task_done_${taskId}`,
+      timestamp: Date.now(),
+      type: 'task_completed',
+      data: { projectId, taskId, taskTitle },
+    });
+  }
+
+  async recordExecutorSpawned(
+    agentId: string,
+    executorSessionId: string,
+    promptPreview: string
+  ): Promise<void> {
+    await this.addTimelineEvent(agentId, {
+      id: `executor_${executorSessionId}`,
+      timestamp: Date.now(),
+      type: 'executor_spawned',
+      data: {
+        executorSessionId,
+        promptPreview: promptPreview.length > 200
+          ? promptPreview.slice(0, 200) + '...'
+          : promptPreview,
+      },
     });
   }
 
