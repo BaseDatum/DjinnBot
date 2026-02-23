@@ -55,6 +55,7 @@ from app.routers import llm_calls
 from app.routers import user_usage
 from app.routers import slack as slack_router
 from app.routers import spawn_executor as spawn_executor_router
+from app.routers import ingest as ingest_router
 
 
 async def _handle_task_run_event(run_id: str, event_type: str):
@@ -646,6 +647,7 @@ app.include_router(slack_router.router, prefix="/v1/slack", tags=["slack"])
 app.include_router(
     spawn_executor_router.router, prefix="/v1/internal", tags=["internal"]
 )
+app.include_router(ingest_router.router, prefix="/v1/ingest", tags=["ingest"])
 
 
 @app.get("/v1/status")
