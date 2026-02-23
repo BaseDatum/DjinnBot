@@ -3,7 +3,9 @@ title: Memory System
 weight: 4
 ---
 
-DjinnBot agents have persistent memory that survives across sessions. They remember decisions, learn from mistakes, and build knowledge over time. This is powered by [ClawVault](https://github.com/koi-labs-org/clawvault) with semantic search via [QMDR](https://github.com/uf-hy/qmdr).
+DjinnBot agents have persistent memory that survives across sessions. They remember decisions, learn from mistakes, and build knowledge over time. Unlike most AI tools that start every session from scratch, DjinnBot agents accumulate experience — and that experience makes them more effective with every interaction.
+
+Memory is powered by [ClawVault](https://github.com/koi-labs-org/clawvault) with semantic search via [QMDR](https://github.com/uf-hy/qmdr).
 
 ## How It Works
 
@@ -15,6 +17,22 @@ Every agent has two memory vaults:
 Memories are stored as markdown entries with metadata (type, tags, timestamps) and connected via wiki-links for graph traversal.
 
 ## Memory Lifecycle
+
+```mermaid
+graph LR
+    Wake["Wake"] --> Recall["Recall"]
+    Recall --> Work["Work"]
+    Work --> Remember["Remember"]
+    Remember --> Checkpoint["Checkpoint"]
+    Checkpoint --> Sleep["Sleep"]
+    
+    style Wake fill:#3b82f6,color:#fff
+    style Recall fill:#8b5cf6,color:#fff
+    style Work fill:#f59e0b,color:#000
+    style Remember fill:#059669,color:#fff
+    style Checkpoint fill:#ec4899,color:#fff
+    style Sleep fill:#6366f1,color:#fff
+```
 
 1. **Wake** — when an agent session starts, ClawVault loads relevant memories into context
 2. **Recall** — during execution, agents search memories semantically before making decisions
@@ -58,10 +76,12 @@ Memory types:
 | `fact` | Important information about the project/team |
 | `preference` | How someone or something prefers to work |
 | `handoff` | Context for resuming work later |
+| `commitment` | Promises made with deadlines (used by Grace) |
+| `relationship` | People, connections, affiliations (used by Grace) |
 
 ## Wiki-Link Knowledge Graph
 
-Memories are connected using `[[wiki-link]]` syntax:
+Memories are connected using `[[wiki-link]]` syntax, creating a traversable knowledge graph:
 
 ```javascript
 remember("decision", "MyApp: Tech Stack",
@@ -72,7 +92,7 @@ remember("decision", "MyApp: Tech Stack",
 )
 ```
 
-These links create a traversable knowledge graph. When an agent recalls context about a project, they start from `[[Project: Name]]` and follow links to discover related information.
+These links create a web of connected knowledge. When an agent recalls context about a project, they start from `[[Project: Name]]` and follow links to discover related information — tech stack decisions, architectural patterns, past bugs, team preferences, and more.
 
 ### The Anchor Pattern
 
@@ -88,7 +108,40 @@ remember("fact", "Project: MyApp",
 )
 ```
 
-Subsequent memories link back to the anchor, keeping the graph connected.
+Subsequent memories link back to the anchor, keeping the graph connected and navigable.
+
+## Memory Scoring
+
+Not all memories are equally useful. DjinnBot's memory scoring system automatically weights memories by:
+
+- **Recency** — recently accessed memories rank higher
+- **Frequency** — frequently recalled memories are more important
+- **Relevance** — semantic similarity to the current context
+- **Importance** — explicitly tagged high-importance items
+
+Memory scoring is configured through the dashboard (**Settings > Memory Scoring**) and affects how `recall()` ranks results. This means agents naturally prioritize recent, relevant knowledge without manual curation.
+
+## 3D Knowledge Graph Visualization
+
+The dashboard includes an interactive 3D visualization of the memory knowledge graph, powered by Three.js and WebGL:
+
+- **Nodes** represent individual memories, colored by type
+- **Edges** represent wiki-link connections between memories
+- **Clusters** emerge naturally around projects, people, and topics
+- **Interactive** — rotate, zoom, click nodes to inspect memories, filter by agent or type
+
+This visualization makes it easy to understand how your team's knowledge connects and identify gaps or orphaned memories. Access it from the **Memory** page in the dashboard.
+
+## Automatic Memory Consolidation
+
+During session teardown (particularly Slack sessions), DjinnBot automatically consolidates memories:
+
+1. Reviews the session's conversation and decisions
+2. Extracts key learnings, decisions, and action items
+3. Stores them as structured memories with proper wiki-links
+4. Avoids duplicating existing memories by searching first
+
+This means that even casual Slack conversations contribute to the team's knowledge base without any manual effort.
 
 ## Semantic Search
 
@@ -96,11 +149,29 @@ Memory search uses embeddings for semantic similarity, not just keyword matching
 
 The search pipeline:
 
-1. **Query expansion** — the query is expanded to capture related concepts
-2. **Embedding** — query is converted to a vector via `text-embedding-3-small`
-3. **Retrieval** — nearest neighbors found in the SQLite-backed vector store
-4. **Reranking** — results are reranked using `gpt-4o-mini` for relevance
-5. **Injection** — top results are injected into the agent's context
+{{% steps %}}
+
+### Query expansion
+
+The query is expanded to capture related concepts.
+
+### Embedding
+
+Query is converted to a vector via `text-embedding-3-small`.
+
+### Retrieval
+
+Nearest neighbors found in the SQLite-backed vector store.
+
+### Reranking
+
+Results are reranked using `gpt-4o-mini` for relevance, weighted by memory scores.
+
+### Injection
+
+Top results are injected into the agent's context.
+
+{{% /steps %}}
 
 All embedding and reranking runs through OpenRouter — no local GPU or model downloads required.
 
@@ -108,6 +179,6 @@ All embedding and reranking runs through OpenRouter — no local GPU or model do
 
 You can browse and search agent memories through:
 
-- **Dashboard** — the Memory page lets you view vaults and search semantically
-- **CLI** — `djinnbot memory search eric "architecture decisions"`
+- **Dashboard** — the Memory page with 2D and 3D graph views, semantic search, and per-agent filtering
+- **CLI** — `djinn memory search "architecture decisions" --agent finn`
 - **API** — `GET /v1/memory/search?agent_id=eric&query=architecture`

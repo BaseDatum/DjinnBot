@@ -3,7 +3,7 @@ title: Agent Containers
 weight: 8
 ---
 
-Every agent session runs in an isolated Docker container. This is one of DjinnBot's key differentiators — agents get a full engineering environment without any host access.
+Every agent session runs in an isolated Docker container. This is one of DjinnBot's key differentiators — while other tools give agents direct access to your machine, DjinnBot agents get a full engineering environment in a sandbox that's destroyed after every step. Zero risk to your system.
 
 ## What's Inside
 

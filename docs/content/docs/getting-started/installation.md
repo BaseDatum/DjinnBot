@@ -11,24 +11,35 @@ The fastest way to get DjinnBot running. A single command installs all prerequis
 curl -fsSL https://raw.githubusercontent.com/BaseDatum/djinnbot/main/install.sh | bash
 ```
 
-The installer automatically:
+The installer automatically detects your platform and installs everything needed. Then the setup wizard walks you through:
 
-1. Detects your platform (Linux or macOS, amd64 or arm64)
-2. Installs **git**, **Docker + Compose**, and **Python 3.11+** if missing
-3. Installs the **`djinn` CLI** via pip/pipx
-4. Launches the **interactive setup wizard** (`djinn setup`)
+{{% steps %}}
 
-The setup wizard then walks you through:
+### Clone the repo
 
-1. **Cloning the repo** (or detecting an existing checkout)
-2. **Creating `.env`** from `.env.example`
-3. **Generating encryption keys** (`SECRET_ENCRYPTION_KEY`, `ENGINE_INTERNAL_TOKEN`, `AUTH_SECRET_KEY`, `MCPO_API_KEY`)
-4. **Enabling authentication** (recommended for anything beyond localhost)
-5. **Detecting your server IP** for network configuration
-6. **Optional SSL/TLS** with Traefik and automatic Let's Encrypt certificates
-7. **Port conflict checks**
-8. **Choosing a model provider** and entering your API key
-9. **Starting the Docker Compose stack**
+Detects an existing checkout or clones fresh from GitHub.
+
+### Generate secrets
+
+Creates `.env` with encryption keys, internal tokens, and API key for the mcpo proxy.
+
+### Enable authentication
+
+Recommended for anything beyond localhost — sets up JWT auth with optional 2FA.
+
+### Configure networking
+
+Detects your server IP and sets up network access. Optional SSL/TLS with Traefik and automatic Let's Encrypt certificates.
+
+### Choose a model provider
+
+Enter your API key for OpenRouter, Anthropic, OpenAI, or any supported provider.
+
+### Start the stack
+
+Launches Docker Compose with all 6 services — your AI team is ready.
+
+{{% /steps %}}
 
 Supported platforms: **Ubuntu**, **Debian**, **Fedora**, **CentOS/RHEL**, **Rocky/Alma**, **Amazon Linux**, **Arch**, **macOS** (Intel and Apple Silicon).
 

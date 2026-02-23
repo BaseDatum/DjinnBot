@@ -52,7 +52,7 @@ When `AUTH_ENABLED=true`, the following are also required:
 | Variable | Default | Description |
 |----------|---------|------------|
 | `BIND_HOST` | `0.0.0.0` | Network bind address. Set to `127.0.0.1` when using Traefik (SSL mode), `0.0.0.0` for direct access. |
-| `VITE_API_URL` | `http://localhost:8000` | API URL baked into the dashboard at build time. Set by `djinn setup`. For SSL: `https://yourdomain.com`. For direct access: `http://your-ip:8000`. |
+| `VITE_API_URL` | `http://localhost:8000` | API URL used by the dashboard. Injected at runtime — no rebuild needed for custom domains. |
 | `DOMAIN` | `localhost` | Domain name used by Traefik for SSL certificate issuance. |
 
 ### Paths
@@ -69,7 +69,7 @@ When `AUTH_ENABLED=true`, the following are also required:
 |----------|---------|------------|
 | `AUTH_ENABLED` | `false` | Master toggle for authentication. Set to `true` for any non-local deployment. |
 | `AUTH_SECRET_KEY` | — | Secret key for signing JWT access and refresh tokens (HS256). Required when `AUTH_ENABLED=true`. |
-| `AUTH_TOTP_ISSUER` | `DjinnBot` | Issuer name displayed in authenticator apps (Google Authenticator, Authy, etc.) when setting up 2FA. |
+| `AUTH_TOTP_ISSUER` | `DjinnBot` | Issuer name displayed in authenticator apps when setting up 2FA. |
 | `AUTH_ACCESS_TOKEN_TTL` | `900` | Access token lifetime in seconds (default: 15 minutes). |
 | `AUTH_REFRESH_TOKEN_TTL` | `604800` | Refresh token lifetime in seconds (default: 7 days). |
 
@@ -125,16 +125,22 @@ The Traefik proxy also uses `proxy/.env`:
 | `MOCK_RUNNER` | `false` | Use mock agent runner for testing |
 | `USE_CONTAINER_RUNNER` | `true` | Use Docker containers for agents |
 | `LOG_LEVEL` | `INFO` | Logging level |
+| `DJINNBOT_VERSION` | `latest` | Current version (for update checking) |
 
 ## Agent Configuration (config.yml)
 
 Per-agent settings in `agents/<id>/config.yml`:
 
 ```yaml
-# LLM Model
+# LLM Models
 model: anthropic/claude-sonnet-4
 thinking_model: anthropic/claude-sonnet-4
 thinking_level: 'off'          # off, low, medium, high
+thinking_model_thinking_level: 'off'
+
+# Context-specific model overrides
+planning_model: openrouter/x-ai/grok-4.1-fast
+executor_model: openrouter/x-ai/grok-4.1-fast
 
 # Slack
 thread_mode: passive            # passive or active
@@ -158,6 +164,18 @@ pulse_blackouts:
     end_time: '07:00'
     type: recurring
 pulse_one_offs: []
+
+# Agent coordination
+coordination:
+  max_concurrent_pulse_sessions: 2
+  wake_guardrails:
+    cooldown_seconds: 300
+    max_daily_session_minutes: 120
+    max_wakes_per_day: 12
+    max_wakes_per_pair_per_day: 5
+
+# Tool control
+skills_disabled: []            # List of skill names to disable
 ```
 
 All agent config can also be edited through the dashboard Settings and Agent pages.
@@ -171,6 +189,8 @@ The Settings page in the dashboard provides UI access to:
 - **Pulse interval** — global pulse frequency
 - **Provider API keys** — add/update provider credentials
 - **Custom providers** — configure OpenAI-compatible endpoints
+- **Memory scoring** — configure memory relevance weights
+- **User provider keys** — personal API keys per user (override system keys)
 - **Authentication** — manage user accounts, API keys, 2FA, and OIDC providers
 - **API keys** — generate and manage API keys for CLI and programmatic access
 - **Two-factor authentication** — enable/disable TOTP 2FA with recovery codes

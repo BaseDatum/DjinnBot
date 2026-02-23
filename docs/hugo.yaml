@@ -2,6 +2,8 @@ baseURL: https://docs.djinn.bot/
 title: DjinnBot
 languageCode: en-us
 
+enableInlineShortcodes: true
+
 module:
   imports:
     - path: github.com/imfing/hextra
@@ -17,7 +19,7 @@ enableRobotsTXT: true
 enableGitInfo: true
 
 params:
-  description: "Autonomous AI teams that build software. Open-core agent orchestration platform."
+  description: "Autonomous AI teams that build software. Open-core agent orchestration platform with swarm execution, persistent memory, and real-time dashboards."
 
   theme:
     default: system
@@ -58,6 +60,9 @@ menu:
     - name: Guides
       pageRef: /docs/guides
       weight: 2
+    - name: Reference
+      pageRef: /docs/reference
+      weight: 3
     - name: GitHub
       url: https://github.com/BaseDatum/djinnbot
       weight: 5

@@ -3,7 +3,7 @@ title: Local Development
 weight: 3
 ---
 
-For contributing to DjinnBot or running without Docker.
+For contributing to DjinnBot or running services locally without Docker (infrastructure services like PostgreSQL and Redis still recommended via Docker).
 
 ## Prerequisites
 

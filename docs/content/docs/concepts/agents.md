@@ -3,22 +3,23 @@ title: Agents
 weight: 2
 ---
 
-Agents are the core of DjinnBot. Each agent is a specialized AI persona with its own identity, expertise, memory, and tools. They're not generic LLM wrappers — they're characters with opinions and domain knowledge.
+Agents are the core of DjinnBot. Each agent is a specialized AI persona with its own identity, expertise, memory, and tools. They're not generic LLM wrappers — they're characters with opinions, domain knowledge, and the ability to coordinate with each other autonomously.
 
 ## Agent Files
 
 Every agent is defined by a directory under `agents/`:
 
-```
-agents/eric/
-├── IDENTITY.md      # Name, origin, role, emoji
-├── SOUL.md          # Deep personality, beliefs, anti-patterns, voice
-├── AGENTS.md        # Workflow procedures, collaboration triggers, tool usage
-├── DECISION.md      # Memory-first decision framework
-├── PULSE.md         # Autonomous wake-up routine
-├── config.yml       # Model, pulse schedule, thinking settings
-└── slack.yml        # Slack bot credentials (optional)
-```
+{{< filetree/container >}}
+  {{< filetree/folder name="agents/eric" >}}
+    {{< filetree/file name="IDENTITY.md" >}}
+    {{< filetree/file name="SOUL.md" >}}
+    {{< filetree/file name="AGENTS.md" >}}
+    {{< filetree/file name="DECISION.md" >}}
+    {{< filetree/file name="PULSE.md" >}}
+    {{< filetree/file name="config.yml" >}}
+    {{< filetree/file name="slack.yml" >}}
+  {{< /filetree/folder >}}
+{{< /filetree/container >}}
 
 ### IDENTITY.md
 
@@ -37,7 +38,7 @@ The basics — name, origin country, role title, emoji, and which pipeline stage
 
 ### SOUL.md
 
-The personality file. This is what makes agents feel real. It includes:
+The personality file. This is what makes agents feel real — and what separates DjinnBot from tools that wrap an LLM in a system prompt and call it an "agent." It includes:
 
 - **Who they are** — backstory, experience, what shaped their approach
 - **Core beliefs** — principles forged through experience (e.g., "vague specs produce vague results")
@@ -47,7 +48,7 @@ The personality file. This is what makes agents feel real. It includes:
 - **Collaboration style** — how they interact with other agents
 - **Key phrases** — characteristic things they say
 
-The SOUL file is typically 100-200 lines of rich, specific character definition. This is injected into the agent's system prompt.
+The SOUL file is typically 100-200 lines of rich, specific character definition. This is injected into the agent's system prompt, and it produces dramatically different behavior from generic instructions.
 
 ### AGENTS.md
 
@@ -77,24 +78,37 @@ The autonomous wake-up routine for pulse mode. See [Pulse Mode](/docs/concepts/p
 Runtime configuration for the agent:
 
 ```yaml
-model: xai/grok-4-1-fast-reasoning        # Default LLM model
-thinking_model: xai/grok-4-1-fast-reasoning  # Model for thinking/reasoning
-thinking_level: 'off'                        # off, low, medium, high
-thread_mode: passive                         # passive or active Slack mode
-pulse_enabled: false                         # Autonomous pulse mode
-pulse_interval_minutes: 30                   # How often to wake up
-pulse_columns:                               # Which kanban columns to check
+model: xai/grok-4-1-fast-reasoning
+thinking_model: xai/grok-4-1-fast-reasoning
+thinking_level: 'off'
+thread_mode: passive
+pulse_enabled: false
+pulse_interval_minutes: 30
+pulse_columns:
   - Backlog
   - Ready
-pulse_container_timeout_ms: 120000           # Max container runtime
-pulse_blackouts:                             # Don't pulse during these times
+pulse_container_timeout_ms: 120000
+pulse_blackouts:
   - label: Nighttime
     start_time: '23:00'
     end_time: '07:00'
     type: recurring
+
+# Agent coordination (controls multi-agent interaction)
+coordination:
+  max_concurrent_pulse_sessions: 2
+  wake_guardrails:
+    cooldown_seconds: 300
+    max_daily_session_minutes: 120
+    max_wakes_per_day: 12
+    max_wakes_per_pair_per_day: 5
+
+# Model overrides for different contexts
+planning_model: openrouter/x-ai/grok-4.1-fast
+executor_model: openrouter/x-ai/grok-4.1-fast
 ```
 
-All configuration can be edited through the dashboard Settings page.
+All configuration can be edited through the dashboard Settings page — no YAML editing required.
 
 ### slack.yml
 
@@ -107,7 +121,7 @@ app_token: ${SLACK_ERIC_APP_TOKEN}
 
 ## The Default Team
 
-DjinnBot ships with 10 agents covering a full product organization:
+DjinnBot ships with 11 agents covering a full product organization:
 
 ### Engineering Pipeline Agents
 
@@ -121,15 +135,59 @@ DjinnBot ships with 10 agents covering a full product organization:
 | **Stas** | SRE | DEPLOY | Infrastructure, deployment, monitoring |
 | **Yang** | DevEx Specialist | DX (on-demand) | CI/CD, tooling, developer workflow |
 
-### Business Agents
+### Operations & Business Agents
 
 | Agent | Role | Expertise |
 |-------|------|-----------|
+| **Grace** | Executive Assistant | Meeting transcripts, commitment tracking, relationship management, proactive follow-ups |
 | **Holt** | Marketing & Sales | Sales strategy, outreach, deal management |
 | **Luke** | SEO Specialist | Content strategy, keyword research, technical SEO |
 | **Jim** | Finance Lead | Budget, pricing, runway, financial modeling |
 
-Business agents currently work in chat and pulse modes. Structured marketing/sales pipeline support is on the roadmap.
+### Grace — The Executive Assistant
+
+Grace is a different kind of agent. She doesn't write code or run pipelines — she manages organizational memory. When you feed her a meeting transcript (via the `/v1/ingest` endpoint or chat), she:
+
+1. **Extracts every actionable detail** — people, decisions, commitments, action items, relationships, facts
+2. **Stores them as linked memories** — each piece of information becomes a searchable, graph-connected memory entry
+3. **Tracks commitments to closure** — on pulse cycles, she checks for overdue items and follows up via Slack DM
+4. **Surfaces context proactively** — before your next meeting with someone, she can recall everything relevant from past interactions
+
+Grace's memories are shared (`shared: true`), so the entire agent team benefits from the organizational context she builds.
+
+## Agent Coordination
+
+When multiple agents work autonomously, they need coordination to avoid conflicts and communicate effectively. DjinnBot provides:
+
+### Work Ledger
+
+A structured task coordination system where agents can:
+- See what other agents are working on
+- Avoid claiming the same tasks
+- Hand off work between roles (e.g., "implementation done, ready for review")
+
+### Two-Tier Messaging
+
+Agents communicate through two channels:
+
+1. **Inbox messages** — direct agent-to-agent messages with priority levels (`normal`, `high`, `urgent`) and types (`info`, `help_request`, `review_request`, `unblock`, `handoff`)
+2. **Slack DMs** — messages to the human, used sparingly for urgent findings or blockers
+
+### Wake Guardrails
+
+Configurable limits prevent agents from running away with resources:
+
+```yaml
+coordination:
+  max_concurrent_pulse_sessions: 2    # Max simultaneous containers
+  wake_guardrails:
+    cooldown_seconds: 300              # Minimum time between wakes
+    max_daily_session_minutes: 120     # Daily runtime cap
+    max_wakes_per_day: 12              # Daily wake limit
+    max_wakes_per_pair_per_day: 5      # Prevent infinite agent loops
+```
+
+These guardrails ensure agents collaborate effectively without exhausting compute resources or getting stuck in infinite message loops.
 
 ## Agent Templates
 
@@ -142,20 +200,53 @@ Shared templates in `agents/_templates/` provide common workflow and memory inst
 
 When creating a new agent, these templates provide the baseline behavior. Agent-specific files add role-specific expertise on top.
 
+## Built-In Tool Control
+
+Admins can control which built-in tools each agent has access to via the dashboard. This allows you to:
+
+- Disable `bash` for agents that shouldn't run shell commands
+- Restrict file operations for read-only analysis agents
+- Customize the toolbox per agent without modifying code
+
+Tool overrides are stored in the database and take effect immediately — no restart needed.
+
 ## Creating Custom Agents
 
-To create a new agent:
+{{% steps %}}
 
-1. Create a directory under `agents/` with the agent's ID
-2. Add at minimum `IDENTITY.md`, `SOUL.md`, and `config.yml`
-3. Copy `AGENTS.md`, `DECISION.md`, and `PULSE.md` from `agents/_templates/` and customize
-4. Restart the engine to pick up the new agent
+### Create the agent directory
 
-The agent will immediately be available in the dashboard for chat sessions and can be referenced in pipeline YAML files.
+```bash
+mkdir agents/nova
+```
+
+### Add IDENTITY.md, SOUL.md, and config.yml
+
+At minimum, define who the agent is, their personality, and their runtime configuration. See the [Custom Agents guide](/docs/guides/custom-agents) for detailed examples.
+
+### Copy shared templates
+
+```bash
+cp agents/_templates/AGENTS.md agents/nova/AGENTS.md
+cp agents/_templates/DECISION.md agents/nova/DECISION.md
+cp agents/_templates/PULSE.md agents/nova/PULSE.md
+```
+
+### Customize and restart
+
+Edit the workflow files with role-specific procedures, then restart the engine:
+
+```bash
+docker compose restart engine
+```
+
+{{% /steps %}}
+
+The agent will immediately be available in the dashboard for chat sessions, pulse mode, and pipeline references.
 
 ## How Agents Execute
 
-When an agent is assigned a pipeline step or chat message:
+When an agent is assigned a pipeline step, chat message, or pulse cycle:
 
 1. The engine spawns a Docker container from `Dockerfile.agent-runtime`
 2. The container loads the agent's persona files (IDENTITY + SOUL + AGENTS + DECISION)

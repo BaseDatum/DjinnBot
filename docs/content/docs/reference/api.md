@@ -5,6 +5,10 @@ weight: 1
 
 The DjinnBot API server runs at `http://localhost:8000` and provides a REST API for all operations. All endpoints are prefixed with `/v1/`.
 
+{{< callout type="info" >}}
+When authentication is enabled (`AUTH_ENABLED=true`), most endpoints require a valid JWT access token or API key in the `Authorization: Bearer <token>` header. The `ENGINE_INTERNAL_TOKEN` is also accepted as a service-level API key.
+{{< /callout >}}
+
 ## Status
 
 ```
@@ -58,6 +62,14 @@ GET /v1/agents/{id}/runs        # Get agent run history
 PUT /v1/agents/{id}/config      # Update agent configuration
 ```
 
+## Agent Tools
+
+```
+GET  /v1/agent-tools/{agent_id}           # List tool overrides
+PUT  /v1/agent-tools/{agent_id}/{tool}    # Set tool override (enable/disable)
+DELETE /v1/agent-tools/{agent_id}/{tool}  # Remove tool override
+```
+
 ## Chat
 
 ```
@@ -68,17 +80,27 @@ POST /v1/chat/sessions/{id}/message # Send a message
 DELETE /v1/chat/sessions/{id}       # End a session
 ```
 
+## Attachments
+
+```
+POST /v1/attachments/upload         # Upload a file attachment
+GET  /v1/attachments/{id}           # Get attachment metadata
+GET  /v1/attachments/{id}/content   # Download attachment content
+```
+
 ## Projects
 
 ```
 GET  /v1/projects                   # List projects
 POST /v1/projects                   # Create a project
 GET  /v1/projects/{id}              # Get project details
+PUT  /v1/projects/{id}              # Update a project
 GET  /v1/projects/{id}/tasks        # List tasks
 POST /v1/projects/{id}/tasks        # Create a task
 PUT  /v1/projects/{id}/tasks/{tid}  # Update a task
-POST /v1/projects/{id}/tasks/{tid}/claim    # Claim a task
+POST /v1/projects/{id}/tasks/{tid}/claim       # Claim a task
 POST /v1/projects/{id}/tasks/{tid}/transition  # Move task
+PUT  /v1/projects/{id}/vision       # Set project vision
 ```
 
 ## Memory
@@ -89,6 +111,15 @@ GET /v1/memory/vaults/{agent_id}    # Get vault contents
 GET /v1/memory/search               # Search memories
     ?agent_id=eric&query=architecture&limit=5
 GET /v1/memory/shared               # Search shared knowledge
+```
+
+## Memory Scores
+
+```
+GET  /v1/memory-scores/{agent_id}          # Get memory scores
+PUT  /v1/memory-scores/{agent_id}/{entry}  # Update memory score
+GET  /v1/memory-scores/settings            # Get scoring settings
+PUT  /v1/memory-scores/settings            # Update scoring settings
 ```
 
 ## Skills
@@ -132,6 +163,95 @@ GET  /v1/settings/providers/keys/all  # Get all provider API keys
 GET  /v1/secrets                    # List secrets (names only)
 POST /v1/secrets                    # Store a secret
 DELETE /v1/secrets/{name}           # Delete a secret
+POST /v1/secrets/{id}/grant/{agent_id}    # Grant to agent
+DELETE /v1/secrets/{id}/grant/{agent_id}  # Revoke from agent
+GET  /v1/secrets/agents/{agent_id}        # List agent's secrets (masked)
+GET  /v1/secrets/agents/{agent_id}/env    # Get plaintext (engine only)
+```
+
+## Pulse Routines
+
+```
+GET  /v1/pulse-routines/{agent_id}           # List routines
+POST /v1/pulse-routines/{agent_id}           # Create routine
+PUT  /v1/pulse-routines/{agent_id}/{id}      # Update routine
+DELETE /v1/pulse-routines/{agent_id}/{id}    # Delete routine
+```
+
+## Swarm Execution
+
+```
+POST /v1/swarm/execute              # Launch a swarm
+GET  /v1/swarm/{id}                 # Get swarm status
+GET  /v1/swarm/{id}/tasks           # List swarm tasks
+POST /v1/swarm/{id}/cancel          # Cancel a swarm
+```
+
+## Spawn Executor
+
+```
+POST /v1/spawn-executor/execute     # Spawn a one-off agent execution
+GET  /v1/spawn-executor/{id}        # Get execution status
+```
+
+## LLM Call Logs
+
+```
+GET /v1/llm-calls                   # List LLM calls (filterable)
+    ?agent_id=&run_id=&provider=&limit=50
+GET /v1/llm-calls/summary           # Aggregate usage summary
+GET /v1/llm-calls/{id}              # Get call details
+```
+
+## User Usage
+
+```
+GET /v1/usage                       # Personal usage summary
+GET /v1/usage/history               # Usage history over time
+```
+
+## Users
+
+```
+GET  /v1/users                      # List users (admin)
+POST /v1/users                      # Create a user (admin)
+GET  /v1/users/{id}                 # Get user details
+PUT  /v1/users/{id}                 # Update a user
+DELETE /v1/users/{id}               # Delete a user
+```
+
+## User Providers
+
+```
+GET  /v1/settings/user-providers           # List personal provider keys
+PUT  /v1/settings/user-providers/{provider}  # Set personal API key
+DELETE /v1/settings/user-providers/{provider}  # Remove personal key
+```
+
+## Admin
+
+```
+GET  /v1/admin/api-usage            # API usage analytics
+GET  /v1/admin/notifications        # System notifications
+POST /v1/admin/notifications/{id}/dismiss  # Dismiss notification
+GET  /v1/admin/containers           # List containers
+GET  /v1/admin/containers/{id}/logs # Stream container logs
+POST /v1/admin/pull-image           # Pull a Docker image
+GET  /v1/admin/users                # User management
+```
+
+## Ingest
+
+```
+POST /v1/ingest/transcript          # Submit a meeting transcript for Grace
+POST /v1/ingest/document            # Submit a document for processing
+```
+
+## Waitlist
+
+```
+POST /v1/waitlist                   # Join the waitlist
+GET  /v1/waitlist                   # List waitlist entries (admin)
 ```
 
 ## Events (SSE)
@@ -147,6 +267,26 @@ Returns real-time events including:
 - `agent_output` (streaming text chunks)
 - `agent_thinking` (reasoning blocks)
 - `tool_call_start`, `tool_call_end`
+- `swarm_task_started`, `swarm_task_complete`
+- `llm_call` (per-API-call token and cost data)
+- `activity` (live activity feed events)
+
+## Auth
+
+```
+POST /v1/auth/login                 # Email/password login
+POST /v1/auth/login/2fa             # 2FA verification
+POST /v1/auth/refresh               # Refresh access token
+POST /v1/auth/logout                # Logout (invalidate refresh)
+POST /v1/auth/setup                 # Initial admin account creation
+GET  /v1/auth/me                    # Current user info
+POST /v1/auth/2fa/enable            # Enable 2FA
+POST /v1/auth/2fa/verify            # Verify 2FA setup
+POST /v1/auth/2fa/disable           # Disable 2FA
+POST /v1/auth/api-keys              # Create API key
+GET  /v1/auth/api-keys              # List API keys
+DELETE /v1/auth/api-keys/{id}       # Revoke API key
+```
 
 ## GitHub
 
@@ -161,4 +301,11 @@ GET  /v1/github/app/status          # GitHub App connection status
 ```
 GET /v1/lifecycle/timeline          # Agent activity timeline
 GET /v1/lifecycle/sessions          # Active sessions
+```
+
+## Updates
+
+```
+GET /v1/updates/check               # Check for DjinnBot updates
+GET /v1/updates/version             # Current version info
 ```
