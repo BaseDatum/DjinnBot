@@ -2,7 +2,7 @@ import { createFileRoute, Link } from '@tanstack/react-router';
 import { Card, CardHeader, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Play, Search, Trash2, ChevronDown, Square, Loader2, Key, Network } from 'lucide-react';
+import { Play, Search, Trash2, ChevronDown, Square, Loader2, Key, Network, Plus } from 'lucide-react';
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { fetchRuns, fetchSwarms, deleteRun, bulkDeleteRuns, cancelRun, API_BASE } from '@/lib/api';
 import { useSSE } from '@/hooks/useSSE';
@@ -10,6 +10,7 @@ import { getStatusVariant, formatDuration } from '@/lib/format';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { KeySourceBadge } from '@/components/ui/KeySourceBadge';
 import { SessionTokenStats } from '@/components/ui/SessionTokenStats';
+import { NewRunDialog } from '@/components/NewRunDialog';
 
 interface Run {
   id: string;
@@ -41,6 +42,8 @@ function RunsList() {
   const [confirmAction, setConfirmAction] = useState<{ title: string; desc: string; action: () => void } | null>(null);
   const [stoppingRuns, setStoppingRuns] = useState<Set<string>>(new Set());
   const [swarms, setSwarms] = useState<any[]>([]);
+  const [newRunOpen, setNewRunOpen] = useState(false);
+  const [newRunDefaultType, setNewRunDefaultType] = useState<'pipeline' | 'swarm'>('pipeline');
 
   // Debounce ref for SSE updates
   const refreshTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -249,7 +252,7 @@ function RunsList() {
               </div>
             )}
           </div>
-          <Button>
+          <Button onClick={() => { setNewRunDefaultType('pipeline'); setNewRunOpen(true); }}>
             <Play className="mr-2 h-4 w-4" />
             New Run
           </Button>
@@ -260,10 +263,21 @@ function RunsList() {
       {swarms.length > 0 && (
         <Card className="mb-4">
           <CardHeader>
-            <div className="flex items-center gap-2">
-              <Network className="h-4 w-4 text-indigo-400" />
-              <span className="text-sm font-semibold">Swarm Executions</span>
-              <Badge variant="outline" className="text-[10px]">{swarms.length}</Badge>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Network className="h-4 w-4 text-indigo-400" />
+                <span className="text-sm font-semibold">Swarm Executions</span>
+                <Badge variant="outline" className="text-[10px]">{swarms.length}</Badge>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => { setNewRunDefaultType('swarm'); setNewRunOpen(true); }}
+                className="gap-1.5"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                New Swarm
+              </Button>
             </div>
           </CardHeader>
           <CardContent>
@@ -425,6 +439,12 @@ function RunsList() {
           onConfirm={confirmAction.action}
         />
       )}
+
+      <NewRunDialog
+        open={newRunOpen}
+        onOpenChange={setNewRunOpen}
+        defaultType={newRunDefaultType}
+      />
     </div>
   );
 }

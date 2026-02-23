@@ -5,10 +5,19 @@
 # Context engineering: Every step receives {{project_vision}} — the synthesized
 # vision document from onboarding. This ensures all agents share the same
 # understanding of goals, architecture, and constraints.
+#
+# Optimizations over v1.1:
+# - Added testStrategy, verificationSteps, scopeBoundary fields to schemas
+# - Added technicalNotes for architecture details, file paths, API endpoints
+# - Prompts enforce scope boundaries ("NOT in scope") to prevent agent drift
+# - Every task requires a verification command (how to prove it works)
+# - Every feature task must have a paired test task or inline test strategy
+# - Subtask descriptions include explicit file paths and NOT-in-scope boundaries
+# - Validation steps check for test coverage, scope creep vectors, and isolation
 id: planning
 name: Project Planning Pipeline
-version: 1.1.0
-description: AI-driven project decomposition into tasks with dependency chains
+version: 2.0.0
+description: AI-driven project decomposition into tasks with dependency chains, test strategies, and scope boundaries
 
 defaults:
   model: openrouter/moonshotai/kimi-k2.5
@@ -26,7 +35,9 @@ agents:
     model: openai/gpt-4o-mini
 
 steps:
+  # ═══════════════════════════════════════════════════════════════════════════
   # Step 1: Product Owner decomposes into high-level tasks
+  # ═══════════════════════════════════════════════════════════════════════════
   - id: DECOMPOSE
     agent: eric
     outputSchema:
@@ -42,28 +53,42 @@ steps:
               properties:
                 title:
                   type: string
-                  description: "Clear, actionable task title (verb + noun)"
+                  description: "Clear, actionable task title (verb + noun, e.g. 'Implement user authentication endpoint')"
                 description:
                   type: string
-                  description: "Detailed description including acceptance criteria and what 'done' looks like"
+                  description: "Detailed description with: (1) What to build, (2) Acceptance criteria as Given/When/Then, (3) Key technical constraints. Must be specific enough for an AI agent with zero project context to execute."
                 priority:
                   type: string
                   enum: ["P0", "P1", "P2", "P3"]
-                  description: "P0=critical, P1=high, P2=medium, P3=nice-to-have"
+                  description: "P0=critical/blocker, P1=high/core feature, P2=medium/enhancement, P3=nice-to-have"
                 tags:
                   type: array
                   items:
                     type: string
-                  description: "Category tags (backend, frontend, devops, design, testing, docs)"
+                  description: "Category tags (backend, frontend, devops, design, testing, docs, security, performance)"
                 estimatedHours:
                   type: number
-                  description: "Realistic hours to complete"
+                  description: "Realistic hours to complete (include testing time in estimate)"
                 dependencies:
                   type: array
                   items:
                     type: string
                   description: "Titles of tasks this depends on (must match exactly)"
-              required: ["title", "description", "priority", "tags", "estimatedHours", "dependencies"]
+                testStrategy:
+                  type: string
+                  description: "Summary of how this task will be tested. This duplicates info from the description for structured validation — the description remains the canonical source."
+                verificationSteps:
+                  type: array
+                  items:
+                    type: string
+                  description: "Concrete commands or checks to prove this task is done. Extracted from the description for structured validation."
+                scopeBoundary:
+                  type: string
+                  description: "What is explicitly NOT in scope. Extracted from the description for structured validation — prevents executing agent scope creep."
+                technicalNotes:
+                  type: string
+                  description: "Key files, endpoints, data models, patterns. Extracted from the description for structured indexing."
+              required: ["title", "description", "priority", "tags", "estimatedHours", "dependencies", "testStrategy", "verificationSteps", "scopeBoundary", "technicalNotes"]
               additionalProperties: false
         required: ["tasks"]
         additionalProperties: false
@@ -79,28 +104,80 @@ steps:
       {% endif %}
 
       {% if additional_context %}
-      Additional Context:
+      ## Additional Context
       {{additional_context}}
       {% endif %}
 
+      ## Your Process
+
+      Before generating tasks, think through:
+      1. What are the core features that must exist for this to work at all?
+      2. What infrastructure/setup must come first?
+      3. What are the testing and validation requirements?
+      4. What are the natural dependency chains?
+      5. Where are the scope creep risks?
+
+      ## Output Requirements
+
       Create a comprehensive task breakdown with 5-20 tasks.
-      
-      Rules:
-      - Break down into 5-20 tasks (not too granular, not too high-level)
-      - Each task description MUST include clear acceptance criteria (what does "done" look like?)
-      - Dependencies reference other task titles exactly
-      - No circular dependencies
-      - P0 tasks should have no or minimal dependencies
-      - Include testing and documentation tasks
-      - Be realistic with hour estimates
-      - Task descriptions should be detailed enough that an AI agent with zero context
-        (but access to the codebase) can implement them. Vague descriptions like
-        "implement auth" will produce vague results.
+
+      ### Task Rules
+
+      IMPORTANT: The `description` field is the CANONICAL source of truth for each task.
+      It must be 100% self-contained — an executing agent reads ONLY the description
+      (plus the codebase). The other fields (testStrategy, verificationSteps, scopeBoundary,
+      technicalNotes) are structured extractions from the description used for validation
+      and indexing. Always write the description FIRST with all details, then extract
+      summaries into the structured fields.
+
+      1. **Granularity:** 5-20 tasks. Each task is a coherent unit of work (4-16 hours).
+         Not too granular ("add a CSS class") and not too vague ("build the backend").
+
+      2. **Descriptions must be execution-ready.** An AI agent with ZERO project context
+         (but full codebase access) will execute each task. Write descriptions that answer:
+         - What exactly to build or change
+         - Where in the codebase (files, modules, layers)
+         - What patterns to follow from existing code
+         - What the acceptance criteria are (Given/When/Then format)
+         BAD: "implement auth"
+         GOOD: "Create POST /api/auth/login endpoint in src/routes/auth.ts that validates
+         email+password against the users table, returns a JWT in an httpOnly cookie, and
+         returns 401 for invalid credentials. Follow the existing endpoint pattern in
+         src/routes/health.ts."
+
+      3. **Every task needs a test strategy.** State what kind of tests (unit, integration,
+         E2E) and what scenarios to test. If a task IS a testing task, state what it validates.
+
+      4. **Every task needs verification steps.** Concrete commands or checks that prove
+         the task is done. Examples: "Run: npm test", "Verify: POST /api/login returns 200
+         with valid creds", "Check: database migration applies cleanly".
+
+      5. **Every task needs a scope boundary.** Explicitly state what is NOT in scope.
+         This prevents the executing agent from doing adjacent work that belongs to
+         another task. Example: "NOT in scope: frontend login form, password reset flow,
+         OAuth integration — those are separate tasks."
+
+      6. **Every task needs technical notes.** File paths, API endpoints, data models,
+         patterns to follow. The more specific, the better the execution.
+
+      7. **Dependencies** reference other task titles EXACTLY (string match).
+         No circular dependencies. P0 tasks should have no or minimal dependencies.
+
+      8. **Estimates** must be realistic and include testing time.
+         If a task would take >16 hours, it needs to be broken down further.
+
+      9. **Include dedicated testing tasks** for integration/E2E testing that spans
+         multiple feature tasks. Individual tasks include their own unit tests, but
+         cross-cutting validation needs its own task.
+
+      10. **Include a documentation task** if the project has user-facing changes.
     outputs:
       - task_breakdown_json
     onComplete: VALIDATE
 
+  # ═══════════════════════════════════════════════════════════════════════════
   # Step 2: Architect validates and enriches the task breakdown
+  # ═══════════════════════════════════════════════════════════════════════════
   - id: VALIDATE
     agent: finn
     outputSchema:
@@ -131,12 +208,23 @@ steps:
                   type: array
                   items:
                     type: string
-              required: ["title", "description", "priority", "tags", "estimatedHours", "dependencies"]
+                testStrategy:
+                  type: string
+                verificationSteps:
+                  type: array
+                  items:
+                    type: string
+                scopeBoundary:
+                  type: string
+                technicalNotes:
+                  type: string
+              required: ["title", "description", "priority", "tags", "estimatedHours", "dependencies", "testStrategy", "verificationSteps", "scopeBoundary", "technicalNotes"]
               additionalProperties: false
         required: ["tasks"]
         additionalProperties: false
     input: |
-      You are the Solutions Architect. Review and validate this task breakdown.
+      You are the Solutions Architect. Review and validate this task breakdown for
+      technical correctness, completeness, and executability.
 
       Project: {{project_name}}
 
@@ -144,32 +232,63 @@ steps:
       ## Project Vision
       {{project_vision}}
       {% endif %}
-      
-      Task Breakdown:
+
+      ## Task Breakdown to Review
       {{task_breakdown_json}}
 
-      Review for:
-      1. Missing tasks (infrastructure, testing, CI/CD, documentation)
-      2. Incorrect dependencies
-      3. Unrealistic estimates
-      4. Missing technical tasks
-      5. Proper priority assignment
-      6. Task descriptions include acceptance criteria (add them if missing)
+      ## Validation Checklist
 
-      You may add, modify, or remove tasks. Fix any dependency issues.
-      Ensure:
-      - No circular dependencies
-      - All dependency references match exact task titles
-      - Estimates are realistic
-      - Critical path makes sense
-      - Every description includes acceptance criteria
+      Review EVERY task against ALL of the following criteria. Fix issues inline —
+      do not just flag them.
+
+      ### Structural Validation
+      1. **No circular dependencies** — trace every dependency chain to confirm it terminates
+      2. **All dependency titles match exactly** — string comparison, no approximations
+      3. **Critical path is sound** — P0 tasks have no/minimal dependencies; the dependency
+         chain from first task to last task makes logical sense
+      4. **Estimates are realistic** — include testing time; no task >16 hours
+      5. **5-20 tasks total** — not too granular, not too coarse
+
+      ### Technical Validation
+      6. **No missing infrastructure tasks** — database setup, migrations, CI/CD, deployment
+         configs, environment setup tasks are present if needed
+      7. **No missing security tasks** — auth, input validation, secrets management if relevant
+      8. **Technical notes are specific** — file paths, API endpoints, data models, not just
+         "modify the backend". If vague, rewrite with specifics from the project vision.
+      9. **Patterns are consistent** — tasks reference the same frameworks, naming conventions,
+         and architecture patterns throughout
+
+      ### Quality Validation
+      10. **Every task has a test strategy** — if missing, add one. Unit tests for logic,
+          integration tests for API endpoints, E2E for user flows.
+      11. **Every task has verification steps** — concrete runnable commands. If missing,
+          add them (e.g. "Run: pytest tests/", "Verify: curl localhost:8000/health")
+      12. **Dedicated integration/E2E test task exists** — cross-cutting validation that
+          spans multiple feature tasks
+
+      ### Scope Validation
+      13. **Every task has a scope boundary** — what's NOT in scope. If missing, add one
+          based on adjacent tasks in the breakdown.
+      14. **No overlapping scope** — two tasks should not modify the same files/endpoints
+          for the same purpose. If overlap exists, consolidate or clarify boundaries.
+      15. **Tasks are independently completable** — after dependencies are met, a task can
+          be executed in isolation without implicit knowledge of other tasks
+
+      ### Description Quality
+      16. **Acceptance criteria are present** — Given/When/Then format preferred
+      17. **Descriptions are execution-ready** — an agent with zero context can implement
+          from the description alone (plus codebase access)
+
+      You may add, modify, reorder, or remove tasks. Return the corrected full task list.
     outputs:
       - validated_tasks_json
     onComplete: DECOMPOSE_SUBTASKS
 
+  # ═══════════════════════════════════════════════════════════════════════════
   # Step 3: Product Owner decomposes tasks into bite-sized subtasks
   # NOTE: This step receives BOTH the parent tasks AND the project vision so
   # subtask descriptions have the full project context (not just parent titles).
+  # ═══════════════════════════════════════════════════════════════════════════
   - id: DECOMPOSE_SUBTASKS
     agent: eric
     outputSchema:
@@ -188,10 +307,10 @@ steps:
                   description: "Exact title of the parent task this subtask belongs to"
                 title:
                   type: string
-                  description: "Clear, specific subtask title"
+                  description: "Clear, specific subtask title (verb + noun)"
                 description:
                   type: string
-                  description: "Detailed implementation instructions with acceptance criteria. Must be specific enough for an AI agent with zero context to execute in 1-4 hours."
+                  description: "Complete implementation instructions. Must include: (1) exactly what to build/change with file paths, (2) acceptance criteria, (3) what is NOT in scope for this subtask, (4) verification command. Specific enough for an AI agent with zero context to execute in 1-4 hours."
                 priority:
                   type: string
                   enum: ["P0", "P1", "P2", "P3"]
@@ -206,44 +325,107 @@ steps:
                   type: array
                   items:
                     type: string
-                  description: "Titles of OTHER subtasks this depends on (within same parent or cross-parent)"
-              required: ["parentTaskTitle", "title", "description", "priority", "tags", "estimatedHours", "dependencies"]
+                  description: "Titles of OTHER SUBTASKS (never parent task titles). For cross-parent deps, reference the specific subtask title from the other parent — typically the verification/test subtask."
+                testStrategy:
+                  type: string
+                  description: "Extracted from description: specific tests this subtask must pass. The description is the canonical source."
+                verificationSteps:
+                  type: array
+                  items:
+                    type: string
+                  description: "Extracted from description: concrete commands/checks to prove this subtask is done."
+                scopeBoundary:
+                  type: string
+                  description: "Extracted from description: what is explicitly NOT in scope for this subtask."
+              required: ["parentTaskTitle", "title", "description", "priority", "tags", "estimatedHours", "dependencies", "testStrategy", "verificationSteps", "scopeBoundary"]
               additionalProperties: false
         required: ["subtasks"]
         additionalProperties: false
     input: |
       You are the Product Owner. Break down each validated task into 2-5 bite-sized subtasks.
-      
+
+      ## Critical Context
+
       Each subtask will be executed by an AI agent in a FRESH context window with NO prior
-      knowledge of the project. The subtask description is the ONLY context the agent gets
-      (besides the codebase). Write descriptions accordingly — be specific and explicit.
+      knowledge of the project. The subtask description is the ONLY briefing the agent gets
+      (besides raw codebase access). Write descriptions as if briefing a skilled contractor
+      who has never seen the project before.
 
       {% if project_vision %}
-      ## Project Vision (reference for context — do NOT repeat in every subtask)
+      ## Project Vision (reference for context — do NOT copy verbatim into every subtask)
       {{project_vision}}
       {% endif %}
-      
-      Validated Task Breakdown:
+
+      ## Validated Task Breakdown
       {{validated_tasks_json}}
-      
-      Rules:
-      - Each parent task gets 2-5 subtasks
-      - Subtask estimated hours: 1-4 hours (never more)
-      - parentTaskTitle must EXACTLY match a task title from the input
-      - Dependencies can reference subtask titles within the same parent OR across parents
-      - Include setup, implementation, and testing subtasks where appropriate
-      - Each subtask description MUST include:
-        1. What to build/change (specific files and functions when possible)
-        2. Acceptance criteria (what does "done" look like?)
-        3. Key constraints from the project vision that apply to this subtask
-      - Do NOT write vague descriptions like "implement the backend" — write
-        "Create POST /api/auth/login endpoint that validates credentials against
-        the users table and returns a JWT in an httpOnly cookie"
+
+      ## Subtask Rules
+
+      IMPORTANT: The `description` field is the CANONICAL source of truth. It is the ONLY
+      thing the executing agent reads. The other fields (testStrategy, verificationSteps,
+      scopeBoundary) are structured extractions from the description used for validation.
+      Write the description FIRST with ALL details, then extract summaries into the fields.
+
+      1. **Each parent task gets 2-5 subtasks.** Every parent MUST have subtasks.
+
+      2. **Subtask size: 1-4 hours.** If a subtask would take >4 hours, split it further.
+
+      3. **parentTaskTitle must EXACTLY match** a task title from the validated breakdown.
+
+      4. **Dependencies MUST reference other SUBTASK titles — NEVER parent task titles.**
+         Subtasks and parent tasks live in separate dependency namespaces. If a subtask in
+         parent B needs parent A's work to be done first, it must depend on the specific
+         subtask from parent A (typically the verification/test subtask), not on parent A's title.
+
+         BAD:  dependencies: ["Set up project structure"]       ← parent task title, WRONG
+         GOOD: dependencies: ["Verify project setup"]           ← subtask title, CORRECT
+
+         Cross-parent dependencies should target the final verification subtask of the
+         prerequisite parent, since that subtask confirms all of that parent's work is done.
+
+      5. **Each parent task must include a test/verification subtask** as its final subtask.
+         This subtask runs the tests, verifies acceptance criteria, and confirms the parent
+         task's work is complete. It depends on all other subtasks in the same parent.
+
+      6. **Every subtask description MUST include ALL of the following:**
+
+         a. **What to build/change** — specific files, functions, classes, endpoints.
+            BAD: "Add the login endpoint"
+            GOOD: "In src/routes/auth.ts, add a POST /api/auth/login handler that:
+            (1) accepts {email, password} in the request body,
+            (2) queries the users table by email using the existing db.query() pattern,
+            (3) compares passwords using bcrypt.compare(),
+            (4) returns {token} with a JWT signed using process.env.JWT_SECRET,
+            (5) sets the token as an httpOnly cookie named 'session'.
+            Follow the existing handler pattern in src/routes/health.ts."
+
+         b. **Acceptance criteria** — what "done" looks like, ideally Given/When/Then:
+            "Given valid credentials, When POST /api/auth/login is called,
+            Then response is 200 with a JWT cookie set.
+            Given invalid password, When POST /api/auth/login is called,
+            Then response is 401 with error message."
+
+         c. **Scope boundary (NOT in scope)** — what the agent must NOT touch:
+            "NOT in scope: registration endpoint, password reset, OAuth, frontend
+            login form, token refresh logic. Only implement the login endpoint."
+
+         d. **Verification steps** — commands to run to prove it works:
+            "Run: npm test -- --grep 'auth login'
+            Verify: curl -X POST localhost:3000/api/auth/login -d '{...}' returns 200"
+
+         e. **Key constraints** from the project vision that apply to this subtask.
+
+      7. **Subtask isolation:** After its dependencies are met, a subtask must be
+         completable without implicit knowledge of sibling subtasks. Do not write
+         "continue the work from the previous subtask" — instead, specify exactly
+         what state the codebase should be in (based on dependency outputs).
     outputs:
       - subtask_breakdown_json
     onComplete: VALIDATE_SUBTASKS
 
+  # ═══════════════════════════════════════════════════════════════════════════
   # Step 4: Architect validates and enriches the subtask breakdown
+  # ═══════════════════════════════════════════════════════════════════════════
   - id: VALIDATE_SUBTASKS
     agent: finn
     outputSchema:
@@ -276,36 +458,98 @@ steps:
                   type: array
                   items:
                     type: string
-              required: ["parentTaskTitle", "title", "description", "priority", "tags", "estimatedHours", "dependencies"]
+                testStrategy:
+                  type: string
+                verificationSteps:
+                  type: array
+                  items:
+                    type: string
+                scopeBoundary:
+                  type: string
+              required: ["parentTaskTitle", "title", "description", "priority", "tags", "estimatedHours", "dependencies", "testStrategy", "verificationSteps", "scopeBoundary"]
               additionalProperties: false
         required: ["subtasks"]
         additionalProperties: false
     input: |
-      You are the Solutions Architect. Review and validate the subtask breakdown.
+      You are the Solutions Architect. Perform a final validation pass on the subtask breakdown.
+
+      ## MANDATORY PRE-VALIDATION: DEPENDENCY AUDIT
+
+      Before reviewing anything else, perform this exact procedure:
+
+      STEP A: List every PARENT TASK title from the parent tasks input. Call this set P.
+      STEP B: List every SUBTASK title from the subtask breakdown input. Call this set S.
+      STEP C: For every subtask, for every string in its dependencies array:
+        - If the string is in set P (matches a parent task title): this is a BUG.
+          Replace it with the appropriate subtask from set S — typically the verification
+          or test subtask belonging to that parent.
+        - If the string is NOT in set S (doesn't match any subtask title): this is a BUG.
+          Fix the string to exactly match the intended subtask title from set S.
+          Common cause: small wording differences like "Implement X" vs "Implement the X".
+        - If the string IS in set S and NOT in set P: this is correct. Keep it.
+
+      This audit must be done for EVERY dependency of EVERY subtask before proceeding.
+      Dangling or mismatched dependency strings will cause import failures.
+      This is the last gate before these subtasks are imported into the project board and
+      assigned to executing agents. Be thorough — errors here become execution failures.
 
       {% if project_vision %}
       ## Project Vision
       {{project_vision}}
       {% endif %}
-      
-      Parent Tasks:
+
+      ## Parent Tasks
       {{validated_tasks_json}}
-      
-      Subtask Breakdown:
+
+      ## Subtask Breakdown to Validate
       {{subtask_breakdown_json}}
-      
-      Review for:
-      1. Every parent task has 2-5 subtasks
-      2. No parent task references are wrong
-      3. Subtask estimates are 1-4 hours
-      4. No circular dependencies
-      5. Dependencies reference exact subtask titles
-      6. Complete coverage — no gaps in implementation
-      7. Descriptions are specific enough for an AI agent to execute without context
-      8. Acceptance criteria are present in every subtask description
-      
-      You may add, modify, or remove subtasks. Fix any issues.
-      If descriptions are too vague, rewrite them with specific file paths, 
-      API endpoints, data models, or implementation details from the project vision.
+
+      ## Validation Checklist
+
+      ### Coverage Validation
+      1. **Every parent task has 2-5 subtasks** — count them. If a parent has 0 or 1, add subtasks.
+      2. **Every parent task has a test/verification subtask** — the final subtask for each parent
+         should run tests and verify acceptance criteria. If missing, add one.
+      3. **No gaps in implementation** — trace each parent task's acceptance criteria and verify
+         that the subtasks collectively cover ALL of them. Flag any uncovered criteria.
+      4. **No parent task references are wrong** — every parentTaskTitle must exactly match
+         a title from the parent tasks list.
+
+      ### Technical Validation
+      5. **Subtask estimates are 1-4 hours** — if any exceed 4 hours, split them.
+      6. **No circular dependencies** — trace every chain.
+      7. **Dependencies reference exact subtask titles** — string match, no approximations.
+      8. **CRITICAL: Dependencies must ONLY reference subtask titles, NEVER parent task titles.**
+         Collect every parent task title into a set. Then check every dependency string in
+         every subtask. If ANY dependency matches a parent task title instead of a subtask
+         title, it is WRONG. Replace it with the correct subtask — typically the verification
+         subtask of that parent (e.g. replace "Set up project structure" with "Verify project
+         setup"). This is the most common dependency bug — check every single one.
+      9. **File paths and endpoints are plausible** — cross-reference with the project vision
+         and architecture. If a subtask references a file that doesn't align with the project
+         structure, fix it.
+
+      ### Description Quality Validation
+      9. **Descriptions are execution-ready** — each description must contain:
+         - Specific files/functions to modify (not "update the backend")
+         - Acceptance criteria (Given/When/Then preferred)
+         - Scope boundary (what NOT to do)
+         - Verification steps (runnable commands)
+         If any description is vague, REWRITE it with specifics from the project vision.
+
+      10. **Scope boundaries prevent overlap** — no two subtasks should modify the same
+          file for the same purpose. If overlap exists, clarify which subtask owns what.
+
+      ### Scope Creep Prevention
+      11. **Subtask descriptions do NOT include work from other subtasks** — each subtask
+          should be laser-focused on its own deliverable.
+      12. **No implicit assumptions** — a subtask must not assume the executing agent knows
+          about sibling subtasks or the broader project context.
+      13. **Test strategies are specific** — not just "write tests" but "write unit tests in
+          tests/auth.test.ts covering: valid login, invalid password, missing email, expired token."
+
+      You may add, modify, or remove subtasks. Return the corrected full subtask list.
+      When rewriting vague descriptions, include specific file paths, API endpoints,
+      data models, and patterns from the project vision.
     outputs:
       - final_subtasks_json

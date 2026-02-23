@@ -157,6 +157,42 @@ export async function fetchSwarms(): Promise<any> {
   return handleResponse(res, 'Failed to fetch swarms');
 }
 
+export interface SwarmTaskDef {
+  key: string;
+  title: string;
+  project_id: string;
+  task_id: string;
+  execution_prompt: string;
+  dependencies: string[];
+  model?: string;
+  timeout_seconds?: number;
+}
+
+export interface StartSwarmRequest {
+  agent_id: string;
+  tasks: SwarmTaskDef[];
+  max_concurrent?: number;
+  deviation_rules?: string;
+  global_timeout_seconds?: number;
+}
+
+export async function startSwarm(req: StartSwarmRequest): Promise<{
+  swarm_id: string;
+  status: string;
+  total_tasks: number;
+  max_concurrent: number;
+  root_tasks: string[];
+  max_depth: number;
+  progress_channel: string;
+}> {
+  const res = await authFetch(`${API_BASE}/internal/swarm-execute`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(req),
+  });
+  return handleResponse(res, 'Failed to start swarm');
+}
+
 export async function fetchRun(runId: string) {
   const res = await authFetch(`${API_BASE}/runs/${runId}`);
   return handleResponse(res, 'Failed to fetch run');
@@ -191,11 +227,14 @@ export async function validatePipeline(pipelineId: string) {
   return handleResponse(res, 'Failed to validate pipeline');
 }
 
-export async function startRun(pipelineId: string, task: string, context?: string) {
+export async function startRun(pipelineId: string, task: string, context?: string, projectId?: string) {
+  const body: Record<string, unknown> = { pipeline_id: pipelineId, task };
+  if (context) body.context = context;
+  if (projectId) body.project_id = projectId;
   const res = await authFetch(`${API_BASE}/runs/`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ pipeline_id: pipelineId, task, context }),
+    body: JSON.stringify(body),
   });
   return handleResponse(res, 'Failed to start run');
 }
