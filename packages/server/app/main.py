@@ -55,6 +55,7 @@ from app.routers import llm_calls
 from app.routers import user_usage
 from app.routers import slack as slack_router
 from app.routers import spawn_executor as spawn_executor_router
+from app.routers import swarm_executor as swarm_executor_router
 from app.routers import ingest as ingest_router
 
 
@@ -646,6 +647,9 @@ app.include_router(updates_router.router, prefix="/v1/system/updates", tags=["up
 app.include_router(slack_router.router, prefix="/v1/slack", tags=["slack"])
 app.include_router(
     spawn_executor_router.router, prefix="/v1/internal", tags=["internal"]
+)
+app.include_router(
+    swarm_executor_router.router, prefix="/v1/internal", tags=["internal"]
 )
 app.include_router(ingest_router.router, prefix="/v1/ingest", tags=["ingest"])
 

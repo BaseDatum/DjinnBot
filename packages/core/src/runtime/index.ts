@@ -53,3 +53,23 @@ export { DEFAULT_PULSE_SCHEDULE, CONFLICT_WINDOW_MS } from './pulse-types.js';
 
 export { StandaloneSessionRunner } from './standalone-session.js';
 export type { StandaloneSessionOptions, StandaloneSessionResult } from './standalone-session.js';
+
+export { SwarmSessionManager } from './swarm-session.js';
+export type { SwarmSessionDeps } from './swarm-session.js';
+export { swarmChannel, swarmStateKey } from './swarm-types.js';
+export type {
+  SwarmRequest,
+  SwarmTaskDef,
+  SwarmTaskState,
+  SwarmTaskStatus,
+  SwarmSessionState,
+  SwarmSessionStatus,
+  SwarmProgressEvent,
+  SwarmTaskStartedEvent,
+  SwarmTaskCompletedEvent,
+  SwarmTaskFailedEvent,
+  SwarmTaskSkippedEvent,
+  SwarmCompletedEvent,
+  SwarmFailedEvent,
+  SwarmSummary,
+} from './swarm-types.js';

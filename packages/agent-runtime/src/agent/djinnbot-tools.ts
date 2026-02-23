@@ -15,6 +15,7 @@ import { createPulseTasksTools } from './djinnbot-tools/pulse-tasks.js';
 import { createSecretsTools } from './djinnbot-tools/secrets.js';
 import { createSlackTools } from './djinnbot-tools/slack.js';
 import { createSpawnExecutorTools } from './djinnbot-tools/spawn-executor.js';
+import { createSwarmExecutorTools } from './djinnbot-tools/swarm-executor.js';
 import { createWorkLedgerTools } from './djinnbot-tools/work-ledger.js';
 
 export interface DjinnBotToolsConfig {
@@ -96,6 +97,9 @@ export function createDjinnBotTools(config: DjinnBotToolsConfig): AgentTool[] {
 
     // Spawn executor — available in pulse sessions for plan-then-execute workflow
     ...createSpawnExecutorTools({ publisher, requestIdRef, agentId, apiBaseUrl }),
+
+    // Swarm executor — parallel multi-task execution with dependency DAG
+    ...createSwarmExecutorTools({ publisher, requestIdRef, agentId, apiBaseUrl }),
 
     // Onboarding tools — only for onboarding sessions (ONBOARDING_SESSION_ID is set)
     ...(isOnboardingSession ? createOnboardingTools({ agentId, apiBaseUrl }) : []),
