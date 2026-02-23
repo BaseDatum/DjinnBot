@@ -112,10 +112,10 @@ class OnboardingMessageResponse(BaseModel):
     created_at: int
 
 
-class DiagramState(BaseModel):
-    """The evolving Mermaid diagram built collaboratively during onboarding."""
+class LandingPageState(BaseModel):
+    """The evolving landing page built collaboratively during onboarding."""
 
-    mermaid: str
+    html: str
     caption: Optional[str] = None
     last_agent_id: Optional[str] = None
     version: int = 1
@@ -130,7 +130,7 @@ class OnboardingSessionResponse(BaseModel):
     current_agent_emoji: str
     phase: str
     context: dict
-    diagram_state: Optional[DiagramState] = None
+    landing_page_state: Optional[LandingPageState] = None
     chat_session_id: Optional[str]
     model: str
     created_at: int
@@ -190,11 +190,11 @@ def _serialize_session(
             ctx = json.loads(session.context)
         except Exception:
             pass
-    # Parse diagram state
-    diagram: Optional[DiagramState] = None
-    if session.diagram_state:
+    # Parse landing page state
+    landing_page: Optional[LandingPageState] = None
+    if session.landing_page_state:
         try:
-            diagram = DiagramState(**json.loads(session.diagram_state))
+            landing_page = LandingPageState(**json.loads(session.landing_page_state))
         except Exception:
             pass
 
@@ -208,7 +208,7 @@ def _serialize_session(
         current_agent_emoji=emoji,
         phase=session.phase,
         context=ctx,
-        diagram_state=diagram,
+        landing_page_state=landing_page,
         chat_session_id=session.chat_session_id,
         model=session.model,
         created_at=session.created_at,
@@ -303,6 +303,22 @@ async def _start_agent_container(
                     "opening message to show you were listening:\n\n"
                     + "\n".join(f"- {h}" for h in highlights[:4])
                 )
+
+            # Instruct every non-first agent to keep the landing page updated
+            supplement += (
+                "\n\n## 🚨 Landing Page — NON-NEGOTIABLE, YOU MUST UPDATE IT\n\n"
+                "A live landing page preview is displayed to the user throughout onboarding. "
+                "The previous agent(s) have been building it. **Updating the landing page "
+                "during your phase is MANDATORY. You MUST call `update_onboarding_landing_page` "
+                "at least once. Do NOT hand off without doing so.**\n\n"
+                "Every time you learn something that affects the landing page copy (target "
+                "customer, value proposition, pricing model, features, technical approach, etc.), "
+                "update the landing page immediately. The user is watching it evolve in real "
+                "time — this is a key part of the onboarding experience.\n\n"
+                "When you call `update_onboarding_landing_page`, you MUST include the FULL HTML "
+                "from the previous version plus your additions/refinements. Each call replaces "
+                "the entire page."
+            )
 
             payload["system_prompt_supplement"] = supplement
 
@@ -860,12 +876,23 @@ async def resume_onboarding_session(
     )
     db.add(greeting_msg)
 
-    # Re-start the agent container for the current agent
+    # Parse accumulated context so the resumed agent knows everything
+    # gathered before the session was abandoned — same as the handoff path.
+    resumed_ctx: dict = {}
+    if onb.context:
+        try:
+            resumed_ctx = json.loads(onb.context)
+        except Exception:
+            pass
+
+    # Re-start the agent container for the current agent, passing the
+    # accumulated onboarding context so it picks up where it left off.
     chat_session_id = await _start_agent_container(
         onb.current_agent_id,
         onb.model,
         session_id,
         greeting_message_id=greeting_msg_id,
+        onboarding_context=resumed_ctx if resumed_ctx else None,
     )
 
     onb.status = "active"
@@ -1606,25 +1633,25 @@ async def update_onboarding_context(
     return {"status": "updated", "context": existing}
 
 
-class UpdateDiagramRequest(BaseModel):
-    """Update the evolving onboarding diagram."""
+class UpdateLandingPageRequest(BaseModel):
+    """Update the evolving onboarding landing page."""
 
-    mermaid: str
+    html: str
     caption: Optional[str] = None
 
 
-@router.patch("/sessions/{session_id}/diagram")
-async def update_onboarding_diagram(
+@router.patch("/sessions/{session_id}/landing-page")
+async def update_onboarding_landing_page(
     session_id: str,
-    req: UpdateDiagramRequest,
+    req: UpdateLandingPageRequest,
     db: AsyncSession = Depends(get_async_session),
 ):
-    """Update the evolving Mermaid diagram for an onboarding session.
+    """Update the evolving landing page for an onboarding session.
 
-    Called by agents via the update_onboarding_diagram tool to progressively
-    build the project diagram throughout the onboarding process.  Each call
-    replaces the full Mermaid string (the agent sees the current diagram in
-    its context and builds on it).
+    Called by agents via the update_onboarding_landing_page tool to
+    progressively build a high-converting landing page throughout the
+    onboarding process.  Each call replaces the full HTML (the agent sees
+    the current page in its context and builds on it).
     """
     result = await db.execute(
         select(OnboardingSession).where(OnboardingSession.id == session_id)
@@ -1635,24 +1662,24 @@ async def update_onboarding_diagram(
 
     # Parse existing state to bump version
     existing_version = 0
-    if onb.diagram_state:
+    if onb.landing_page_state:
         try:
-            existing = json.loads(onb.diagram_state)
+            existing = json.loads(onb.landing_page_state)
             existing_version = existing.get("version", 0)
         except Exception:
             pass
 
     new_state = {
-        "mermaid": req.mermaid,
+        "html": req.html,
         "caption": req.caption,
         "last_agent_id": onb.current_agent_id,
         "version": existing_version + 1,
     }
-    onb.diagram_state = json.dumps(new_state)
+    onb.landing_page_state = json.dumps(new_state)
     onb.updated_at = now_ms()
     await db.commit()
 
-    # Broadcast so the diagram panel updates live
+    # Broadcast so the landing page panel updates live
     if dependencies.redis_client:
         try:
             await dependencies.redis_client.xadd(
@@ -1660,9 +1687,9 @@ async def update_onboarding_diagram(
                 {
                     "data": json.dumps(
                         {
-                            "type": "ONBOARDING_DIAGRAM_UPDATED",
+                            "type": "ONBOARDING_LANDING_PAGE_UPDATED",
                             "sessionId": session_id,
-                            "diagramState": new_state,
+                            "landingPageState": new_state,
                             "timestamp": now_ms(),
                         }
                     )
@@ -1671,7 +1698,7 @@ async def update_onboarding_diagram(
         except Exception:
             pass
 
-    return {"status": "updated", "diagramState": new_state}
+    return {"status": "updated", "landingPageState": new_state}
 
 
 @router.patch("/internal/messages/{message_id}/complete")

@@ -21,14 +21,20 @@ async function main(): Promise<void> {
   await subscriber.connect();
   await broadcastSubscriber.connect();
 
-  // Create agent runner with mounted paths
+  // Create agent runner with mounted paths.
+  // IMPORTANT: Use config.personalVaultPath / config.sharedVaultPath — these
+  // have symlinks resolved via realpathSync.  Raw env vars like
+  // CLAWVAULT_PERSONAL point to symlinks (e.g. /home/agent/clawvault/shared →
+  // /djinnbot-data/vaults/shared) and glob v10 cannot expand '**' through
+  // symlinks, which causes the graph builder to find zero files.
+  console.log(`[AgentRuntime] Vault paths: personal=${config.personalVaultPath}, shared=${config.sharedVaultPath}`);
   const runner = new ContainerAgentRunner({
     publisher,
     redis,
     agentId: process.env.AGENT_ID || 'unknown',
     workspacePath: config.workspacePath,
-    vaultPath: process.env.CLAWVAULT_PERSONAL || process.env.VAULT_PATH || '/home/agent/clawvault/personal',
-    sharedPath: process.env.CLAWVAULT_SHARED || process.env.SHARED_PATH || '/home/agent/clawvault/shared',
+    vaultPath: config.personalVaultPath,
+    sharedPath: config.sharedVaultPath,
     model: process.env.AGENT_MODEL,
     agentsDir: process.env.AGENTS_DIR,
     thinkingLevel: process.env.AGENT_THINKING_LEVEL,

@@ -30,6 +30,14 @@ def get_sandboxes_dir() -> str:
 SANDBOXES_DIR = get_sandboxes_dir()
 MAX_FILE_SIZE = 1024 * 1024  # 1MB limit for file content
 
+# The unified data volume is mounted at /data in the API/engine containers but at
+# /djinnbot-data in agent containers.  Agent entrypoint scripts create symlinks
+# using /djinnbot-data/... paths (e.g. run-workspace -> /djinnbot-data/runs/{runId}).
+# When the API server follows those symlinks the targets don't exist because here
+# the same volume is at /data.  We fix this by resolving the symlink target manually
+# and translating /djinnbot-data → /data.
+DATA_DIR = os.getenv("DJINN_DATA_PATH", "/data")
+
 
 class FileNode(BaseModel):
     name: str
@@ -63,13 +71,49 @@ class FileContent(BaseModel):
     truncated: bool = False
 
 
+def _resolve_symlink(path: Path) -> Optional[Path]:
+    """Resolve a symlink, translating /djinnbot-data → DATA_DIR if needed.
+
+    Agent containers mount the data volume at /djinnbot-data and create symlinks
+    with that prefix.  The API server mounts the *same* volume at DATA_DIR
+    (typically /data), so those symlink targets appear broken.  This helper
+    reads the raw link target and rewrites the prefix so the path resolves.
+
+    Returns the resolved Path on success, or None if truly broken.
+    """
+    if not path.is_symlink():
+        return None
+    try:
+        target = os.readlink(path)
+    except OSError:
+        return None
+
+    # Fast path: symlink already resolves (same mount layout)
+    target_path = Path(target)
+    if target_path.exists():
+        return target_path
+
+    # Translate /djinnbot-data/... → DATA_DIR/...
+    if target.startswith("/djinnbot-data/"):
+        translated = Path(DATA_DIR) / target[len("/djinnbot-data/") :]
+        if translated.exists():
+            return translated
+    elif target.startswith("/djinnbot-data"):
+        translated = Path(DATA_DIR) / target[len("/djinnbot-data") :]
+        if translated.exists():
+            return translated
+
+    return None
+
+
 def validate_sandbox_path(agent_id: str, requested_path: str = "/") -> Path:
     """
     Validate and resolve a sandbox path for the given agent.
 
     SECURITY:
     - Blocks directory traversal (../)
-    - Resolves symlinks and ensures final path is within sandbox
+    - Resolves symlinks (with /djinnbot-data → DATA_DIR translation)
+    - Ensures final path is within the data volume
     - Normalizes path separators
 
     Returns: Absolute Path object within sandbox
@@ -82,6 +126,7 @@ def validate_sandbox_path(agent_id: str, requested_path: str = "/") -> Path:
     # Get sandbox root (unified sandbox for this agent)
     sandbox_root = Path(get_sandboxes_dir()) / agent_id
     sandbox_root_resolved = sandbox_root.resolve()
+    data_dir_resolved = Path(DATA_DIR).resolve()
 
     # Normalize requested path (remove leading slash for join)
     requested_path = requested_path.lstrip("/")
@@ -96,19 +141,64 @@ def validate_sandbox_path(agent_id: str, requested_path: str = "/") -> Path:
     # Construct full path
     full_path = sandbox_root / requested_path
 
-    # Resolve symlinks and normalize
+    # Resolve symlinks and normalize.
+    # Walk the path components, translating any symlink that points to
+    # /djinnbot-data (the agent-container mount) so it resolves under DATA_DIR.
     try:
         full_path_resolved = full_path.resolve()
-    except (OSError, RuntimeError) as e:
-        raise HTTPException(status_code=400, detail=f"Invalid path: {e}")
+    except (OSError, RuntimeError):
+        # resolve() failed — the symlink target doesn't exist.
+        # Try translating each symlink segment.
+        full_path_resolved = _resolve_with_translation(full_path)
+        if full_path_resolved is None:
+            raise HTTPException(status_code=400, detail="Path could not be resolved")
 
-    # Ensure resolved path is still within sandbox
+    # Also handle the case where resolve() "succeeded" but returned a
+    # /djinnbot-data/... path (can happen if resolve doesn't traverse).
+    resolved_str = str(full_path_resolved)
+    if resolved_str.startswith("/djinnbot-data/"):
+        full_path_resolved = Path(DATA_DIR) / resolved_str[len("/djinnbot-data/") :]
+    elif resolved_str.startswith("/djinnbot-data"):
+        full_path_resolved = Path(DATA_DIR) / resolved_str[len("/djinnbot-data") :]
+
+    # Ensure resolved path is still within the data volume (sandbox root or its
+    # symlink targets like vaults/runs/workspaces all live under DATA_DIR).
     try:
         full_path_resolved.relative_to(sandbox_root_resolved)
     except ValueError:
-        raise HTTPException(status_code=400, detail="Path outside sandbox")
+        # Not under sandbox root — but symlinked dirs (vaults, runs, workspaces)
+        # live elsewhere under DATA_DIR. Allow anything under the data volume.
+        try:
+            full_path_resolved.relative_to(data_dir_resolved)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Path outside sandbox")
 
     return full_path_resolved
+
+
+def _resolve_with_translation(path: Path) -> Optional[Path]:
+    """Walk path components, translating broken symlinks via _resolve_symlink.
+
+    Returns the resolved real path, or None if unresolvable.
+    """
+    # Find the deepest existing ancestor
+    parts = list(path.parts)
+    resolved = Path(parts[0])  # root "/"
+
+    for part in parts[1:]:
+        candidate = resolved / part
+        if candidate.is_symlink():
+            translated = _resolve_symlink(candidate)
+            if translated is not None and translated.exists():
+                resolved = translated
+                continue
+        if candidate.exists():
+            resolved = candidate.resolve() if candidate.is_symlink() else candidate
+        else:
+            # Component doesn't exist even after translation
+            return None
+
+    return resolved if resolved.exists() else None
 
 
 def get_sandbox_path(agent_id: str) -> Optional[Path]:
@@ -185,26 +275,51 @@ def list_installed_tools(sandbox_path: Path) -> List[dict]:
 
 
 def build_file_node(
-    path: Path, sandbox_root: Path, include_children: bool = False
+    path: Path, sandbox_root: Path, max_depth: int = 0
 ) -> Optional[FileNode]:
     """Build a FileNode from a Path object.
+
+    Args:
+        path: The filesystem path to build a node for.
+        sandbox_root: Root of the sandbox (for computing relative paths).
+        max_depth: How many levels of children to include for directories.
+                   0 = no children, 1 = immediate children only, etc.
 
     Returns None for broken symlinks or unreadable paths instead of raising.
     """
     try:
         # Use lstat() so broken symlinks don't raise — we get the symlink's own metadata
-        stat = path.lstat()
+        stat_info = path.lstat()
         is_symlink = path.is_symlink()
-        # For symlinks, try to resolve the type; fall back to "file" if target is missing
+
+        # The actual filesystem path to iterate (differs from `path` when we
+        # need to translate a broken symlink to the correct mount point).
+        effective_path = path
+
+        # For symlinks, try to resolve the type.
+        # If the target doesn't exist at the raw path (mount-point mismatch),
+        # translate the target through _resolve_symlink().
         if is_symlink:
             try:
-                is_dir = path.is_dir()  # follows symlink; False if broken
+                is_dir = path.is_dir()  # follows symlink
             except OSError:
                 is_dir = False
+
+            if not is_dir and not path.exists():
+                # Broken symlink — attempt mount-point translation
+                resolved = _resolve_symlink(path)
+                if resolved is not None:
+                    is_dir = resolved.is_dir()
+                    effective_path = resolved
+                    try:
+                        stat_info = resolved.stat()
+                    except OSError:
+                        pass
         else:
             is_dir = path.is_dir()
 
-        # Get relative path from sandbox root
+        # Get relative path from sandbox root (always use the *original* path
+        # so the frontend sees sandbox-relative paths, not translated ones).
         try:
             rel_path = path.relative_to(sandbox_root)
             path_str = "/" + str(rel_path).replace(os.sep, "/")
@@ -215,20 +330,29 @@ def build_file_node(
             name=path.name,
             path=path_str,
             type="directory" if is_dir else "file",
-            size=stat.st_size if not is_dir else None,
-            modified=int(stat.st_mtime * 1000),  # Convert to milliseconds
+            size=stat_info.st_size if not is_dir else None,
+            modified=int(stat_info.st_mtime * 1000),  # Convert to milliseconds
             children=None,
         )
 
-        # Optionally include children for directories
-        if include_children and is_dir:
+        # Include children for directories when depth allows.
+        # Use effective_path for iteration (handles translated symlinks).
+        if max_depth > 0 and is_dir:
             children = []
             try:
                 for child in sorted(
-                    path.iterdir(), key=lambda p: (not p.is_dir(), p.name)
+                    effective_path.iterdir(), key=lambda p: (not p.is_dir(), p.name)
                 ):
-                    child_node = build_file_node(
-                        child, sandbox_root, include_children=False
+                    # For children of a translated symlink we need to present
+                    # paths relative to sandbox_root.  We build a "virtual" child
+                    # path under the original parent so relative_to() works.
+                    if effective_path != path:
+                        virtual_child = path / child.name
+                    else:
+                        virtual_child = child
+
+                    child_node = _build_file_node_from(
+                        virtual_child, child, sandbox_root, max_depth=max_depth - 1
                     )
                     if child_node is not None:
                         children.append(child_node)
@@ -240,6 +364,83 @@ def build_file_node(
 
     except (OSError, PermissionError) as e:
         logger.warning(f"Skipping unreadable path {path}: {e}")
+        return None
+
+
+def _build_file_node_from(
+    virtual_path: Path,
+    real_path: Path,
+    sandbox_root: Path,
+    max_depth: int = 0,
+) -> Optional[FileNode]:
+    """Build a FileNode where the display path and real FS path may differ.
+
+    This handles children of translated symlinks: the *virtual_path* is used
+    for the relative path shown in the UI, while *real_path* is what we
+    actually stat/iterate on disk.
+    """
+    try:
+        is_symlink = real_path.is_symlink()
+        is_dir = False
+        effective_path = real_path
+
+        if is_symlink:
+            try:
+                is_dir = real_path.is_dir()
+            except OSError:
+                is_dir = False
+            if not is_dir and not real_path.exists():
+                resolved = _resolve_symlink(real_path)
+                if resolved is not None:
+                    is_dir = resolved.is_dir()
+                    effective_path = resolved
+        else:
+            is_dir = real_path.is_dir()
+
+        try:
+            stat_info = (
+                effective_path.stat()
+                if effective_path != real_path
+                else real_path.lstat()
+            )
+        except OSError:
+            stat_info = real_path.lstat()
+
+        try:
+            rel_path = virtual_path.relative_to(sandbox_root)
+            path_str = "/" + str(rel_path).replace(os.sep, "/")
+        except ValueError:
+            path_str = "/" + virtual_path.name
+
+        node = FileNode(
+            name=virtual_path.name,
+            path=path_str,
+            type="directory" if is_dir else "file",
+            size=stat_info.st_size if not is_dir else None,
+            modified=int(stat_info.st_mtime * 1000),
+            children=None,
+        )
+
+        if max_depth > 0 and is_dir:
+            children = []
+            try:
+                for child in sorted(
+                    effective_path.iterdir(), key=lambda p: (not p.is_dir(), p.name)
+                ):
+                    vchild = virtual_path / child.name
+                    child_node = _build_file_node_from(
+                        vchild, child, sandbox_root, max_depth=max_depth - 1
+                    )
+                    if child_node is not None:
+                        children.append(child_node)
+                node.children = children
+            except (OSError, PermissionError):
+                pass
+
+        return node
+
+    except (OSError, PermissionError) as e:
+        logger.warning(f"Skipping unreadable path {real_path}: {e}")
         return None
 
 
@@ -284,13 +485,14 @@ async def get_sandbox_info(agent_id: str) -> SandboxInfo:
     file_count, dir_count = count_files_and_dirs(sandbox_path)
     installed_tools = list_installed_tools(sandbox_path)
 
-    # List root files with one level of children for better UX
+    # List root files with deep recursion so the tree is fully browsable.
+    # max_depth=10 follows symlinks and nested dirs up to 10 levels.
     root_files = []
     try:
         for item in sorted(
             sandbox_path.iterdir(), key=lambda p: (not p.is_dir(), p.name)
         ):
-            node = build_file_node(item, sandbox_path, include_children=True)
+            node = build_file_node(item, sandbox_path, max_depth=10)
             if node is not None:
                 root_files.append(node)
     except (OSError, PermissionError) as e:
@@ -313,7 +515,14 @@ async def get_file_tree(
     """Get file tree for a specific path within the sandbox."""
     logger.debug(f"Getting file tree: agent_id={agent_id}, path={path}")
 
-    # Validate and resolve path
+    sandbox_root = Path(get_sandboxes_dir()) / agent_id
+
+    # Build the "virtual" parent path under sandbox_root (for relative path
+    # computation in the UI) and the "real" path to iterate on disk.
+    requested = path.lstrip("/")
+    virtual_parent = sandbox_root / requested if requested else sandbox_root
+
+    # Validate — this may return a translated real path for symlinks
     resolved_path = validate_sandbox_path(agent_id, path)
 
     # Check if path exists
@@ -324,30 +533,23 @@ async def get_file_tree(
     if not resolved_path.is_dir():
         raise HTTPException(status_code=400, detail="Path is not a directory")
 
-    # Get sandbox root for relative path calculation
-    sandbox_root = Path(get_sandboxes_dir()) / agent_id
-
-    # Build file list
+    # Build file list.  Use resolved_path for iteration (real FS path) and
+    # virtual_parent for building sandbox-relative display paths.
     files = []
     try:
         for item in sorted(
             resolved_path.iterdir(), key=lambda p: (not p.is_dir(), p.name)
         ):
-            # Include children for immediate subdirectories (one level deep)
-            node = build_file_node(item, sandbox_root, include_children=item.is_dir())
+            vchild = virtual_parent / item.name
+            node = _build_file_node_from(vchild, item, sandbox_root, max_depth=10)
             if node is not None:
                 files.append(node)
     except (OSError, PermissionError) as e:
         raise HTTPException(status_code=500, detail=f"Failed to list directory: {e}")
 
-    # Return normalized path
-    try:
-        rel_path = resolved_path.relative_to(sandbox_root)
-        path_str = "/" + str(rel_path).replace(os.sep, "/")
-    except ValueError:
-        path_str = "/"
-
-    return FileTree(path=path_str if path_str != "/." else "/", files=files)
+    # Return normalized path (always relative to sandbox root)
+    norm_path = "/" + requested if requested else "/"
+    return FileTree(path=norm_path if norm_path != "/." else "/", files=files)
 
 
 @router.get("/{agent_id}/sandbox/file")

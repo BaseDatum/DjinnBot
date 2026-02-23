@@ -56,6 +56,7 @@ from app.routers import user_usage
 from app.routers import slack as slack_router
 from app.routers import spawn_executor as spawn_executor_router
 from app.routers import ingest as ingest_router
+from app.routers import memory_scores as memory_scores_router
 
 
 async def _handle_task_run_event(run_id: str, event_type: str):
@@ -648,6 +649,7 @@ app.include_router(
     spawn_executor_router.router, prefix="/v1/internal", tags=["internal"]
 )
 app.include_router(ingest_router.router, prefix="/v1/ingest", tags=["ingest"])
+app.include_router(memory_scores_router.router, prefix="/v1", tags=["memory-scores"])
 
 
 @app.get("/v1/status")

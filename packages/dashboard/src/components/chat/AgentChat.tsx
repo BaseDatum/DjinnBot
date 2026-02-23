@@ -14,7 +14,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Textarea } from '@/components/ui/textarea';
-import { ChatMessage, type ChatMessageData } from './ChatMessage';
+import { ChatMessage } from './ChatMessage';
 import { ToolCallGroupCard } from '@/components/ToolCallGroupCard';
 import {
   sendChatMessage,
@@ -36,39 +36,7 @@ import {
 } from 'lucide-react';
 
 // ── Message grouping ─────────────────────────────────────────────────────────
-
-/** A rendered item is either a single message or a group of consecutive tool calls. */
-type RenderItem =
-  | { kind: 'message'; msg: ChatMessageData }
-  | { kind: 'tool_group'; calls: ChatMessageData[] };
-
-/**
- * Group consecutive tool_call messages into collapsible groups.
- * Non-tool messages pass through as-is.
- */
-function groupMessages(messages: ChatMessageData[]): RenderItem[] {
-  const result: RenderItem[] = [];
-  let currentGroup: ChatMessageData[] = [];
-
-  const flushGroup = () => {
-    if (currentGroup.length > 0) {
-      result.push({ kind: 'tool_group', calls: [...currentGroup] });
-      currentGroup = [];
-    }
-  };
-
-  for (const msg of messages) {
-    if (msg.type === 'tool_call') {
-      currentGroup.push(msg);
-    } else {
-      flushGroup();
-      result.push({ kind: 'message', msg });
-    }
-  }
-  flushGroup();
-
-  return result;
-}
+import { groupMessages } from './groupMessages';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -106,6 +74,9 @@ export function AgentChat({
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const historyLoadedRef = useRef(false);
+  // Bumped on restart to re-trigger the history-loading useEffect (since
+  // sessionId stays the same across restarts, we need an extra dep).
+  const [restartGeneration, setRestartGeneration] = useState(0);
 
   // ── Custom top-edge resize for textarea ────────────────────────────────────
   const [inputHeight, setInputHeight] = useState(44);
@@ -212,7 +183,16 @@ export function AgentChat({
     getChatSession(sessionId)
       .then(data => {
         const loaded = expandDbMessages(data.messages);
-        setMessagesFromDb(loaded);
+        // Stamp agent metadata from props onto DB-loaded messages that are
+        // missing it. Regular (non-onboarding) chat messages don't persist
+        // agent_id/agent_name/agent_emoji in the DB, so without this the
+        // agent's emoji and name vanish on page refresh or widget reopen.
+        const stamped = loaded.map(m =>
+          (m.type === 'assistant' || m.type === 'thinking' || m.type === 'tool_call') && !m.agentName
+            ? { ...m, agentId: agentId, agentName: agentName, agentEmoji: agentEmoji ?? undefined }
+            : m,
+        );
+        setMessagesFromDb(stamped);
         // Build a set of DB message IDs so markHistoryLoaded can skip
         // replayed structural SSE events that duplicate DB content.
         const dbIds = new Set(data.messages.map((m: { id: string }) => m.id));
@@ -242,7 +222,7 @@ export function AgentChat({
         // Still release the gate so SSE events can flow
         markHistoryLoaded();
       });
-  }, [sessionId, expandDbMessages, setMessages, setMessagesFromDb, markHistoryLoaded, onSessionEnd]);
+  }, [sessionId, restartGeneration, expandDbMessages, setMessages, setMessagesFromDb, markHistoryLoaded, onSessionEnd]);
 
   // ── Messaging ──────────────────────────────────────────────────────────────
 
@@ -391,6 +371,9 @@ export function AgentChat({
       // Reset history gate so the session reloads when the new container is ready
       historyLoadedRef.current = false;
       chatStream.resetStreamCursor();
+      // Bump generation counter to re-trigger the history-loading useEffect
+      // (sessionId stays the same across restarts so we need this extra dep).
+      setRestartGeneration(g => g + 1);
     } catch (err) {
       console.error('Failed to restart session:', err);
       setMessages(prev => [...prev, {
@@ -511,9 +494,11 @@ export function AgentChat({
               <span className="text-xs">Send a message to begin</span>
             </div>
           )}
-          {renderItems.map((item, idx) => {
+          {renderItems.map((item) => {
             if (item.kind === 'tool_group') {
-              const groupKey = item.calls.map(c => c.id).join('|');
+              // Use the first call's ID as the key so the component isn't
+              // remounted (and expanded state lost) when new calls join the group.
+              const groupKey = `tg_${item.calls[0].id}`;
               const hasRunning = item.calls.some(
                 c => !c.result && isStreaming && c.id.startsWith('streaming_'),
               );

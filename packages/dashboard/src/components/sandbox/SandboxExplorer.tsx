@@ -119,6 +119,7 @@ export function SandboxExplorer({ agentId }: SandboxExplorerProps) {
           <div className="overflow-auto h-[500px]">
             <SandboxFileTree
               files={sandboxData.rootFiles}
+              agentId={agentId}
               selectedPath={selectedPath}
               onSelect={handleSelect}
               changedPaths={new Set()}

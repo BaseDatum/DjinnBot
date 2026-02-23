@@ -48,6 +48,8 @@ import {
 import { ProviderModelSelector } from '@/components/ui/ProviderModelSelector';
 import { DEFAULT_CHAT_MODEL } from '@/lib/constants';
 import { ChatMessage } from '@/components/chat/ChatMessage';
+import { groupMessages } from '@/components/chat/groupMessages';
+import { ToolCallGroupCard } from '@/components/ToolCallGroupCard';
 import {
   OnboardingAgentMessage,
   AgentComposingIndicator,
@@ -57,7 +59,7 @@ import {
   AGENT_META,
   AGENT_CHAIN,
 } from './OnboardingMessages';
-import { OnboardingDiagramPanel, type DiagramState } from './OnboardingDiagramPanel';
+import { OnboardingLandingPagePanel, type LandingPageState } from './OnboardingLandingPagePanel';
 import { OnboardingMiniMemoryGraph } from './OnboardingMiniMemoryGraph';
 
 // ============================================================================
@@ -78,7 +80,7 @@ interface GlobalSSEEvent {
   toAgent?: string;
   newChatSessionId?: string;
   context?: Record<string, unknown>;
-  diagramState?: DiagramState;
+  landingPageState?: LandingPageState;
   phase?: string;
   projectId?: string;
   projectName?: string;
@@ -493,10 +495,10 @@ export function OnboardingChat({ onClose, onProjectCreated, resumeSessionId }: O
   const [isWaitingForAgent, setIsWaitingForAgent] = useState(false);
 
   const [error, setError] = useState<string | null>(null);
-  // Evolving diagram state — updated via ONBOARDING_DIAGRAM_UPDATED SSE
-  const [diagramState, setDiagramState] = useState<DiagramState | null>(null);
+  // Evolving landing page state — updated via ONBOARDING_LANDING_PAGE_UPDATED SSE
+  const [landingPageState, setLandingPageState] = useState<LandingPageState | null>(null);
   // Left panel collapse state — respects viewport width
-  const [diagramCollapsed, setDiagramCollapsed] = useState(false);
+  const [previewCollapsed, setPreviewCollapsed] = useState(false);
   // Completion state — set when ONBOARDING_COMPLETED fires
   const [completionInfo, setCompletionInfo] = useState<{
     projectId?: string;
@@ -588,7 +590,7 @@ export function OnboardingChat({ onClose, onProjectCreated, resumeSessionId }: O
           setSession(s);
           setMessagesFromDb(expandDbMessages(s.messages));
           // Initialize diagram state from session (may be null for fresh sessions)
-          if (s.diagram_state) setDiagramState(s.diagram_state);
+          if (s.landing_page_state) setLandingPageState(s.landing_page_state);
           // NOTE: markHistoryLoaded() is NOT called here. It must run AFTER
           // useChatStream's reset effect (which fires when sessionId changes
           // from '' to the new chat_session_id and resets historyLoadedRef
@@ -633,7 +635,7 @@ export function OnboardingChat({ onClose, onProjectCreated, resumeSessionId }: O
       const s = await getOnboardingSession(session.id);
       setSession(s);
       // Sync diagram state from DB
-      if (s.diagram_state) setDiagramState(s.diagram_state);
+      if (s.landing_page_state) setLandingPageState(s.landing_page_state);
       // Merge DB messages with any active streaming state using deduplication.
       // setMessagesFromDb preserves in-flight streaming_ prefixed messages
       // while replacing all committed messages with the DB source of truth.
@@ -692,8 +694,8 @@ export function OnboardingChat({ onClose, onProjectCreated, resumeSessionId }: O
           );
         }
 
-        if (event.type === 'ONBOARDING_DIAGRAM_UPDATED' && event.diagramState) {
-          setDiagramState(event.diagramState);
+        if (event.type === 'ONBOARDING_LANDING_PAGE_UPDATED' && event.landingPageState) {
+          setLandingPageState(event.landingPageState);
         }
 
         if (event.type === 'ONBOARDING_COMPLETED') {
@@ -1003,13 +1005,13 @@ export function OnboardingChat({ onClose, onProjectCreated, resumeSessionId }: O
       <div className="flex flex-1 min-h-0">
         {/* Left panel: Diagram + Mini Memory Graph */}
         {session && (
-          <div className={`flex flex-col min-h-0 shrink-0 transition-all duration-200 ${diagramCollapsed ? 'w-10' : 'w-[60%]'}`}>
-            <OnboardingDiagramPanel
-              diagramState={diagramState}
-              collapsed={diagramCollapsed}
-              onToggleCollapse={() => setDiagramCollapsed((c) => !c)}
+          <div className={`flex flex-col min-h-0 shrink-0 transition-all duration-200 ${previewCollapsed ? 'w-10' : 'w-[60%]'}`}>
+            <OnboardingLandingPagePanel
+              landingPageState={landingPageState}
+              collapsed={previewCollapsed}
+              onToggleCollapse={() => setPreviewCollapsed((c) => !c)}
             />
-            {!diagramCollapsed && (
+            {!previewCollapsed && (
               <OnboardingMiniMemoryGraph />
             )}
           </div>
@@ -1030,7 +1032,25 @@ export function OnboardingChat({ onClose, onProjectCreated, resumeSessionId }: O
           {/* Message list */}
           <ScrollArea className="flex-1" ref={scrollAreaRef as any}>
             <div className="px-4 py-4 space-y-4 max-w-2xl mx-auto w-full">
-              {[...messages].sort((a, b) => a.timestamp - b.timestamp).map((msg) => {
+              {groupMessages([...messages].sort((a, b) => a.timestamp - b.timestamp)).map((item) => {
+                // ── Collapsed tool call groups ─────────────────────────────
+                if (item.kind === 'tool_group') {
+                  // Use the first call's ID as the key so the component isn't
+                  // remounted (and expanded state lost) when new calls join the group.
+                  const groupKey = `tg_${item.calls[0].id}`;
+                  const hasRunning = item.calls.some(
+                    c => !c.result && isStreaming && c.id.startsWith('streaming_'),
+                  );
+                  return (
+                    <ToolCallGroupCard
+                      key={groupKey}
+                      calls={item.calls}
+                      hasRunning={hasRunning}
+                    />
+                  );
+                }
+
+                const msg = item.msg;
                 const msgIsStreaming = isStreaming && msg.id.startsWith('streaming_');
 
                 // ── Handoff transition card ────────────────────────────────
@@ -1051,7 +1071,7 @@ export function OnboardingChat({ onClose, onProjectCreated, resumeSessionId }: O
                   );
                 }
 
-                // ── All other messages: user, system, tool_call, error ─────
+                // ── All other messages: user, system, error ────────────────
                 return (
                   <ChatMessage
                     key={msg.id}

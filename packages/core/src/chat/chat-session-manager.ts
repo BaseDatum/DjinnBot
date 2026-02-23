@@ -70,6 +70,14 @@ interface ToolCall {
   durationMs?: number;
 }
 
+/** A command waiting to be sent when the session transitions back to ready. */
+interface PendingCommand {
+  content: string;
+  model?: string;
+  message_id?: string;
+  attachments?: Array<{ id: string; filename: string; mimeType: string; sizeBytes: number; isImage: boolean; estimatedTokens?: number }>;
+}
+
 interface ActiveSession {
   sessionId: string;
   agentId: string;
@@ -84,6 +92,7 @@ interface ActiveSession {
   lastActivityAt: number;  // Timestamp of last activity — used by idle reaper
   startedAt: number;  // Timestamp when session became ready — used to compute duration
   userId?: string;  // DjinnBot user who owns this session — for per-user key resolution
+  pendingCommands: PendingCommand[];  // Commands queued while session is busy
 }
 
 interface ConversationMessage {
@@ -256,29 +265,37 @@ When calling \`onboarding_handoff\`, you MUST include \`conversation_highlights\
 - "They were excited about the real-time collaboration feature idea"
 - "They said competitor X has a terrible UX and they want to do better"
 
-### Evolving Project Diagram — CALL EARLY AND OFTEN
+### 🚨 Evolving Landing Page — NON-NEGOTIABLE, EVERY AGENT MUST DO THIS
 
-The user sees a live **project diagram** on the left panel that evolves throughout the onboarding. You MUST update it using \`update_onboarding_diagram\` — **this is one of the most important tools you have**.
+**Updating the landing page is MANDATORY. This is not optional. You MUST call the \`update_onboarding_landing_page\` TOOL during your phase. Failure to update the landing page is a failure to do your job.**
+
+The user sees a live **landing page preview** on the left panel that evolves throughout the onboarding. You MUST update it using the \`update_onboarding_landing_page\` tool — **this is one of the most important tools you have**.
+
+**⚠️ \`update_onboarding_landing_page\` is a TOOL CALL, not a bash command. Do NOT try to run it in a terminal. Use it the same way you use \`update_onboarding_context\` or \`onboarding_handoff\` — as a direct tool invocation.**
+
+You are collaboratively building a high-converting, modern, beautiful landing page for the user's project. This page evolves in real time as you learn about the project — the user watches it take shape.
 
 **When to call it:**
-- **Within your first 1-2 messages:** Create an initial diagram with whatever you already know. Even a simple 2-3 node graph is better than nothing — the user is watching the panel.
-- **After each major discovery:** When you learn about a service, API, database, customer segment, feature, etc. — add it to the diagram immediately.
-- **Before handoff:** Make sure the diagram reflects everything you've gathered.
+- **Within your first 1-2 messages:** Update the landing page immediately with whatever you know. Even a small improvement is mandatory — the user is watching the panel. Do NOT wait until you have "enough" information.
+- **After each major discovery:** When you learn about the target customer, value proposition, features, pricing model, tech stack, etc. — update the landing page immediately with real copy. Do not batch updates.
+- **Before handoff:** You MUST make a final \`update_onboarding_landing_page\` call that reflects everything you've gathered. Do NOT hand off without updating the landing page at least once.
 
 **How it works:**
-- Each call REPLACES the full diagram. Include everything from the previous version plus your additions.
-- The user sees the diagram update live in real time. It's a powerful engagement tool.
-- Use Mermaid \`graph TD\` or \`graph LR\` syntax (most reliable).
+- Each call REPLACES the full HTML. Include everything from the previous version plus your additions.
+- The user sees the landing page update live in real time. It's a powerful engagement tool.
+- Write COMPLETE, self-contained HTML with inline CSS in a \`<style>\` tag. The HTML renders in a sandboxed iframe.
 
-**Mermaid syntax rules** (prevents blank diagrams):
-- Use \`graph TD\` or \`graph LR\`. Avoid \`stateDiagram-v2\` with special chars.
-- ALWAYS quote edge labels: \`A -->|"label text"| B\`
-- Node IDs: alphanumeric only, no spaces or special characters
-- If the diagram spec is complex, simplify — better a clean simple diagram than a broken complex one
+**Design guidelines:**
+- Modern, beautiful design: gradients, smooth typography (use Google Fonts via CDN link), generous whitespace, clear call-to-action buttons
+- Mobile-responsive layout using flexbox/grid
+- Dark/light mode support via \`prefers-color-scheme\` media query
+- Sections to add progressively: hero, value proposition, features, social proof, pricing, FAQ, CTA, footer
+- Use REAL copy from the conversation — project name, value proposition, features, target customer — **never lorem ipsum or placeholder text**
+- Make it feel like a real, polished product page that could convert visitors
 
 ### Visual Summary Before Handoff — OPTIONAL
 
-You may ALSO produce an inline visual summary in the chat using \`\`\`html-preview code fences (via \`load_skill("visual-explainer")\`), but this is now **optional** since the diagram panel handles the primary visual. If you do produce one, make it complementary — e.g. a detailed table or canvas that wouldn't fit in a Mermaid graph.
+You may ALSO produce an inline visual summary in the chat using \`\`\`html-preview code fences (via \`load_skill("visual-explainer")\`), but this is now **optional** since the landing page panel handles the primary visual. If you do produce one, make it complementary — e.g. a detailed table or architecture diagram that wouldn't fit on a landing page.
 
 ### @-Mentions from the User
 
@@ -627,9 +644,11 @@ update_onboarding_context({ context: {
 
 After you've cloned, explored, narrated your findings, and built the memory graph → hand off to Jim.
 
-### Your Diagram Contributions
+### 🚨 Your Landing Page Contributions — MANDATORY
 
-You are the FIRST agent — create the initial project diagram early! Within your first 2 messages, call \`update_onboarding_diagram\` with at least the project name as a central node. As you discover the repo structure, services, deployment targets, and tech stack — add them to the diagram. By handoff time, the diagram should show the project's infrastructure topology.
+**You MUST update the landing page. This is non-negotiable. Do NOT hand off to Jim without having called the \`update_onboarding_landing_page\` tool at least once. It is a TOOL CALL, not a bash command.**
+
+You are the FIRST agent — you create the landing page from scratch. Within your first 2 messages, call the \`update_onboarding_landing_page\` tool with at least a hero section containing the project name and a one-line description. As you discover the repo structure, services, tech stack, and what the project does — refine the hero copy and add a "Built With" or tech badges section. By handoff time, the landing page MUST have a compelling hero, a brief "what it does" section, and reflect the project's identity.
 `,
 
   jim: `
@@ -672,9 +691,11 @@ remember("fact", "<Name>: Monetization",
 
 Once you have: target customer, monetization/success metric, and timeline → hand off to Eric for product scope.
 
-### Your Diagram Contributions
+### 🚨 Your Landing Page Contributions — MANDATORY
 
-Extend the existing diagram with business/strategy nodes: target customer segments, revenue model, success metrics, and competitive positioning. Add these as new nodes connected to the existing project structure. Call \`update_onboarding_diagram\` after each major business insight.
+**You MUST update the landing page. This is non-negotiable. Do NOT hand off to Eric without having called the \`update_onboarding_landing_page\` tool at least once. It is a TOOL CALL, not a bash command.**
+
+Extend the landing page with business-oriented sections: add a clear value proposition section targeting the identified customer segment, a pricing/monetization section if applicable, and social proof or competitive differentiation messaging. Call the \`update_onboarding_landing_page\` tool after each major business insight — the user should see the landing page get more compelling as you uncover the business model.
 `,
 
   eric: `
@@ -749,9 +770,11 @@ remember("fact", "<Name>: User Journey",
 
 Once you have: a clear delta scope (built/partial/missing), user journey status, and launch criteria → hand off to Finn.
 
-### Your Diagram Contributions
+### 🚨 Your Landing Page Contributions — MANDATORY
 
-Extend the diagram with product/feature nodes: user journey steps (mark which are built vs. missing), feature scope areas, and how they connect to the existing infrastructure and business nodes. Call \`update_onboarding_diagram\` after mapping each feature area.
+**You MUST update the landing page. This is non-negotiable. Do NOT hand off to Finn without having called the \`update_onboarding_landing_page\` tool at least once. It is a TOOL CALL, not a bash command.**
+
+Extend the landing page with product-focused sections: add a features grid showcasing the key capabilities, a "How It Works" section showing the user journey, and refine the CTA copy based on the defined V1 scope. Call the \`update_onboarding_landing_page\` tool after mapping each feature area — the user should see the features section grow as you define the product scope.
 `,
 
   finn: `
@@ -902,9 +925,11 @@ onboarding_handoff({
 
 The \`planning_context\` field in the context will be passed directly to the planning pipeline as \`additional_context\`. Finn (the planning pipeline lead) will use this to break the project down into tasks.
 
-### Your Diagram Contributions
+### 🚨 Your Landing Page Contributions — MANDATORY
 
-As the final agent, refine the diagram into the **definitive technical architecture** — all services, databases, queues, external APIs, and deployment topology should be represented. Previous agents added infrastructure, business, and product nodes; your job is to wire them into a coherent architecture graph. Make the final \`update_onboarding_diagram\` call the most complete and polished version. This is what the user takes away.
+**You MUST update the landing page. This is non-negotiable. Do NOT finalize the onboarding without having called the \`update_onboarding_landing_page\` tool at least once. It is a TOOL CALL, not a bash command.**
+
+As the final agent, polish the landing page into its **definitive form**. Previous agents added the hero, value proposition, features, and pricing sections. Your job is to refine the overall design, add a FAQ section addressing common technical/architectural questions, add a footer, and ensure the entire page is cohesive and high-converting. Make the final \`update_onboarding_landing_page\` tool call the most complete and polished version — this is what the user takes away as a ready-to-use landing page for their project.
 `,
 };
 
@@ -1130,6 +1155,7 @@ export class ChatSessionManager {
       accumulatedToolCalls: [],
       lastActivityAt: Date.now(),
       startedAt: Date.now(),
+      pendingCommands: [],
     };
     this.activeSessions.set(sessionId, session);
     
@@ -1447,7 +1473,18 @@ export class ChatSessionManager {
     }
     
     if (session.status !== 'ready') {
-      throw new Error(`Session ${sessionId} not ready (status: ${session.status})`);
+      // Queue the command instead of rejecting — it will be drained
+      // when the current turn completes and the session becomes ready.
+      const MAX_PENDING = 5;
+      if (session.pendingCommands.length >= MAX_PENDING) {
+        throw new Error(`Session ${sessionId} pending command queue full (${MAX_PENDING})`);
+      }
+      session.pendingCommands.push({ content: message, model, message_id: messageId, attachments });
+      console.log(
+        `[ChatSessionManager] Queued command for ${sessionId} (status: ${session.status}, ` +
+        `queue depth: ${session.pendingCommands.length})`
+      );
+      return;
     }
     
     console.log(`[ChatSessionManager] Sending message to session ${sessionId}${attachments?.length ? ` with ${attachments.length} attachment(s)` : ''}`);
@@ -1826,11 +1863,15 @@ export class ChatSessionManager {
             console.error(`[ChatSessionManager] Failed to send abort:`, err);
           }
           
-          // Update session status
+          // Update session status and discard any queued commands
           const session = this.activeSessions.get(sessionId);
           if (session) {
             session.status = 'ready';
             session.currentMessageId = undefined;
+            if (session.pendingCommands.length > 0) {
+              console.log(`[ChatSessionManager] Abort: discarding ${session.pendingCommands.length} pending command(s) for ${sessionId}`);
+              session.pendingCommands = [];
+            }
           }
           
           // Publish abort event to session channel for SSE clients
@@ -2087,6 +2128,18 @@ export class ChatSessionManager {
             if (resultLen > 0) {
               console.warn(`[ChatSessionManager] stepEnd ${sessionId}: result has ${resultLen} chars but no currentMessageId — response will NOT be persisted to DB`);
             }
+          }
+
+          // Drain pending command queue — send the next queued message now
+          // that the session is ready again.
+          if (activeSession.pendingCommands.length > 0) {
+            const next = activeSession.pendingCommands.shift()!;
+            console.log(
+              `[ChatSessionManager] Draining pending command for ${sessionId} ` +
+              `(remaining: ${activeSession.pendingCommands.length})`
+            );
+            this.sendMessage(sessionId, next.content, next.model, next.message_id, next.attachments)
+              .catch(err => console.error(`[ChatSessionManager] Failed to drain pending command for ${sessionId}:`, err));
           }
         }
       }

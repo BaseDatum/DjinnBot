@@ -140,12 +140,20 @@ export const ChatMessage = memo(function ChatMessage({
       : (message.content || '');
 
     const hasAgentEmoji = !!message.agentEmoji;
+    const hasAgentIdentity = !!message.agentName;
 
     return (
-      <div className="group flex gap-3">
+      <div className={cn(
+        'group flex gap-3',
+        hasAgentIdentity && 'border-l-2 border-l-primary/40 pl-1 rounded-sm bg-[radial-gradient(circle_at_10%_50%,rgba(var(--primary-rgb,99,102,241),0.04)_0%,transparent_50%)]',
+      )}>
         <div className={cn(
           'flex h-8 w-8 shrink-0 items-center justify-center rounded-full',
-          hasAgentEmoji ? 'bg-primary/10 ring-1 ring-primary/20' : 'bg-primary/10',
+          hasAgentIdentity
+            ? 'bg-primary/10 ring-2 ring-primary/20 transition-shadow'
+            : hasAgentEmoji
+              ? 'bg-primary/10 ring-1 ring-primary/20'
+              : 'bg-primary/10',
         )}>
           {hasAgentEmoji ? (
             <span className="text-base leading-none">{message.agentEmoji}</span>
@@ -153,29 +161,31 @@ export const ChatMessage = memo(function ChatMessage({
             <Bot className="h-4 w-4 text-primary" />
           )}
         </div>
-        <div className="max-w-[80%] rounded-2xl rounded-tl-sm bg-muted px-4 py-2 overflow-hidden">
-          {(message.model || message.agentName) && (
-            <div className="flex items-center gap-2 mb-2">
-              <span className="font-medium text-xs text-muted-foreground">
-                {message.agentName || 'Assistant'}
-              </span>
-              {message.model && (
+        <div className="flex-1 min-w-0 max-w-[80%]">
+          {hasAgentIdentity && (
+            <span className="text-[10px] font-semibold uppercase tracking-wider mb-1 block text-primary/70">
+              {message.agentName}
+            </span>
+          )}
+          <div className="rounded-2xl rounded-tl-sm bg-muted px-4 py-2 overflow-hidden">
+            {message.model && (
+              <div className="flex items-center gap-2 mb-2">
                 <Badge variant="outline" className="text-xs">
                   {message.model.split('/').pop()}
                 </Badge>
+              </div>
+            )}
+            <div className="text-sm break-words overflow-hidden" style={{ overflowWrap: 'anywhere' }}>
+              {isStreaming ? (
+                // Plain text during streaming — avoids O(n^2) markdown re-parse per token
+                <p className="whitespace-pre-wrap leading-relaxed break-words">
+                  {displayContent}
+                  <span className="text-primary animate-pulse">&#9610;</span>
+                </p>
+              ) : (
+                <MarkdownRenderer content={displayContent} />
               )}
             </div>
-          )}
-          <div className="text-sm break-words overflow-hidden" style={{ overflowWrap: 'anywhere' }}>
-            {isStreaming ? (
-              // Plain text during streaming — avoids O(n^2) markdown re-parse per token
-              <p className="whitespace-pre-wrap leading-relaxed break-words">
-                {displayContent}
-                <span className="text-primary animate-pulse">&#9610;</span>
-              </p>
-            ) : (
-              <MarkdownRenderer content={displayContent} />
-            )}
           </div>
         </div>
         {!isStreaming && <CopyButton getText={() => displayContent} className="self-start mt-1" />}

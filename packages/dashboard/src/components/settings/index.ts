@@ -3,6 +3,7 @@ export { DangerZone } from './DangerZone';
 export { PulseControls } from './PulseControls';
 export { ModelProvidersSettings } from './ModelProvidersSettings';
 export { MemorySearchSettings } from './MemorySearchSettings';
+export { MemoryScoringSettings } from './MemoryScoringSettings';
 export { SecretsSettings } from './SecretsSettings';
 export { AuthSettings } from './AuthSettings';
 export { OIDCProviderSettings } from './OIDCProviderSettings';

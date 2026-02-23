@@ -21,7 +21,7 @@ import {
   type MemoryGraph 
 } from 'clawvault';
 import { join } from 'node:path';
-import { existsSync } from 'node:fs';
+import { existsSync, realpathSync } from 'node:fs';
 import { execFileSync, spawn } from 'node:child_process';
 
 export interface WakeContext {
@@ -93,8 +93,18 @@ export class AgentMemory {
 
   constructor(agentId: string, vaultPath: string, sharedVaultPath?: string) {
     this.agentId = agentId;
-    this.vaultPath = vaultPath;
-    this.sharedVaultPath = sharedVaultPath || null;
+    // Resolve symlinks — glob v10 does NOT follow symlinks when expanding
+    // '**', so clawvault's graph builder silently finds zero files when the
+    // cwd is a symlink.  Agent containers use symlinks for vault mounts.
+    this.vaultPath = AgentMemory.resolveSymlinks(vaultPath);
+    this.sharedVaultPath = sharedVaultPath ? AgentMemory.resolveSymlinks(sharedVaultPath) : null;
+  }
+
+  private static resolveSymlinks(p: string): string {
+    try {
+      if (existsSync(p)) return realpathSync(p);
+    } catch { /* fall through */ }
+    return p;
   }
 
   async initialize(): Promise<void> {
@@ -140,6 +150,13 @@ export class AgentMemory {
             env: { ...process.env, PATH: `/root/.bun/bin:${process.env.PATH}` },
           });
         } catch { /* already exists or qmd unavailable */ }
+
+        // Build/update the shared vault graph index so graph_query works immediately
+        try {
+          await getMemoryGraph(this.sharedVaultPath);
+        } catch (err) {
+          console.warn(`[AgentMemory:${this.agentId}] Shared graph index build failed (non-fatal):`, err);
+        }
       }
       // Don't create shared vault here — AgentMemoryManager handles that
     }
@@ -214,6 +231,13 @@ export class AgentMemory {
             sharedBy: this.agentId,
           });
           console.log(`[AgentMemory:${this.agentId}] remember("${title}") → shared vault OK`);
+
+          // Incrementally update shared vault graph index so graph_query finds new memories
+          if (this.sharedVaultPath) {
+            getMemoryGraph(this.sharedVaultPath).catch((err) => {
+              console.warn(`[AgentMemory:${this.agentId}] Shared graph index update failed (non-fatal):`, err);
+            });
+          }
         } catch (err) {
           console.error(`[AgentMemory:${this.agentId}] Failed to write to shared vault:`, err);
         }
@@ -330,50 +354,92 @@ export class AgentMemory {
   /**
    * Query the knowledge graph directly.
    * Returns nodes, edges, stats for visualization or agent graph traversal.
+   * @param options.scope - 'personal' (default), 'shared', or 'all'
    */
-  async queryGraph(options?: { refresh?: boolean }): Promise<GraphQueryResult> {
-    if (!this.vault) {
-      return { 
-        nodes: [], 
-        edges: [], 
-        stats: { nodeCount: 0, edgeCount: 0, nodeTypeCounts: {}, edgeTypeCounts: {} } 
-      };
+  async queryGraph(options?: { refresh?: boolean; scope?: string }): Promise<GraphQueryResult> {
+    const scope = options?.scope || 'personal';
+    const emptyResult: GraphQueryResult = { 
+      nodes: [], 
+      edges: [], 
+      stats: { nodeCount: 0, edgeCount: 0, nodeTypeCounts: {}, edgeTypeCounts: {} } 
+    };
+
+    const mapGraph = (graph: MemoryGraph): GraphQueryResult => ({
+      nodes: graph.nodes.map(n => ({
+        id: n.id,
+        title: n.title,
+        type: n.type,
+        category: n.category,
+        degree: n.degree,
+        tags: n.tags,
+      })),
+      edges: graph.edges.map(e => ({
+        source: e.source,
+        target: e.target,
+        type: e.type,
+        label: e.label,
+      })),
+      stats: graph.stats,
+    });
+
+    const results: GraphQueryResult[] = [];
+
+    // Personal graph
+    if ((scope === 'personal' || scope === 'all') && this.vault) {
+      try {
+        const graph: MemoryGraph = await getMemoryGraph(this.vaultPath, options);
+        results.push(mapGraph(graph));
+      } catch (err) {
+        console.error(`[AgentMemory:${this.agentId}] Personal graph query failed:`, err);
+      }
     }
 
-    try {
-      const graph: MemoryGraph = await getMemoryGraph(this.vaultPath, options);
-      return {
-        nodes: graph.nodes.map(n => ({
-          id: n.id,
-          title: n.title,
-          type: n.type,
-          category: n.category,
-          degree: n.degree,
-          tags: n.tags,
-        })),
-        edges: graph.edges.map(e => ({
-          source: e.source,
-          target: e.target,
-          type: e.type,
-          label: e.label,
-        })),
-        stats: graph.stats,
-      };
-    } catch (err) {
-      console.error(`[AgentMemory:${this.agentId}] Graph query failed:`, err);
-      return { 
-        nodes: [], 
-        edges: [], 
-        stats: { nodeCount: 0, edgeCount: 0, nodeTypeCounts: {}, edgeTypeCounts: {} } 
-      };
+    // Shared graph
+    if ((scope === 'shared' || scope === 'all') && this.sharedVaultPath) {
+      try {
+        const graph: MemoryGraph = await getMemoryGraph(this.sharedVaultPath, options);
+        const mapped = mapGraph(graph);
+        // Tag shared nodes so callers can distinguish them
+        mapped.nodes = mapped.nodes.map(n => ({ ...n, id: n.id, title: `[shared] ${n.title}` }));
+        results.push(mapped);
+      } catch (err) {
+        console.error(`[AgentMemory:${this.agentId}] Shared graph query failed:`, err);
+      }
     }
+
+    if (results.length === 0) return emptyResult;
+    if (results.length === 1) return results[0];
+
+    // Merge results from both vaults
+    const merged: GraphQueryResult = {
+      nodes: results.flatMap(r => r.nodes),
+      edges: results.flatMap(r => r.edges),
+      stats: {
+        nodeCount: results.reduce((sum, r) => sum + r.stats.nodeCount, 0),
+        edgeCount: results.reduce((sum, r) => sum + r.stats.edgeCount, 0),
+        nodeTypeCounts: results.reduce((acc, r) => {
+          for (const [k, v] of Object.entries(r.stats.nodeTypeCounts)) {
+            acc[k] = (acc[k] || 0) + v;
+          }
+          return acc;
+        }, {} as Record<string, number>),
+        edgeTypeCounts: results.reduce((acc, r) => {
+          for (const [k, v] of Object.entries(r.stats.edgeTypeCounts)) {
+            acc[k] = (acc[k] || 0) + v;
+          }
+          return acc;
+        }, {} as Record<string, number>),
+      },
+    };
+    return merged;
   }
 
   /**
    * Get neighbors of a specific node in the graph (1-2 hops).
+   * @param scope - 'personal' (default), 'shared', or 'all'
    */
-  async getNeighbors(nodeId: string, maxHops: number = 1): Promise<GraphQueryResult> {
-    const fullGraph = await this.queryGraph();
+  async getNeighbors(nodeId: string, maxHops: number = 1, scope?: string): Promise<GraphQueryResult> {
+    const fullGraph = await this.queryGraph({ scope });
     if (fullGraph.nodes.length === 0) return fullGraph;
 
     // BFS from nodeId

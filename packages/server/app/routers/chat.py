@@ -38,7 +38,7 @@ router = APIRouter()
 class StartChatRequest(BaseModel):
     """Request to start a new chat session."""
 
-    model: Optional[str] = DEFAULT_CHAT_MODEL
+    model: Optional[str] = None
     # Optional text appended to the agent's system prompt (after their persona).
     # Use this to inject project context, onboarding summaries, etc.
     system_prompt_supplement: Optional[str] = None

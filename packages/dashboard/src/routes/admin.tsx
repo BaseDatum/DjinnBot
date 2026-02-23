@@ -50,6 +50,7 @@ import {
 import { SecretsSettings } from '@/components/settings/SecretsSettings';
 import { ModelProvidersSettings } from '@/components/settings/ModelProvidersSettings';
 import { MemorySearchSettings } from '@/components/settings/MemorySearchSettings';
+import { MemoryScoringSettings } from '@/components/settings/MemoryScoringSettings';
 import { NestedSidebar } from '@/components/layout/NestedSidebar';
 import type { NestedSidebarItem } from '@/components/layout/NestedSidebar';
 import { SearchableCombobox } from '@/components/ui/SearchableCombobox';
@@ -64,7 +65,7 @@ export const Route = createFileRoute('/admin')({
   component: AdminPage,
 });
 
-type AdminTab = 'users' | 'providers' | 'sharing' | 'memory' | 'models' | 'approvals' | 'runtime' | 'secrets' | 'waitlist' | 'email' | 'logs' | 'notifications' | 'usage';
+type AdminTab = 'users' | 'providers' | 'sharing' | 'memory' | 'memory-scoring' | 'models' | 'approvals' | 'runtime' | 'secrets' | 'waitlist' | 'email' | 'logs' | 'notifications' | 'usage';
 
 const NAV_ITEMS: NestedSidebarItem[] = [
   { key: 'notifications', label: 'Notifications', icon: Bell },
@@ -75,6 +76,7 @@ const NAV_ITEMS: NestedSidebarItem[] = [
   { key: 'providers', label: 'Instance Providers', icon: Layers },
   { key: 'sharing', label: 'Key Sharing', icon: Share2 },
   { key: 'memory', label: 'Memory Search', icon: Database },
+  { key: 'memory-scoring', label: 'Memory Scoring', icon: Brain },
   { key: 'models', label: 'Default Models', icon: Cpu },
   { key: 'approvals', label: 'Approvals', icon: CheckCircle },
   { key: 'runtime', label: 'Agent Runtime', icon: Container },
@@ -112,7 +114,8 @@ interface AdminNotification {
 
 const VALID_TABS = new Set<AdminTab>([
   'notifications', 'usage', 'users', 'providers', 'sharing', 'memory',
-  'models', 'approvals', 'runtime', 'secrets', 'waitlist', 'email', 'logs',
+  'memory-scoring', 'models', 'approvals', 'runtime', 'secrets', 'waitlist',
+  'email', 'logs',
 ]);
 
 function getTabFromHash(): AdminTab {
@@ -813,6 +816,24 @@ function AdminPage() {
               </p>
             </div>
             <MemorySearchSettings />
+          </div>
+        )}
+
+        {/* ── Memory Scoring ── */}
+        {activeTab === 'memory-scoring' && (
+          <div className="max-w-5xl mx-auto space-y-4">
+            <div>
+              <h2 className="text-lg font-semibold flex items-center gap-2">
+                <Brain className="h-5 w-5" />
+                Adaptive Memory Scoring
+              </h2>
+              <p className="text-sm text-muted-foreground mt-1">
+                Control how the retrieval outcome tracking system scores and re-ranks memories.
+                These parameters govern the learning rate, decay behavior, safety limits, and
+                blend formula used when agents recall memories.
+              </p>
+            </div>
+            <MemoryScoringSettings />
           </div>
         )}
 

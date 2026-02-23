@@ -279,6 +279,12 @@ export function useChatStream({
   const lastStreamIdRef = useRef('0-0');
   const resetStreamCursor = useCallback(() => {
     lastStreamIdRef.current = '0-0';
+    // Also reset the history gate and event queue so that replayed XRANGE
+    // events are properly queued and deduplicated against DB messages when
+    // markHistoryLoaded is called again (e.g. after a session restart where
+    // the sessionId stays the same).
+    historyLoadedRef.current = false;
+    eventQueueRef.current = [];
   }, []);
 
   // ── Stable callback refs for options ──────────────────────────────────────

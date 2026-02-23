@@ -36,16 +36,26 @@ function getCallStatus(call: ChatMessageData): ToolStatus {
 
 export function ToolCallGroupCard({ calls, hasRunning }: ToolCallGroupCardProps) {
   const [expanded, setExpanded] = useState(false);
+  // Track whether the user manually toggled expansion so we don't override it
+  const userToggledRef = useRef(false);
   // Auto-expand when a call starts running, auto-collapse when all finish
   const prevHasRunning = useRef(hasRunning);
+
+  const handleToggle = () => {
+    userToggledRef.current = true;
+    setExpanded(prev => !prev);
+  };
 
   useEffect(() => {
     if (hasRunning && !prevHasRunning.current) {
       // A new tool started — auto-expand
       setExpanded(true);
+      userToggledRef.current = false;
     } else if (!hasRunning && prevHasRunning.current && calls.length > 1) {
-      // All tools finished — auto-collapse (only for multi-call groups)
-      setExpanded(false);
+      // All tools finished — only auto-collapse if the user hasn't manually toggled
+      if (!userToggledRef.current) {
+        setExpanded(false);
+      }
     }
     prevHasRunning.current = hasRunning;
   }, [hasRunning, calls.length]);
@@ -101,7 +111,7 @@ export function ToolCallGroupCard({ calls, hasRunning }: ToolCallGroupCardProps)
         <div className={`my-2 rounded-md border ${borderColor} ${bgColor}`}>
           {/* Summary header */}
           <button
-            onClick={() => setExpanded(!expanded)}
+            onClick={handleToggle}
             className="flex w-full items-center gap-2 px-3 py-2 text-xs hover:bg-white/[0.02] transition-colors"
           >
             {expanded

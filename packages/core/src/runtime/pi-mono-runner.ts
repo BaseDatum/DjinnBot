@@ -38,7 +38,7 @@ export interface PiMonoRunnerConfig {
   /** Called when agent recalls something */
   onRecall?: (agentId: string, runId: string, stepId: string, query: string, scope: string, profile: string, budget: number) => Promise<string>;
   /** Called when agent queries the knowledge graph */
-  onGraphQuery?: (agentId: string, runId: string, stepId: string, action: string, nodeId?: string, query?: string, maxHops?: number) => Promise<string>;
+  onGraphQuery?: (agentId: string, runId: string, stepId: string, action: string, nodeId?: string, query?: string, maxHops?: number, scope?: string) => Promise<string>;
   /** Called when agent links two memories */
   onLinkMemory?: (agentId: string, runId: string, stepId: string, fromId: string, toId: string, relationType: string) => Promise<void>;
   /** Called when agent saves a checkpoint */
@@ -219,9 +219,9 @@ export class PiMonoRunner implements AgentRunner {
         }
         return 'Memory not available.';
       },
-      onGraphQuery: async (action, nodeId, query, maxHops) => {
+      onGraphQuery: async (action, nodeId, query, maxHops, scope) => {
         if (this.config.onGraphQuery) {
-          return await this.config.onGraphQuery(options.agentId, options.runId, options.stepId, action, nodeId, query, maxHops);
+          return await this.config.onGraphQuery(options.agentId, options.runId, options.stepId, action, nodeId, query, maxHops, scope);
         }
         return 'Graph query not available.';
       },

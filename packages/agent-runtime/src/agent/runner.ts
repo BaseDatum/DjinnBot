@@ -9,6 +9,7 @@ import { createMcpTools } from './mcp-tools.js';
 import { parseModelString, CUSTOM_PROVIDER_API } from '@djinnbot/core';
 import { buildAttachmentBlocks, type AttachmentMeta } from './attachments.js';
 import { authFetch } from '../api/auth-fetch.js';
+import { MemoryRetrievalTracker } from './djinnbot-tools/memory-scoring.js';
 
 export interface StepResult {
   output?: string;
@@ -123,9 +124,17 @@ export class ContainerAgentRunner {
   private turnToolCallCount = 0;
   private turnHasThinking = false;
 
+  // ── Memory retrieval tracking ──────────────────────────────────────────
+  /** Tracks which memories were recalled during this step for adaptive scoring. */
+  readonly retrievalTracker: MemoryRetrievalTracker;
+
   constructor(private options: ContainerAgentRunnerOptions) {
     ensureInitialized();
     ensureCustomProviderRegistered();
+    this.retrievalTracker = new MemoryRetrievalTracker(
+      options.agentId,
+      process.env.DJINNBOT_API_URL || 'http://api:8000',
+    );
   }
 
   /**
@@ -238,6 +247,7 @@ export class ContainerAgentRunner {
       isPipelineRun,
       isPulseSession,
       isOnboardingSession,
+      retrievalTracker: this.retrievalTracker,
       onComplete: (outputs, summary) => {
         this.stepCompleted = true;
         this.stepResult = {
@@ -573,6 +583,7 @@ export class ContainerAgentRunner {
     this.rawOutput = '';
     this.turnCount = 0;
     this.toolCallStartTimes.clear();
+    this.retrievalTracker.clear();
 
     try {
       const model = this.getModel();
@@ -681,10 +692,14 @@ export class ContainerAgentRunner {
 
       // Check results
       if (this.stepCompleted) {
+        // Flush memory retrieval tracking (fire-and-forget)
+        this.retrievalTracker.flush(this.stepResult.success).catch(() => {});
         return this.stepResult;
       }
 
       // Agent didn't call complete/fail — return raw output
+      // Flush memory retrieval tracking (fire-and-forget)
+      this.retrievalTracker.flush(true).catch(() => {});
       return {
         output: this.rawOutput,
         success: true,
@@ -693,6 +708,8 @@ export class ContainerAgentRunner {
       const error = err instanceof Error ? err.message : String(err);
       console.error(`[AgentRunner] Step failed:`, error);
 
+      // Flush memory retrieval tracking with failure outcome (fire-and-forget)
+      this.retrievalTracker.flush(false).catch(() => {});
       return {
         output: this.rawOutput,
         error,

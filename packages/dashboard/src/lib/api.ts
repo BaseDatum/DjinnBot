@@ -1643,8 +1643,8 @@ export interface OnboardingMessage {
   created_at: number;
 }
 
-export interface OnboardingDiagramState {
-  mermaid: string;
+export interface OnboardingLandingPageState {
+  html: string;
   caption?: string | null;
   last_agent_id?: string | null;
   version: number;
@@ -1659,7 +1659,7 @@ export interface OnboardingSession {
   current_agent_emoji: string;
   phase: 'intake' | 'strategy' | 'product' | 'architecture' | 'done';
   context: Record<string, unknown>;
-  diagram_state: OnboardingDiagramState | null;
+  landing_page_state: OnboardingLandingPageState | null;
   chat_session_id: string | null;
   model: string;
   created_at: number;

@@ -433,26 +433,29 @@ export class DjinnBot {
           return 'Memory search failed.';
         }
       },
-      onGraphQuery: async (agentId, runId, stepId, action, nodeId, query, maxHops) => {
+      onGraphQuery: async (agentId, runId, stepId, action, nodeId, query, maxHops, scope) => {
         if (!this.agentMemoryManager) return 'Memory not initialized.';
         try {
           const memory = await this.agentMemoryManager.get(agentId);
+          const graphScope = scope || 'personal';
           
           if (action === 'summary') {
-            const graph = await memory.queryGraph();
+            const graph = await memory.queryGraph({ scope: graphScope });
             return JSON.stringify(graph.stats, null, 2) + '\n\nTop nodes:\n' +
               graph.nodes.sort((a, b) => b.degree - a.degree).slice(0, 10)
                 .map(n => `- ${n.id} (${n.type}, ${n.degree} connections)`).join('\n');
           } else if (action === 'neighbors' && nodeId) {
-            const neighbors = await memory.getNeighbors(nodeId, maxHops || 1);
+            const neighbors = await memory.getNeighbors(nodeId, maxHops || 1, graphScope);
             return `Neighbors of ${nodeId} (${maxHops || 1} hops):\n` +
               neighbors.nodes.map(n => `- ${n.id} [${n.type}] "${n.title}"`).join('\n') + '\n\nEdges:\n' +
               neighbors.edges.map(e => `- ${e.source} → ${e.target} (${e.type})`).join('\n');
           } else if (action === 'search' && query) {
-            const graph = await memory.queryGraph();
+            const graph = await memory.queryGraph({ scope: graphScope });
+            const needle = query.toLowerCase();
             const matches = graph.nodes.filter(n =>
-              n.title.toLowerCase().includes(query.toLowerCase()) ||
-              n.id.toLowerCase().includes(query.toLowerCase())
+              n.title.toLowerCase().includes(needle) ||
+              n.id.toLowerCase().includes(needle) ||
+              n.tags?.some(t => t.toLowerCase().includes(needle))
             );
             return matches.length === 0 ? 'No matching nodes found.' :
               matches.map(n => `- ${n.id} [${n.type}] "${n.title}" (${n.degree} connections)`).join('\n');

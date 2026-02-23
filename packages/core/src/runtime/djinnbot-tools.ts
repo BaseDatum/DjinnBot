@@ -148,6 +148,11 @@ const GraphQueryParamsSchema = Type.Object({
     description: 'How many hops for neighbors (1-3)', 
     default: 1 
   })),
+  scope: Type.Optional(Type.Union([
+    Type.Literal('personal'),
+    Type.Literal('shared'),
+    Type.Literal('all'),
+  ], { default: 'personal', description: 'IMPORTANT: Set scope to "shared" to search the SHARED team vault (project knowledge visible to ALL agents), "all" to search BOTH personal and shared, or "personal" (default) for your own graph only. When looking for project-level knowledge, conventions, or decisions you MUST use scope="shared" or scope="all".' })),
 });
 type GraphQueryParams = Static<typeof GraphQueryParamsSchema>;
 
@@ -286,7 +291,7 @@ export interface DjinnBotToolCallbacks {
     links?: string[];
   }) => Promise<void>;
   onRecall?: (query: string, scope: string, profile: string, budget: number) => Promise<string>;
-  onGraphQuery?: (action: string, nodeId?: string, query?: string, maxHops?: number) => Promise<string>;
+  onGraphQuery?: (action: string, nodeId?: string, query?: string, maxHops?: number, scope?: string) => Promise<string>;
   onLinkMemory?: (fromId: string, toId: string, relationType: string) => Promise<void>;
   onCheckpoint?: (workingOn: string, focus?: string, decisions?: string[]) => Promise<void>;
   onMessageAgent?: (to: string, message: string, priority: string, type: string) => Promise<string>;
@@ -453,7 +458,7 @@ export function createDjinnBotTools(
     {
       name: 'graph_query',
       description:
-        'Query your knowledge graph directly. Get graph stats, explore neighbors of a node, or search for nodes by name. Useful for understanding connections and traversing your memory network.',
+        'Query your knowledge graph directly. IMPORTANT: By default this only searches your PERSONAL graph. To search project/team knowledge, you MUST pass scope="shared" or scope="all". Use scope="shared" for the shared team vault, scope="all" for both personal and shared, scope="personal" (default) for your own graph only.',
       label: 'graph_query',
       parameters: GraphQueryParamsSchema,
       execute: async (
@@ -473,7 +478,8 @@ export function createDjinnBotTools(
           typedParams.action,
           typedParams.nodeId,
           typedParams.query,
-          typedParams.maxHops
+          typedParams.maxHops,
+          typedParams.scope
         );
         return {
           content: [{ type: 'text', text: result }],

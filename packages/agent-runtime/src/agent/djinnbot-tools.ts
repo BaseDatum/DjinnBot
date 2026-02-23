@@ -5,6 +5,7 @@ import type { RequestIdRef } from './runner.js';
 import { createStepControlTools } from './djinnbot-tools/step-control.js';
 import { createMemoryTools } from './djinnbot-tools/memory.js';
 import { createMemoryGraphTools } from './djinnbot-tools/memory-graph.js';
+import { createMemoryContextTools } from './djinnbot-tools/memory-context.js';
 import { createMessagingTools } from './djinnbot-tools/messaging.js';
 import { createResearchTools } from './djinnbot-tools/research.js';
 import { createSkillsTools } from './djinnbot-tools/skills.js';
@@ -16,6 +17,7 @@ import { createSecretsTools } from './djinnbot-tools/secrets.js';
 import { createSlackTools } from './djinnbot-tools/slack.js';
 import { createSpawnExecutorTools } from './djinnbot-tools/spawn-executor.js';
 import { createWorkLedgerTools } from './djinnbot-tools/work-ledger.js';
+import type { MemoryRetrievalTracker } from './djinnbot-tools/memory-scoring.js';
 
 export interface DjinnBotToolsConfig {
   publisher: RedisPublisher;
@@ -59,6 +61,8 @@ export interface DjinnBotToolsConfig {
    * Onboarding tools are included only when true.
    */
   isOnboardingSession?: boolean;
+  /** Memory retrieval tracker for adaptive scoring. Shared with the runner. */
+  retrievalTracker?: MemoryRetrievalTracker;
 }
 
 export function createDjinnBotTools(config: DjinnBotToolsConfig): AgentTool[] {
@@ -66,14 +70,17 @@ export function createDjinnBotTools(config: DjinnBotToolsConfig): AgentTool[] {
     publisher, redis, requestIdRef, agentId, sessionId, vaultPath, sharedPath,
     onComplete, onFail, apiBaseUrl, pulseColumns,
     isOnboardingSession = false,
+    retrievalTracker,
   } = config;
 
   return [
     ...createStepControlTools({ onComplete, onFail }),
 
-    ...createMemoryTools({ publisher, agentId, vaultPath, sharedPath }),
+    ...createMemoryTools({ publisher, agentId, vaultPath, sharedPath, retrievalTracker }),
 
-    ...createMemoryGraphTools({ publisher, agentId, vaultPath }),
+    ...createMemoryGraphTools({ publisher, agentId, vaultPath, sharedPath }),
+
+    ...createMemoryContextTools({ agentId, vaultPath, sharedPath }),
 
     ...createMessagingTools({ publisher, requestIdRef, vaultPath }),
 

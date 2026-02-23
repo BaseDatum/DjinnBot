@@ -243,10 +243,10 @@ class OnboardingSession(Base):
     model: Mapped[str] = mapped_column(
         String(128), nullable=False, default="openrouter/anthropic/claude-sonnet-4-5"
     )
-    # JSON blob storing the evolving Mermaid diagram built collaboratively
+    # JSON blob storing the evolving landing page built collaboratively
     # by agents throughout the onboarding process:
-    # { "mermaid": "graph TD\n ...", "caption": "...", "last_agent_id": "stas", "version": 3 }
-    diagram_state: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # { "html": "<!DOCTYPE html>...", "caption": "...", "last_agent_id": "stas", "version": 3 }
+    landing_page_state: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     created_at: Mapped[int] = mapped_column(BigInteger, nullable=False)
     updated_at: Mapped[int] = mapped_column(BigInteger, nullable=False)

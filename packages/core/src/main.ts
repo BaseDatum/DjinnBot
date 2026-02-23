@@ -560,9 +560,15 @@ async function shutdown(signal: string): Promise<void> {
 /**
  * Run `clawvault graph --refresh` for the given agent vault.
  * Debounced per-agent so rapid dashboard saves don't stack up rebuilds.
+ *
+ * The shared vault uses a much longer debounce (15s) because during
+ * onboarding multiple agents write shared memories in quick succession
+ * and the graph rebuild is expensive. Personal vaults use a shorter
+ * debounce (3s) since writes are less frequent.
  */
 const graphRebuildTimers = new Map<string, ReturnType<typeof setTimeout>>();
-const GRAPH_REBUILD_DEBOUNCE_MS = 1500;
+const GRAPH_REBUILD_DEBOUNCE_MS = 3_000;
+const GRAPH_REBUILD_DEBOUNCE_SHARED_MS = 15_000;
 
 async function rebuildGraphIndex(agentId: string): Promise<void> {
   const { join } = await import('node:path');
@@ -593,12 +599,15 @@ async function rebuildGraphIndex(agentId: string): Promise<void> {
 function scheduleGraphRebuild(agentId: string): void {
   const existing = graphRebuildTimers.get(agentId);
   if (existing) clearTimeout(existing);
+  const debounceMs = agentId === 'shared'
+    ? GRAPH_REBUILD_DEBOUNCE_SHARED_MS
+    : GRAPH_REBUILD_DEBOUNCE_MS;
   const timer = setTimeout(() => {
     graphRebuildTimers.delete(agentId);
     rebuildGraphIndex(agentId).catch((err) =>
       console.error(`[Engine] Graph rebuild error for ${agentId}:`, err)
     );
-  }, GRAPH_REBUILD_DEBOUNCE_MS);
+  }, debounceMs);
   graphRebuildTimers.set(agentId, timer);
 }
 

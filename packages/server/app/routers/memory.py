@@ -447,18 +447,21 @@ class VaultWatcher:
         return {"nodes": [], "edges": [], "stats": {}}
 
     def _hash_vault(self) -> str:
+        """Hash based on markdown source files only.
+
+        IMPORTANT: Do NOT include graph-index.json here.  That file is a
+        derived artifact written by the engine after every rebuild.  Including
+        it creates a feedback loop: rebuild writes graph-index.json → mtime
+        changes → hash changes → triggers another rebuild → infinite loop.
+
+        The ``_graph_rebuilt_listener`` already handles notifying WebSocket
+        clients when a fresh graph index lands, so there is no need to
+        detect it via polling.
+        """
         h = hashlib.md5()
         if not os.path.isdir(self.vault_path):
             return ""
         try:
-            # Include graph-index.json mtime so we detect when the engine
-            # finishes rebuilding (it lives inside .clawvault/ which is
-            # excluded from the .md walk below).
-            graph_idx = os.path.join(self.vault_path, ".clawvault", "graph-index.json")
-            if os.path.isfile(graph_idx):
-                st = os.stat(graph_idx)
-                h.update(f"__graph_index__:{st.st_mtime_ns}".encode())
-
             for root_dir, dirs, files in os.walk(self.vault_path):
                 dirs[:] = [
                     d

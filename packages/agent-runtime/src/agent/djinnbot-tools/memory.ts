@@ -8,6 +8,7 @@ import { join, dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
 // @ts-ignore — clawvault is an ESM package declared in package.json; types resolve at build time
 import { ClawVault } from 'clawvault';
+import { MemoryRetrievalTracker } from './memory-scoring.js';
 
 const execAsync = promisify(exec);
 
@@ -72,12 +73,14 @@ export interface MemoryToolsConfig {
   agentId: string;
   vaultPath: string;
   sharedPath: string;
+  /** Optional retrieval tracker for adaptive memory scoring. */
+  retrievalTracker?: MemoryRetrievalTracker;
 }
 
 // ── Tool factories ─────────────────────────────────────────────────────────
 
 export function createMemoryTools(config: MemoryToolsConfig): AgentTool[] {
-  const { publisher, agentId, vaultPath, sharedPath } = config;
+  const { publisher, agentId, vaultPath, sharedPath, retrievalTracker } = config;
 
   // ── ClawVault instances (loaded once, reused per call) ──────────────────
   let personalVault: InstanceType<typeof ClawVault> | null = null;
@@ -161,7 +164,7 @@ export function createMemoryTools(config: MemoryToolsConfig): AgentTool[] {
 
     {
       name: 'recall',
-      description: 'Search memory for relevant information. Use scope="shared" to search team/project memories, scope="personal" for your own memories, scope="all" (default) for both.',
+      description: 'Full-text content search across your memories (BM25 keyword + semantic matching). Use this to find memories by their CONTENT — searches inside the body text of all memory files. For graph-aware context retrieval that also traverses wiki-link connections, use "context_query" instead. Scope: "all" (default) searches both personal and shared, "shared" for team vault only, "personal" for your own memories only.',
       label: 'recall',
       parameters: RecallParamsSchema,
       execute: async (
@@ -172,28 +175,46 @@ export function createMemoryTools(config: MemoryToolsConfig): AgentTool[] {
       ): Promise<AgentToolResult<VoidDetails>> => {
         const p = params as RecallParams;
         const scope = p.scope || 'all';
-        const sections: string[] = [];
 
-        const search = async (
+        // Collect all hits with metadata for adaptive score blending
+        interface ScoredHit {
+          memoryId: string;
+          title: string;
+          content: string;
+          rawScore: number;
+          blendedScore: number;
+          source: string; // 'personal' | 'shared'
+          retrievalSource: string; // 'bm25' | 'shared_bm25' | 'grep'
+        }
+        const allHits: ScoredHit[] = [];
+        const fallbackSections: string[] = [];
+
+        const searchVault = async (
           getVault: () => Promise<InstanceType<typeof ClawVault>>,
-          label: string,
+          source: string,
+          retrievalSource: string,
           fallbackDir: string,
         ): Promise<void> => {
           try {
             const vault = await getVault();
             const hits = await vault.query(p.query, { limit: 5 });
-            if (!hits.length) {
-              sections.push(`## ${label}`, 'No results found.');
-              return;
-            }
-            const formatted = hits.map((h: any) => {
-              const score = Math.round((h.score ?? 0) * 100);
+            for (const h of hits) {
+              const rawScore = h.score ?? 0;
               const title = h.document?.title ?? 'Untitled';
               const content = h.snippet ?? h.document?.content ?? '';
-              return `### ${title} (${score}%)\n${content}`;
-            });
-            sections.push(`## ${label}`, ...formatted);
+              const memoryId = h.document?.id ?? h.document?.title ?? title;
+              allHits.push({
+                memoryId,
+                title,
+                content,
+                rawScore,
+                blendedScore: rawScore, // Will be updated after adaptive lookup
+                source,
+                retrievalSource,
+              });
+            }
           } catch {
+            // Grep fallback — no scoring data available
             try {
               const safeQuery = p.query.replace(/"/g, '').replace(/`/g, '');
               const { stdout } = await execAsync(
@@ -202,22 +223,94 @@ export function createMemoryTools(config: MemoryToolsConfig): AgentTool[] {
               );
               const lines = stdout.split('\n').filter(Boolean);
               if (lines.length) {
-                sections.push(`## ${label} (grep fallback)`, ...lines.map((l: string) => `  ${l}`));
-              } else {
-                sections.push(`## ${label}`, 'No results found.');
+                fallbackSections.push(`## ${source === 'personal' ? 'Personal Memory' : 'Shared Knowledge'} (grep fallback)`, ...lines.map((l: string) => `  ${l}`));
               }
-            } catch {
-              sections.push(`## ${label}`, 'No results found.');
-            }
+            } catch { /* no results */ }
           }
         };
 
         if (scope === 'personal' || scope === 'all') {
-          await search(getPersonalVault, 'Personal Memory', vaultPath);
+          await searchVault(getPersonalVault, 'personal', 'bm25', vaultPath);
         }
 
         if (scope === 'shared' || scope === 'all') {
-          await search(getSharedVault, 'Shared Knowledge', sharedPath);
+          await searchVault(getSharedVault, 'shared', 'shared_bm25', sharedPath);
+        }
+
+        // ── Adaptive score blending ──────────────────────────────────────────
+        if (retrievalTracker && allHits.length > 0) {
+          try {
+            const memoryIds = allHits.map(h => h.memoryId);
+            const scores = await retrievalTracker.getAdaptiveScores(memoryIds);
+
+            for (const hit of allHits) {
+              const adaptive = scores.get(hit.memoryId);
+              hit.blendedScore = retrievalTracker.blendScore(
+                hit.rawScore,
+                adaptive?.adaptiveScore,
+              );
+
+              // Track this retrieval for later flush
+              retrievalTracker.track({
+                memoryId: hit.memoryId,
+                memoryTitle: hit.title,
+                query: p.query,
+                retrievalSource: hit.retrievalSource,
+                rawScore: hit.rawScore,
+              });
+            }
+          } catch (err) {
+            // Non-fatal — fall back to raw scores
+            console.warn('[recall] Adaptive score blending failed:', err);
+            // Still track retrievals even without score blending
+            for (const hit of allHits) {
+              retrievalTracker.track({
+                memoryId: hit.memoryId,
+                memoryTitle: hit.title,
+                query: p.query,
+                retrievalSource: hit.retrievalSource,
+                rawScore: hit.rawScore,
+              });
+            }
+          }
+        }
+
+        // ── Sort by blended score and format ─────────────────────────────────
+        allHits.sort((a, b) => b.blendedScore - a.blendedScore);
+
+        const sections: string[] = [];
+
+        // Group by source for display
+        const personalHits = allHits.filter(h => h.source === 'personal');
+        const sharedHits = allHits.filter(h => h.source === 'shared');
+
+        if (scope === 'personal' || scope === 'all') {
+          if (personalHits.length > 0) {
+            sections.push('## Personal Memory');
+            for (const h of personalHits) {
+              const pct = Math.round(h.blendedScore * 100);
+              sections.push(`### ${h.title} (${pct}%)\n${h.content}`);
+            }
+          } else {
+            sections.push('## Personal Memory', 'No results found.');
+          }
+        }
+
+        if (scope === 'shared' || scope === 'all') {
+          if (sharedHits.length > 0) {
+            sections.push('## Shared Knowledge');
+            for (const h of sharedHits) {
+              const pct = Math.round(h.blendedScore * 100);
+              sections.push(`### ${h.title} (${pct}%)\n${h.content}`);
+            }
+          } else {
+            sections.push('## Shared Knowledge', 'No results found.');
+          }
+        }
+
+        // Append any grep fallback results
+        if (fallbackSections.length > 0) {
+          sections.push(...fallbackSections);
         }
 
         return { content: [{ type: 'text', text: sections.join('\n\n') }], details: {} };

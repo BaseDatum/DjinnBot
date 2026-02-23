@@ -29,6 +29,7 @@ const execFileAsync = promisify(execFile);
 
 const CHANNEL = 'djinnbot:vault:updated';
 const DEBOUNCE_MS = 2000; // wait 2s after last write before embedding
+const DEBOUNCE_SHARED_MS = 10_000; // shared vault: 10s debounce — during onboarding many agents write rapidly
 const EMBED_TIMEOUT_MS = 120_000; // 2 min max per embed run
 const QMD_BIN = '/usr/local/bin/qmd';
 
@@ -96,6 +97,11 @@ export class VaultEmbedWatcher {
     const existing = this.debounceTimers.get(agentId);
     if (existing) clearTimeout(existing);
 
+    // Shared vault gets a longer debounce — during onboarding multiple agents
+    // write shared memories in rapid succession and we don't want to re-embed
+    // after every single write.
+    const debounceMs = agentId === 'shared' ? DEBOUNCE_SHARED_MS : DEBOUNCE_MS;
+
     const timer = setTimeout(() => {
       this.debounceTimers.delete(agentId);
       // Enqueue onto the serial chain — never run two qmd processes at once
@@ -104,7 +110,7 @@ export class VaultEmbedWatcher {
           console.error(`[VaultEmbedWatcher] Embed failed for ${agentId}:`, err);
         }),
       );
-    }, DEBOUNCE_MS);
+    }, debounceMs);
 
     this.debounceTimers.set(agentId, timer);
   }

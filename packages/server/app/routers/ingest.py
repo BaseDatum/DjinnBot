@@ -24,21 +24,53 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_async_session
 from app.models.chat import ChatSession, ChatMessage
+from app.models.settings import GlobalSetting
 from app import dependencies
 from app.logging_config import get_logger
 from app.utils import now_ms
+from app.constants import DEFAULT_CHAT_MODEL
+from app.services.agent_config import get_agent_config
 
 logger = get_logger(__name__)
 router = APIRouter()
 
 GRACE_AGENT_ID = "grace"
-GRACE_INGEST_MODEL = "anthropic/claude-sonnet-4"
 # Maximum time (seconds) to wait for Grace to finish processing before
 # returning a 202 Accepted with partial status.
 GRACE_RESPONSE_TIMEOUT_SECONDS = 120
 
 # Lock to prevent concurrent session creation races
 _session_creation_lock = asyncio.Lock()
+
+
+async def _resolve_grace_model(db: AsyncSession) -> str:
+    """Resolve the model for Grace: agent config.yml > instance default > hardcoded fallback.
+
+    Uses the same resolution chain as the dashboard chat endpoint so the
+    configured model is respected regardless of entry point.
+    """
+    # 1. Agent config.yml
+    try:
+        agent_config = await get_agent_config(GRACE_AGENT_ID)
+        model = agent_config.get("model") or None
+        if model:
+            return model
+    except Exception:
+        pass
+
+    # 2. Instance-level default from GlobalSetting
+    try:
+        result = await db.execute(
+            select(GlobalSetting).where(GlobalSetting.key == "defaultWorkingModel")
+        )
+        row = result.scalar_one_or_none()
+        if row and row.value and row.value.strip():
+            return row.value.strip()
+    except Exception:
+        pass
+
+    # 3. Hardcoded fallback
+    return DEFAULT_CHAT_MODEL
 
 
 # ============================================================================
@@ -116,12 +148,16 @@ class BriefingResponse(BaseModel):
 
 async def _get_or_create_grace_session(
     db: AsyncSession,
-) -> str:
+) -> tuple[str, str]:
     """Find an active Grace ingest session or create a new one.
 
     Reuses a running session if one exists to avoid container churn.
     Uses an asyncio lock to prevent concurrent creation races.
+
+    Returns (session_id, resolved_model).
     """
+    resolved_model = await _resolve_grace_model(db)
+
     async with _session_creation_lock:
         # Look for an existing running ingest session
         # Expire cached objects so we see the latest DB state
@@ -137,7 +173,7 @@ async def _get_or_create_grace_session(
 
         if existing:
             logger.info(f"Reusing existing Grace session: {existing.id}")
-            return existing.id
+            return existing.id, resolved_model
 
         # Create a new session
         now = now_ms()
@@ -147,7 +183,7 @@ async def _get_or_create_grace_session(
             id=session_id,
             agent_id=GRACE_AGENT_ID,
             status="starting",
-            model=GRACE_INGEST_MODEL,
+            model=resolved_model,
             created_at=now,
             last_activity_at=now,
         )
@@ -164,17 +200,19 @@ async def _get_or_create_grace_session(
                 "event": "chat:start",
                 "session_id": session_id,
                 "agent_id": GRACE_AGENT_ID,
-                "model": GRACE_INGEST_MODEL,
+                "model": resolved_model,
             },
         )
-        logger.info(f"Created new Grace session: {session_id}")
+        logger.info(
+            f"Created new Grace session: {session_id} with model: {resolved_model}"
+        )
 
     # Wait for the session to become ready (up to 30s) — outside the lock
     for _ in range(60):
         await asyncio.sleep(0.5)
         await db.refresh(chat_session)
         if chat_session.status in ("running", "ready"):
-            return session_id
+            return session_id, resolved_model
         if chat_session.status == "failed":
             raise HTTPException(
                 status_code=503,
@@ -191,6 +229,7 @@ async def _send_to_grace(
     session_id: str,
     message: str,
     db: AsyncSession,
+    model: str = DEFAULT_CHAT_MODEL,
 ) -> dict:
     """Send a message to Grace and wait for her response."""
     if not dependencies.redis_client:
@@ -218,7 +257,7 @@ async def _send_to_grace(
             session_id=session_id,
             role="assistant",
             content="",
-            model=GRACE_INGEST_MODEL,
+            model=model,
             created_at=now,
         )
     )
@@ -232,7 +271,7 @@ async def _send_to_grace(
             {
                 "type": "message",
                 "content": message,
-                "model": GRACE_INGEST_MODEL,
+                "model": model,
                 "message_id": assistant_msg_id,
                 "timestamp": now,
             }
@@ -270,6 +309,7 @@ async def _send_to_grace_streaming(
     session_id: str,
     message: str,
     db: AsyncSession,
+    model: str = DEFAULT_CHAT_MODEL,
 ):
     """Send a message to Grace and yield SSE token events as they arrive.
 
@@ -300,7 +340,7 @@ async def _send_to_grace_streaming(
             session_id=session_id,
             role="assistant",
             content="",
-            model=GRACE_INGEST_MODEL,
+            model=model,
             created_at=now,
         )
     )
@@ -314,7 +354,7 @@ async def _send_to_grace_streaming(
             {
                 "type": "message",
                 "content": message,
-                "model": GRACE_INGEST_MODEL,
+                "model": model,
                 "message_id": assistant_msg_id,
                 "timestamp": now,
             }
@@ -502,9 +542,9 @@ async def ingest_meeting(
     if not request.transcript.strip():
         raise HTTPException(status_code=400, detail="Transcript is required")
 
-    session_id = await _get_or_create_grace_session(db)
+    session_id, model = await _get_or_create_grace_session(db)
     prompt = _format_meeting_prompt(request)
-    result = await _send_to_grace(session_id, prompt, db)
+    result = await _send_to_grace(session_id, prompt, db, model=model)
 
     status_code = 200 if result["status"] == "processed" else 202
     return JSONResponse(content=result, status_code=status_code)
@@ -524,9 +564,9 @@ async def ingest_note(
     if not request.notes.strip():
         raise HTTPException(status_code=400, detail="Notes content is required")
 
-    session_id = await _get_or_create_grace_session(db)
+    session_id, model = await _get_or_create_grace_session(db)
     prompt = _format_note_prompt(request)
-    result = await _send_to_grace(session_id, prompt, db)
+    result = await _send_to_grace(session_id, prompt, db, model=model)
 
     status_code = 200 if result["status"] == "processed" else 202
     return JSONResponse(content=result, status_code=status_code)
@@ -550,9 +590,9 @@ async def ingest_dictation(
     if not request.text.strip():
         raise HTTPException(status_code=400, detail="Dictation text is required")
 
-    session_id = await _get_or_create_grace_session(db)
+    session_id, model = await _get_or_create_grace_session(db)
     prompt = _format_dictation_prompt(request)
-    result = await _send_to_grace(session_id, prompt, db)
+    result = await _send_to_grace(session_id, prompt, db, model=model)
 
     status_code = 200 if result["status"] == "processed" else 202
     return JSONResponse(content=result, status_code=status_code)
@@ -579,8 +619,8 @@ async def generate_briefing(
     )
 
     prompt = _format_briefing_prompt(request)
-    session_id = await _get_or_create_grace_session(db)
-    result = await _send_to_grace(session_id, prompt, db)
+    session_id, model = await _get_or_create_grace_session(db)
+    result = await _send_to_grace(session_id, prompt, db, model=model)
 
     briefing_text = result.get("reply") or ""
     return BriefingResponse(
@@ -611,11 +651,11 @@ async def chat_proxy(
         f"chat_proxy: message_len={len(request.message)} stream={request.stream}"
     )
 
-    session_id = await _get_or_create_grace_session(db)
+    session_id, model = await _get_or_create_grace_session(db)
 
     if request.stream:
         return StreamingResponse(
-            _send_to_grace_streaming(session_id, request.message, db),
+            _send_to_grace_streaming(session_id, request.message, db, model=model),
             media_type="text/event-stream",
             headers={
                 "Cache-Control": "no-cache",
@@ -624,5 +664,5 @@ async def chat_proxy(
             },
         )
 
-    result = await _send_to_grace(session_id, request.message, db)
+    result = await _send_to_grace(session_id, request.message, db, model=model)
     return result
