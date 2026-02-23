@@ -17,11 +17,13 @@ the planner submits a full DAG and the engine handles parallelism, dependency
 resolution, and cascade skipping automatically.
 """
 
+import asyncio
 import json
 import uuid
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from app import dependencies
@@ -254,6 +256,110 @@ async def cancel_swarm(swarm_id: str):
     except Exception as e:
         logger.error(f"Failed to cancel swarm: {e}")
         raise HTTPException(status_code=500, detail="Failed to send cancel command")
+
+
+@router.get("/swarm/{swarm_id}/stream")
+async def stream_swarm_events(swarm_id: str, request: Request):
+    """SSE endpoint — streams real-time swarm progress events.
+
+    On connect, emits the full current state as a 'state' event, then
+    subscribes to djinnbot:swarm:{swarm_id}:progress for live updates.
+    Sends keepalive pings every 15s. Closes when the swarm completes
+    or the client disconnects.
+
+    Event types:
+    - state: Full SwarmSessionState snapshot (sent on connect)
+    - swarm:task_started: A task executor was spawned
+    - swarm:task_completed: A task executor finished successfully
+    - swarm:task_failed: A task executor failed
+    - swarm:task_skipped: A task was skipped (dependency failed)
+    - swarm:completed: All tasks finished (success)
+    - swarm:failed: Swarm finished with failures
+    """
+    if not dependencies.redis_client:
+        raise HTTPException(status_code=503, detail="Redis not available")
+
+    async def event_generator():
+        pubsub = dependencies.redis_client.pubsub()
+        channel = f"djinnbot:swarm:{swarm_id}:progress"
+        state_key = f"djinnbot:swarm:{swarm_id}:state"
+
+        await pubsub.subscribe(channel)
+
+        try:
+            # Bootstrap: send current state snapshot so the client has
+            # the full picture immediately, even if events were missed.
+            raw_state = await dependencies.redis_client.get(state_key)
+            if raw_state:
+                state_data = (
+                    raw_state
+                    if isinstance(raw_state, str)
+                    else raw_state.decode("utf-8")
+                )
+                yield f"event: state\ndata: {state_data}\n\n"
+            else:
+                yield f"event: state\ndata: {json.dumps({'swarm_id': swarm_id, 'status': 'pending', 'tasks': []})}\n\n"
+
+            terminal = False
+            while not terminal:
+                # Check if client disconnected
+                if await request.is_disconnected():
+                    break
+
+                try:
+                    message = await asyncio.wait_for(
+                        pubsub.get_message(
+                            ignore_subscribe_messages=True, timeout=None
+                        ),
+                        timeout=15.0,
+                    )
+                    if message and message["type"] == "message":
+                        data = message["data"]
+                        if isinstance(data, bytes):
+                            data = data.decode("utf-8")
+                        yield f"data: {data}\n\n"
+
+                        # Check if this is a terminal event
+                        try:
+                            parsed = json.loads(data)
+                            evt_type = parsed.get("type", "")
+                            if evt_type in ("swarm:completed", "swarm:failed"):
+                                # Send one final full state snapshot
+                                final_state = await dependencies.redis_client.get(
+                                    state_key
+                                )
+                                if final_state:
+                                    fs = (
+                                        final_state
+                                        if isinstance(final_state, str)
+                                        else final_state.decode("utf-8")
+                                    )
+                                    yield f"event: state\ndata: {fs}\n\n"
+                                terminal = True
+                        except (json.JSONDecodeError, AttributeError):
+                            pass
+                    # No message within timeout — send keepalive
+                    else:
+                        yield ": ping\n\n"
+
+                except asyncio.TimeoutError:
+                    yield ": ping\n\n"
+
+        except asyncio.CancelledError:
+            raise
+        finally:
+            await pubsub.unsubscribe(channel)
+            await pubsub.close()
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 # ══════════════════════════════════════════════════════════════════════════
