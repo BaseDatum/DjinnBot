@@ -1,0 +1,75 @@
+import SwiftUI
+
+@main
+struct DialogueApp: App {
+    @StateObject private var documentManager = DocumentManager.shared
+    @StateObject private var appState = AppState.shared
+
+    var body: some Scene {
+        WindowGroup {
+            ContentView()
+                .environmentObject(documentManager)
+                .environmentObject(appState)
+        }
+        .commands {
+            CommandGroup(replacing: .newItem) {
+                Button("New Document") {
+                    appState.createAndOpenNewDocument()
+                }
+                .keyboardShortcut("n", modifiers: .command)
+            }
+            
+            CommandGroup(replacing: .saveItem) {
+                Button("Save") {
+                    appState.saveCurrentDocument()
+                }
+                .keyboardShortcut("s", modifiers: .command)
+            }
+        }
+
+        Settings {
+            SettingsView()
+        }
+    }
+}
+
+// MARK: - App State
+
+/// Central app state managing the currently open document.
+final class AppState: ObservableObject {
+    static let shared = AppState()
+
+    /// The document currently loaded in the editor.
+    @Published var currentDocument: BlockNoteDocument = .init()
+
+    /// The file URL of the currently open document (nil if unsaved).
+    @Published var currentFileURL: URL?
+
+    private init() {}
+
+    func openDocument(at url: URL) {
+        // Save current document before switching to prevent data loss
+        saveCurrentDocument()
+
+        guard let data = try? Data(contentsOf: url),
+              let file = try? BlockNoteFile.fromJSON(data) else {
+            print("[Dialogue] Failed to open document at \(url.path)")
+            return
+        }
+        currentDocument = BlockNoteDocument(file: file)
+        currentFileURL = url
+    }
+
+    func createAndOpenNewDocument(in folder: URL? = nil) {
+        if let url = DocumentManager.shared.createNewDocument(in: folder) {
+            openDocument(at: url)
+        }
+    }
+
+    func saveCurrentDocument() {
+        guard let url = currentFileURL,
+              let data = try? currentDocument.file.toJSON() else { return }
+        try? data.write(to: url, options: .atomic)
+        currentDocument.hasUnsavedChanges = false
+    }
+}
