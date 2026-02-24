@@ -169,6 +169,33 @@ final class StreamingChatService {
         return try JSONDecoder().decode(StartChatResponse.self, from: data)
     }
     
+    // MARK: - Model Providers
+    
+    /// GET /v1/settings/providers — fetch all configured model providers
+    func fetchModelProviders() async throws -> [ModelProvider] {
+        let url = URL(string: "\(baseURL)/settings/providers")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        authHeaders().forEach { request.setValue($1, forHTTPHeaderField: $0) }
+        
+        let (data, response) = try await session.data(for: request)
+        try validateHTTPResponse(response, data: data)
+        return try JSONDecoder().decode([ModelProvider].self, from: data)
+    }
+    
+    /// GET /v1/settings/providers/{providerId}/models — fetch models for a specific provider
+    func fetchProviderModels(providerId: String) async throws -> [ProviderModel] {
+        let url = URL(string: "\(baseURL)/settings/providers/\(providerId)/models")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        authHeaders().forEach { request.setValue($1, forHTTPHeaderField: $0) }
+        
+        let (data, response) = try await session.data(for: request)
+        try validateHTTPResponse(response, data: data)
+        let result = try JSONDecoder().decode(ProviderModelsResponse.self, from: data)
+        return result.models
+    }
+    
     // MARK: - SSE Event Stream
     
     /// Connect to the session SSE stream and call the handler for each event.

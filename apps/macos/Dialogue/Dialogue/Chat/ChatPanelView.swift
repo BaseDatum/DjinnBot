@@ -5,6 +5,8 @@ import SwiftUI
 struct ChatPanelView: View {
     @ObservedObject var manager: ChatSessionManager
     @Binding var isExpanded: Bool
+    /// A message passed from the collapsed toolbar to be sent once the panel is ready.
+    @Binding var pendingMessage: String?
     @State private var inputText: String = ""
     @FocusState private var isInputFocused: Bool
     
@@ -104,18 +106,38 @@ struct ChatPanelView: View {
     
     private func modelPicker(session: ChatSession) -> some View {
         Menu {
-            ForEach(manager.availableModels, id: \.self) { model in
-                Button {
-                    manager.updateModel(model)
-                } label: {
-                    HStack {
-                        Text(displayModelName(model))
-                        if model == session.model {
-                            Image(systemName: "checkmark")
+            if manager.providers.isEmpty {
+                Button("Loading providers...") {}
+                    .disabled(true)
+            } else {
+                ForEach(manager.providers) { provider in
+                    Menu(provider.name) {
+                        if let models = manager.providerModels[provider.providerId] {
+                            ForEach(models) { model in
+                                Button {
+                                    manager.updateModel(model.id)
+                                } label: {
+                                    HStack {
+                                        Text(model.name)
+                                        if model.id == session.model {
+                                            Image(systemName: "checkmark")
+                                        }
+                                    }
+                                }
+                            }
+                        } else {
+                            Button("Loading...") {}
+                                .disabled(true)
                         }
                     }
                 }
             }
+            
+            Divider()
+            
+            // Show current model as label
+            Button("Current: \(displayModelName(session.model))") {}
+                .disabled(true)
         } label: {
             HStack(spacing: 3) {
                 Image(systemName: "cpu")
@@ -133,6 +155,18 @@ struct ChatPanelView: View {
         }
         .menuStyle(.borderlessButton)
         .fixedSize()
+        .onAppear {
+            // Load providers when the picker appears
+            if manager.providers.isEmpty {
+                manager.loadProviders()
+            }
+        }
+        .onChange(of: manager.providers) { _, providers in
+            // Auto-load models for each configured provider
+            for provider in providers {
+                manager.loadModelsForProvider(provider.providerId)
+            }
+        }
     }
     
     // MARK: - Message List
@@ -257,6 +291,13 @@ struct ChatPanelView: View {
         .padding(.vertical, 10)
         .onAppear {
             isInputFocused = true
+            consumePendingMessage()
+        }
+        .onChange(of: manager.activeSession?.status) { _, newStatus in
+            // When session becomes ready/running, try to consume any pending message
+            if newStatus?.isActive == true {
+                consumePendingMessage()
+            }
         }
     }
     
@@ -265,17 +306,30 @@ struct ChatPanelView: View {
     private func send() {
         let text = inputText
         inputText = ""
+        sendText(text)
+    }
+    
+    /// Send a text message, auto-creating a session if needed.
+    private func sendText(_ text: String) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
         
-        // Auto-create session if none exists
         if manager.activeSession == nil {
             manager.createNewSession()
             // Wait briefly for session creation, then send
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                manager.sendMessage(text)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                manager.sendMessage(trimmed)
             }
         } else {
-            manager.sendMessage(text)
+            manager.sendMessage(trimmed)
         }
+    }
+    
+    /// Consume a pending message from the collapsed toolbar.
+    private func consumePendingMessage() {
+        guard let text = pendingMessage else { return }
+        pendingMessage = nil
+        sendText(text)
     }
     
     private func displayModelName(_ model: String) -> String {

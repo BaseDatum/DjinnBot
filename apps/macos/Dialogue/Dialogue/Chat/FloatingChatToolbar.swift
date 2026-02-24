@@ -18,6 +18,9 @@ struct FloatingChatToolbar: View {
     /// Input text for the collapsed bar's text field.
     @State private var collapsedInput: String = ""
     
+    /// Pending message to send once the panel is expanded and a session is ready.
+    @State private var pendingMessage: String? = nil
+    
     /// Track panel height for drag resizing.
     @State private var panelHeight: CGFloat = 400
     
@@ -43,7 +46,8 @@ struct FloatingChatToolbar: View {
                             // Full chat panel
                             ChatPanelView(
                                 manager: chatManager,
-                                isExpanded: $isExpanded
+                                isExpanded: $isExpanded,
+                                pendingMessage: $pendingMessage
                             )
                             .frame(height: min(panelHeight, maxHeight))
                         } else {
@@ -93,15 +97,15 @@ struct FloatingChatToolbar: View {
                     .foregroundStyle(.tertiary)
                 
                 TextField("Ask Dialogue AI...", text: $collapsedInput, onCommit: {
-                    if !collapsedInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    let trimmed = collapsedInput.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !trimmed.isEmpty {
                         expandAndSend()
+                    } else {
+                        expand()
                     }
                 })
                 .textFieldStyle(.plain)
                 .font(.subheadline)
-                .onTapGesture {
-                    expand()
-                }
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
@@ -123,17 +127,16 @@ struct FloatingChatToolbar: View {
                 }
             }
             
-            // New session button
+            // Expand chat / open panel button
             Button {
-                chatManager.createNewSession()
                 expand()
             } label: {
-                Image(systemName: "plus.circle")
+                Image(systemName: "bubble.left.and.bubble.right")
                     .font(.body)
                     .foregroundStyle(.secondary)
             }
             .buttonStyle(.borderless)
-            .help("New Chat Session")
+            .help("Open Chat Panel")
         }
         .padding(.horizontal, 16)
         .frame(height: 48)
@@ -167,19 +170,15 @@ struct FloatingChatToolbar: View {
     }
     
     private func expandAndSend() {
-        let text = collapsedInput
+        let text = collapsedInput.trimmingCharacters(in: .whitespacesAndNewlines)
         collapsedInput = ""
-        expand()
+        guard !text.isEmpty else { return }
         
-        // Auto-create session if needed
-        if chatManager.activeSession == nil {
-            chatManager.createNewSession()
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                chatManager.sendMessage(text)
-            }
-        } else {
-            chatManager.sendMessage(text)
-        }
+        // Store the message to be sent by ChatPanelView once it's visible and ready.
+        // This avoids the duplication bug where sending from the collapsed bar races
+        // with the expanded panel's own state management.
+        pendingMessage = text
+        expand()
     }
     
     /// Called from external keyboard shortcut (Cmd+K).

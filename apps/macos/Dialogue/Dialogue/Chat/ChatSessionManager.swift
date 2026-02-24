@@ -29,24 +29,29 @@ final class ChatSessionManager: ObservableObject {
         set { UserDefaults.standard.set(newValue, forKey: "chatAgentId") }
     }
     
-    /// Available models for the model picker.
-    let availableModels: [String] = [
-        "anthropic/claude-sonnet-4",
-        "anthropic/claude-opus-4",
-        "openrouter/moonshotai/kimi-k2.5",
-        "openrouter/google/gemini-2.5-pro",
-        "openrouter/openai/gpt-4o",
-    ]
+    /// Configured providers (fetched from the server).
+    @Published var providers: [ModelProvider] = []
+    
+    /// Models for the currently selected provider (fetched on demand).
+    @Published var providerModels: [String: [ProviderModel]] = [:]
+    
+    /// Whether providers are being loaded.
+    @Published var isLoadingProviders: Bool = false
     
     private let service = StreamingChatService.shared
     private var sseTask: Task<Void, Never>?
     private var statusPollTask: Task<Void, Never>?
+    
+    /// Throttle for UI updates during streaming — batches objectWillChange
+    /// notifications to ~30fps instead of firing on every token.
+    private var streamingUIUpdatePending = false
     
     private init() {}
     
     // MARK: - Session Lifecycle
     
     /// Create a new chat session with the Djinn backend.
+    /// Pass nil for model to let the backend use the agent's configured default.
     func createNewSession(model: String? = nil) {
         guard !isStartingSession else { return }
         guard KeychainManager.shared.hasAPIKey else {
@@ -59,16 +64,17 @@ final class ChatSessionManager: ObservableObject {
         
         Task {
             do {
+                // Pass nil model to let the agent's config.yml default take effect
                 let response = try await service.startSession(
                     agentId: defaultAgentId,
-                    model: model ?? availableModels.first
+                    model: model
                 )
                 
                 let session = ChatSession(
                     id: response.sessionId,
                     agentId: defaultAgentId,
                     title: "Chat \(sessions.count + 1)",
-                    model: model ?? availableModels.first ?? "anthropic/claude-sonnet-4",
+                    model: model ?? "default",
                     status: SessionStatus(rawValue: response.status) ?? .starting
                 )
                 
@@ -83,6 +89,39 @@ final class ChatSessionManager: ObservableObject {
                 isStartingSession = false
                 errorMessage = "Failed to start session: \(error.localizedDescription)"
                 print("[Chat] Start session error: \(error)")
+            }
+        }
+    }
+    
+    // MARK: - Provider / Model Loading
+    
+    /// Fetch configured providers from the server.
+    func loadProviders() {
+        guard !isLoadingProviders else { return }
+        isLoadingProviders = true
+        
+        Task {
+            do {
+                let fetched = try await service.fetchModelProviders()
+                providers = fetched.filter { $0.configured }
+                isLoadingProviders = false
+            } catch {
+                print("[Chat] Failed to load providers: \(error)")
+                isLoadingProviders = false
+            }
+        }
+    }
+    
+    /// Fetch models for a specific provider.
+    func loadModelsForProvider(_ providerId: String) {
+        guard providerModels[providerId] == nil else { return }
+        
+        Task {
+            do {
+                let models = try await service.fetchProviderModels(providerId: providerId)
+                providerModels[providerId] = models
+            } catch {
+                print("[Chat] Failed to load models for \(providerId): \(error)")
             }
         }
     }
@@ -260,6 +299,21 @@ final class ChatSessionManager: ObservableObject {
                 lastTool.toolResult = result
             }
             
+        case .stepEnd(let result, let success):
+            // step_end carries the complete response text. If streaming tokens were
+            // received via "output" events, the assistant message already has content.
+            // If they were missed (e.g. late SSE connect), fill from step_end result.
+            if success, let result = result, !result.isEmpty {
+                if let msg = session.messages.last(where: { $0.role == .assistant && $0.isStreaming }) {
+                    if msg.content.isEmpty {
+                        msg.content = result
+                    }
+                }
+            } else if !success, let result = result {
+                let errorMsg = ChatMessage(role: .error, content: result)
+                session.messages.append(errorMsg)
+            }
+            
         case .turnEnd:
             finalizeStreaming(in: session)
             
@@ -292,14 +346,28 @@ final class ChatSessionManager: ObservableObject {
     private func appendToStreamingMessage(_ text: String, in session: ChatSession) {
         if let msg = session.messages.last(where: { $0.role == .assistant && $0.isStreaming }) {
             msg.content += text
+            scheduleStreamingUIUpdate(for: session)
         }
     }
     
     /// Append thinking text to the last assistant message.
     private func appendThinking(_ text: String, in session: ChatSession) {
-        // Find or create a thinking message before the current streaming assistant message
         if let msg = session.messages.last(where: { $0.role == .assistant && $0.isStreaming }) {
             msg.thinkingContent = (msg.thinkingContent ?? "") + text
+            scheduleStreamingUIUpdate(for: session)
+        }
+    }
+    
+    /// Throttled UI update during streaming (~30fps).
+    /// Mutating a @Published property on a reference-type element inside a @Published
+    /// array does NOT trigger the array's publisher — SwiftUI won't re-render the
+    /// message list unless we signal manually. We batch these to avoid per-token jank.
+    private func scheduleStreamingUIUpdate(for session: ChatSession) {
+        guard !streamingUIUpdatePending else { return }
+        streamingUIUpdatePending = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.033) { [weak self] in
+            self?.streamingUIUpdatePending = false
+            session.objectWillChange.send()
         }
     }
     
@@ -335,6 +403,10 @@ final class ChatSessionManager: ObservableObject {
                     }
                     
                     if status.status == "running" || status.status == "ready" {
+                        // Update model from backend (resolves "default" to actual model)
+                        if let model = status.model, !model.isEmpty {
+                            session.model = model
+                        }
                         // Session is ready — connect SSE
                         connectSSE(for: session)
                         return

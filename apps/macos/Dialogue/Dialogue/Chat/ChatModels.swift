@@ -137,6 +137,7 @@ enum DjinnSSEEvent {
     case thinkingDelta(text: String)
     case toolStart(toolName: String, toolCallId: String?)
     case toolEnd(toolCallId: String?, result: String?)
+    case stepEnd(result: String?, success: Bool)
     case turnEnd
     case responseAborted
     case sessionComplete
@@ -160,8 +161,9 @@ enum DjinnSSEEvent {
             let sessionId = json["session_id"] as? String ?? ""
             return .connected(sessionId: sessionId)
             
-        case "text_delta", "delta":
-            if let text = eventData["text"] as? String ?? eventData["content"] as? String ?? json["text"] as? String {
+        case "text_delta", "delta", "output":
+            // The engine sends "output" events with data.content or data.stream
+            if let text = eventData["content"] as? String ?? eventData["stream"] as? String ?? eventData["text"] as? String ?? json["text"] as? String {
                 return .textDelta(text: text)
             }
             // Fallback: check top-level content field
@@ -171,7 +173,8 @@ enum DjinnSSEEvent {
             return nil
             
         case "thinking_delta", "thinking":
-            if let text = eventData["text"] as? String ?? json["thinking"] as? String {
+            // The engine sends "thinking" events with data.thinking or data.text
+            if let text = eventData["thinking"] as? String ?? eventData["text"] as? String ?? json["thinking"] as? String {
                 return .thinkingDelta(text: text)
             }
             return nil
@@ -185,6 +188,11 @@ enum DjinnSSEEvent {
             let callId = eventData["tool_call_id"] as? String ?? eventData["id"] as? String
             let result = eventData["result"] as? String ?? eventData["output"] as? String
             return .toolEnd(toolCallId: callId, result: result)
+            
+        case "step_end":
+            let result = eventData["result"] as? String
+            let success = eventData["success"] as? Bool ?? true
+            return .stepEnd(result: result, success: success)
             
         case "turn_end", "completed":
             return .turnEnd
@@ -256,4 +264,32 @@ struct ChatSessionInfo: Codable {
     let created_at: Int
     let last_activity_at: Int
     let message_count: Int?
+}
+
+// MARK: - Model Provider Types
+
+/// A configured model provider from GET /v1/settings/providers
+struct ModelProvider: Codable, Identifiable, Equatable {
+    let providerId: String
+    let name: String
+    let description: String
+    let configured: Bool
+    let enabled: Bool
+    let models: [ProviderModel]
+    
+    var id: String { providerId }
+}
+
+/// A model available from a provider
+struct ProviderModel: Codable, Identifiable, Equatable {
+    let id: String
+    let name: String
+    let description: String?
+    let reasoning: Bool?
+}
+
+/// Response from GET /v1/settings/providers/{providerId}/models
+struct ProviderModelsResponse: Codable {
+    let models: [ProviderModel]
+    let source: String // "live" or "static"
 }
