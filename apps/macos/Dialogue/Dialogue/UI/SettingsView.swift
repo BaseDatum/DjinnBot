@@ -7,7 +7,8 @@ struct SettingsView: View {
     @State private var showKey: Bool = false
     @State private var saveStatus: SaveStatus = .idle
     @State private var testStatus: TestStatus = .idle
-    @State private var endpointURL: String = UserDefaults.standard.string(forKey: "aiEndpoint") ?? "https://api.openai.com/v1/chat/completions"
+    @State private var endpointURL: String = UserDefaults.standard.string(forKey: "aiEndpoint") ?? "https://localhost:8000/v1"
+    @State private var agentId: String = UserDefaults.standard.string(forKey: "chatAgentId") ?? "chieko"
 
     @Environment(\.dismiss) private var dismiss
 
@@ -32,8 +33,22 @@ struct SettingsView: View {
                 }
 
                 // Endpoint URL (above API key)
-                TextField("Endpoint URL", text: $endpointURL)
-                    .textFieldStyle(.roundedBorder)
+                HStack {
+                    TextField("Endpoint URL", text: $endpointURL, prompt: Text("https://your-server.example.com/v1"))
+                        .textFieldStyle(.roundedBorder)
+                    Text("Base URL ending in /v1")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+
+                // Agent ID for chat (Phase 3)
+                HStack {
+                    TextField("Chat Agent ID", text: $agentId)
+                        .textFieldStyle(.roundedBorder)
+                    Text("Used for AI Chat sessions")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
 
                 // API Key field
                 HStack {
@@ -125,9 +140,33 @@ struct SettingsView: View {
                     }
                 }
             }
+
+            Section {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Voice Profiles")
+                        .font(.headline)
+
+                    Text("Rebuild voice profiles if speaker recognition accuracy has degraded after a model update.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    HStack {
+                        Text("\(VoiceProfileManager.shared.profiles.count) profile(s) enrolled")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+
+                        Spacer()
+
+                        Button("Re-enroll Voice...") {
+                            NotificationCenter.default.post(name: .reenrollVoice, object: nil)
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                }
+            }
         }
         .formStyle(.grouped)
-        .frame(width: 520, height: 400)
+        .frame(width: 520, height: 450)
         .onAppear(perform: loadExistingKey)
     }
 
@@ -145,6 +184,7 @@ struct SettingsView: View {
         do {
             try KeychainManager.shared.saveAPIKey(apiKey)
             UserDefaults.standard.set(endpointURL, forKey: "aiEndpoint")
+            UserDefaults.standard.set(agentId, forKey: "chatAgentId")
             hasExistingKey = true
             saveStatus = .saved
 
@@ -172,24 +212,18 @@ struct SettingsView: View {
     private func testConnection() {
         testStatus = .testing
 
-        guard let url = URL(string: endpointURL) else {
+        // Test against the Djinn /v1/status endpoint
+        let base = endpointURL.hasSuffix("/") ? String(endpointURL.dropLast()) : endpointURL
+        guard let url = URL(string: "\(base)/status") else {
             testStatus = .error("Invalid URL")
             return
         }
 
         var request = URLRequest(url: url)
-        request.httpMethod = "POST"
+        request.httpMethod = "GET"
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.timeoutInterval = 10
-
-        // Minimal chat completions request to test connectivity
-        let body: [String: Any] = [
-            "model": "gpt-4o-mini",
-            "messages": [["role": "user", "content": "Say hi"]],
-            "max_tokens": 1
-        ]
-        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
 
         URLSession.shared.dataTask(with: request) { _, response, error in
             DispatchQueue.main.async {

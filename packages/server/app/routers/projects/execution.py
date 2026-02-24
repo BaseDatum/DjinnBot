@@ -1,6 +1,5 @@
 """Task execution engine endpoints."""
 
-import asyncio
 import json
 import re
 from typing import Optional
@@ -22,7 +21,6 @@ from app.models import (
 from app import dependencies
 from app.utils import now_ms, gen_id
 from app.logging_config import get_logger
-from app.github_helper import github_helper
 from app.auth.dependencies import get_current_user, AuthUser
 from ._common import (
     get_project_or_404,
@@ -30,6 +28,9 @@ from ._common import (
     _serialize_task,
     _publish_event,
     _validate_pipeline_exists,
+    get_valid_statuses_for_project,
+    get_project_semantics,
+    get_semantic_statuses,
 )
 
 logger = get_logger(__name__)
@@ -47,6 +48,12 @@ class ExecuteTaskRequest(BaseModel):
     context: Optional[str] = None  # Additional context for the run
     modelOverride: Optional[str] = None  # Override agent/pipeline model for this run
     keyUserId: Optional[str] = None  # Override whose API keys to use (user ID)
+
+
+class ExecuteAgentRequest(BaseModel):
+    agentId: str  # Agent to execute this task
+    modelOverride: Optional[str] = None  # Override the agent's default model
+    keyUserId: Optional[str] = None  # Override whose API keys to use
 
 
 class ClaimTaskRequest(BaseModel):
@@ -206,9 +213,8 @@ async def _recompute_task_readiness(
 ):
     """
     After a task status changes, recompute readiness/blocking for dependent tasks.
-    - If changed_task_id is now 'done': check dependents, auto-ready if all deps met
-    - If changed_task_id is now 'failed': cascade-block dependents
-    - If changed_task_id moves OUT of 'failed': unblock dependents
+    Uses project status semantics to determine terminal_done, terminal_fail, and blocked
+    statuses dynamically instead of hardcoding "done"/"failed"/"blocked".
     """
     logger.debug(
         f"Recomputing task readiness: project_id={project_id}, task_id={changed_task_id}, new_status={new_status}"
@@ -216,7 +222,14 @@ async def _recompute_task_readiness(
     now = now_ms()
     events = []  # Collect events to publish
 
-    if new_status == "done":
+    # Resolve semantic status sets for this project
+    semantics = await get_project_semantics(session, project_id)
+    terminal_done = get_semantic_statuses(semantics, "terminal_done")
+    terminal_fail = get_semantic_statuses(semantics, "terminal_fail")
+    blocked_statuses = get_semantic_statuses(semantics, "blocked")
+    initial_statuses = get_semantic_statuses(semantics, "initial")
+
+    if new_status in terminal_done:
         # Find tasks that depend on the completed task (where completed task is from_task_id)
         result = await session.execute(
             select(DependencyEdge.to_task_id).where(
@@ -237,7 +250,7 @@ async def _recompute_task_readiness(
                 )
             )
             blocking_deps = dep_result.all()
-            all_done = all(status == "done" for _, status in blocking_deps)
+            all_done = all(status in terminal_done for _, status in blocking_deps)
 
             if all_done:
                 # Get current task status
@@ -245,25 +258,56 @@ async def _recompute_task_readiness(
                     select(Task).where(Task.id == dep_id)
                 )
                 task = task_result.scalar_one_or_none()
-                if task and task.status in ("backlog", "planning", "blocked"):
-                    # Find the "Ready" column
-                    ready_col_result = await session.execute(
-                        select(KanbanColumn)
-                        .where(KanbanColumn.project_id == project_id)
-                        .order_by(KanbanColumn.position)
-                    )
-                    ready_col = None
-                    for col in ready_col_result.scalars().all():
-                        statuses = (
-                            json.loads(col.task_statuses) if col.task_statuses else []
+                # Unblock if task is in initial, blocked, or other non-terminal statuses
+                non_terminal = (
+                    initial_statuses | blocked_statuses | {"planning", "planned", "ux"}
+                )
+                if task and (
+                    task.status in non_terminal or task.status in blocked_statuses
+                ):
+                    # Restore to pre-block status if available, otherwise default to "ready"
+                    try:
+                        meta = (
+                            json.loads(task.task_metadata) if task.task_metadata else {}
                         )
-                        if "ready" in statuses:
-                            ready_col = col
-                            break
+                    except (json.JSONDecodeError, TypeError):
+                        meta = {}
 
-                    if ready_col:
-                        task.status = "ready"
-                        task.column_id = ready_col.id
+                    restore_status = meta.pop("pre_block_status", "ready")
+                    restore_column_id = meta.pop("pre_block_column_id", None)
+                    task.task_metadata = json.dumps(meta)
+
+                    # Find the column for the restored status
+                    target_col = None
+                    if restore_column_id:
+                        col_result = await session.execute(
+                            select(KanbanColumn).where(
+                                KanbanColumn.id == restore_column_id,
+                                KanbanColumn.project_id == project_id,
+                            )
+                        )
+                        target_col = col_result.scalar_one_or_none()
+
+                    # Fallback: find column by status
+                    if not target_col:
+                        col_result = await session.execute(
+                            select(KanbanColumn)
+                            .where(KanbanColumn.project_id == project_id)
+                            .order_by(KanbanColumn.position)
+                        )
+                        for col in col_result.scalars().all():
+                            statuses = (
+                                json.loads(col.task_statuses)
+                                if col.task_statuses
+                                else []
+                            )
+                            if restore_status in statuses:
+                                target_col = col
+                                break
+
+                    if target_col:
+                        task.status = restore_status
+                        task.column_id = target_col.id
                         task.updated_at = now
                         events.append(
                             (
@@ -271,16 +315,17 @@ async def _recompute_task_readiness(
                                 {
                                     "projectId": project_id,
                                     "taskId": dep_id,
-                                    "status": "ready",
+                                    "status": restore_status,
                                     "reason": "all_dependencies_met",
                                 },
                             )
                         )
 
-    elif new_status == "failed":
+    elif new_status in terminal_fail:
         # Cascade: block all downstream tasks (recursive)
         to_block = []
         visited = set()
+        all_terminal = terminal_done | terminal_fail
 
         async def find_downstream(task_id):
             result = await session.execute(
@@ -295,12 +340,12 @@ async def _recompute_task_readiness(
             for dep_id in dep_ids:
                 if dep_id not in visited:
                     visited.add(dep_id)
-                    # Only block tasks that aren't already done or failed
+                    # Only block tasks that aren't already in a terminal state
                     task_result = await session.execute(
                         select(Task.status).where(Task.id == dep_id)
                     )
                     task_status = task_result.scalar_one_or_none()
-                    if task_status and task_status not in ("done", "failed"):
+                    if task_status and task_status not in all_terminal:
                         to_block.append(dep_id)
                         await find_downstream(dep_id)
 
@@ -320,13 +365,13 @@ async def _recompute_task_readiness(
                     blocked_col = col
                     break
 
-            # If no blocked column, try the Failed column
+            # If no blocked column, try finding a terminal_fail column
             if not blocked_col:
                 for col in blocked_col_result.scalars().all():
                     statuses = (
                         json.loads(col.task_statuses) if col.task_statuses else []
                     )
-                    if "failed" in statuses:
+                    if any(s in terminal_fail for s in statuses):
                         blocked_col = col
                         break
 
@@ -337,6 +382,21 @@ async def _recompute_task_readiness(
                     )
                     task = task_result.scalar_one_or_none()
                     if task:
+                        # Store pre-block status so we can restore it when
+                        # the dependency is resolved (instead of always
+                        # going to "ready").
+                        try:
+                            meta = (
+                                json.loads(task.task_metadata)
+                                if task.task_metadata
+                                else {}
+                            )
+                        except (json.JSONDecodeError, TypeError):
+                            meta = {}
+                        meta["pre_block_status"] = task.status
+                        meta["pre_block_column_id"] = task.column_id
+                        task.task_metadata = json.dumps(meta)
+
                         task.status = "blocked"
                         task.column_id = blocked_col.id
                         task.updated_at = now
@@ -352,7 +412,7 @@ async def _recompute_task_readiness(
                             )
                         )
 
-    elif new_status in ("in_progress", "backlog", "planning", "ready"):
+    elif new_status not in (terminal_done | terminal_fail | blocked_statuses):
         # Task moved out of failed/blocked — re-check if dependents should be unblocked
         # Only unblock tasks that were blocked due to this specific task
         result = await session.execute(
@@ -367,7 +427,7 @@ async def _recompute_task_readiness(
         for dep_id in dependent_ids:
             task_result = await session.execute(select(Task).where(Task.id == dep_id))
             task = task_result.scalar_one_or_none()
-            if task and task.status == "blocked":
+            if task and task.status in blocked_statuses:
                 # Check if there are other failed/blocked blocking deps
                 dep_result = await session.execute(
                     select(DependencyEdge.from_task_id, Task.status)
@@ -379,13 +439,24 @@ async def _recompute_task_readiness(
                 )
                 blocking_deps = dep_result.all()
                 has_failed = any(
-                    status in ("failed", "blocked") for _, status in blocking_deps
+                    status in (terminal_fail | blocked_statuses)
+                    for _, status in blocking_deps
                 )
 
                 if not has_failed:
-                    # Check if all deps are done → ready, otherwise → backlog
-                    all_done = all(status == "done" for _, status in blocking_deps)
-                    new_task_status = "ready" if all_done else "backlog"
+                    # Check if all deps are done → first claimable status, otherwise → first initial status
+                    all_done = all(
+                        status in terminal_done for _, status in blocking_deps
+                    )
+                    claimable = get_semantic_statuses(semantics, "claimable")
+                    # Pick a sensible restore status
+                    new_task_status = (
+                        (list(claimable)[0] if claimable else "ready")
+                        if all_done
+                        else (
+                            list(initial_statuses)[0] if initial_statuses else "backlog"
+                        )
+                    )
 
                     # Find appropriate column
                     col_result = await session.execute(
@@ -444,11 +515,17 @@ async def execute_task(
     )
     task = await get_task_or_404(session, project_id, task_id)
 
-    # Check task is in an executable state
-    if task.status not in ("ready", "backlog", "planning"):
+    # Check task is in an executable state — use project semantics
+    exec_semantics = await get_project_semantics(session, project_id)
+    executable_statuses = get_semantic_statuses(
+        exec_semantics, "claimable"
+    ) | get_semantic_statuses(exec_semantics, "initial")
+    if not executable_statuses:
+        executable_statuses = {"ready", "backlog", "planning"}
+    if task.status not in executable_statuses:
         raise HTTPException(
             status_code=400,
-            detail=f"Cannot execute task in '{task.status}' status. Must be ready, backlog, or planning.",
+            detail=f"Cannot execute task in '{task.status}' status. Must be one of: {sorted(executable_statuses)}",
         )
 
     # Determine which pipeline to use (priority order)
@@ -500,7 +577,10 @@ async def execute_task(
 
     # Determine who initiated this run: explicit keyUserId override > current user > None
     # Engine/service callers (pulse tools) have is_service=True and store None.
-    initiated_by = req.keyUserId or (user.id if not user.is_service else None)
+    # Anonymous user (auth disabled) doesn't exist in users table, so skip.
+    initiated_by = req.keyUserId or (
+        user.id if not user.is_service and user.id != "anonymous" else None
+    )
 
     # Execute the task using shared helper
     result = await _execute_single_task(
@@ -514,6 +594,167 @@ async def execute_task(
     )
 
     return {"status": "executing", **result}
+
+
+@router.post("/{project_id}/tasks/{task_id}/execute-agent")
+async def execute_task_with_agent(
+    project_id: str,
+    task_id: str,
+    req: ExecuteAgentRequest,
+    session: AsyncSession = Depends(get_async_session),
+    user: AuthUser = Depends(get_current_user),
+):
+    """Execute a task by spawning a standalone agent session.
+
+    Creates a single-step run using the 'execute' pipeline with the specified
+    agent's identity. Includes pre-flight memory injection and task branch
+    resolution (same as spawn_executor but user-facing).
+    """
+    from app.routers.spawn_executor import _build_lessons_section
+
+    logger.info(
+        f"Execute-agent: project={project_id}, task={task_id}, agent={req.agentId}"
+    )
+    task = await get_task_or_404(session, project_id, task_id)
+
+    # Check task is in an executable state
+    exec_semantics = await get_project_semantics(session, project_id)
+    executable_statuses = get_semantic_statuses(
+        exec_semantics, "claimable"
+    ) | get_semantic_statuses(exec_semantics, "initial")
+    if not executable_statuses:
+        executable_statuses = {"ready", "backlog", "planning"}
+    if task.status not in executable_statuses:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot execute task in '{task.status}' status. Must be one of: {sorted(executable_statuses)}",
+        )
+
+    now = now_ms()
+
+    # Assign agent to task
+    task.assigned_agent = req.agentId
+    task.updated_at = now
+
+    # Build execution prompt from task
+    task_desc = (
+        f"[Project: {project_id}] [Task: {task.title}]\n\n{task.description or ''}"
+    )
+
+    # Pre-flight memory injection
+    task_tags = json.loads(task.tags) if task.tags else []
+    lessons = _build_lessons_section(
+        req.agentId, task.title or "", task_tags, task.description or ""
+    )
+    if lessons:
+        task_desc += f"\n\n{lessons}"
+
+    # Resolve task branch — only for projects with a git repository.
+    # Non-git projects skip worktree creation in the engine; setting a task_branch
+    # would trigger a safety check that verifies a git remote exists and fail.
+    project = await get_project_or_404(session, project_id)
+    task_branch = None
+    if project.repository:
+        task_branch = _get_task_branch(task)
+        if not task_branch:
+            task_branch = _task_branch_name(task.id, task.title)
+            _set_task_branch(task, task_branch)
+
+    # Store metadata in human_context for the engine
+    human_context = json.dumps(
+        {
+            "spawn_executor": True,
+            "planner_agent_id": req.agentId,
+            "project_id": project_id,
+            "task_id": task_id,
+            "memory_injection": bool(lessons),
+        }
+    )
+
+    # Determine initiator — skip for anonymous users (auth disabled)
+    initiated_by = req.keyUserId or (
+        user.id if not user.is_service and user.id != "anonymous" else None
+    )
+
+    # Create the run using 'execute' pipeline (single-step)
+    run_id = gen_id("run_")
+    run = Run(
+        id=run_id,
+        pipeline_id="execute",
+        project_id=project_id,
+        task_description=task_desc,
+        status="pending",
+        outputs="{}",
+        human_context=human_context,
+        initiated_by_user_id=initiated_by,
+        model_override=req.modelOverride,
+        task_branch=task_branch,
+        created_at=now,
+        updated_at=now,
+    )
+    session.add(run)
+
+    # Update task: link to run, move to in_progress
+    result = await session.execute(
+        select(KanbanColumn)
+        .where(KanbanColumn.project_id == project_id)
+        .order_by(KanbanColumn.position)
+    )
+    columns = result.scalars().all()
+    in_progress_col = None
+    for col in columns:
+        statuses = json.loads(col.task_statuses) if col.task_statuses else []
+        if "in_progress" in statuses:
+            in_progress_col = col
+            break
+
+    task.run_id = run_id
+    task.status = "in_progress"
+    task.pipeline_id = "execute"
+    task.updated_at = now
+    if in_progress_col:
+        task.column_id = in_progress_col.id
+
+    # Record in task_runs history
+    task_run = TaskRun(
+        task_id=task.id,
+        run_id=run_id,
+        pipeline_id="execute",
+        status="running",
+        started_at=now,
+    )
+    session.add(task_run)
+
+    await session.commit()
+
+    # Dispatch to engine via Redis
+    if dependencies.redis_client:
+        try:
+            await dependencies.redis_client.xadd(
+                "djinnbot:events:new_runs",
+                {"run_id": run_id, "pipeline_id": "execute"},
+            )
+        except Exception as e:
+            logger.warning(f"Failed to dispatch agent run to Redis: {e}")
+
+        await _publish_event(
+            "TASK_EXECUTION_STARTED",
+            {
+                "projectId": project_id,
+                "taskId": task_id,
+                "runId": run_id,
+                "agentId": req.agentId,
+                "pipelineId": "execute",
+            },
+        )
+
+    return {
+        "status": "executing",
+        "task_id": task_id,
+        "run_id": run_id,
+        "agent_id": req.agentId,
+        "pipeline_id": "execute",
+    }
 
 
 @router.post("/{project_id}/execute-ready")
@@ -683,10 +924,15 @@ async def task_run_completed(
     now = now_ms()
     task = await get_task_or_404(session, project_id, task_id)
 
+    # Map run status to task status using project semantics
+    run_semantics = await get_project_semantics(session, project_id)
+    done_statuses = get_semantic_statuses(run_semantics, "terminal_done")
+    fail_statuses = get_semantic_statuses(run_semantics, "terminal_fail")
+
     if status == "completed":
-        new_status = "done"
+        new_status = list(done_statuses)[0] if done_statuses else "done"
     elif status == "failed":
-        new_status = "failed"
+        new_status = list(fail_statuses)[0] if fail_statuses else "failed"
     else:
         return {"status": "ignored", "reason": f"Unknown run status: {status}"}
 
@@ -707,7 +953,7 @@ async def task_run_completed(
     task.status = new_status
     task.run_id = None  # Clear active run
     task.updated_at = now
-    if new_status == "done":
+    if new_status in done_statuses:
         task.completed_at = now
     if target_col:
         task.column_id = target_col.id
@@ -738,47 +984,6 @@ async def task_run_completed(
     )
 
     return {"status": "updated", "task_status": new_status}
-
-
-# ══════════════════════════════════════════════════════════════════════════
-# TASK BRANCH — Get or create the persistent git branch for a task
-# ══════════════════════════════════════════════════════════════════════════
-
-
-@router.get("/{project_id}/tasks/{task_id}/branch")
-async def get_task_branch(
-    project_id: str,
-    task_id: str,
-    session: AsyncSession = Depends(get_async_session),
-):
-    """Get the persistent git branch name for a task.
-
-    Creates and stores the branch name in task metadata if it doesn't exist yet.
-    The branch follows the naming convention: feat/{task_id}-{slug}
-
-    Agents should call this before starting work on a task to get the branch
-    they should check out / create.
-    """
-    task = await get_task_or_404(session, project_id, task_id)
-    now = now_ms()
-
-    branch = _get_task_branch(task)
-    created = False
-
-    if not branch:
-        branch = _task_branch_name(task.id, task.title)
-        _set_task_branch(task, branch)
-        task.updated_at = now
-        await session.commit()
-        created = True
-        logger.debug(f"Created branch name for task {task_id}: {branch}")
-
-    return {
-        "task_id": task_id,
-        "project_id": project_id,
-        "branch": branch,
-        "created": created,
-    }
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -845,8 +1050,20 @@ async def claim_task(
             detail=f"Task is already claimed by agent '{task.assigned_agent}'",
         )
 
-    # Not claimable in current status
-    claimable_statuses = {"backlog", "planning", "ready"}
+    # Not claimable in current status — use semantic statuses
+    claim_semantics = await get_project_semantics(session, project_id)
+    claimable_statuses = get_semantic_statuses(claim_semantics, "claimable")
+    if not claimable_statuses:
+        # Fallback for projects without claimable semantics
+        claimable_statuses = {
+            "backlog",
+            "planning",
+            "planned",
+            "ux",
+            "ready",
+            "test",
+            "failed",
+        }
     if task.status not in claimable_statuses:
         raise HTTPException(
             status_code=400,
@@ -883,202 +1100,6 @@ async def claim_task(
 
 
 # ══════════════════════════════════════════════════════════════════════════
-# TASK WORKSPACE — Create / remove a persistent worktree in agent's sandbox
-# ══════════════════════════════════════════════════════════════════════════
-
-
-class TaskWorkspaceRequest(BaseModel):
-    agentId: str  # Agent that will own the worktree
-
-
-@router.post("/{project_id}/tasks/{task_id}/workspace")
-async def create_task_workspace(
-    project_id: str,
-    task_id: str,
-    req: TaskWorkspaceRequest,
-    session: AsyncSession = Depends(get_async_session),
-):
-    """Create a persistent git worktree for a task in the agent's sandbox.
-
-    Called automatically by the claim_task response so pulse agents have an
-    authenticated git workspace at /home/agent/task-workspaces/{task_id}/.
-
-    The engine:
-      1. Ensures the project repo exists (clones if needed, with GitHub App auth).
-      2. Creates a worktree on feat/{task_id} inside the agent's persistent sandbox.
-      3. The worktree inherits the authenticated remote URL — the agent can push
-         using the installed git credential helper.
-
-    Publishes TASK_WORKSPACE_REQUESTED to the engine via Redis global events stream
-    and polls for the result (max 30 s).
-    """
-    task = await get_task_or_404(session, project_id, task_id)
-
-    branch = _get_task_branch(task)
-    if not branch:
-        branch = _task_branch_name(task.id, task.title)
-        _set_task_branch(task, branch)
-        task.updated_at = now_ms()
-        await session.commit()
-
-    if not dependencies.redis_client:
-        raise HTTPException(status_code=503, detail="Redis not available")
-
-    # Clear any stale result key
-    result_key = f"djinnbot:workspace:{req.agentId}:{task_id}"
-    await dependencies.redis_client.delete(result_key)
-
-    # Ask the engine to create the worktree
-    await _publish_event(
-        "TASK_WORKSPACE_REQUESTED",
-        {
-            "agentId": req.agentId,
-            "projectId": project_id,
-            "taskId": task_id,
-            "taskBranch": branch,
-        },
-    )
-
-    # Poll for result (engine is async — usually < 5 s for a local fetch+worktree)
-    for _ in range(60):  # 60 × 0.5 s = 30 s max
-        await asyncio.sleep(0.5)
-        raw = await dependencies.redis_client.get(result_key)
-        if raw:
-            result = json.loads(raw)
-            if not result.get("success"):
-                raise HTTPException(
-                    status_code=500,
-                    detail=f"Engine failed to create task workspace: {result.get('error', 'unknown')}",
-                )
-            # Container path — inside the container the sandbox is /home/agent
-            # Engine path is /data/sandboxes/{agentId}/task-workspaces/{taskId}
-            # Container sees it as /home/agent/task-workspaces/{taskId}
-            container_path = f"/home/agent/task-workspaces/{task_id}"
-            return {
-                "status": "ready",
-                "task_id": task_id,
-                "agent_id": req.agentId,
-                "branch": result["branch"],
-                "worktree_path": container_path,
-                "already_existed": result.get("alreadyExists", False),
-            }
-
-    raise HTTPException(
-        status_code=504,
-        detail="Timed out waiting for engine to create task workspace (30 s)",
-    )
-
-
-@router.delete("/{project_id}/tasks/{task_id}/workspace")
-async def remove_task_workspace(
-    project_id: str,
-    task_id: str,
-    agent_id: str = Query(..., description="Agent ID whose workspace to remove"),
-):
-    """Remove a task worktree from an agent's sandbox.
-
-    Called after a task's PR is merged or the task is closed.
-    Fire-and-forget — the engine removes the worktree asynchronously.
-    """
-    if not dependencies.redis_client:
-        raise HTTPException(status_code=503, detail="Redis not available")
-
-    await _publish_event(
-        "TASK_WORKSPACE_REMOVE_REQUESTED",
-        {
-            "agentId": agent_id,
-            "projectId": project_id,
-            "taskId": task_id,
-        },
-    )
-    return {"status": "remove_requested", "task_id": task_id, "agent_id": agent_id}
-
-
-# ══════════════════════════════════════════════════════════════════════════
-# PULL REQUEST — Open a PR for a task branch
-# ══════════════════════════════════════════════════════════════════════════
-
-
-class OpenPullRequestRequest(BaseModel):
-    agentId: str
-    title: str
-    body: Optional[str] = ""
-    draft: Optional[bool] = False
-    base_branch: Optional[str] = "main"
-
-
-@router.post("/{project_id}/tasks/{task_id}/pull-request")
-async def open_task_pull_request(
-    project_id: str,
-    task_id: str,
-    req: OpenPullRequestRequest,
-    session: AsyncSession = Depends(get_async_session),
-):
-    """Open a GitHub pull request for a task's feature branch.
-
-    Called by pulse agents via the open_pull_request tool after their
-    implementation is complete. Uses the project's GitHub App installation
-    token — no personal access token required.
-
-    Stores the PR URL in task.metadata.pr_url so other agents can find it.
-    """
-    task = await get_task_or_404(session, project_id, task_id)
-
-    branch = _get_task_branch(task)
-    if not branch:
-        branch = _task_branch_name(task.id, task.title)
-        _set_task_branch(task, branch)
-
-    try:
-        result = await github_helper.create_pull_request(
-            project_id=project_id,
-            head_branch=branch,
-            base_branch=req.base_branch or "main",
-            title=req.title,
-            body=req.body or "",
-            draft=req.draft or False,
-        )
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to create PR: {e}")
-
-    # Persist PR URL in task metadata
-    try:
-        meta = json.loads(task.task_metadata) if task.task_metadata else {}
-    except (json.JSONDecodeError, TypeError):
-        meta = {}
-    meta["pr_url"] = result["pr_url"]
-    meta["pr_number"] = result["pr_number"]
-    task.task_metadata = json.dumps(meta)
-    task.updated_at = now_ms()
-    await session.commit()
-
-    await _publish_event(
-        "TASK_PR_OPENED",
-        {
-            "projectId": project_id,
-            "taskId": task_id,
-            "agentId": req.agentId,
-            "prNumber": result["pr_number"],
-            "prUrl": result["pr_url"],
-            "branch": branch,
-        },
-    )
-
-    logger.debug(
-        "PR #%d opened for task %s by %s", result["pr_number"], task_id, req.agentId
-    )
-    return {
-        "pr_number": result["pr_number"],
-        "pr_url": result["pr_url"],
-        "title": result["title"],
-        "draft": result["draft"],
-        "branch": branch,
-    }
-
-
-# ══════════════════════════════════════════════════════════════════════════
 # TRANSITION TASK — Move a task to a new status / kanban column
 # ══════════════════════════════════════════════════════════════════════════
 
@@ -1102,20 +1123,27 @@ async def transition_task(
     Called by agents during their pulse routine to advance tasks through the kanban.
     Also triggers cascade readiness checks for dependent tasks.
     """
-    valid_statuses = {
-        "backlog",
-        "planning",
-        "ready",
-        "in_progress",
-        "review",
-        "blocked",
-        "done",
-        "failed",
-    }
+    # Dynamic status validation — read valid statuses from project columns
+    valid_statuses = await get_valid_statuses_for_project(session, project_id)
+    if not valid_statuses:
+        # Fallback for legacy projects without columns (shouldn't happen)
+        valid_statuses = {
+            "backlog",
+            "planning",
+            "planned",
+            "ux",
+            "ready",
+            "in_progress",
+            "review",
+            "test",
+            "blocked",
+            "done",
+            "failed",
+        }
     if req.status not in valid_statuses:
         raise HTTPException(
             status_code=400,
-            detail=f"Invalid status '{req.status}'. Must be one of: {valid_statuses}",
+            detail=f"Invalid status '{req.status}'. Must be one of: {sorted(valid_statuses)}",
         )
 
     now = now_ms()
@@ -1168,8 +1196,11 @@ async def transition_task(
 
     await session.commit()
 
-    # Cascade readiness if needed
-    if req.status in ("done", "failed"):
+    # Cascade readiness if needed — use semantic statuses
+    semantics = await get_project_semantics(session, project_id)
+    terminal_done = get_semantic_statuses(semantics, "terminal_done")
+    terminal_fail = get_semantic_statuses(semantics, "terminal_fail")
+    if req.status in terminal_done or req.status in terminal_fail:
         await _recompute_task_readiness(session, project_id, task_id, req.status)
 
     await _publish_event(
@@ -1182,6 +1213,43 @@ async def transition_task(
             "note": req.note,
         },
     )
+
+    # ── Transition-triggered agent pulses ──────────────────────────────────
+    # When certain statuses are reached, automatically wake the responsible
+    # agent so work flows through the pipeline without waiting for scheduled
+    # pulses.  This is the heartbeat of the autonomous loop.
+    #
+    # NOTE: These triggers are software-dev-specific. For custom templates,
+    # transition triggers should be configurable per-project. For now, they
+    # only fire if the status name matches a known software-dev status.
+    TRANSITION_TRIGGERS: dict[str, list[str]] = {
+        "planned": ["shigeo"],  # Architecture done → Shigeo does UX
+        "test": ["chieko"],  # Finn approved → Chieko runs QA
+        "failed": ["yukihiro"],  # QA failed → Yukihiro fixes bugs
+    }
+    triggered_agents = TRANSITION_TRIGGERS.get(req.status, [])
+    for agent_id in triggered_agents:
+        await _publish_event(
+            "PULSE_TRIGGERED",
+            {
+                "agentId": agent_id,
+                "source": "transition_trigger",
+                "context": (
+                    f"Task '{task.title}' moved to {req.status} in project {project_id}"
+                ),
+            },
+        )
+
+    # When a task reaches a terminal_done status, request worktree cleanup.
+    if req.status in terminal_done and task.assigned_agent:
+        await _publish_event(
+            "TASK_WORKSPACE_REMOVE_REQUESTED",
+            {
+                "agentId": task.assigned_agent,
+                "projectId": project_id,
+                "taskId": task_id,
+            },
+        )
 
     return {
         "status": "transitioned",

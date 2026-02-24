@@ -354,7 +354,7 @@ export async function fetchProject(projectId: string) {
   return handleResponse(res, 'Failed to fetch project');
 }
 
-export async function createProject(data: { name: string; description?: string; repository?: string }) {
+export async function createProject(data: { name: string; description?: string; repository?: string; templateId?: string; columns?: any[]; statusSemantics?: any }) {
   const res = await authFetch(`${API_BASE}/projects/`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -510,6 +510,19 @@ export async function executeTask(projectId: string, taskId: string, data?: { wo
     body: JSON.stringify(data || {}),
   });
   return handleResponse(res, 'Failed to execute task');
+}
+
+export async function executeTaskWithAgent(
+  projectId: string,
+  taskId: string,
+  data: { agentId: string; modelOverride?: string; keyUserId?: string },
+): Promise<{ status: string; task_id: string; run_id: string; agent_id: string; pipeline_id: string }> {
+  const res = await authFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/execute-agent`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+  return handleResponse(res, 'Failed to execute task with agent');
 }
 
 export async function executeReadyTasks(projectId: string, maxTasks: number = 5) {
@@ -1462,6 +1475,7 @@ export interface PulseRoutine {
   timeoutMs: number | null;
   maxConcurrent: number;
   pulseColumns: string[] | null;
+  tools: string[] | null;
   planningModel: string | null;
   executorModel: string | null;
   sortOrder: number;
@@ -1483,6 +1497,7 @@ export interface CreatePulseRoutineRequest {
   timeoutMs?: number;
   maxConcurrent?: number;
   pulseColumns?: string[];
+  tools?: string[];
   color?: string;
   planningModel?: string;
   executorModel?: string;
@@ -1500,6 +1515,7 @@ export interface UpdatePulseRoutineRequest {
   timeoutMs?: number;
   maxConcurrent?: number;
   pulseColumns?: string[];
+  tools?: string[];
   color?: string;
   planningModel?: string;
   executorModel?: string;
@@ -1705,6 +1721,7 @@ export interface OnboardingSession {
   context: Record<string, unknown>;
   landing_page_state: OnboardingLandingPageState | null;
   chat_session_id: string | null;
+  template_id: string | null;
   model: string;
   created_at: number;
   updated_at: number;
@@ -1721,6 +1738,7 @@ export interface OnboardingSessionSummary {
   current_agent_id: string;
   current_agent_name: string;
   current_agent_emoji: string;
+  template_id: string | null;
   model: string;
   created_at: number;
   updated_at: number;
@@ -1745,11 +1763,11 @@ export async function resumeOnboardingSession(sessionId: string): Promise<Onboar
   return handleResponse(res, 'Failed to resume onboarding session');
 }
 
-export async function createOnboardingSession(model?: string): Promise<OnboardingSession> {
+export async function createOnboardingSession(model?: string, templateId?: string): Promise<OnboardingSession> {
   const res = await authFetch(`${API_BASE}/onboarding/sessions`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model }),
+    body: JSON.stringify({ model, templateId }),
   });
   return handleResponse(res, 'Failed to create onboarding session');
 }
@@ -2591,4 +2609,271 @@ export async function setToolOverrides(
     body: JSON.stringify({ overrides }),
   });
   return handleResponse(res, 'Failed to update tool overrides');
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PROJECT TEMPLATES
+// ═══════════════════════════════════════════════════════════════════════════
+
+export interface ProjectTemplateColumn {
+  name: string;
+  position: number;
+  wip_limit: number | null;
+  statuses: string[];
+}
+
+export interface StatusSemantics {
+  initial: string[];
+  terminal_done: string[];
+  terminal_fail: string[];
+  blocked: string[];
+  in_progress: string[];
+  claimable: string[];
+}
+
+export interface ProjectTemplate {
+  id: string;
+  slug: string;
+  name: string;
+  description: string;
+  icon: string | null;
+  isBuiltin: boolean;
+  columns: ProjectTemplateColumn[];
+  statusSemantics: StatusSemantics;
+  defaultPipelineId: string | null;
+  onboardingAgentChain: string[] | null;
+  metadata: Record<string, any>;
+  sortOrder: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export async function fetchProjectTemplates(): Promise<ProjectTemplate[]> {
+  const res = await authFetch(`${API_BASE}/project-templates/`);
+  const data = await handleResponse(res, 'Failed to fetch templates');
+  return data.templates ?? data;
+}
+
+export async function fetchProjectTemplate(idOrSlug: string): Promise<ProjectTemplate> {
+  const res = await authFetch(`${API_BASE}/project-templates/${idOrSlug}`);
+  return handleResponse(res, 'Failed to fetch template');
+}
+
+export async function createProjectTemplate(data: {
+  name: string;
+  slug: string;
+  description?: string;
+  icon?: string;
+  columns: ProjectTemplateColumn[];
+  statusSemantics: StatusSemantics;
+  defaultPipelineId?: string;
+  onboardingAgentChain?: string[];
+  metadata?: Record<string, any>;
+}): Promise<ProjectTemplate> {
+  const res = await authFetch(`${API_BASE}/project-templates/`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+  return handleResponse(res, 'Failed to create template');
+}
+
+export async function updateProjectTemplate(
+  templateId: string,
+  data: Partial<{
+    name: string;
+    description: string;
+    icon: string;
+    columns: ProjectTemplateColumn[];
+    statusSemantics: StatusSemantics;
+    defaultPipelineId: string;
+    onboardingAgentChain: string[];
+    metadata: Record<string, any>;
+  }>,
+): Promise<ProjectTemplate> {
+  const res = await authFetch(`${API_BASE}/project-templates/${templateId}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+  return handleResponse(res, 'Failed to update template');
+}
+
+export async function deleteProjectTemplate(templateId: string): Promise<void> {
+  const res = await authFetch(`${API_BASE}/project-templates/${templateId}`, {
+    method: 'DELETE',
+  });
+  return handleResponse(res, 'Failed to delete template');
+}
+
+export async function cloneProjectTemplate(templateId: string): Promise<ProjectTemplate> {
+  const res = await authFetch(`${API_BASE}/project-templates/${templateId}/clone`, {
+    method: 'POST',
+  });
+  return handleResponse(res, 'Failed to clone template');
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PROJECT-AGENT ROUTINE MAPPINGS
+// ═══════════════════════════════════════════════════════════════════════════
+
+export interface RoutineMapping {
+  id: string;
+  projectId: string;
+  agentId: string;
+  routineId: string;
+  columnIds: string[] | null;
+  toolOverrides: string[] | null;
+  enabled: boolean;
+  createdAt: number;
+  updatedAt: number;
+  // Enriched fields from list endpoint
+  routineName?: string;
+  routineDescription?: string | null;
+  routineDefaultTools?: string[] | null;
+  routineDefaultColumns?: string[] | null;
+}
+
+export interface ProjectColumn {
+  id: string;
+  name: string;
+  statuses: string[];
+}
+
+export async function fetchRoutineMappings(
+  projectId: string,
+  agentId: string,
+): Promise<{ mappings: RoutineMapping[]; projectColumns: ProjectColumn[] }> {
+  const res = await authFetch(`${API_BASE}/projects/${projectId}/agents/${agentId}/routines`);
+  return handleResponse(res, 'Failed to fetch routine mappings');
+}
+
+export async function createRoutineMapping(
+  projectId: string,
+  agentId: string,
+  data: { routineId: string; columnIds?: string[]; toolOverrides?: string[]; enabled?: boolean },
+): Promise<RoutineMapping> {
+  const res = await authFetch(`${API_BASE}/projects/${projectId}/agents/${agentId}/routines`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+  return handleResponse(res, 'Failed to create routine mapping');
+}
+
+export async function updateRoutineMapping(
+  projectId: string,
+  agentId: string,
+  mappingId: string,
+  data: { columnIds?: string[]; toolOverrides?: string[]; enabled?: boolean },
+): Promise<RoutineMapping> {
+  const res = await authFetch(`${API_BASE}/projects/${projectId}/agents/${agentId}/routines/${mappingId}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+  return handleResponse(res, 'Failed to update routine mapping');
+}
+
+export async function deleteRoutineMapping(
+  projectId: string,
+  agentId: string,
+  mappingId: string,
+): Promise<void> {
+  const res = await authFetch(`${API_BASE}/projects/${projectId}/agents/${agentId}/routines/${mappingId}`, {
+    method: 'DELETE',
+  });
+  return handleResponse(res, 'Failed to delete routine mapping');
+}
+
+export interface ResolvedRoutineConfig {
+  routineId: string;
+  routineName: string;
+  mappingId: string;
+  effectiveColumns: string[];
+  effectiveStatuses: string[];
+  effectiveTools: string[] | null;
+  planningModel?: string;
+  executorModel?: string;
+}
+
+export async function resolveRoutineConfigs(
+  projectId: string,
+  agentId: string,
+): Promise<{ resolved: ResolvedRoutineConfig[] }> {
+  const res = await authFetch(`${API_BASE}/projects/${projectId}/agents/${agentId}/routines/resolve`);
+  return handleResponse(res, 'Failed to resolve routine configs');
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// BOARD-INITIATED SWARM EXECUTION
+// ═══════════════════════════════════════════════════════════════════════════
+
+export interface SwarmPreview {
+  tasks: Array<{
+    key: string;
+    title: string;
+    status: string;
+    priority: string;
+    dependencies: string[];
+  }>;
+  dag_depth: number;
+  root_tasks: string[];
+  total_tasks: number;
+  warnings: string[];
+}
+
+export interface BoardSwarmResult {
+  swarm_id: string;
+  status: string;
+  project_id: string;
+  total_tasks: number;
+  max_concurrent: number;
+  root_tasks: string[];
+  dag_depth: number;
+  warnings: string[];
+  tasks: SwarmPreview['tasks'];
+  progress_channel: string;
+  stream_url: string;
+}
+
+export async function previewProjectSwarm(
+  projectId: string,
+  data: { taskIds: string[]; agentId: string },
+): Promise<SwarmPreview> {
+  const res = await authFetch(`${API_BASE}/projects/${projectId}/swarm-preview`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+  return handleResponse(res, 'Failed to preview swarm');
+}
+
+export async function launchProjectSwarm(
+  projectId: string,
+  data: {
+    taskIds?: string[];
+    agentId: string;
+    maxConcurrent?: number;
+    deviationRules?: string;
+    globalTimeoutSeconds?: number;
+    model?: string;
+  },
+): Promise<BoardSwarmResult> {
+  const res = await authFetch(`${API_BASE}/projects/${projectId}/swarm-execute`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+  return handleResponse(res, 'Failed to launch swarm');
+}
+
+export async function fetchProjectSwarms(
+  projectId: string,
+): Promise<{ swarms: any[]; project_id: string }> {
+  const res = await authFetch(`${API_BASE}/projects/${projectId}/swarms`);
+  return handleResponse(res, 'Failed to fetch project swarms');
 }

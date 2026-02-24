@@ -276,6 +276,7 @@ async def get_run(run_id: str, session: AsyncSession = Depends(get_async_session
         "updated_at": run.updated_at,
         "completed_at": run.completed_at,
         "human_context": run.human_context,
+        "task_branch": getattr(run, "task_branch", None),
         "workspace_exists": workspace_exists,
         "workspace_has_git": workspace_has_git,
         "steps": [

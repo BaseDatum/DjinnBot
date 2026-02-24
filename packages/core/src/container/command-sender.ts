@@ -8,6 +8,7 @@ import {
   type ToolCommand,
   type ShutdownCommand,
   type AbortCommand,
+  type StructuredOutputCommand,
 } from '../redis-protocol/index.js';
 
 export class CommandSender {
@@ -124,6 +125,49 @@ export class CommandSender {
     } catch (error) {
       console.error(`[CommandSender] Failed to send abort to ${runId}:`, error);
       throw new Error(`Failed to publish abort command to ${runId}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+
+    return requestId;
+  }
+
+  async sendStructuredOutput(
+    runId: string,
+    prompt: string,
+    options: {
+      requestId?: string;
+      systemPrompt: string;
+      outputSchema: {
+        name: string;
+        schema: Record<string, unknown>;
+        strict?: boolean;
+      };
+      outputMethod?: 'response_format' | 'tool_use';
+      temperature?: number;
+      model?: string;
+    }
+  ): Promise<string> {
+    const requestId = options.requestId ?? this.generateRequestId();
+
+    const cmd: StructuredOutputCommand = {
+      type: 'structuredOutput',
+      requestId,
+      prompt,
+      systemPrompt: options.systemPrompt,
+      outputSchema: options.outputSchema,
+      outputMethod: options.outputMethod,
+      temperature: options.temperature,
+      model: options.model,
+      timestamp: createTimestamp(),
+    };
+
+    const channel = channels.command(runId);
+    
+    try {
+      await this.redis.publish(channel, JSON.stringify(cmd));
+      console.log(`[CommandSender] Sent structuredOutput to ${runId}: ${requestId}`);
+    } catch (error) {
+      console.error(`[CommandSender] Failed to send structuredOutput to ${runId}:`, error);
+      throw new Error(`Failed to publish structuredOutput command to ${runId}: ${error instanceof Error ? error.message : String(error)}`);
     }
 
     return requestId;

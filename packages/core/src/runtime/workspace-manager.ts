@@ -51,11 +51,41 @@ export interface WorkspaceManagerConfig {
 export class WorkspaceManager {
   private getProjectRepository?: (projectId: string) => string | null | Promise<string | null>;
 
+  /**
+   * Per-project mutex to serialize git operations on the shared parent repo.
+   * Multiple concurrent worktree add/remove/pull operations on the same .git
+   * directory can race on the refdb. This chains them sequentially.
+   */
+  private projectLocks = new Map<string, Promise<void>>();
+
   constructor(config?: WorkspaceManagerConfig) {
     this.getProjectRepository = config?.getProjectRepository;
     console.log(`[WorkspaceManager] Initialized with repo lookup callback: ${!!this.getProjectRepository}`);
     mkdirSync(WORKSPACES_DIR, { recursive: true });
     mkdirSync(RUNS_DIR, { recursive: true });
+  }
+
+  /**
+   * Run a function while holding the per-project lock.
+   * Operations are chained sequentially — no two git operations on the same
+   * project repo run concurrently.
+   */
+  private async withProjectLock<T>(projectId: string, fn: () => Promise<T>): Promise<T> {
+    const prev = this.projectLocks.get(projectId) ?? Promise.resolve();
+    let resolve!: () => void;
+    const next = new Promise<void>(r => { resolve = r; });
+    this.projectLocks.set(projectId, next);
+
+    try {
+      await prev;
+      return await fn();
+    } finally {
+      resolve();
+      // Clean up the map entry if nothing else is queued behind us
+      if (this.projectLocks.get(projectId) === next) {
+        this.projectLocks.delete(projectId);
+      }
+    }
   }
 
   /**
@@ -383,10 +413,32 @@ export class WorkspaceManager {
   async createRunWorktreeAsync(projectId: string, runId: string, repoUrl?: string, taskBranch?: string): Promise<WorkspaceInfo> {
     // Ensure project exists (will clone with API auth if available)
     const projectPath = await this.ensureProjectAsync(projectId, repoUrl);
+
+    // All subsequent git operations are serialized per-project to prevent races
+    return this.withProjectLock(projectId, async () => this._createRunWorktreeInner(projectPath, projectId, runId, repoUrl, taskBranch));
+  }
+
+  private async _createRunWorktreeInner(projectPath: string, projectId: string, runId: string, repoUrl?: string, taskBranch?: string): Promise<WorkspaceInfo> {
     const runPath = join(RUNS_DIR, runId);
     const branch = taskBranch ?? `run/${runId}`;
 
     console.log(`[WorkspaceManager] createRunWorktreeAsync: projectId=${projectId}, runId=${runId}`);
+
+    // Safety check: if this is a project-linked run with a task branch,
+    // verify the project repo has a remote. Without a remote, work can't
+    // be pushed and will be silently lost when the worktree is cleaned up.
+    if (taskBranch) {
+      try {
+        execSync('git remote get-url origin', {
+          cwd: projectPath, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'],
+        });
+      } catch {
+        throw new Error(
+          `Project ${projectId} has no linked repository — work cannot be pushed. ` +
+          `Configure a GitHub repository in project settings before executing tasks.`
+        );
+      }
+    }
 
     // Check if worktree already exists
     if (existsSync(runPath)) {
@@ -741,8 +793,15 @@ export class WorkspaceManager {
       pushError = pushResult.error;
     }
 
-    // 2. Remove the worktree
-    if (projectId) {
+    // 2. Remove the worktree — but only if push succeeded or there's no remote.
+    //    If push failed WITH a remote, preserve the worktree so work can be recovered.
+    const shouldPreserve = !pushed && !pushResult.noRemote && pushResult.error;
+    if (shouldPreserve) {
+      console.warn(
+        `[WorkspaceManager] Preserving worktree at ${runPath} — push failed: ${pushResult.error}. ` +
+        `Work is committed locally and can be retried.`
+      );
+    } else if (projectId) {
       this.cleanupRun(projectId, runId);
     } else {
       try { rmSync(runPath, { recursive: true, force: true }); } catch {}
@@ -973,12 +1032,39 @@ export class WorkspaceManager {
     taskBranch: string,
   ): Promise<{ worktreePath: string; branch: string; alreadyExists: boolean }> {
     const projectPath = await this.ensureProjectAsync(projectId);
+
+    // Serialize git operations per-project
+    return this.withProjectLock(projectId, async () => this._createTaskWorktreeInner(agentId, projectId, projectPath, taskId, taskBranch));
+  }
+
+  private async _createTaskWorktreeInner(
+    agentId: string,
+    projectId: string,
+    projectPath: string,
+    taskId: string,
+    taskBranch: string,
+  ): Promise<{ worktreePath: string; branch: string; alreadyExists: boolean }> {
     const worktreePath = join(SANDBOXES_DIR, agentId, 'task-workspaces', taskId);
 
     // Already exists and is a valid worktree — idempotent
     if (existsSync(worktreePath)) {
       const gitFile = join(worktreePath, '.git');
       if (existsSync(gitFile) && !statSync(gitFile).isDirectory()) {
+        // Clean up stale lock files left behind if a container was killed mid-operation.
+        // Without this, git commands fail with "Another git process seems to be running".
+        // For worktrees, index.lock lives in the worktree dir itself (not the parent .git).
+        // The parent repo's index.lock is at projectPath/.git/index.lock.
+        for (const candidate of [
+          join(worktreePath, 'index.lock'),           // worktree-local index lock
+          join(projectPath, '.git', 'index.lock'),    // parent repo index lock
+        ]) {
+          if (existsSync(candidate)) {
+            try {
+              rmSync(candidate);
+              console.log(`[WorkspaceManager] Removed stale lock: ${candidate}`);
+            } catch {}
+          }
+        }
         console.log(`[WorkspaceManager] Task worktree already exists for ${agentId}/${taskId}`);
         return { worktreePath, branch: taskBranch, alreadyExists: true };
       }
@@ -1071,6 +1157,169 @@ export class WorkspaceManager {
 
     try { execSync('git worktree prune', { cwd: projectPath, stdio: 'pipe' }); } catch {}
     console.log(`[WorkspaceManager] Removed task worktree for ${agentId}/${taskId}`);
+  }
+
+  /**
+   * Merge multiple executor branches into a single target branch.
+   *
+   * Used after a swarm completes to integrate parallel work:
+   *   feat/{taskId}-taskA  ─┐
+   *   feat/{taskId}-taskB  ─┼──→ feat/{taskId}  (target)
+   *   feat/{taskId}-taskC  ─┘
+   *
+   * Creates a temporary worktree for the merge, performs sequential merges,
+   * pushes the result, and cleans up.
+   *
+   * Returns merge result with conflict details if any branch failed to merge.
+   */
+  async mergeExecutorBranches(
+    projectId: string,
+    targetBranch: string,
+    executorBranches: string[],
+  ): Promise<{
+    success: boolean;
+    merged: string[];
+    conflicts: Array<{ branch: string; error: string }>;
+    pushed: boolean;
+    pushError?: string;
+  }> {
+    return this.withProjectLock(projectId, async () => {
+      const projectPath = join(WORKSPACES_DIR, projectId);
+      const mergeWorkdir = join(RUNS_DIR, `merge_${Date.now()}`);
+      const merged: string[] = [];
+      const conflicts: Array<{ branch: string; error: string }> = [];
+
+      try {
+        // Prune stale refs
+        try { execSync('git worktree prune', { cwd: projectPath, stdio: 'pipe' }); } catch {}
+
+        // Fetch latest so we see all executor branches
+        try {
+          const gitToken = await this.fetchGitToken(projectId);
+          if (gitToken) {
+            const originalUrl = execSync('git remote get-url origin', {
+              cwd: projectPath, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'],
+            }).trim();
+            try {
+              execSync(`git remote set-url origin "${gitToken.repo_url}"`, { cwd: projectPath, stdio: 'pipe' });
+              execSync('git fetch --prune origin', { cwd: projectPath, stdio: 'pipe' });
+            } finally {
+              execSync(`git remote set-url origin "${originalUrl}"`, { cwd: projectPath, stdio: 'pipe' });
+            }
+          } else {
+            execSync('git fetch --prune origin 2>/dev/null || true', { cwd: projectPath, stdio: 'pipe' });
+          }
+        } catch {}
+
+        // Create or check out the target branch in a temporary worktree
+        const targetExists = (() => {
+          try {
+            execSync(`git rev-parse --verify "${targetBranch}"`, { cwd: projectPath, stdio: ['pipe', 'pipe', 'pipe'] });
+            return true;
+          } catch { return false; }
+        })();
+
+        if (targetExists) {
+          execSync(`git worktree add "${mergeWorkdir}" "${targetBranch}"`, { cwd: projectPath, stdio: 'pipe' });
+        } else {
+          execSync(`git worktree add "${mergeWorkdir}" -b "${targetBranch}"`, { cwd: projectPath, stdio: 'pipe' });
+        }
+
+        // Sequentially merge each executor branch
+        for (const branch of executorBranches) {
+          try {
+            // Ensure local branch exists
+            const localExists = execSync(`git branch --list "${branch}"`, {
+              cwd: projectPath, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'],
+            }).trim().length > 0;
+
+            if (!localExists) {
+              try {
+                execSync(`git branch "${branch}" "origin/${branch}"`, { cwd: projectPath, stdio: 'pipe' });
+              } catch {
+                conflicts.push({ branch, error: 'Branch not found locally or on remote' });
+                continue;
+              }
+            }
+
+            execSync(`git merge "${branch}" --no-edit -m "Merge swarm executor: ${branch}"`, {
+              cwd: mergeWorkdir,
+              stdio: 'pipe',
+              env: {
+                ...process.env,
+                GIT_AUTHOR_NAME: 'djinnbot',
+                GIT_AUTHOR_EMAIL: 'djinnbot@local',
+                GIT_COMMITTER_NAME: 'djinnbot',
+                GIT_COMMITTER_EMAIL: 'djinnbot@local',
+              },
+            });
+            merged.push(branch);
+            console.log(`[WorkspaceManager] Merged ${branch} into ${targetBranch}`);
+          } catch (err: any) {
+            // Abort the failed merge
+            try { execSync('git merge --abort', { cwd: mergeWorkdir, stdio: 'pipe' }); } catch {}
+            const errMsg = err.stderr?.toString() || err.message || 'Unknown merge error';
+            conflicts.push({ branch, error: errMsg });
+            console.warn(`[WorkspaceManager] Merge conflict: ${branch} into ${targetBranch}: ${errMsg}`);
+          }
+        }
+
+        // Push the integrated branch
+        let pushed = false;
+        let pushError: string | undefined;
+        if (merged.length > 0) {
+          const pushResult = await this.pushFromWorktree(mergeWorkdir, projectId, targetBranch);
+          pushed = pushResult.success;
+          pushError = pushResult.error;
+        }
+
+        return { success: conflicts.length === 0, merged, conflicts, pushed, pushError };
+      } finally {
+        // Clean up merge worktree
+        try {
+          execSync(`git worktree remove "${mergeWorkdir}" --force`, { cwd: projectPath, stdio: 'pipe' });
+        } catch {
+          try { rmSync(mergeWorkdir, { recursive: true, force: true }); } catch {}
+        }
+        try { execSync('git worktree prune', { cwd: projectPath, stdio: 'pipe' }); } catch {}
+      }
+    });
+  }
+
+  /**
+   * Push from a worktree directory (used by mergeExecutorBranches).
+   */
+  private async pushFromWorktree(
+    worktreePath: string,
+    projectId: string,
+    branch: string,
+  ): Promise<{ success: boolean; error?: string }> {
+    try {
+      let remoteUrl: string;
+      try {
+        remoteUrl = execSync('git remote get-url origin', {
+          cwd: worktreePath, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'],
+        }).trim();
+      } catch {
+        return { success: false, error: 'No remote origin' };
+      }
+
+      const gitToken = await this.fetchGitToken(projectId, remoteUrl);
+      const authenticatedUrl = gitToken ? gitToken.repo_url : this.addCredentials(remoteUrl);
+
+      execSync(`git remote set-url origin "${authenticatedUrl}"`, { cwd: worktreePath, stdio: 'pipe' });
+      try {
+        execSync(`git push -u origin "${branch}"`, {
+          cwd: worktreePath, stdio: 'pipe', timeout: 30000,
+          env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
+        });
+        return { success: true };
+      } finally {
+        try { execSync(`git remote set-url origin "${remoteUrl}"`, { cwd: worktreePath, stdio: 'pipe' }); } catch {}
+      }
+    } catch (err: any) {
+      return { success: false, error: err.message || 'Push failed' };
+    }
   }
 
   private addCredentials(repoUrl: string): string {

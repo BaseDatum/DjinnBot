@@ -30,7 +30,7 @@ export function useAgentLifecycle({
   enabled = true,
 }: UseAgentLifecycleOptions = {}) {
   const { status, lastMessage, lastEventTime } = useSSE<LifecycleEvent>({
-    url: `${API_BASE}/agents/events`,
+    url: `${API_BASE}/events/events`,
     enabled,
     onMessage: (event) => {
       // Validate it's a lifecycle event

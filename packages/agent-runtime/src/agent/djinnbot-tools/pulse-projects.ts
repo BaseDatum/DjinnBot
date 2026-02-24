@@ -104,9 +104,10 @@ export function createPulseProjectsTools(config: PulseProjectsToolsConfig): Agen
 
         // Resolve columns → statuses at call time (env may have been set after module load)
         const columnToStatus: Record<string, string> = {
-          'Backlog': 'backlog', 'Planning': 'planning', 'Ready': 'ready',
-          'In Progress': 'in_progress', 'Review': 'review',
-          'Blocked': 'blocked', 'Done': 'done', 'Failed': 'failed',
+          'Backlog': 'backlog', 'Planning': 'planning', 'Planned': 'planned',
+          'UX': 'ux', 'Ready': 'ready', 'In Progress': 'in_progress',
+          'Review': 'review', 'Test': 'test', 'Blocked': 'blocked',
+          'Done': 'done', 'Failed': 'failed',
         };
         const columns: string[] = config.pulseColumns
           || (process.env.PULSE_COLUMNS ? process.env.PULSE_COLUMNS.split(',').map((c: string) => c.trim()).filter(Boolean) : [])

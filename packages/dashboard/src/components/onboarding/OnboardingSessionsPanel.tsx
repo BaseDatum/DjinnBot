@@ -10,7 +10,9 @@ import { Loader2, RefreshCw, RotateCcw, Sparkles, Trash2 } from 'lucide-react';
 import {
   listOnboardingSessions,
   deleteOnboardingSession,
+  fetchProjectTemplates,
   type OnboardingSessionSummary,
+  type ProjectTemplate,
 } from '@/lib/api';
 import { formatTimeAgo } from '@/lib/format';
 
@@ -34,6 +36,7 @@ const STATUS_CONFIG = {
 
 export function OnboardingSessionsPanel({ onResume, onStartNew }: OnboardingSessionsPanelProps) {
   const [sessions, setSessions] = useState<OnboardingSessionSummary[]>([]);
+  const [templateMap, setTemplateMap] = useState<Record<string, { name: string; icon: string | null }>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [dismissing, setDismissing] = useState<string | null>(null);
@@ -43,8 +46,16 @@ export function OnboardingSessionsPanel({ onResume, onStartNew }: OnboardingSess
     setError(null);
     try {
       // API defaults to active+abandoned only; completed sessions live on the project page
-      const data = await listOnboardingSessions(undefined, 20);
+      const [data, templates] = await Promise.all([
+        listOnboardingSessions(undefined, 20),
+        fetchProjectTemplates().catch(() => [] as ProjectTemplate[]),
+      ]);
       setSessions(data);
+      const map: Record<string, { name: string; icon: string | null }> = {};
+      for (const t of templates) {
+        map[t.id] = { name: t.name, icon: t.icon };
+      }
+      setTemplateMap(map);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load sessions');
     } finally {
@@ -100,6 +111,7 @@ export function OnboardingSessionsPanel({ onResume, onStartNew }: OnboardingSess
             <SessionCard
               key={s.id}
               session={s}
+              templateMap={templateMap}
               onResume={onResume}
               onDismiss={handleDismiss}
               dismissing={dismissing === s.id}
@@ -126,6 +138,7 @@ export function OnboardingSessionsPanel({ onResume, onStartNew }: OnboardingSess
             <SessionCard
               key={s.id}
               session={s}
+              templateMap={templateMap}
               onResume={onResume}
               onDismiss={handleDismiss}
               dismissing={dismissing === s.id}
@@ -145,11 +158,13 @@ export function OnboardingSessionsPanel({ onResume, onStartNew }: OnboardingSess
 
 function SessionCard({
   session,
+  templateMap,
   onResume,
   onDismiss,
   dismissing,
 }: {
   session: OnboardingSessionSummary;
+  templateMap: Record<string, { name: string; icon: string | null }>;
   onResume: (id: string) => void;
   onDismiss: (id: string) => void;
   dismissing: boolean;
@@ -157,6 +172,7 @@ function SessionCard({
   const cfg = STATUS_CONFIG[session.status as keyof typeof STATUS_CONFIG] ?? STATUS_CONFIG.abandoned;
   const phaseLabel = PHASE_LABELS[session.phase] ?? session.phase;
   const projectName = session.context?.project_name as string | undefined;
+  const tmpl = session.template_id ? templateMap[session.template_id] : null;
 
   return (
     <div className="flex items-center justify-between rounded-lg border bg-card px-3 py-2.5 gap-3">
@@ -167,7 +183,9 @@ function SessionCard({
             {projectName || 'Unnamed project'}
           </p>
           <p className="text-xs text-muted-foreground truncate">
-            {session.current_agent_name} · {phaseLabel} · {formatTimeAgo(session.updated_at)}
+            {session.current_agent_name} · {phaseLabel}
+            {tmpl && <> · {tmpl.icon} {tmpl.name}</>}
+            {' · '}{formatTimeAgo(session.updated_at)}
           </p>
         </div>
       </div>

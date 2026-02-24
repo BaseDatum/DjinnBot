@@ -153,9 +153,12 @@ export class PipelineEngine {
   /**
    * Setup workspace for a run — must succeed before any steps are queued.
    *
-   * For project runs: creates a git worktree at RUNS_DIR/{runId} on the task's
-   * persistent branch (feat/{taskId}) or an ephemeral run/{runId} branch if no
-   * taskBranch is specified.  Multiple runs on the same task share the same branch.
+   * For project runs with a repoUrl: creates a git worktree at RUNS_DIR/{runId}
+   * on the task's persistent branch (feat/{taskId}) or an ephemeral run/{runId}
+   * branch if no taskBranch is specified.
+   *
+   * For project runs WITHOUT a repoUrl (non-git projects): skips workspace setup
+   * entirely. The agent will work without a git workspace.
    *
    * For standalone runs: initialises an independent empty git repo at RUNS_DIR/{runId}.
    *
@@ -166,7 +169,12 @@ export class PipelineEngine {
     if (!this.workspaceManager) return;
 
     if (projectId) {
-      // Project-associated run — use async path so GitHub App tokens work.
+      // Skip workspace setup for non-git projects (no repoUrl)
+      if (!repoUrl) {
+        console.log(`[PipelineEngine] Skipping workspace setup for run ${runId} — no repository configured for project ${projectId}`);
+        return;
+      }
+      // Project-associated run with git — use async path so GitHub App tokens work.
       const workspaceInfo = await this.workspaceManager.createRunWorktreeAsync(projectId, runId, repoUrl, taskBranch);
       console.log(`[PipelineEngine] Created project worktree for run ${runId}:`);
       console.log(`  - Project: ${workspaceInfo.projectPath}`);
@@ -324,12 +332,17 @@ export class PipelineEngine {
         });
       }
       // Always publish RUN_FAILED to ensure agent gets abort signal
+      const cancelError = `Run stopped by human: ${event.context}`;
       await this.eventBus.publish(runChannel(runId), {
         type: 'RUN_FAILED',
         runId,
-        error: `Run stopped by human: ${event.context}`,
+        error: cancelError,
         timestamp: Date.now(),
       });
+      // Notify TaskRunTracker so the task status is updated (moved back from in_progress)
+      if (this.config.onRunFailed) {
+        await this.config.onRunFailed(runId, cancelError);
+      }
       this.stopRun(runId);
       return;
     }
@@ -915,7 +928,8 @@ export class PipelineEngine {
     // Finalize workspace: push the task branch to remote, then remove the worktree.
     // No merge to main — agents open PRs which are reviewed and merged separately.
     // Run after publishing RUN_COMPLETE so the dashboard updates immediately.
-    if (this.workspaceManager) {
+    // Only finalize if the workspace manager has a path for this run (i.e., git was set up).
+    if (this.workspaceManager && this.workspaceManager.getRunPath(runId)) {
       const run = await this.store.getRun(runId);
       try {
         const result = await this.workspaceManager.finalizeRunWorkspace(runId, run?.projectId);

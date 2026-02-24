@@ -1,6 +1,6 @@
 # Planning Pipeline — Decomposes a project into tasks with dependencies
-# NOTE: Steps with outputSchema use direct API calls with constrained JSON output.
-# Tools are not available in structured output mode.
+# NOTE: Steps with outputSchema use constrained JSON output (response_format or tool_use).
+# These steps run in containers like all other steps — no tools are available.
 #
 # Context engineering: Every step receives {{project_vision}} — the synthesized
 # vision document from onboarding. This ensures all agents share the same

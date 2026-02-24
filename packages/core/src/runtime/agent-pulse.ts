@@ -5,7 +5,8 @@ import {
   PulseRoutine,
   ScheduledPulse,
   DEFAULT_PULSE_SCHEDULE,
-  PulseTimelineResponse 
+  PulseTimelineResponse,
+  ResolvedRoutineConfig,
 } from './pulse-types.js';
 
 // ── Wake guardrail configuration ────────────────────────────────────────────
@@ -67,6 +68,12 @@ export interface PulseDependencies {
    */
   getAssignedTasks?: (agentId: string) => Promise<Array<{ id: string; title: string; status: string; project: string }>>;
   /**
+   * Resolve the effective routine config across all projects for a given
+   * agent + routine. Returns project-specific column/tool configs.
+   * Used when routine-to-project mappings exist (Phase 2 modular workflows).
+   */
+  resolveRoutineProjectConfigs?: (agentId: string, routineId: string) => Promise<ResolvedRoutineConfig[]>;
+  /**
    * Register a pulse session as active for this agent.
    * Returns false if the agent is already at maxConcurrent — caller should skip.
    */
@@ -101,6 +108,19 @@ export interface PulseContext {
   routinePlanningModel?: string;
   /** Override executor model for this routine (passed to spawn_executor) */
   routineExecutorModel?: string;
+  /**
+   * Per-routine tool selection. When set, only these tools should be
+   * available to the agent during this pulse session.
+   * null/undefined = use agent's default tool set.
+   */
+  routineTools?: string[];
+  /**
+   * Resolved project-specific routine configs. When a routine is mapped
+   * to specific projects (via ProjectAgentRoutine), this contains the
+   * resolved config per project so the session runner knows which
+   * columns and tools to use for each project.
+   */
+  projectRoutineConfigs?: ResolvedRoutineConfig[];
 }
 
 export interface PulseSessionResult {
@@ -701,9 +721,22 @@ export class AgentPulse {
               context.routineTimeoutMs = routine.timeoutMs;
               context.routinePlanningModel = routine.planningModel;
               context.routineExecutorModel = routine.executorModel;
+              context.routineTools = routine.tools;
             }
           } catch {
             // Non-fatal: the session runner can still fall back to defaults
+          }
+        }
+
+        // Resolve project-specific routine configs (Phase 2 modular workflows)
+        if (routineId && this.deps.resolveRoutineProjectConfigs) {
+          try {
+            const projectConfigs = await this.deps.resolveRoutineProjectConfigs(agentId, routineId);
+            if (projectConfigs.length > 0) {
+              context.projectRoutineConfigs = projectConfigs;
+            }
+          } catch {
+            // Non-fatal: falls back to routine-level defaults
           }
         }
         

@@ -61,18 +61,37 @@ export const abortCommandSchema = baseMessageSchema.extend({
 
 export type AbortCommand = z.infer<typeof abortCommandSchema>;
 
+export const structuredOutputCommandSchema = baseMessageSchema.extend({
+  type: z.literal("structuredOutput"),
+  requestId: z.string(),
+  prompt: z.string(),
+  systemPrompt: z.string(),
+  outputSchema: z.object({
+    name: z.string(),
+    schema: z.record(z.unknown()),
+    strict: z.boolean().optional(),
+  }),
+  outputMethod: z.enum(["response_format", "tool_use"]).optional(),
+  temperature: z.number().optional(),
+  model: z.string().optional(),
+});
+
+export type StructuredOutputCommand = z.infer<typeof structuredOutputCommandSchema>;
+
 export const commandMessageSchema = z.discriminatedUnion("type", [
   agentStepCommandSchema,
   toolCommandSchema,
   shutdownCommandSchema,
   abortCommandSchema,
+  structuredOutputCommandSchema,
 ]);
 
 export type CommandMessage =
   | AgentStepCommand
   | ToolCommand
   | ShutdownCommand
-  | AbortCommand;
+  | AbortCommand
+  | StructuredOutputCommand;
 
 // ============================================================================
 // Output Messages (Container → Engine)

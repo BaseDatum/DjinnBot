@@ -25,6 +25,40 @@ struct DialogueApp: App {
                 }
                 .keyboardShortcut("s", modifiers: .command)
             }
+            
+            // Phase 2: Meeting recording commands
+            CommandMenu("Meeting") {
+                Button("Start Recording") {
+                    NotificationCenter.default.post(name: .startMeetingRecording, object: nil)
+                }
+                .keyboardShortcut("r", modifiers: [.command, .shift])
+                
+                Divider()
+                
+                Button("Re-enroll Voice...") {
+                    NotificationCenter.default.post(name: .reenrollVoice, object: nil)
+                }
+            }
+            
+            // Phase 3: AI Chat commands
+            CommandMenu("AI Chat") {
+                Button("Toggle Chat Panel") {
+                    NotificationCenter.default.post(name: .toggleChatPanel, object: nil)
+                }
+                .keyboardShortcut("k", modifiers: .command)
+                
+                Button("New Chat Session") {
+                    NotificationCenter.default.post(name: .newChatSession, object: nil)
+                }
+                .keyboardShortcut("k", modifiers: [.command, .shift])
+                
+                Divider()
+                
+                Button("Close Chat") {
+                    NotificationCenter.default.post(name: .closeChatPanel, object: nil)
+                }
+                .keyboardShortcut(.escape, modifiers: [])
+            }
         }
 
         Settings {
@@ -72,4 +106,16 @@ final class AppState: ObservableObject {
         try? data.write(to: url, options: .atomic)
         currentDocument.hasUnsavedChanges = false
     }
+}
+
+// MARK: - Notification Names
+
+extension Notification.Name {
+    static let startMeetingRecording = Notification.Name("dialogue.startMeetingRecording")
+    static let reenrollVoice = Notification.Name("dialogue.reenrollVoice")
+    
+    // Phase 3: Chat panel notifications
+    static let toggleChatPanel = Notification.Name("dialogue.toggleChatPanel")
+    static let newChatSession = Notification.Name("dialogue.newChatSession")
+    static let closeChatPanel = Notification.Name("dialogue.closeChatPanel")
 }

@@ -51,6 +51,16 @@ class PulseRoutine(Base, PrefixedIdMixin, TimestampMixin):
     max_concurrent: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     pulse_columns: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
 
+    # --- per-routine tool selection ---
+    # JSON array of tool names available during this routine.
+    # When null → inherit from agent's default tools.
+    # When set → only these tools are available (e.g. ["get_my_projects",
+    # "get_ready_tasks", "transition_task", "claim_task", "open_pull_request"]).
+    # This allows different routines to have different tool sets — e.g. a
+    # "triage" routine might only get read-only tools while an "implement"
+    # routine gets the full git toolset.
+    tools: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+
     # --- model overrides (per-routine) ---
     # When set, these override the agent-level defaults for this routine.
     # Resolution: routine → agent config → global fallback

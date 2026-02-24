@@ -35,58 +35,67 @@ columns that are ready to work on. Your allowed columns are configured in your
 
 **Only pick up ONE task per pulse** to stay focused.
 
-### 6. Work On a Task
+### 6. Design UX for Planned Tasks (Primary Responsibility)
 
-Once you have identified the highest-priority task:
+As UX Designer, your primary pulse responsibility is **creating UX designs**
+for tasks that Finn has architecturally planned. You pick from the **Planned** column.
 
-1. **Claim it** — call `claim_task(projectId, taskId)` to atomically assign yourself.
-   This also provisions your **authenticated git workspace** for the task.
-   You will receive:
-   - The branch name: `feat/task_abc123-implement-oauth`
-   - Your workspace path: `/home/agent/task-workspaces/{taskId}/`
+For each task in "planned" status:
 
-2. **Get context** — call `get_task_context(projectId, taskId)` to read the full
-   description, acceptance criteria, and any prior work on this task.
+1. **Claim it** — call `claim_task(projectId, taskId)` to assign yourself and
+   provision your workspace. Then transition to UX:
+   ```
+   transition_task(projectId, taskId, "ux")
+   ```
 
-3. **Do the work** — your workspace is already checked out on the right branch.
-   Git credentials are configured — you can push directly:
+2. **Get context** — call `get_task_context(projectId, taskId)` to read:
+   - The original spec and acceptance criteria
+   - Finn's architecture notes (if any)
+   - What the user is trying to accomplish
+
+3. **Understand the user goal** — before designing, ask:
+   - What is the user trying to accomplish?
+   - What's the core task? What context are they in?
+   - What are they trying to avoid?
+
+4. **Create UX deliverables** — in your task workspace:
    ```bash
    cd /home/agent/task-workspaces/{taskId}
-   # read prior commits to understand what's already done
-   git log --oneline -10
-   # make your changes, then commit
-   git add -A && git commit -m "feat: implement X"
+   ```
+   Create the appropriate deliverables:
+   - **User flow**: Map the entry point → core steps → success state → error states
+   - **Component specs**: Spacing, colors, typography, interactive states
+   - **Accessibility notes**: Keyboard nav, screen reader, color contrast
+   - **Responsive considerations**: Mobile, tablet, desktop breakpoints
+
+   Commit and push your work:
+   ```bash
+   git add -A && git commit -m "design: UX specs for [feature]"
    git push
    ```
 
-4. **Open a PR** — when your implementation is ready for review:
+5. **Check dependencies** — does this task depend on others that aren't done?
+   - If all dependencies are met → `transition_task(projectId, taskId, "ready")`
+   - If dependencies are unresolved → `transition_task(projectId, taskId, "blocked")`
+
+6. **Message Yukihiro** — if the design has complex interactions or non-obvious
+   patterns, send a note:
    ```
-   open_pull_request(projectId, taskId, title="feat: ...", body="...")
+   message_agent("yukihiro", "UX specs ready for task {taskId}: [key notes]")
    ```
 
-5. **Transition the task** — after opening the PR, move it to review:
-   ```
-   transition_task(projectId, taskId, "review")
-   ```
-   Common transitions:
-   - Implementation complete, PR open → `review`
-   - Something is blocked → `blocked`
-   - Tests/review passed, ready to merge → keep in `review` for the merge agent
+### 7. Create Follow-Up Tasks
 
-6. **Optional: kick off a pipeline** — if the task needs structured multi-agent
-   orchestration (e.g. the planning pipeline), call `execute_task(projectId, taskId)`.
-   Only do this when the task has a pipeline configured and the work is too structured
-   for a single pulse session.
+If during UX design you discover additional work (accessibility fixes,
+design system updates, missing components), create tasks:
+```
+create_task(projectId, title="UX: [description]", description="...", priority="normal")
+```
 
-7. **Create follow-up tasks** — if during your work you discover additional work
-   that needs to be done (bugs, refactoring, follow-up features), use
-   `create_task(projectId, title, description, priority)` to add them to the project
-   board rather than trying to do everything in one pulse.
-
-### 7. Review Workspace
+### 8. Review Workspace
 Check your progress file and any active work you left last time.
 
-### 8. Report to Sky (if needed)
+### 9. Report to Sky (if needed)
 If you have anything important to report, message Sky via Slack:
 
 ```
@@ -108,9 +117,7 @@ slack_dm({
 | `create_task(projectId, title, description, priority)` | Create a new task in a project |
 | `claim_task(projectId, taskId)` | Atomically claim a task + provision authenticated git workspace |
 | `get_task_context(projectId, taskId)` | Full task details, description, PR info |
-| `open_pull_request(projectId, taskId, title, body)` | Open a GitHub PR for the task branch |
-| `transition_task(projectId, taskId, status)` | Move task through kanban columns |
-| `execute_task(projectId, taskId)` | Kick off a pipeline run for a task (optional) |
+| `transition_task(projectId, taskId, status)` | Move task through kanban columns (ux, ready, blocked) |
 
 ---
 

@@ -66,6 +66,8 @@ from app.models.user_provider import (
 )
 from app.models.waitlist import WaitlistEntry, EmailSettings
 from app.models.pulse_routine import PulseRoutine
+from app.models.project_template import ProjectTemplate
+from app.models.project_agent_routine import ProjectAgentRoutine
 from app.models.admin_notification import AdminNotification
 from app.models.agent_tool_override import AgentToolOverride
 from app.models.memory_score import MemoryRetrievalLog, MemoryScore
@@ -136,6 +138,10 @@ __all__ = [
     "EmailSettings",
     # Pulse routines
     "PulseRoutine",
+    # Project templates
+    "ProjectTemplate",
+    # Project-agent-routine mappings
+    "ProjectAgentRoutine",
     # Admin notifications
     "AdminNotification",
     # Built-in tool overrides

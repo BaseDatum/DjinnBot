@@ -83,6 +83,98 @@ final class KeychainManager {
     var hasAPIKey: Bool {
         (try? getAPIKey()) != nil
     }
+    
+    // MARK: - Voice Embedding Storage
+    
+    /// Save a voice embedding (raw binary data) for a named speaker profile.
+    /// The account field encodes the profile type: "voice-<identifier>".
+    func saveVoiceEmbedding(_ data: Data, identifier: String) throws {
+        let voiceAccount = "voice-\(identifier)"
+        
+        // Delete existing item first (update = delete + add)
+        try? deleteVoiceEmbedding(identifier: identifier)
+        
+        let query: [String: Any] = [
+            kSecClass as String:       kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: voiceAccount,
+            kSecValueData as String:   data,
+            kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlocked,
+        ]
+        
+        let status = SecItemAdd(query as CFDictionary, nil)
+        guard status == errSecSuccess else {
+            throw KeychainError.saveFailed(status)
+        }
+    }
+    
+    /// Read a voice embedding by identifier.
+    func getVoiceEmbedding(identifier: String) throws -> Data? {
+        let voiceAccount = "voice-\(identifier)"
+        
+        let query: [String: Any] = [
+            kSecClass as String:       kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: voiceAccount,
+            kSecReturnData as String:  true,
+            kSecMatchLimit as String:  kSecMatchLimitOne,
+        ]
+        
+        var result: AnyObject?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        
+        switch status {
+        case errSecSuccess:
+            guard let data = result as? Data else {
+                throw KeychainError.decodingFailed
+            }
+            return data
+        case errSecItemNotFound:
+            return nil
+        default:
+            throw KeychainError.readFailed(status)
+        }
+    }
+    
+    /// Delete a voice embedding by identifier.
+    func deleteVoiceEmbedding(identifier: String) throws {
+        let voiceAccount = "voice-\(identifier)"
+        
+        let query: [String: Any] = [
+            kSecClass as String:       kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: voiceAccount,
+        ]
+        
+        let status = SecItemDelete(query as CFDictionary)
+        guard status == errSecSuccess || status == errSecItemNotFound else {
+            throw KeychainError.deleteFailed(status)
+        }
+    }
+    
+    /// List all voice embedding identifiers stored in the Keychain.
+    func allVoiceEmbeddingIdentifiers() -> [String] {
+        let query: [String: Any] = [
+            kSecClass as String:       kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecReturnAttributes as String: true,
+            kSecMatchLimit as String:  kSecMatchLimitAll,
+        ]
+        
+        var result: AnyObject?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        
+        guard status == errSecSuccess,
+              let items = result as? [[String: Any]] else {
+            return []
+        }
+        
+        return items.compactMap { item in
+            guard let account = item[kSecAttrAccount as String] as? String,
+                  account.hasPrefix("voice-") else { return nil }
+            return String(account.dropFirst("voice-".count))
+        }
+    }
 }
 
 // MARK: - Errors

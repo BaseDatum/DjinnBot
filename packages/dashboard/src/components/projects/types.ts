@@ -71,6 +71,15 @@ export interface Pipeline {
   description?: string;
 }
 
+export interface StatusSemantics {
+  initial: string[];
+  terminal_done: string[];
+  terminal_fail: string[];
+  blocked: string[];
+  in_progress: string[];
+  claimable: string[];
+}
+
 export interface Project {
   id: string;
   name: string;
@@ -82,6 +91,8 @@ export interface Project {
   slack_notify_user_id?: string;
   key_user_id?: string;
   vision?: string;
+  template_id?: string | null;
+  status_semantics?: StatusSemantics | null;
   columns: Column[];
   tasks: Task[];
   dependencies: Dependency[];

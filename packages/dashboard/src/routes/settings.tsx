@@ -1,16 +1,17 @@
 import { createFileRoute, useNavigate } from '@tanstack/react-router';
-import { Settings, Key, Lock, Github, Zap, Puzzle, Workflow } from 'lucide-react';
+import { Settings, Key, Lock, Github, Zap, Puzzle, Workflow, LayoutTemplate } from 'lucide-react';
 import { UserProviderSettings } from '@/components/settings/UserProviderSettings';
 import { SecretsSettings } from '@/components/settings/SecretsSettings';
 import { GitHubAppInstallations } from '@/components/github/GitHubAppInstallations';
+import { TemplateManager } from '@/components/settings/TemplateManager';
 import { NestedSidebar } from '@/components/layout/NestedSidebar';
 import type { NestedSidebarItem } from '@/components/layout/NestedSidebar';
 import { SkillsPage } from '@/routes/skills';
 import { McpPage } from '@/routes/mcp';
 import { PipelinesPage } from '@/routes/pipelines/';
 
-type SettingsTab = 'providers' | 'secrets' | 'github' | 'skills' | 'mcp' | 'pipelines';
-const VALID_TABS: SettingsTab[] = ['providers', 'secrets', 'github', 'skills', 'mcp', 'pipelines'];
+type SettingsTab = 'providers' | 'secrets' | 'github' | 'skills' | 'mcp' | 'pipelines' | 'templates';
+const VALID_TABS: SettingsTab[] = ['providers', 'secrets', 'github', 'skills', 'mcp', 'pipelines', 'templates'];
 
 export const Route = createFileRoute('/settings')({
   validateSearch: (search: Record<string, unknown>) => ({
@@ -28,6 +29,7 @@ const NAV_ITEMS: NestedSidebarItem[] = [
   { key: 'skills',     label: 'Skills',           icon: Zap },
   { key: 'mcp',        label: 'MCP Servers',      icon: Puzzle },
   { key: 'pipelines',  label: 'Pipelines',        icon: Workflow },
+  { key: 'templates',  label: 'Templates',        icon: LayoutTemplate },
 ];
 
 function SettingsPage() {
@@ -117,6 +119,12 @@ function SettingsPage() {
         {activeTab === 'pipelines' && (
           <div className="-m-4 md:-m-8">
             <PipelinesPage />
+          </div>
+        )}
+
+        {activeTab === 'templates' && (
+          <div className="max-w-5xl mx-auto">
+            <TemplateManager />
           </div>
         )}
       </NestedSidebar>

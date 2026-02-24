@@ -11,6 +11,7 @@ The original endpoints are now split across:
 - planning.py: Project planning and bulk import
 - agents.py: Agent assignments to projects
 """
+
 from fastapi import APIRouter
 
 from .core import router as core_router
@@ -21,6 +22,9 @@ from .workflows import router as workflows_router
 from .execution import router as execution_router
 from .planning import router as planning_router
 from .agents import router as agents_router
+from .git_integration import router as git_integration_router
+from .agent_routines import router as agent_routines_router
+from .swarm import router as swarm_router
 
 # Re-export commonly used items for backward compatibility
 from ._common import (
@@ -30,7 +34,10 @@ from ._common import (
     BulkImportTasksRequest,
 )
 from .execution import task_run_completed  # Used by main.py listener
-from .planning import bulk_import_tasks, bulk_import_subtasks  # Used by main.py listener
+from .planning import (
+    bulk_import_tasks,
+    bulk_import_subtasks,
+)  # Used by main.py listener
 
 # Create combined router for backward compatibility
 router = APIRouter()
@@ -44,14 +51,17 @@ router.include_router(workflows_router)
 router.include_router(execution_router)
 router.include_router(planning_router)
 router.include_router(agents_router)
+router.include_router(git_integration_router)
+router.include_router(agent_routines_router)
+router.include_router(swarm_router)
 
 __all__ = [
-    'router',
-    'get_project_or_404',
-    'get_task_or_404',
-    '_serialize_task',
-    'task_run_completed',
-    'bulk_import_tasks',
-    'bulk_import_subtasks',
-    'BulkImportTasksRequest',
+    "router",
+    "get_project_or_404",
+    "get_task_or_404",
+    "_serialize_task",
+    "task_run_completed",
+    "bulk_import_tasks",
+    "bulk_import_subtasks",
+    "BulkImportTasksRequest",
 ]

@@ -58,6 +58,7 @@ from app.routers import spawn_executor as spawn_executor_router
 from app.routers import swarm_executor as swarm_executor_router
 from app.routers import ingest as ingest_router
 from app.routers import memory_scores as memory_scores_router
+from app.routers import project_templates as project_templates_router
 
 
 async def _handle_task_run_event(run_id: str, event_type: str):
@@ -371,7 +372,24 @@ async def _github_webhook_listener():
                         await session.rollback()
                         raise
 
-                # Process event through router
+                # ── PR lifecycle automation (runs before agent routing) ────────
+                # Handles PR merge → auto-complete task → worktree cleanup
+                # without requiring an agent session.
+                event_type = data.get("event_type")
+                if event_type == "pull_request":
+                    from app.services.pr_lifecycle import handle_pr_event
+
+                    try:
+                        result = await handle_pr_event(payload)
+                        if result:
+                            logger.info(f"PR lifecycle: {result}")
+                    except Exception as pr_err:
+                        logger.error(
+                            f"PR lifecycle handler error: {pr_err}",
+                            exc_info=True,
+                        )
+
+                # Process event through agent assignment router
                 from app.services.github_event_router import process_webhook_event
 
                 await process_webhook_event(event_id, payload)
@@ -487,6 +505,16 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Could not validate GitHub App configuration: {e}")
         logger.warning("GitHub integration features will be unavailable")
+
+    # Seed built-in project templates
+    try:
+        from app.routers.project_templates import seed_builtin_templates
+
+        seed_result = await seed_builtin_templates()
+        if seed_result.get("seeded"):
+            logger.info(f"Project templates seeded: {', '.join(seed_result['seeded'])}")
+    except Exception as e:
+        logger.warning(f"Could not seed project templates: {e}")
 
     # Auto-import skills from SKILLS_DIR into the database
     try:
@@ -614,7 +642,6 @@ app.include_router(pipelines.router, prefix="/v1/pipelines", tags=["pipelines"])
 app.include_router(runs.router, prefix="/v1/runs", tags=["runs"])
 app.include_router(steps.router, prefix="/v1/steps", tags=["steps"])
 app.include_router(events.router, prefix="/v1/events", tags=["events"])
-app.include_router(events.router, prefix="/v1/agents", tags=["agent-events"])
 app.include_router(agents.router, prefix="/v1/agents", tags=["agents"])
 app.include_router(lifecycle.router, prefix="/v1/agents", tags=["lifecycle"])
 app.include_router(memory.router, prefix="/v1/memory", tags=["memory"])
@@ -654,6 +681,11 @@ app.include_router(
 )
 app.include_router(ingest_router.router, prefix="/v1/ingest", tags=["ingest"])
 app.include_router(memory_scores_router.router, prefix="/v1", tags=["memory-scores"])
+app.include_router(
+    project_templates_router.router,
+    prefix="/v1/project-templates",
+    tags=["project-templates"],
+)
 
 
 @app.get("/v1/status")

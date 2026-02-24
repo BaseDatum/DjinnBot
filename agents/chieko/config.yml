@@ -5,7 +5,7 @@ pulse_blackouts:
   start_time: '23:00'
   type: recurring
 pulse_columns:
-- Review
+- Test
 pulse_container_timeout_ms: 120000
 pulse_enabled: false
 pulse_interval_minutes: 30
@@ -14,7 +14,7 @@ pulse_offset_minutes: 0
 pulse_one_offs: []
 pulse_transitions_to:
 - done
-- in_progress
+- failed
 skills_disabled: []
 thinkingModel: moonshotai/kimi-k2.5
 thinking_level: 'off'

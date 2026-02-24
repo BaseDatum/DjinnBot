@@ -12,6 +12,7 @@ import { performResearch } from './research.js';
 import { createReadTool, createWriteTool, createEditTool, createBashTool } from '@mariozechner/pi-coding-agent';
 import { PROVIDER_ENV_MAP } from '../constants.js';
 import { parseModelString, enrichNetworkError } from './model-resolver.js';
+import { StructuredOutputRunner } from './structured-output-runner.js';
 
 export interface PiMonoRunnerConfig {
   /**
@@ -179,6 +180,43 @@ export class PiMonoRunner implements AgentRunner {
     // when the run is scoped to a specific user via project key_user_id or
     // initiated_by_user_id.
     await this.fetchAndInjectProviderApiKeys(options.userId);
+
+    // Handle structured output steps in-process (PiMonoRunner path).
+    // Delegates to StructuredOutputRunner for the actual HTTP call.
+    if (options.outputSchema) {
+      const sessionId = `pi_structured_${options.runId}_${options.stepId}_${Date.now()}`;
+      console.log(`[PiMonoRunner] Structured output for step ${options.stepId}`);
+
+      const structuredRunner = new StructuredOutputRunner({
+        apiBaseUrl: this.config.apiBaseUrl,
+        onStreamChunk: (runId, stepId, chunk) => {
+          this.config.onStreamChunk?.(options.agentId, runId, stepId, chunk);
+        },
+      });
+
+      const result = await structuredRunner.run({
+        runId: options.runId,
+        stepId: options.stepId,
+        model: options.model,
+        systemPrompt: options.systemPrompt,
+        userPrompt: options.userPrompt,
+        outputSchema: options.outputSchema,
+        outputMethod: options.outputMethod,
+        timeout: options.timeout,
+        userId: options.userId,
+      });
+
+      if (result.success && result.data) {
+        return {
+          sessionId,
+          output: result.rawJson,
+          success: true,
+          parsedOutputs: { _structured_json: result.rawJson },
+        };
+      }
+      // On failure, fall through to normal agent execution as fallback
+      console.warn(`[PiMonoRunner] Structured output failed: ${result.error}, falling back to agent`);
+    }
 
     const sessionId = `pi_${options.runId}_${options.stepId}_${Date.now()}`;
 

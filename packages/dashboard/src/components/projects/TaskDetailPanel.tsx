@@ -6,6 +6,7 @@ import {
   X,
   Lock,
   ChevronRight,
+  ChevronDown,
   Play,
   CheckCircle2,
   Zap,
@@ -19,10 +20,15 @@ import {
   addDependency,
   removeDependency,
   executeTask,
+  executeTaskWithAgent,
   fetchPipelines,
+  moveTask,
+  fetchAgents,
 } from '@/lib/api';
+import type { AgentListItem } from '@/lib/api';
+import { ProviderModelSelector } from '@/components/ui/ProviderModelSelector';
 import { PRIORITY_COLORS } from './constants';
-import type { Task, TaskDetail, Pipeline } from './types';
+import type { Task, TaskDetail, Pipeline, Column, StatusSemantics } from './types';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { useAuth } from '@/hooks/useAuth';
 import { API_BASE } from '@/lib/api';
@@ -59,6 +65,15 @@ export function TaskDetailPanel({
   const [keyUserOverride, setKeyUserOverride] = useState<string>('');
   const [modelOverride, setModelOverride] = useState<string>('');
   const [userOptions, setUserOptions] = useState<Array<{ value: string; label: string }>>([]);
+  const [projectColumns, setProjectColumns] = useState<Column[]>([]);
+  const [movingToColumn, setMovingToColumn] = useState(false);
+  const [statusSemantics, setStatusSemantics] = useState<StatusSemantics | null>(null);
+  const [pipelineExecCollapsed, setPipelineExecCollapsed] = useState(true);
+  const [agentExecCollapsed, setAgentExecCollapsed] = useState(true);
+  const [agents, setAgents] = useState<AgentListItem[]>([]);
+  const [selectedAgent, setSelectedAgent] = useState<string>('');
+  const [agentModelOverride, setAgentModelOverride] = useState<string>('');
+  const [executingAgent, setExecutingAgent] = useState(false);
   const { user } = useAuth();
 
   useEffect(() => {
@@ -90,8 +105,15 @@ export function TaskDetailPanel({
     
     fetchProject(projectId).then((p) => {
       setProjectDefaultPipeline(p.default_pipeline_id || '');
+      setProjectColumns(p.columns || []);
+      setStatusSemantics(p.status_semantics || null);
     }).catch(() => {});
   }, [projectId]);
+
+  // Load agents for agent executor
+  useEffect(() => {
+    fetchAgents().then(setAgents).catch(() => {});
+  }, []);
 
   // Load user options for key user selector
   useEffect(() => {
@@ -191,14 +213,49 @@ export function TaskDetailPanel({
     }
   };
 
-  const priorityClass = PRIORITY_COLORS[task.priority] || PRIORITY_COLORS.P2;
+  const handleAgentExecute = async () => {
+    if (!selectedAgent) return;
+    setExecutingAgent(true);
+    try {
+      await executeTaskWithAgent(projectId, task.id, {
+        agentId: selectedAgent,
+        modelOverride: agentModelOverride || undefined,
+      });
+      onUpdated();
+      // Refresh detail to get the new run_id
+      const updated = await fetchTask(projectId, task.id);
+      setDetail(updated);
+    } catch (err: unknown) {
+      alert((err instanceof Error ? err.message : String(err)) || 'Failed to execute task with agent');
+    } finally {
+      setExecutingAgent(false);
+    }
+  };
+
+  const handleMoveToColumn = async (columnId: string) => {
+    const currentColumnId = detail?.column_id ?? task.column_id;
+    if (!columnId || columnId === currentColumnId) return;
+    setMovingToColumn(true);
+    try {
+      await moveTask(projectId, task.id, columnId);
+      onUpdated();
+      const updated = await fetchTask(projectId, task.id);
+      setDetail(updated);
+    } catch (err) {
+      console.error('Failed to move task:', err);
+    } finally {
+      setMovingToColumn(false);
+    }
+  };
+
+  const priorityClass = PRIORITY_COLORS[detail?.priority ?? task.priority] || PRIORITY_COLORS.P2;
 
   return (
     <div className="fixed inset-y-0 right-0 z-50 w-full sm:w-[480px] bg-card border-l shadow-xl flex flex-col">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b shrink-0">
         <div className="flex items-center gap-2">
-          <Badge variant="outline" className={`${priorityClass}`}>{task.priority}</Badge>
+          <Badge variant="outline" className={`${priorityClass}`}>{detail?.priority ?? task.priority}</Badge>
           <span className="text-xs text-muted-foreground font-mono">{task.id.substring(0, 12)}</span>
         </div>
         <div className="flex items-center gap-1">
@@ -269,11 +326,49 @@ export function TaskDetailPanel({
             <div className="grid grid-cols-2 gap-3 text-sm">
               <div>
                 <label className="text-xs text-muted-foreground block mb-1">Status</label>
-                <Badge variant="outline">{detail.status}</Badge>
+                {projectColumns.length > 0 ? (
+                  <select
+                    value={detail?.column_id ?? task.column_id}
+                    onChange={(e) => handleMoveToColumn(e.target.value)}
+                    disabled={movingToColumn}
+                    className="h-7 rounded-md border border-input bg-background px-2 text-xs"
+                  >
+                    {projectColumns
+                      .sort((a, b) => a.position - b.position)
+                      .map((col) => {
+                        const currentColId = detail?.column_id ?? task.column_id;
+                        return (
+                          <option key={col.id} value={col.id}>
+                            {col.name}{col.id === currentColId ? ' (current)' : ''}
+                          </option>
+                        );
+                      })}
+                  </select>
+                ) : (
+                  <Badge variant="outline">{detail.status}</Badge>
+                )}
               </div>
               <div>
                 <label className="text-xs text-muted-foreground block mb-1">Priority</label>
-                <Badge variant="outline" className={priorityClass}>{detail.priority}</Badge>
+                <select
+                  value={detail.priority}
+                  onChange={async (e) => {
+                    const newPriority = e.target.value;
+                    try {
+                      await updateTask(projectId, task.id, { priority: newPriority });
+                      onUpdated();
+                      const updated = await fetchTask(projectId, task.id);
+                      setDetail(updated);
+                    } catch (err) {
+                      console.error('Failed to update priority:', err);
+                    }
+                  }}
+                  className="h-7 rounded-md border border-input bg-background px-2 text-xs"
+                >
+                  {['P0', 'P1', 'P2', 'P3'].map((p) => (
+                    <option key={p} value={p}>{p}</option>
+                  ))}
+                </select>
               </div>
               <div>
                 <label className="text-xs text-muted-foreground block mb-1">Agent</label>
@@ -281,7 +376,26 @@ export function TaskDetailPanel({
               </div>
               <div>
                 <label className="text-xs text-muted-foreground block mb-1">Estimate</label>
-                <span>{detail.estimated_hours ? `${detail.estimated_hours}h` : '—'}</span>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.5"
+                  value={detail.estimated_hours ?? ''}
+                  onChange={async (e) => {
+                    const val = e.target.value;
+                    const hours = val === '' ? null : parseFloat(val);
+                    try {
+                      await updateTask(projectId, task.id, { estimatedHours: hours });
+                      onUpdated();
+                      const updated = await fetchTask(projectId, task.id);
+                      setDetail(updated);
+                    } catch (err) {
+                      console.error('Failed to update estimate:', err);
+                    }
+                  }}
+                  placeholder="hours"
+                  className="h-7 w-full rounded-md border border-input bg-background px-2 text-xs"
+                />
               </div>
             </div>
 
@@ -297,63 +411,156 @@ export function TaskDetailPanel({
               </div>
             )}
 
-            {/* Execute */}
-            {detail && ['ready', 'backlog', 'planning'].includes(detail.status) && (
-              <div className="border rounded-lg p-3 bg-muted/30 space-y-2">
-                <label className="text-xs text-muted-foreground block">Execute Task</label>
-                <div>
-                  <label className="text-[10px] text-muted-foreground block mb-0.5">Pipeline</label>
-                  <select
-                    value={selectedPipeline}
-                    onChange={(e) => setSelectedPipeline(e.target.value)}
-                    className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs"
-                  >
-                    <option value="">
-                      Use project default{projectDefaultPipeline ? ` (${pipelines.find(p => p.id === projectDefaultPipeline)?.name || projectDefaultPipeline})` : ''}
-                    </option>
-                    {pipelines.map((p: Pipeline) => (
-                      <option key={p.id} value={p.id}>
-                        {p.name || p.id}{p.id === projectDefaultPipeline ? ' *' : ''}
-                      </option>
-                    ))}
-                  </select>
+            {/* Execute sections */}
+            {detail && (() => {
+              // Compute executable statuses from project semantics
+              const executableStatuses = new Set<string>();
+              if (statusSemantics) {
+                for (const s of statusSemantics.claimable || []) executableStatuses.add(s);
+                for (const s of statusSemantics.initial || []) executableStatuses.add(s);
+              }
+              // Fallback for projects without semantics
+              if (executableStatuses.size === 0) {
+                for (const s of ['ready', 'backlog', 'planning']) executableStatuses.add(s);
+              }
+              if (!executableStatuses.has(detail.status)) return null;
+
+              return (
+                <div className="space-y-2">
+                  {/* Agent Execute Task */}
+                  <div className="border rounded-lg bg-muted/30">
+                    <button
+                      type="button"
+                      className="flex items-center justify-between w-full p-3 text-left"
+                      onClick={() => setAgentExecCollapsed(!agentExecCollapsed)}
+                    >
+                      <label className="text-xs text-muted-foreground cursor-pointer flex items-center gap-1.5">
+                        <Play className="h-3 w-3" />
+                        Execute Task
+                      </label>
+                      {agentExecCollapsed ? (
+                        <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
+                      ) : (
+                        <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+                      )}
+                    </button>
+                    {!agentExecCollapsed && (
+                      <div className="px-3 pb-3 space-y-2">
+                        <p className="text-[10px] text-muted-foreground">
+                          Spawns a standalone agent session to work on this task. Includes memory injection and task branch isolation.
+                        </p>
+                        <div>
+                          <label className="text-[10px] text-muted-foreground block mb-0.5">Agent</label>
+                          <select
+                            value={selectedAgent}
+                            onChange={(e) => setSelectedAgent(e.target.value)}
+                            className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs"
+                          >
+                            <option value="">Select an agent...</option>
+                            {agents.map((a) => (
+                              <option key={a.id} value={a.id}>
+                                {a.emoji ? `${a.emoji} ` : ''}{a.name || a.id}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="text-[10px] text-muted-foreground block mb-0.5">Model</label>
+                          <ProviderModelSelector
+                            value={agentModelOverride}
+                            onChange={setAgentModelOverride}
+                            placeholder="Use agent default"
+                            className="h-8 w-full text-xs"
+                          />
+                        </div>
+                        <Button
+                          size="sm"
+                          onClick={handleAgentExecute}
+                          disabled={executingAgent || !selectedAgent}
+                          className="w-full gap-1.5"
+                        >
+                          <Play className="h-3.5 w-3.5" />
+                          {executingAgent ? 'Starting session...' : 'Execute with Agent'}
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Pipeline Execute Task */}
+                  <div className="border rounded-lg bg-muted/30">
+                    <button
+                      type="button"
+                      className="flex items-center justify-between w-full p-3 text-left"
+                      onClick={() => setPipelineExecCollapsed(!pipelineExecCollapsed)}
+                    >
+                      <label className="text-xs text-muted-foreground cursor-pointer flex items-center gap-1.5">
+                        <Zap className="h-3 w-3" />
+                        Pipeline Execute Task
+                      </label>
+                      {pipelineExecCollapsed ? (
+                        <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
+                      ) : (
+                        <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+                      )}
+                    </button>
+                    {!pipelineExecCollapsed && (
+                      <div className="px-3 pb-3 space-y-2">
+                        <div>
+                          <label className="text-[10px] text-muted-foreground block mb-0.5">Pipeline</label>
+                          <select
+                            value={selectedPipeline}
+                            onChange={(e) => setSelectedPipeline(e.target.value)}
+                            className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs"
+                          >
+                            <option value="">
+                              Use project default{projectDefaultPipeline ? ` (${pipelines.find(p => p.id === projectDefaultPipeline)?.name || projectDefaultPipeline})` : ''}
+                            </option>
+                            {pipelines.map((p: Pipeline) => (
+                              <option key={p.id} value={p.id}>
+                                {p.name || p.id}{p.id === projectDefaultPipeline ? ' *' : ''}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="text-[10px] text-muted-foreground flex items-center gap-1 mb-0.5">
+                            <Key className="h-2.5 w-2.5" />
+                            API Keys
+                          </label>
+                          <select
+                            value={keyUserOverride}
+                            onChange={(e) => setKeyUserOverride(e.target.value)}
+                            className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs"
+                          >
+                            {userOptions.map(opt => (
+                              <option key={opt.value} value={opt.value}>{opt.label}</option>
+                            ))}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="text-[10px] text-muted-foreground block mb-0.5">Model Override</label>
+                          <ProviderModelSelector
+                            value={modelOverride}
+                            onChange={setModelOverride}
+                            placeholder="Use pipeline default"
+                            className="h-8 w-full text-xs"
+                          />
+                        </div>
+                        <Button
+                          size="sm"
+                          onClick={handleExecute}
+                          disabled={executing}
+                          className="w-full gap-1.5"
+                        >
+                          <Zap className="h-3.5 w-3.5" />
+                          {executing ? 'Starting...' : 'Execute with Pipeline'}
+                        </Button>
+                      </div>
+                    )}
+                  </div>
                 </div>
-                <div>
-                  <label className="text-[10px] text-muted-foreground flex items-center gap-1 mb-0.5">
-                    <Key className="h-2.5 w-2.5" />
-                    API Keys
-                  </label>
-                  <select
-                    value={keyUserOverride}
-                    onChange={(e) => setKeyUserOverride(e.target.value)}
-                    className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs"
-                  >
-                    {userOptions.map(opt => (
-                      <option key={opt.value} value={opt.value}>{opt.label}</option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="text-[10px] text-muted-foreground block mb-0.5">Model Override</label>
-                  <input
-                    type="text"
-                    value={modelOverride}
-                    onChange={(e) => setModelOverride(e.target.value)}
-                    placeholder="e.g. anthropic/claude-sonnet-4 (leave empty for default)"
-                    className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs font-mono"
-                  />
-                </div>
-                <Button
-                  size="sm"
-                  onClick={handleExecute}
-                  disabled={executing}
-                  className="w-full gap-1.5"
-                >
-                  <Zap className="h-3.5 w-3.5" />
-                  {executing ? 'Starting...' : 'Execute with Pipeline'}
-                </Button>
-              </div>
-            )}
+              );
+            })()}
 
             {/* Active Run Link */}
             {detail?.run_id && detail.status === 'in_progress' && (

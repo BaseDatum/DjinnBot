@@ -35,9 +35,54 @@ columns that are ready to work on. Your allowed columns are configured in your
 
 **Only pick up ONE task per pulse** to stay focused.
 
-### 6. Work On a Task
+### 6. Check In-Flight Work (Before Picking New Tasks)
 
-Once you have identified the highest-priority task:
+Before picking up new work, check on tasks you already have in progress or review:
+
+1. **Get your ready tasks** — call `get_ready_tasks(projectId)` with your Review column.
+   Tasks in "review" status with your name are PRs you opened that may need attention.
+
+2. **For each task in "review"** — call `get_task_pr_status(projectId, taskId)`:
+   - If `ready_to_merge` is true: call `github_merge_pr(pr_number=...)`, then
+     `transition_task(projectId, taskId, "done")`. You're done with this task.
+   - If reviews have `CHANGES_REQUESTED`: read the review comments, go to your
+     task workspace, address the feedback, commit, push, and re-request review.
+   - If CI is failing: check the logs, fix the issue, push.
+   - If no reviews yet: the reviewer hasn't gotten to it — move on to new work.
+
+3. **For tasks in "in_progress"** that you previously started:
+   - Check if the workspace still exists: `cd /home/agent/task-workspaces/{taskId}`
+   - If you left uncommitted work, finish it up, commit, and push.
+
+Only after checking all in-flight work should you pick up a new task.
+
+### 7. Fix Failed Tasks (Failed Column)
+
+Check the **Failed** column for tasks that Chieko (QA) has rejected. These need
+bug fixes before they can be re-tested.
+
+For each task in "failed" status:
+
+1. **Claim it** (if not already yours) — `claim_task(projectId, taskId)`
+2. **Get context** — `get_task_context(projectId, taskId)` to read Chieko's
+   QA notes and bug reports in the PR comments
+3. **Check PR status** — `get_task_pr_status(projectId, taskId)` to see what
+   Chieko flagged
+4. **Fix the bugs** — go to your task workspace, address each issue:
+   ```bash
+   cd /home/agent/task-workspaces/{taskId}
+   # fix the issues
+   git add -A && git commit -m "fix: address QA feedback"
+   git push
+   ```
+5. **Transition back to review** — `transition_task(projectId, taskId, "review")`
+   This sends it back to Finn for re-review, then Chieko for re-testing.
+
+Failed tasks take priority over new work from the Ready column.
+
+### 8. Work On a Task (Ready Column)
+
+Once you have identified the highest-priority task from the **Ready** column:
 
 1. **Claim it** — call `claim_task(projectId, taskId)` to atomically assign yourself.
    This also provisions your **authenticated git workspace** for the task.
@@ -83,10 +128,10 @@ Once you have identified the highest-priority task:
    `create_task(projectId, title, description, priority)` to add them to the project
    board rather than trying to do everything in one pulse.
 
-### 7. Review Workspace
+### 9. Review Workspace
 Check your progress file and any active work you left last time.
 
-### 8. Report to Sky (if needed)
+### 10. Report to Sky (if needed)
 If you have anything important to report, message Sky via Slack:
 
 ```
@@ -109,6 +154,7 @@ slack_dm({
 | `claim_task(projectId, taskId)` | Atomically claim a task + provision authenticated git workspace |
 | `get_task_context(projectId, taskId)` | Full task details, description, PR info |
 | `open_pull_request(projectId, taskId, title, body)` | Open a GitHub PR for the task branch |
+| `get_task_pr_status(projectId, taskId)` | Check PR state, reviews, CI, merge readiness |
 | `transition_task(projectId, taskId, status)` | Move task through kanban columns |
 | `execute_task(projectId, taskId)` | Kick off a pipeline run for a task (optional) |
 

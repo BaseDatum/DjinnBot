@@ -277,6 +277,64 @@ export function createPulseTasksTools(config: PulseTasksToolsConfig): AgentTool[
     },
 
     {
+      name: 'get_task_pr_status',
+      description:
+        'Check the current status of a task\'s pull request on GitHub. ' +
+        'Returns PR state (open/closed/merged), review status, CI checks, ' +
+        'and whether the PR is ready to merge (approved + CI green + no conflicts). ' +
+        'Use this during pulse to check if any of your PRs need attention.',
+      label: 'get_task_pr_status',
+      parameters: Type.Object({
+        projectId: Type.String({ description: 'Project ID' }),
+        taskId: Type.String({ description: 'Task ID' }),
+      }),
+      execute: async (
+        _toolCallId: string,
+        params: unknown,
+        signal?: AbortSignal,
+      ): Promise<AgentToolResult<VoidDetails>> => {
+        const { projectId, taskId } = params as { projectId: string; taskId: string };
+        const apiBase = getApiBase();
+        try {
+          const url = `${apiBase}/v1/projects/${projectId}/tasks/${taskId}/pr-status`;
+          const response = await authFetch(url, { signal });
+          const data = (await response.json()) as any;
+          if (!response.ok) throw new Error(data.detail || `${response.status} ${response.statusText}`);
+
+          const lines = [
+            `**PR #${data.pr_number}**: ${data.title}`,
+            `**URL**: ${data.pr_url}`,
+            `**State**: ${data.state}${data.merged ? ' (merged)' : ''}${data.draft ? ' (draft)' : ''}`,
+            `**Branch**: ${data.head_branch} → ${data.base_branch}`,
+            `**Changes**: +${data.additions} -${data.deletions} across ${data.changed_files} files`,
+            ``, `**CI Status**: ${data.ci_status}`,
+          ];
+          if (data.checks?.length > 0) {
+            for (const check of data.checks) {
+              const icon = check.conclusion === 'success' ? 'PASS' : check.status === 'completed' ? 'FAIL' : 'PENDING';
+              lines.push(`  - ${icon}: ${check.name}`);
+            }
+          }
+          lines.push(``, `**Reviews**:`);
+          if (data.reviews?.length > 0) {
+            for (const review of data.reviews) lines.push(`  - ${review.user}: ${review.state}`);
+          } else {
+            lines.push(`  No reviews yet`);
+          }
+          lines.push(``, `**Mergeable**: ${data.mergeable === true ? 'Yes' : data.mergeable === false ? 'No (conflicts)' : 'Unknown'}`);
+          lines.push(`**Ready to merge**: ${data.ready_to_merge ? 'YES — approved, CI green, no conflicts' : 'No'}`);
+          if (data.ready_to_merge) {
+            lines.push(``, `You can merge this PR by calling: github_merge_pr(pr_number=${data.pr_number})`);
+            lines.push(`Then transition the task: transition_task(projectId, taskId, "done")`);
+          }
+          return { content: [{ type: 'text', text: lines.join('\n') }], details: {} };
+        } catch (err) {
+          return { content: [{ type: 'text', text: `Error checking PR status: ${err instanceof Error ? err.message : String(err)}` }], details: {} };
+        }
+      },
+    },
+
+    {
       name: 'transition_task',
       description:
         'Move a task to a new kanban status (e.g. in_progress → review, review → done). ' +

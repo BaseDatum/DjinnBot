@@ -5,7 +5,7 @@ pulse_blackouts:
   start_time: '23:00'
   type: recurring
 pulse_columns:
-- Ready
+- Planned
 pulse_container_timeout_ms: 120000
 pulse_enabled: false
 pulse_interval_minutes: 30
@@ -13,9 +13,9 @@ pulse_max_consecutive_skips: 5
 pulse_offset_minutes: 18
 pulse_one_offs: []
 pulse_transitions_to:
-- in_progress
-- review
-- done
+- ux
+- ready
+- blocked
 thinkingModel: moonshotai/kimi-k2.5
 thinking_level: 'off'
 thinking_model: xai/grok-4-1-fast-reasoning

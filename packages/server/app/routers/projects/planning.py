@@ -252,10 +252,10 @@ async def get_project_timeline(
         latest_task = max(scheduled.keys(), key=lambda tid: scheduled[tid]["end"])
         path = [latest_task]
         current = latest_task
-        while task_dependents.get(current):
-            # Pick the dep with the latest end time
+        while task_deps.get(current):
+            # Trace backwards: pick the dependency (blocker) with the latest end time
             prev = max(
-                task_dependents[current],
+                task_deps[current],
                 key=lambda tid: scheduled.get(tid, {}).get("end", 0),
             )
             path.append(prev)

@@ -1,4 +1,5 @@
-import type { DependencyEdge, Task, TaskStatus, DependencyType } from '../types/project.js';
+import type { DependencyEdge, Task, TaskStatus, DependencyType, StatusSemantics } from '../types/project.js';
+import { DEFAULT_STATUS_SEMANTICS } from '../types/project.js';
 
 export interface DependencyGraph {
   edges: DependencyEdge[];
@@ -101,22 +102,32 @@ export class DependencyResolver {
   
   /**
    * Get all tasks that are "ready" — all hard dependencies (type: 'blocks') are done.
+   *
+   * @param semantics - Status semantics for the project. Uses DEFAULT_STATUS_SEMANTICS
+   *   if not provided. Controls which statuses are considered "initial" (eligible)
+   *   and "terminal_done" (dependency satisfied).
    */
   static getReadyTasks(
     tasks: Map<string, Task>,
-    edges: DependencyEdge[]
+    edges: DependencyEdge[],
+    semantics: StatusSemantics = DEFAULT_STATUS_SEMANTICS,
   ): string[] {
     const ready: string[] = [];
+    const initialStatuses = new Set(semantics.initial);
+    const claimableStatuses = new Set(semantics.claimable);
+    const terminalDone = new Set(semantics.terminal_done);
+
+    // Tasks eligible for "ready" check: those in initial or claimable statuses
+    const eligibleStatuses = new Set([...initialStatuses, ...claimableStatuses]);
     
     for (const [taskId, task] of Array.from(tasks.entries())) {
-      // Only consider tasks in backlog or planning status
-      if (task.status !== 'backlog' && task.status !== 'planning') continue;
+      if (!eligibleStatuses.has(task.status)) continue;
       
       // Check all hard dependencies
       const blockingDeps = edges.filter(e => e.toTaskId === taskId && e.type === 'blocks');
       const allDepsReady = blockingDeps.every(dep => {
         const depTask = tasks.get(dep.fromTaskId);
-        return depTask && depTask.status === 'done';
+        return depTask && terminalDone.has(depTask.status);
       });
       
       if (allDepsReady) {
@@ -130,14 +141,18 @@ export class DependencyResolver {
   /**
    * Get tasks that should be blocked because a dependency failed.
    * Returns task IDs that need to be moved to 'blocked' status.
+   *
+   * @param semantics - Status semantics for the project.
    */
   static getCascadeBlocked(
     taskId: string,
     tasks: Map<string, Task>,
-    edges: DependencyEdge[]
+    edges: DependencyEdge[],
+    semantics: StatusSemantics = DEFAULT_STATUS_SEMANTICS,
   ): string[] {
     const blocked: string[] = [];
     const visited = new Set<string>();
+    const terminalStatuses = new Set([...semantics.terminal_done, ...semantics.terminal_fail]);
     
     function cascade(fromId: string) {
       const dependents = edges.filter(e => e.fromTaskId === fromId && e.type === 'blocks');
@@ -146,7 +161,7 @@ export class DependencyResolver {
         visited.add(dep.toTaskId);
         
         const task = tasks.get(dep.toTaskId);
-        if (task && task.status !== 'done' && task.status !== 'failed') {
+        if (task && !terminalStatuses.has(task.status)) {
           blocked.push(dep.toTaskId);
           // Cascade further
           cascade(dep.toTaskId);

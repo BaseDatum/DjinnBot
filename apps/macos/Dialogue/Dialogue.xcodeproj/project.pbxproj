@@ -20,6 +20,25 @@
 		BB000006 /* DocumentManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB000016 /* DocumentManager.swift */; };
 		BB000007 /* SidebarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB000017 /* SidebarView.swift */; };
 		BB000008 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB000018 /* SettingsView.swift */; };
+		CC000001 /* VoiceProfileManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC000011 /* VoiceProfileManager.swift */; };
+		CC000002 /* AudioEngineManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC000012 /* AudioEngineManager.swift */; };
+		CC000003 /* StreamingTranscriptionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC000013 /* StreamingTranscriptionService.swift */; };
+		CC000004 /* RealTimeDiarizationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC000014 /* RealTimeDiarizationService.swift */; };
+		CC000005 /* MeetingTranscript.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC000015 /* MeetingTranscript.swift */; };
+		CC000006 /* LiveRecordingPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC000016 /* LiveRecordingPanel.swift */; };
+		CC000007 /* PostMeetingVoiceLabeler.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC000017 /* PostMeetingVoiceLabeler.swift */; };
+		CC000008 /* FirstLaunchManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC000018 /* FirstLaunchManager.swift */; };
+		CC000009 /* VoiceEnrollmentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC000019 /* VoiceEnrollmentView.swift */; };
+		CC00000A /* StatusFooterView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC00001A /* StatusFooterView.swift */; };
+		CC00000C /* FluidAudio in Frameworks */ = {isa = PBXBuildFile; productRef = CC000082 /* FluidAudio */; };
+		CC00000D /* SystemAudioCaptureManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC00001B /* SystemAudioCaptureManager.swift */; };
+		DD000001 /* ChatModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD000011 /* ChatModels.swift */; };
+		DD000002 /* StreamingChatService.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD000012 /* StreamingChatService.swift */; };
+		DD000003 /* ChatSessionManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD000013 /* ChatSessionManager.swift */; };
+		DD000004 /* ChatMessageView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD000014 /* ChatMessageView.swift */; };
+		DD000005 /* ChatPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD000015 /* ChatPanelView.swift */; };
+		DD000006 /* FloatingChatToolbar.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD000016 /* FloatingChatToolbar.swift */; };
+		DD000007 /* BottomEdgeDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD000017 /* BottomEdgeDetector.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -38,6 +57,24 @@
 		BB000016 /* DocumentManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DocumentManager.swift; sourceTree = "<group>"; };
 		BB000017 /* SidebarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarView.swift; sourceTree = "<group>"; };
 		BB000018 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		CC000011 /* VoiceProfileManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceProfileManager.swift; sourceTree = "<group>"; };
+		CC000012 /* AudioEngineManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioEngineManager.swift; sourceTree = "<group>"; };
+		CC000013 /* StreamingTranscriptionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamingTranscriptionService.swift; sourceTree = "<group>"; };
+		CC000014 /* RealTimeDiarizationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RealTimeDiarizationService.swift; sourceTree = "<group>"; };
+		CC000015 /* MeetingTranscript.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingTranscript.swift; sourceTree = "<group>"; };
+		CC000016 /* LiveRecordingPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveRecordingPanel.swift; sourceTree = "<group>"; };
+		CC000017 /* PostMeetingVoiceLabeler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PostMeetingVoiceLabeler.swift; sourceTree = "<group>"; };
+		CC000018 /* FirstLaunchManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FirstLaunchManager.swift; sourceTree = "<group>"; };
+		CC000019 /* VoiceEnrollmentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceEnrollmentView.swift; sourceTree = "<group>"; };
+		CC00001A /* StatusFooterView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusFooterView.swift; sourceTree = "<group>"; };
+		CC00001B /* SystemAudioCaptureManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemAudioCaptureManager.swift; sourceTree = "<group>"; };
+		DD000011 /* ChatModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatModels.swift; sourceTree = "<group>"; };
+		DD000012 /* StreamingChatService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamingChatService.swift; sourceTree = "<group>"; };
+		DD000013 /* ChatSessionManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatSessionManager.swift; sourceTree = "<group>"; };
+		DD000014 /* ChatMessageView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatMessageView.swift; sourceTree = "<group>"; };
+		DD000015 /* ChatPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatPanelView.swift; sourceTree = "<group>"; };
+		DD000016 /* FloatingChatToolbar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FloatingChatToolbar.swift; sourceTree = "<group>"; };
+		DD000017 /* BottomEdgeDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BottomEdgeDetector.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -45,6 +82,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				CC00000C /* FluidAudio in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -68,6 +106,9 @@
 				BB000031 /* Document */,
 				BB000032 /* Services */,
 				BB000033 /* UI */,
+				DD000030 /* Chat */,
+				CC000034 /* Meeting */,
+				CC000035 /* Onboarding */,
 				AA000016 /* Dialogue.entitlements */,
 				AA000013 /* Assets.xcassets */,
 				AA000033 /* Preview Content */,
@@ -115,6 +156,7 @@
 			children = (
 				BB000015 /* KeychainManager.swift */,
 				BB000016 /* DocumentManager.swift */,
+				CC000011 /* VoiceProfileManager.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -124,8 +166,46 @@
 			children = (
 				BB000017 /* SidebarView.swift */,
 				BB000018 /* SettingsView.swift */,
+				CC00001A /* StatusFooterView.swift */,
+				DD000017 /* BottomEdgeDetector.swift */,
 			);
 			path = UI;
+			sourceTree = "<group>";
+		};
+		DD000030 /* Chat */ = {
+			isa = PBXGroup;
+			children = (
+				DD000011 /* ChatModels.swift */,
+				DD000012 /* StreamingChatService.swift */,
+				DD000013 /* ChatSessionManager.swift */,
+				DD000014 /* ChatMessageView.swift */,
+				DD000015 /* ChatPanelView.swift */,
+				DD000016 /* FloatingChatToolbar.swift */,
+			);
+			path = Chat;
+			sourceTree = "<group>";
+		};
+		CC000034 /* Meeting */ = {
+			isa = PBXGroup;
+			children = (
+				CC000012 /* AudioEngineManager.swift */,
+				CC000013 /* StreamingTranscriptionService.swift */,
+				CC000014 /* RealTimeDiarizationService.swift */,
+				CC000015 /* MeetingTranscript.swift */,
+				CC000016 /* LiveRecordingPanel.swift */,
+				CC000017 /* PostMeetingVoiceLabeler.swift */,
+				CC00001B /* SystemAudioCaptureManager.swift */,
+			);
+			path = Meeting;
+			sourceTree = "<group>";
+		};
+		CC000035 /* Onboarding */ = {
+			isa = PBXGroup;
+			children = (
+				CC000018 /* FirstLaunchManager.swift */,
+				CC000019 /* VoiceEnrollmentView.swift */,
+			);
+			path = Onboarding;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -145,6 +225,9 @@
 			dependencies = (
 			);
 			name = Dialogue;
+			packageProductDependencies = (
+				CC000082 /* FluidAudio */,
+			);
 			productName = Dialogue;
 			productReference = AA000010 /* Dialogue.app */;
 			productType = "com.apple.product-type.application";
@@ -173,6 +256,9 @@
 				Base,
 			);
 			mainGroup = AA000030;
+			packageReferences = (
+				CC000071 /* XCRemoteSwiftPackageReference "FluidAudio" */,
+			);
 			productRefGroup = AA000032 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
@@ -238,6 +324,24 @@
 				BB000006 /* DocumentManager.swift in Sources */,
 				BB000007 /* SidebarView.swift in Sources */,
 				BB000008 /* SettingsView.swift in Sources */,
+				CC000001 /* VoiceProfileManager.swift in Sources */,
+				CC000002 /* AudioEngineManager.swift in Sources */,
+				CC000003 /* StreamingTranscriptionService.swift in Sources */,
+				CC000004 /* RealTimeDiarizationService.swift in Sources */,
+				CC000005 /* MeetingTranscript.swift in Sources */,
+				CC000006 /* LiveRecordingPanel.swift in Sources */,
+				CC000007 /* PostMeetingVoiceLabeler.swift in Sources */,
+				CC000008 /* FirstLaunchManager.swift in Sources */,
+				CC000009 /* VoiceEnrollmentView.swift in Sources */,
+				CC00000A /* StatusFooterView.swift in Sources */,
+				CC00000D /* SystemAudioCaptureManager.swift in Sources */,
+				DD000001 /* ChatModels.swift in Sources */,
+				DD000002 /* StreamingChatService.swift in Sources */,
+				DD000003 /* ChatSessionManager.swift in Sources */,
+				DD000004 /* ChatMessageView.swift in Sources */,
+				DD000005 /* ChatPanelView.swift in Sources */,
+				DD000006 /* FloatingChatToolbar.swift in Sources */,
+				DD000007 /* BottomEdgeDetector.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -436,6 +540,25 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		CC000071 /* XCRemoteSwiftPackageReference "FluidAudio" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/FluidInference/FluidAudio.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 0.7.9;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		CC000082 /* FluidAudio */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = CC000071 /* XCRemoteSwiftPackageReference "FluidAudio" */;
+			productName = FluidAudio;
+		};
+/* End XCSwiftPackageProductDependency section */
 
 	};
 	rootObject = AA000050 /* Project object */;

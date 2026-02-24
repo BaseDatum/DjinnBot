@@ -575,6 +575,289 @@ export class ContainerAgentRunner {
     console.log(`[AgentRunner] Seeded persistent agent with ${messages.length} historical messages (thinkingLevel: ${thinkingLevel || 'off'})`);
   }
 
+  // ── Structured Output ────────────────────────────────────────────────────
+  // Handles constrained-decoding API calls (response_format / tool_use)
+  // inside the container, replacing the old in-engine StructuredOutputRunner.
+
+  /**
+   * Resolve a model string to an API base URL, model ID, and API key.
+   * Used by runStructuredOutput() to call the LLM API directly.
+   */
+  private resolveModelForStructuredOutput(modelString: string): { baseUrl: string; modelId: string; apiKey: string } {
+    const parts = modelString.split('/');
+
+    if (parts[0] === 'openrouter' || parts.length > 2) {
+      const modelId = parts.slice(1).join('/');
+      return {
+        baseUrl: 'https://openrouter.ai/api/v1',
+        modelId,
+        apiKey: process.env.OPENROUTER_API_KEY || '',
+      };
+    }
+
+    const provider = parts[0];
+    const modelId = parts.slice(1).join('/');
+
+    // Only include providers with OpenAI-compatible APIs.
+    // Anthropic and Google use different API formats and route through OpenRouter.
+    const providerMap: Record<string, { baseUrl: string; envKey: string }> = {
+      openai: { baseUrl: 'https://api.openai.com/v1', envKey: 'OPENAI_API_KEY' },
+      xai: { baseUrl: 'https://api.x.ai/v1', envKey: 'XAI_API_KEY' },
+    };
+
+    const config = providerMap[provider];
+    if (!config || !process.env[config.envKey]) {
+      return {
+        baseUrl: 'https://openrouter.ai/api/v1',
+        modelId: parts.length > 2 ? parts.slice(1).join('/') : modelString,
+        apiKey: process.env.OPENROUTER_API_KEY || '',
+      };
+    }
+
+    return {
+      baseUrl: config.baseUrl,
+      modelId,
+      apiKey: process.env[config.envKey] || '',
+    };
+  }
+
+  /**
+   * Run a structured output request. Makes a direct HTTP call to the LLM API
+   * with response_format (JSON Schema) or tool_use fallback.
+   * Returns the raw JSON string on success.
+   */
+  async runStructuredOutput(opts: {
+    requestId: string;
+    systemPrompt: string;
+    userPrompt: string;
+    outputSchema: { name: string; schema: Record<string, unknown>; strict?: boolean };
+    outputMethod?: 'response_format' | 'tool_use';
+    temperature?: number;
+    model?: string;
+    timeout?: number;
+  }): Promise<{ success: boolean; rawJson: string; error?: string }> {
+    const modelString = opts.model || process.env.AGENT_MODEL || 'openrouter/moonshotai/kimi-k2.5';
+    const method = opts.outputMethod || 'response_format';
+
+    console.log(`[AgentRunner] Running structured output: model=${modelString}, method=${method}, schema=${opts.outputSchema.name}`);
+
+    if (method === 'tool_use') {
+      return this.runStructuredWithToolUse(modelString, opts);
+    }
+
+    return this.runStructuredWithResponseFormat(modelString, opts);
+  }
+
+  private async runStructuredWithResponseFormat(
+    modelString: string,
+    opts: {
+      requestId: string;
+      systemPrompt: string;
+      userPrompt: string;
+      outputSchema: { name: string; schema: Record<string, unknown>; strict?: boolean };
+      temperature?: number;
+      timeout?: number;
+    },
+  ): Promise<{ success: boolean; rawJson: string; error?: string }> {
+    const { baseUrl, modelId, apiKey } = this.resolveModelForStructuredOutput(modelString);
+    const timeoutMs = opts.timeout || 300_000;
+    console.log(`[AgentRunner] Structured output POST ${baseUrl}/chat/completions model=${modelId}`);
+
+    const requestBody: Record<string, unknown> = {
+      model: modelId,
+      messages: [
+        { role: 'system', content: opts.systemPrompt },
+        { role: 'user', content: opts.userPrompt },
+      ],
+      response_format: {
+        type: 'json_schema',
+        json_schema: {
+          name: opts.outputSchema.name,
+          strict: opts.outputSchema.strict !== false,
+          schema: opts.outputSchema.schema,
+        },
+      },
+      temperature: opts.temperature ?? 0.7,
+      max_tokens: 16384,
+    };
+
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`,
+    };
+
+    if (baseUrl.includes('openrouter')) {
+      headers['HTTP-Referer'] = 'https://djinnbot.dev';
+      headers['X-Title'] = 'DjinnBot';
+      (requestBody as any).provider = { require_parameters: true };
+    }
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => {
+      console.error(`[AgentRunner] Structured output TIMEOUT after ${timeoutMs}ms`);
+      controller.abort();
+    }, timeoutMs);
+
+    try {
+      const response = await fetch(`${baseUrl}/chat/completions`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(requestBody),
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        const errorBody = await response.text();
+        // Fall back to tool_use if response_format not supported
+        if (response.status === 400 && (
+          errorBody.includes('response_format') ||
+          errorBody.includes('json_schema') ||
+          errorBody.includes('not supported')
+        )) {
+          console.warn(`[AgentRunner] response_format not supported, falling back to tool_use`);
+          return this.runStructuredWithToolUse(modelString, opts as any);
+        }
+        return { success: false, rawJson: '', error: `API error ${response.status}: ${errorBody}` };
+      }
+
+      const bodyText = await response.text();
+      const result = JSON.parse(bodyText);
+      const content = result.choices?.[0]?.message?.content;
+
+      if (!content) {
+        const refusal = result.choices?.[0]?.message?.refusal;
+        if (refusal) return { success: false, rawJson: '', error: `Model refused: ${refusal}` };
+        return { success: false, rawJson: '', error: 'No content in response' };
+      }
+
+      // Stream the content for observability
+      this.options.publisher.publishOutputFast({
+        type: 'stdout',
+        requestId: opts.requestId,
+        data: content,
+      });
+
+      // Validate JSON
+      try {
+        JSON.parse(content);
+        return { success: true, rawJson: content };
+      } catch (parseErr) {
+        return { success: false, rawJson: content, error: `JSON parse failed: ${parseErr}` };
+      }
+    } catch (err) {
+      clearTimeout(timeoutId);
+      const error = err instanceof Error ? err.message : String(err);
+      return { success: false, rawJson: '', error };
+    }
+  }
+
+  private async runStructuredWithToolUse(
+    modelString: string,
+    opts: {
+      requestId: string;
+      systemPrompt: string;
+      userPrompt: string;
+      outputSchema: { name: string; schema: Record<string, unknown>; strict?: boolean };
+      temperature?: number;
+      timeout?: number;
+    },
+  ): Promise<{ success: boolean; rawJson: string; error?: string }> {
+    const { baseUrl, modelId, apiKey } = this.resolveModelForStructuredOutput(modelString);
+    const toolName = `submit_${opts.outputSchema.name}`;
+    const timeoutMs = opts.timeout || 300_000;
+
+    const requestBody: Record<string, unknown> = {
+      model: modelId,
+      messages: [
+        { role: 'system', content: opts.systemPrompt },
+        {
+          role: 'user',
+          content: `${opts.userPrompt}\n\nYou MUST call the ${toolName} tool with your response. Do not output any text — only call the tool.`,
+        },
+      ],
+      tools: [
+        {
+          type: 'function',
+          function: {
+            name: toolName,
+            description: 'Submit the structured output for this step.',
+            parameters: opts.outputSchema.schema,
+          },
+        },
+      ],
+      tool_choice: { type: 'function', function: { name: toolName } },
+      temperature: opts.temperature ?? 0.7,
+      max_tokens: 16384,
+    };
+
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`,
+    };
+
+    if (baseUrl.includes('openrouter')) {
+      headers['HTTP-Referer'] = 'https://djinnbot.dev';
+      headers['X-Title'] = 'DjinnBot';
+    }
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+    try {
+      const response = await fetch(`${baseUrl}/chat/completions`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(requestBody),
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        const errorBody = await response.text();
+        return { success: false, rawJson: '', error: `API error ${response.status}: ${errorBody}` };
+      }
+
+      const result = await response.json() as any;
+      const toolCall = result.choices?.[0]?.message?.tool_calls?.[0];
+
+      if (!toolCall || toolCall.function?.name !== toolName) {
+        const content = result.choices?.[0]?.message?.content;
+        if (content) {
+          try {
+            JSON.parse(content);
+            return { success: true, rawJson: content };
+          } catch {
+            return { success: false, rawJson: content || '', error: 'Model did not call tool and content is not valid JSON' };
+          }
+        }
+        return { success: false, rawJson: '', error: 'Model did not call the expected tool' };
+      }
+
+      const args = toolCall.function.arguments;
+
+      // Stream for observability
+      this.options.publisher.publishOutputFast({
+        type: 'stdout',
+        requestId: opts.requestId,
+        data: args,
+      });
+
+      try {
+        JSON.parse(args);
+        return { success: true, rawJson: args };
+      } catch (parseErr) {
+        return { success: false, rawJson: args, error: `Tool call JSON parse failed: ${parseErr}` };
+      }
+    } catch (err) {
+      clearTimeout(timeoutId);
+      const error = err instanceof Error ? err.message : String(err);
+      return { success: false, rawJson: '', error };
+    }
+  }
+
   async runStep(requestId: string, systemPrompt: string, userPrompt: string, attachments?: AttachmentMeta[]): Promise<StepResult> {
     // Update mutable ref — all tool closures and the subscription read this
     this.requestIdRef.current = requestId;

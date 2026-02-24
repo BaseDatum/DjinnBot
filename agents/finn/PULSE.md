@@ -35,58 +35,70 @@ columns that are ready to work on. Your allowed columns are configured in your
 
 **Only pick up ONE task per pulse** to stay focused.
 
-### 6. Work On a Task
+### 6. Architecture Planning (Planning Column)
 
-Once you have identified the highest-priority task:
+Check for tasks in the "Planning" column that need architectural design.
 
-1. **Claim it** — call `claim_task(projectId, taskId)` to atomically assign yourself.
-   This also provisions your **authenticated git workspace** for the task.
-   You will receive:
-   - The branch name: `feat/task_abc123-implement-oauth`
-   - Your workspace path: `/home/agent/task-workspaces/{taskId}/`
+For each task in "planning" status:
 
-2. **Get context** — call `get_task_context(projectId, taskId)` to read the full
-   description, acceptance criteria, and any prior work on this task.
-
-3. **Do the work** — your workspace is already checked out on the right branch.
-   Git credentials are configured — you can push directly:
+1. **Claim it** — call `claim_task(projectId, taskId)` to assign yourself.
+2. **Get context** — call `get_task_context(projectId, taskId)` to read the
+   spec, acceptance criteria, and any notes from Eric.
+3. **Design the architecture**:
+   - Sketch high-level components and data flows
+   - Identify failure modes and scalability bottlenecks
+   - Document security considerations
+   - Note dependencies on other tasks or systems
+4. **Commit architecture notes** to the task workspace:
    ```bash
    cd /home/agent/task-workspaces/{taskId}
-   # read prior commits to understand what's already done
-   git log --oneline -10
-   # make your changes, then commit
-   git add -A && git commit -m "feat: implement X"
+   git add -A && git commit -m "docs: architecture design for [feature]"
    git push
    ```
+5. **Transition the task**:
+   - If the task needs UX design (has UI components):
+     `transition_task(projectId, taskId, "planned")` — this triggers Shigeo
+   - If the task is backend-only (no UI needed):
+     `transition_task(projectId, taskId, "ready")` — this goes straight to Yukihiro
 
-4. **Open a PR** — when your implementation is ready for review:
+### 7. Review Pull Requests (Review Column)
+
+Check for tasks in the "Review" column that need architectural review.
+
+For each task in "review" status:
+
+1. **Check PR status** — call `get_task_pr_status(projectId, taskId)`:
+   - If the PR has no reviews yet, you should review it.
+   - If you already reviewed and changes were requested, check if they were addressed.
+
+2. **Review the PR** — read the code changes on GitHub:
+   - Check for separation of concerns, error handling, scalability
+   - Check for security issues (input validation, auth, data leaks)
+   - Check for testability and observability
+   - Check alignment with the project's architecture vision
+
+3. **Leave your review**:
+   - If the code is sound: `github_approve_pr(pr_number=..., body="...")`
+   - If changes needed: `github_comment_pr(pr_number=..., body="...")` explaining
+     what needs to change and why.
+
+4. **Send to testing** — after you approve the PR, move the task to QA:
    ```
-   open_pull_request(projectId, taskId, title="feat: ...", body="...")
+   transition_task(projectId, taskId, "test")
    ```
+   This automatically triggers Chieko for QA testing. Do NOT merge the PR
+   yourself — Chieko merges after tests pass.
 
-5. **Transition the task** — after opening the PR, move it to review:
-   ```
-   transition_task(projectId, taskId, "review")
-   ```
-   Common transitions:
-   - Implementation complete, PR open → `review`
-   - Something is blocked → `blocked`
-   - Tests/review passed, ready to merge → keep in `review` for the merge agent
+### 8. Create Follow-Up Tasks
 
-6. **Optional: kick off a pipeline** — if the task needs structured multi-agent
-   orchestration (e.g. the planning pipeline), call `execute_task(projectId, taskId)`.
-   Only do this when the task has a pipeline configured and the work is too structured
-   for a single pulse session.
+If during review you discover additional work needed (refactoring, tech debt,
+security fixes), use `create_task(projectId, title, description, priority)` to
+add them to the project board.
 
-7. **Create follow-up tasks** — if during your work you discover additional work
-   that needs to be done (bugs, refactoring, follow-up features), use
-   `create_task(projectId, title, description, priority)` to add them to the project
-   board rather than trying to do everything in one pulse.
-
-### 7. Review Workspace
+### 9. Review Workspace
 Check your progress file and any active work you left last time.
 
-### 8. Report to Sky (if needed)
+### 10. Report to Sky (if needed)
 If you have anything important to report, message Sky via Slack:
 
 ```
@@ -109,6 +121,10 @@ slack_dm({
 | `claim_task(projectId, taskId)` | Atomically claim a task + provision authenticated git workspace |
 | `get_task_context(projectId, taskId)` | Full task details, description, PR info |
 | `open_pull_request(projectId, taskId, title, body)` | Open a GitHub PR for the task branch |
+| `get_task_pr_status(projectId, taskId)` | Check PR state, reviews, CI, merge readiness |
+| `github_approve_pr(pr_number, body)` | Approve a pull request |
+| `github_comment_pr(pr_number, body)` | Comment on a pull request |
+| `github_merge_pr(pr_number, method)` | Merge a pull request (squash/merge/rebase) |
 | `transition_task(projectId, taskId, status)` | Move task through kanban columns |
 | `execute_task(projectId, taskId)` | Kick off a pipeline run for a task (optional) |
 

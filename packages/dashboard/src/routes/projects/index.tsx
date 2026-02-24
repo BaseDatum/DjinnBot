@@ -4,10 +4,11 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { FolderKanban, Plus, CheckCircle2, Clock, AlertCircle, Trash2, Github, Sparkles } from 'lucide-react';
 import { useState, useEffect } from 'react';
-import { fetchProjects, createProject, deleteProject, listOnboardingSessions } from '@/lib/api';
+import { fetchProjects, createProject, deleteProject, listOnboardingSessions, type ProjectTemplate } from '@/lib/api';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { OnboardingChat } from '@/components/onboarding/OnboardingChat';
 import { OnboardingSessionsPanel } from '@/components/onboarding/OnboardingSessionsPanel';
+import { TemplatePicker } from '@/components/projects/TemplatePicker';
 import { Skeleton } from '@/components/ui/skeleton';
 
 // Keys for persisting onboarding state across refreshes
@@ -36,6 +37,8 @@ function ProjectsPage() {
   const [newName, setNewName] = useState('');
   const [newDesc, setNewDesc] = useState('');
   const [newRepo, setNewRepo] = useState('');
+  const [selectedTemplate, setSelectedTemplate] = useState<ProjectTemplate | null>(null);
+  const [createStep, setCreateStep] = useState<'template' | 'details'>('template');
   const [creating, setCreating] = useState(false);
   const [confirmAction, setConfirmAction] = useState<{ title: string; desc: string; action: () => void } | null>(null);
 
@@ -107,6 +110,7 @@ function ProjectsPage() {
         name: savedName,
         description: savedDesc,
         repository: savedRepo || undefined,
+        templateId: selectedTemplate?.id,
       });
       // Replace the optimistic entry with the real one
       setProjects(prev => prev.map(p => p.id === optimisticId ? created : p));
@@ -203,52 +207,101 @@ function ProjectsPage() {
         </div>
       </div>
 
-      {/* Create Project Form */}
+      {/* Create Project Flow */}
       {showCreate && (
         <Card className="mb-6">
           <CardContent className="pt-6">
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium mb-1.5">Project Name</label>
-                <input
-                  type="text"
-                  value={newName}
-                  onChange={(e) => setNewName(e.target.value)}
-                  placeholder="My Awesome Project"
-                  className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
-                  autoFocus
-                  onKeyDown={(e) => e.key === 'Enter' && handleCreate()}
+            {createStep === 'template' ? (
+              <div className="space-y-4">
+                <div>
+                  <h3 className="text-sm font-medium mb-1">Choose a template</h3>
+                  <p className="text-xs text-muted-foreground mb-3">
+                    Start from a template or create a custom project
+                  </p>
+                </div>
+                <TemplatePicker
+                  selected={selectedTemplate}
+                  onSelect={setSelectedTemplate}
                 />
+                <div className="flex gap-2 pt-2">
+                  <Button onClick={() => setCreateStep('details')}>
+                    {selectedTemplate ? `Continue with ${selectedTemplate.name}` : 'Continue with Custom'}
+                  </Button>
+                  <Button variant="outline" onClick={() => { setShowCreate(false); setCreateStep('template'); setSelectedTemplate(null); }}>
+                    Cancel
+                  </Button>
+                </div>
               </div>
-              <div>
-                <label className="block text-sm font-medium mb-1.5">Description</label>
-                <textarea
-                  value={newDesc}
-                  onChange={(e) => setNewDesc(e.target.value)}
-                  placeholder="What is this project about?"
-                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm resize-y h-20"
-                />
+            ) : (
+              <div className="space-y-4">
+                {selectedTemplate && (
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground mb-2">
+                    {selectedTemplate.icon && <span>{selectedTemplate.icon}</span>}
+                    <span>Template: <strong className="text-foreground">{selectedTemplate.name}</strong></span>
+                    <Button variant="ghost" size="sm" className="h-6 text-xs" onClick={() => setCreateStep('template')}>
+                      Change
+                    </Button>
+                  </div>
+                )}
+                <div>
+                  <label className="block text-sm font-medium mb-1.5">Project Name</label>
+                  <input
+                    type="text"
+                    value={newName}
+                    onChange={(e) => setNewName(e.target.value)}
+                    placeholder="My Awesome Project"
+                    className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                    autoFocus
+                    onKeyDown={(e) => e.key === 'Enter' && handleCreate()}
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-1.5">Description</label>
+                  <textarea
+                    value={newDesc}
+                    onChange={(e) => setNewDesc(e.target.value)}
+                    placeholder="What is this project about?"
+                    className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm resize-y h-20"
+                  />
+                </div>
+                {(!selectedTemplate || selectedTemplate.metadata?.git_integration) && (
+                  <div>
+                    <label className="block text-sm font-medium mb-1.5">Git Repository (Optional)</label>
+                    <input
+                      type="text"
+                      value={newRepo}
+                      onChange={(e) => setNewRepo(e.target.value)}
+                      placeholder="https://github.com/user/repo.git"
+                      className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                    />
+                    <p className="text-xs text-muted-foreground mt-1">
+                      HTTPS, SSH, or github.com/user/repo shorthand
+                    </p>
+                  </div>
+                )}
+                {selectedTemplate && (
+                  <div>
+                    <label className="block text-sm font-medium mb-1.5">Columns</label>
+                    <div className="flex flex-wrap gap-1.5">
+                      {selectedTemplate.columns.map((col) => (
+                        <Badge key={col.name} variant="outline" className="text-xs">
+                          {col.name}
+                        </Badge>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                <div className="flex gap-2">
+                  <Button onClick={handleCreate} disabled={creating || !newName.trim()}>
+                    {creating ? 'Creating...' : 'Create Project'}
+                  </Button>
+                  <Button variant="outline" onClick={() => setCreateStep('template')}>Back</Button>
+                  <Button variant="ghost" onClick={() => { setShowCreate(false); setCreateStep('template'); setSelectedTemplate(null); }}>
+                    Cancel
+                  </Button>
+                </div>
               </div>
-              <div>
-                <label className="block text-sm font-medium mb-1.5">Git Repository (Optional)</label>
-                <input
-                  type="text"
-                  value={newRepo}
-                  onChange={(e) => setNewRepo(e.target.value)}
-                  placeholder="https://github.com/user/repo.git"
-                  className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
-                />
-                <p className="text-xs text-muted-foreground mt-1">
-                  HTTPS, SSH, or github.com/user/repo shorthand
-                </p>
-              </div>
-              <div className="flex gap-2">
-                <Button onClick={handleCreate} disabled={creating || !newName.trim()}>
-                  {creating ? 'Creating...' : 'Create Project'}
-                </Button>
-                <Button variant="outline" onClick={() => setShowCreate(false)}>Cancel</Button>
-              </div>
-            </div>
+            )}
           </CardContent>
         </Card>
       )}

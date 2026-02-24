@@ -16,6 +16,9 @@ export type { ShutdownCommand } from "./types.js";
 export { abortCommandSchema } from "./types.js";
 export type { AbortCommand } from "./types.js";
 
+export { structuredOutputCommandSchema } from "./types.js";
+export type { StructuredOutputCommand } from "./types.js";
+
 export { commandMessageSchema } from "./types.js";
 export type { CommandMessage } from "./types.js";
 

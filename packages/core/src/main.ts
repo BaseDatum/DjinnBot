@@ -312,6 +312,7 @@ function initSwarmManager(): SwarmSessionManager {
           deviation_rules: params.deviationRules,
           model_override: params.modelOverride,
           timeout_seconds: params.timeoutSeconds,
+          swarm_task_key: params.swarmTaskKey,
         }),
       });
       if (!res.ok) {
@@ -400,6 +401,34 @@ function initSwarmManager(): SwarmSessionManager {
       };
       // Persist for 1 hour (polling fallback + debugging)
       await swarmRedis.setex(swarmStateKey(swarmId), 3600, JSON.stringify(snakeState));
+    },
+
+    // Post-swarm branch integration: merge per-executor branches into canonical task branch
+    mergeExecutorBranches: async (params) => {
+      if (!djinnBot) throw new Error('DjinnBot not initialized');
+      const wm = djinnBot.getWorkspaceManager();
+      return wm.mergeExecutorBranches(params.projectId, params.targetBranch, params.executorBranches);
+    },
+
+    // Post-swarm PR creation (uses the API's existing PR endpoint)
+    openPullRequest: async (params) => {
+      try {
+        const res = await authFetch(`${apiUrl}/v1/projects/${params.projectId}/tasks/${params.taskId}/pull-request`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            agentId: 'djinnbot',
+            title: params.title,
+            body: params.body,
+            draft: false,
+          }),
+        });
+        if (!res.ok) return null;
+        const data = await res.json() as { pr_number: number; pr_url: string };
+        return data;
+      } catch {
+        return null;
+      }
     },
   };
 

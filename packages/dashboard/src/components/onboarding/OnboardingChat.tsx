@@ -26,7 +26,9 @@ import {
   getOnboardingSession,
   finalizeOnboardingSession,
   abandonOnboardingSession,
+  fetchProjectTemplates,
   type OnboardingSession,
+  type ProjectTemplate,
   API_BASE,
 } from '@/lib/api';
 import {
@@ -60,6 +62,7 @@ import {
   AGENT_CHAIN,
 } from './OnboardingMessages';
 import { OnboardingLandingPagePanel, type LandingPageState } from './OnboardingLandingPagePanel';
+import { TemplatePicker } from '@/components/projects/TemplatePicker';
 import { OnboardingMiniMemoryGraph } from './OnboardingMiniMemoryGraph';
 
 // ============================================================================
@@ -126,11 +129,15 @@ function AgentHeader({
   agentName,
   phase,
   isTransitioning,
+  templateIcon,
+  templateName,
 }: {
   agentEmoji: string;
   agentName: string;
   phase: string;
   isTransitioning: boolean;
+  templateIcon?: string | null;
+  templateName?: string | null;
 }) {
   return (
     <div
@@ -148,9 +155,16 @@ function AgentHeader({
             {PHASE_LABELS[phase] || phase}
           </Badge>
         </div>
-        <p className="text-xs text-muted-foreground">
-          {isTransitioning ? 'Handing off\u2026' : 'Agent Guided Setup'}
-        </p>
+        <div className="flex items-center gap-2">
+          <p className="text-xs text-muted-foreground">
+            {isTransitioning ? 'Handing off\u2026' : 'Agent Guided Setup'}
+          </p>
+          {templateName && (
+            <span className="text-xs text-muted-foreground">
+              {templateIcon} {templateName}
+            </span>
+          )}
+        </div>
       </div>
       {isTransitioning && (
         <Loader2 className="h-4 w-4 animate-spin ml-auto text-muted-foreground" />
@@ -477,9 +491,12 @@ function OnboardingInput({
 // ============================================================================
 
 export function OnboardingChat({ onClose, onProjectCreated, resumeSessionId }: OnboardingChatProps) {
-  // Pre-start: let user pick a model before creating the session.
+  // Pre-start: let user pick a model and template before creating the session.
   // Skipped when resuming an existing session.
   const [selectedModel, setSelectedModel] = useState<string>(DEFAULT_CHAT_MODEL);
+  const [selectedTemplate, setSelectedTemplate] = useState<ProjectTemplate | null>(null);
+  // Resolved template info — set from selectedTemplate or fetched on resume
+  const [templateInfo, setTemplateInfo] = useState<{ name: string; icon: string | null } | null>(null);
   const [started, setStarted] = useState(!!resumeSessionId);
 
   const [session, setSession] = useState<OnboardingSession | null>(null);
@@ -585,7 +602,7 @@ export function OnboardingChat({ onClose, onProjectCreated, resumeSessionId }: O
       try {
         const s = resumeSessionId
           ? await resumeOnboardingSession(resumeSessionId)
-          : await createOnboardingSession(selectedModel || undefined);
+          : await createOnboardingSession(selectedModel || undefined, selectedTemplate?.id);
         if (!cancelled) {
           setSession(s);
           setMessagesFromDb(expandDbMessages(s.messages));
@@ -612,6 +629,26 @@ export function OnboardingChat({ onClose, onProjectCreated, resumeSessionId }: O
     return () => { cancelled = true; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [started]);
+
+  // ── Resolve template info from session ──────────────────────────────────────
+  useEffect(() => {
+    if (!session) return;
+    // If we picked a template pre-start, use that info directly
+    if (selectedTemplate && selectedTemplate.id === session.template_id) {
+      setTemplateInfo({ name: selectedTemplate.name, icon: selectedTemplate.icon });
+      return;
+    }
+    // If session has a template_id (e.g. resuming), fetch templates to resolve the name
+    if (session.template_id) {
+      fetchProjectTemplates()
+        .then((templates) => {
+          const tmpl = templates.find((t) => t.id === session.template_id);
+          if (tmpl) setTemplateInfo({ name: tmpl.name, icon: tmpl.icon });
+        })
+        .catch(() => {});
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session?.template_id]);
 
   // Release the SSE event gate AFTER useChatStream's session-change reset
   // effect has run. useChatStream resets historyLoadedRef=false whenever
@@ -872,7 +909,7 @@ export function OnboardingChat({ onClose, onProjectCreated, resumeSessionId }: O
   // Unified "agent is working" flag — drives composing dots and input state.
   const isAgentWorking = isAgentStarting || isWaitingForAgent;
 
-  // Pre-start screen — pick a model before creating the session
+  // Pre-start screen — pick a template and model before creating the session
   if (!started) {
     return (
       <div className="fixed inset-0 z-50 flex flex-col bg-background">
@@ -889,16 +926,27 @@ export function OnboardingChat({ onClose, onProjectCreated, resumeSessionId }: O
             <X className="h-4 w-4" />
           </button>
         </div>
-        <div className="flex flex-1 items-center justify-center">
-          <div className="flex flex-col items-center gap-6 max-w-sm w-full px-6">
+        <div className="flex flex-1 items-center justify-center overflow-y-auto">
+          <div className="flex flex-col items-center gap-6 max-w-lg w-full px-6 py-8">
             <div className="text-center">
               <div className="flex h-14 w-14 items-center justify-center rounded-full bg-primary/10 text-3xl mx-auto mb-4">
                 &#x1F680;
               </div>
               <h2 className="text-lg font-semibold">Start your project</h2>
               <p className="text-sm text-muted-foreground mt-1">
-                Choose a model for your onboarding session, then meet Stas.
+                Choose a template and model, then meet your onboarding agents.
               </p>
+            </div>
+            <div className="w-full space-y-2">
+              <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                Template
+              </label>
+              <TemplatePicker
+                selected={selectedTemplate}
+                onSelect={setSelectedTemplate}
+                onboardingOnly
+                showCustom={false}
+              />
             </div>
             <div className="w-full space-y-2">
               <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
@@ -907,7 +955,7 @@ export function OnboardingChat({ onClose, onProjectCreated, resumeSessionId }: O
               <ProviderModelSelector
                 value={selectedModel}
                 onChange={setSelectedModel}
-                placeholder="Select a model…"
+                placeholder="Select a model..."
                 className="w-full"
               />
             </div>
@@ -917,7 +965,7 @@ export function OnboardingChat({ onClose, onProjectCreated, resumeSessionId }: O
               disabled={!selectedModel}
             >
               <Sparkles className="h-4 w-4 mr-2" />
-              Start Onboarding
+              {selectedTemplate ? `Start with ${selectedTemplate.name}` : 'Start Onboarding'}
             </Button>
           </div>
         </div>
@@ -1026,6 +1074,8 @@ export function OnboardingChat({ onClose, onProjectCreated, resumeSessionId }: O
               agentName={session.current_agent_name}
               phase={session.phase}
               isTransitioning={isTransitioning}
+              templateIcon={templateInfo?.icon}
+              templateName={templateInfo?.name}
             />
           )}
 

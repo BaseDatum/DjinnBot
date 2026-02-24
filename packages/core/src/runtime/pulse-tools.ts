@@ -67,25 +67,44 @@ function getApiBaseUrl(override?: string): string {
  *   Defaults to DJINNBOT_API_URL env var, then 'http://localhost:8000'.
  *   Pass this when the env var may not be set before module load (e.g. containers).
  */
-export function createPulseTools(agentId: string, pulseColumns?: string[], apiBaseUrl?: string): AgentTool[] {
+/**
+ * @param agentId - The agent's ID
+ * @param pulseColumns - Optional list of kanban column names this agent works from.
+ *   These are now passed directly to the server as column names — the server
+ *   resolves them to statuses using the project's actual column definitions.
+ *   This removes the hardcoded column-to-status mapping that assumed software-dev columns.
+ *   Defaults to ['Backlog', 'Ready'] if not provided.
+ * @param apiBaseUrl - Optional override for the API base URL.
+ * @param columnToStatusOverride - Optional explicit column→status map. When provided
+ *   (e.g. from the project's column definitions), used instead of any hardcoded map.
+ *   When omitted, column names are lowercased and spaces replaced with underscores
+ *   as a best-effort heuristic (e.g. "In Progress" → "in_progress").
+ */
+export function createPulseTools(
+  agentId: string,
+  pulseColumns?: string[],
+  apiBaseUrl?: string,
+  columnToStatusOverride?: Record<string, string>,
+): AgentTool[] {
   const API_BASE_URL = getApiBaseUrl(apiBaseUrl);
-  // Map column names → task statuses for server-side filtering
-  const columnToStatus: Record<string, string> = {
-    'Backlog': 'backlog',
-    'Planning': 'planning',
-    'Ready': 'ready',
-    'In Progress': 'in_progress',
-    'Review': 'review',
-    'Blocked': 'blocked',
-    'Done': 'done',
-    'Failed': 'failed',
+
+  // Dynamic column → status resolution.
+  // If an explicit override map is provided (from project template), use it.
+  // Otherwise, use a best-effort heuristic: lowercase + replace spaces with underscores.
+  const resolveStatus = (colName: string): string => {
+    if (columnToStatusOverride && columnToStatusOverride[colName]) {
+      return columnToStatusOverride[colName];
+    }
+    // Heuristic: "In Progress" → "in_progress", "To Do" → "to_do"
+    return colName.toLowerCase().replace(/\s+/g, '_');
   };
+
   const defaultColumns = ['Backlog', 'Ready'];
   const agentColumns = pulseColumns && pulseColumns.length > 0 ? pulseColumns : defaultColumns;
   const agentStatuses = agentColumns
-    .map(col => columnToStatus[col])
+    .map(col => resolveStatus(col))
     .filter(Boolean)
-    .join(',') || 'backlog,planning,ready';
+    .join(',') || 'backlog,ready';
   return [
     // get_my_projects tool
     {
@@ -343,13 +362,118 @@ export function createPulseTools(agentId: string, pulseColumns?: string[], apiBa
       },
     },
 
-    // ── claim_task ────────────────────────────────────────────────────────────
+    // ── get_task_context ──────────────────────────────────────────────────────
+    {
+      name: 'get_task_context',
+      description:
+        'Get full details of a specific task: description, status, priority, assigned agent, git branch, PR info. ' +
+        'Use this to understand what a task requires before starting work.',
+      label: 'get_task_context',
+      parameters: Type.Object({
+        projectId: Type.String({ description: 'Project ID' }),
+        taskId: Type.String({ description: 'Task ID' }),
+      }),
+      execute: async (
+        _toolCallId: string,
+        params: unknown,
+        signal?: AbortSignal,
+      ): Promise<AgentToolResult<VoidDetails>> => {
+        const { projectId, taskId } = params as { projectId: string; taskId: string };
+        try {
+          const url = `${API_BASE_URL}/v1/projects/${projectId}/tasks/${taskId}`;
+          const response = await authFetch(url, { signal });
+          const data = (await response.json()) as any;
+          if (!response.ok) {
+            throw new Error(data.detail || `${response.status} ${response.statusText}`);
+          }
+          const meta = data.metadata || {};
+          const lines = [
+            `**Task**: ${data.title} (${taskId})`,
+            `**Status**: ${data.status}  **Priority**: ${data.priority}`,
+            `**Assigned**: ${data.assigned_agent || 'unassigned'}`,
+            `**Estimated**: ${data.estimated_hours ? `${data.estimated_hours}h` : 'unknown'}`,
+            `**Branch**: ${meta.git_branch || 'not yet created (call get_task_branch)'}`,
+            `**PR**: ${meta.pr_url || 'none'}`,
+            `\n**Description**:\n${data.description || '(no description)'}`,
+          ];
+          return { content: [{ type: 'text', text: lines.join('\n') }], details: {} };
+        } catch (error) {
+          return { content: [{ type: 'text', text: `Error fetching task: ${error instanceof Error ? error.message : String(error)}` }], details: {} };
+        }
+      },
+    },
+
+    // ── transition_task ───────────────────────────────────────────────────────
+    {
+      name: 'transition_task',
+      description:
+        'Move a task to a new kanban status (e.g. in_progress → review, review → done). ' +
+        'Also cascades dependency unblocking when a terminal status is reached. ' +
+        'Valid statuses depend on the project\'s template — use get_ready_tasks to see available statuses.',
+      label: 'transition_task',
+      parameters: Type.Object({
+        projectId: Type.String({ description: 'Project ID' }),
+        taskId: Type.String({ description: 'Task ID' }),
+        status: Type.String({ description: 'Target status (project-dependent)' }),
+        note: Type.Optional(Type.String({ description: 'Optional note explaining the transition' })),
+      }),
+      execute: async (
+        _toolCallId: string,
+        params: unknown,
+        signal?: AbortSignal,
+      ): Promise<AgentToolResult<VoidDetails>> => {
+        const { projectId, taskId, status, note } = params as { projectId: string; taskId: string; status: string; note?: string };
+        try {
+          const url = `${API_BASE_URL}/v1/projects/${projectId}/tasks/${taskId}/transition`;
+          const response = await authFetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status, note }),
+            signal,
+          });
+          const data = (await response.json()) as any;
+          if (!response.ok) {
+            throw new Error(data.detail || `${response.status} ${response.statusText}`);
+          }
+          return {
+            content: [{
+              type: 'text',
+              text: `Task transitioned: ${data.from_status} → ${data.to_status}${note ? `\nNote: ${note}` : ''}`,
+            }],
+            details: {},
+          };
+        } catch (error) {
+          return { content: [{ type: 'text', text: `Error transitioning task: ${error instanceof Error ? error.message : String(error)}` }], details: {} };
+        }
+      },
+    },
+  ];
+}
+
+
+/**
+ * Create git-specific pulse tools for software development projects.
+ *
+ * These tools require the project to have a repository configured.
+ * They provide git branch management, workspace provisioning, and PR operations.
+ *
+ * Call this in ADDITION to createPulseTools for agents working on git-enabled projects.
+ *
+ * @param agentId - The agent's ID
+ * @param apiBaseUrl - Optional override for the API base URL.
+ */
+export function createGitPulseTools(agentId: string, apiBaseUrl?: string): AgentTool[] {
+  const API_BASE_URL = getApiBaseUrl(apiBaseUrl);
+
+  return [
+    // ── claim_task (git version — provisions workspace + branch) ────────────
     {
       name: 'claim_task',
       description:
         'Atomically claim an unassigned task so no other agent picks it up simultaneously. ' +
         'Provisions an authenticated git workspace at /home/agent/task-workspaces/{taskId}/ ' +
-        'so you can commit and push immediately. Call this BEFORE starting work on a task.',
+        'so you can commit and push immediately. Call this BEFORE starting work on a task. ' +
+        'NOTE: Only works for projects with git integration enabled.',
       label: 'claim_task',
       parameters: Type.Object({
         projectId: Type.String({ description: 'Project ID' }),
@@ -376,8 +500,7 @@ export function createPulseTools(agentId: string, pulseColumns?: string[], apiBa
           }
           const branch: string = claimData.branch;
 
-          // 2. Provision the authenticated git workspace (engine creates worktree)
-          //    This is async on the engine side — the API polls and returns when ready.
+          // 2. Provision the authenticated git workspace
           let worktreePath = `/home/agent/task-workspaces/${taskId}`;
           let workspaceNote = '';
           try {
@@ -437,7 +560,7 @@ export function createPulseTools(agentId: string, pulseColumns?: string[], apiBa
       name: 'get_task_branch',
       description:
         'Get (or create) the persistent git branch for a task. ' +
-        'Returns the feat/{taskId} branch name. Use claim_task instead — it provisions the branch AND the authenticated workspace in one call.',
+        'Returns the feat/{taskId} branch name. Use claim_task instead for a one-step claim + workspace setup.',
       label: 'get_task_branch',
       parameters: Type.Object({
         projectId: Type.String({ description: 'Project ID' }),
@@ -462,47 +585,6 @@ export function createPulseTools(agentId: string, pulseColumns?: string[], apiBa
           };
         } catch (error) {
           return { content: [{ type: 'text', text: `Error getting task branch: ${error instanceof Error ? error.message : String(error)}` }], details: {} };
-        }
-      },
-    },
-
-    // ── get_task_context ──────────────────────────────────────────────────────
-    {
-      name: 'get_task_context',
-      description:
-        'Get full details of a specific task: description, status, priority, assigned agent, git branch, PR info. ' +
-        'Use this to understand what a task requires before starting work.',
-      label: 'get_task_context',
-      parameters: Type.Object({
-        projectId: Type.String({ description: 'Project ID' }),
-        taskId: Type.String({ description: 'Task ID' }),
-      }),
-      execute: async (
-        _toolCallId: string,
-        params: unknown,
-        signal?: AbortSignal,
-      ): Promise<AgentToolResult<VoidDetails>> => {
-        const { projectId, taskId } = params as { projectId: string; taskId: string };
-        try {
-          const url = `${API_BASE_URL}/v1/projects/${projectId}/tasks/${taskId}`;
-          const response = await authFetch(url, { signal });
-          const data = (await response.json()) as any;
-          if (!response.ok) {
-            throw new Error(data.detail || `${response.status} ${response.statusText}`);
-          }
-          const meta = data.metadata || {};
-          const lines = [
-            `**Task**: ${data.title} (${taskId})`,
-            `**Status**: ${data.status}  **Priority**: ${data.priority}`,
-            `**Assigned**: ${data.assigned_agent || 'unassigned'}`,
-            `**Estimated**: ${data.estimated_hours ? `${data.estimated_hours}h` : 'unknown'}`,
-            `**Branch**: ${meta.git_branch || 'not yet created (call get_task_branch)'}`,
-            `**PR**: ${meta.pr_url || 'none'}`,
-            `\n**Description**:\n${data.description || '(no description)'}`,
-          ];
-          return { content: [{ type: 'text', text: lines.join('\n') }], details: {} };
-        } catch (error) {
-          return { content: [{ type: 'text', text: `Error fetching task: ${error instanceof Error ? error.message : String(error)}` }], details: {} };
         }
       },
     },
@@ -563,47 +645,69 @@ export function createPulseTools(agentId: string, pulseColumns?: string[], apiBa
       },
     },
 
-    // ── transition_task ───────────────────────────────────────────────────────
+    // ── get_task_pr_status ──────────────────────────────────────────────────────
     {
-      name: 'transition_task',
+      name: 'get_task_pr_status',
       description:
-        'Move a task to a new kanban status (e.g. in_progress → review, review → done). ' +
-        'Also cascades dependency unblocking when status is "done". ' +
-        'Valid statuses: backlog, planning, ready, in_progress, review, blocked, done, failed.',
-      label: 'transition_task',
+        'Check the current status of a task\'s pull request on GitHub. ' +
+        'Returns PR state (open/closed/merged), review status, CI checks, ' +
+        'and whether the PR is ready to merge.',
+      label: 'get_task_pr_status',
       parameters: Type.Object({
         projectId: Type.String({ description: 'Project ID' }),
         taskId: Type.String({ description: 'Task ID' }),
-        status: Type.String({ description: 'Target status: in_progress | review | done | failed | blocked | ready | backlog | planning' }),
-        note: Type.Optional(Type.String({ description: 'Optional note explaining the transition' })),
       }),
       execute: async (
         _toolCallId: string,
         params: unknown,
         signal?: AbortSignal,
       ): Promise<AgentToolResult<VoidDetails>> => {
-        const { projectId, taskId, status, note } = params as { projectId: string; taskId: string; status: string; note?: string };
+        const { projectId, taskId } = params as { projectId: string; taskId: string };
         try {
-          const url = `${API_BASE_URL}/v1/projects/${projectId}/tasks/${taskId}/transition`;
-          const response = await authFetch(url, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ status, note }),
-            signal,
-          });
+          const url = `${API_BASE_URL}/v1/projects/${projectId}/tasks/${taskId}/pr-status`;
+          const response = await authFetch(url, { signal });
           const data = (await response.json()) as any;
           if (!response.ok) {
             throw new Error(data.detail || `${response.status} ${response.statusText}`);
           }
+
+          const lines = [
+            `**PR #${data.pr_number}**: ${data.title}`,
+            `**URL**: ${data.pr_url}`,
+            `**State**: ${data.state}${data.merged ? ' (merged)' : ''}${data.draft ? ' (draft)' : ''}`,
+            `**Branch**: ${data.head_branch} → ${data.base_branch}`,
+            `**Changes**: +${data.additions} -${data.deletions} across ${data.changed_files} files`,
+            ``,
+            `**CI Status**: ${data.ci_status}`,
+          ];
+
+          if (data.checks && data.checks.length > 0) {
+            for (const check of data.checks) {
+              const icon = check.conclusion === 'success' ? 'PASS' : check.status === 'completed' ? 'FAIL' : 'PENDING';
+              lines.push(`  - ${icon}: ${check.name}`);
+            }
+          }
+
+          lines.push(``);
+          lines.push(`**Reviews**:`);
+          if (data.reviews && data.reviews.length > 0) {
+            for (const review of data.reviews) {
+              lines.push(`  - ${review.user}: ${review.state}`);
+            }
+          } else {
+            lines.push(`  No reviews yet`);
+          }
+
+          lines.push(``);
+          lines.push(`**Mergeable**: ${data.mergeable === true ? 'Yes' : data.mergeable === false ? 'No (conflicts)' : 'Unknown'}`);
+          lines.push(`**Ready to merge**: ${data.ready_to_merge ? 'YES — approved, CI green, no conflicts' : 'No'}`);
+
           return {
-            content: [{
-              type: 'text',
-              text: `Task transitioned: ${data.from_status} → ${data.to_status}${note ? `\nNote: ${note}` : ''}`,
-            }],
+            content: [{ type: 'text', text: lines.join('\n') }],
             details: {},
           };
         } catch (error) {
-          return { content: [{ type: 'text', text: `Error transitioning task: ${error instanceof Error ? error.message : String(error)}` }], details: {} };
+          return { content: [{ type: 'text', text: `Error checking PR status: ${error instanceof Error ? error.message : String(error)}` }], details: {} };
         }
       },
     },

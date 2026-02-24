@@ -136,6 +136,14 @@ export interface PulseRoutine {
   maxConcurrent: number;
   pulseColumns?: string[];
 
+  /**
+   * Per-routine tool selection.
+   * When null/undefined → inherit from agent's default tools.
+   * When set → only these tools are available during this routine.
+   * E.g. ["get_my_projects", "get_ready_tasks", "transition_task"]
+   */
+  tools?: string[];
+
   /** Per-routine model overrides (null = inherit from agent config) */
   planningModel?: string;
   executorModel?: string;
@@ -150,6 +158,42 @@ export interface PulseRoutine {
 
   createdAt: number;
   updatedAt: number;
+}
+
+/**
+ * Maps a pulse routine to a specific project for an agent.
+ * Defines which columns the routine watches and what tool overrides apply.
+ */
+export interface ProjectAgentRoutineMapping {
+  id: string;
+  projectId: string;
+  agentId: string;
+  routineId: string;
+  /** Column IDs this routine watches in this project. null = use routine defaults */
+  columnIds?: string[];
+  /** Tool overrides for this project-routine combo. null = use routine tools */
+  toolOverrides?: string[];
+  enabled: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
+/**
+ * Resolved configuration for a routine in a specific project.
+ * Merges routine defaults with project-specific overrides.
+ */
+export interface ResolvedRoutineConfig {
+  routineId: string;
+  routineName: string;
+  mappingId: string;
+  /** Effective column names after resolving mapping overrides */
+  effectiveColumns: string[];
+  /** Effective task statuses derived from effective columns */
+  effectiveStatuses: string[];
+  /** Effective tool list. null = use agent defaults */
+  effectiveTools: string[] | null;
+  planningModel?: string;
+  executorModel?: string;
 }
 
 export interface PulseConflict {

@@ -183,10 +183,12 @@ export class ContainerRunner implements AgentRunner {
     // Hoisted so the catch block can use it for error enrichment.
     let providerEnvVars: Record<string, string> = {};
 
-    // Create abort handler
+    // Create abort handler — will reject the output promise when triggered
     let aborted = false;
+    let rejectOutput: ((err: Error) => void) | undefined;
     const abortHandler = () => {
       aborted = true;
+      rejectOutput?.(new Error('Run cancelled'));
     };
     signal?.addEventListener('abort', abortHandler);
 
@@ -272,6 +274,9 @@ export class ContainerRunner implements AgentRunner {
 
       // Set up event handlers
       const outputPromise = new Promise<void>((resolve, reject) => {
+        // Wire abort signal into the promise so cancellation stops the container
+        rejectOutput = reject;
+
         const timeoutId = setTimeout(() => {
           reject(new Error(`Container execution timed out after ${timeout}ms`));
         }, timeout);
@@ -308,9 +313,23 @@ export class ContainerRunner implements AgentRunner {
                 if (msg.result) {
                   output = msg.result;
                 }
-                // Also try to parse key-value outputs from result
-                const parsed = this.parseOutputKeyValues(msg.result);
-                Object.assign(parsedOutputs, parsed);
+                // For structured output steps, the result IS the raw JSON.
+                // Store it as _structured_json so AgentExecutor can map it.
+                if (options.outputSchema && msg.result) {
+                  try {
+                    // Validate it's parseable JSON before storing
+                    JSON.parse(msg.result);
+                    parsedOutputs['_structured_json'] = msg.result;
+                  } catch {
+                    // Not valid JSON — fall through to key-value parsing
+                    const parsed = this.parseOutputKeyValues(msg.result);
+                    Object.assign(parsedOutputs, parsed);
+                  }
+                } else {
+                  // Normal agent step — parse key-value outputs from result
+                  const parsed = this.parseOutputKeyValues(msg.result);
+                  Object.assign(parsedOutputs, parsed);
+                }
               }
               resolve();
               break;
@@ -400,16 +419,29 @@ export class ContainerRunner implements AgentRunner {
         throw new Error('Aborted');
       }
 
-      // 4. Send agent step command
-      const fullPrompt = systemPrompt 
-        ? `${systemPrompt}\n\n---\n\n${userPrompt}`
-        : userPrompt;
+      // 4. Send command — either structuredOutput or agentStep
+      let requestId: string;
+      if (options.outputSchema) {
+        // Structured output: single constrained-decoding API call inside the container
+        console.log(`[ContainerRunner] Sending structuredOutput command for run ${runId}`);
+        requestId = await this.commandSender.sendStructuredOutput(runId, userPrompt, {
+          systemPrompt,
+          outputSchema: options.outputSchema,
+          outputMethod: options.outputMethod,
+          model,
+        });
+      } else {
+        // Normal agent step: full agent loop with tools
+        const fullPrompt = systemPrompt 
+          ? `${systemPrompt}\n\n---\n\n${userPrompt}`
+          : userPrompt;
 
-      console.log(`[ContainerRunner] Sending agentStep command for run ${runId}`);
-      const requestId = await this.commandSender.sendAgentStep(runId, fullPrompt, {
-        tools,
-        maxSteps: maxTurns,
-      });
+        console.log(`[ContainerRunner] Sending agentStep command for run ${runId}`);
+        requestId = await this.commandSender.sendAgentStep(runId, fullPrompt, {
+          tools,
+          maxSteps: maxTurns,
+        });
+      }
 
       // 5. Wait for completion or timeout
       await outputPromise;

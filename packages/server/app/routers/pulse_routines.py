@@ -80,6 +80,9 @@ class CreatePulseRoutineRequest(BaseModel):
     color: Optional[str] = None
     planningModel: Optional[str] = None
     executorModel: Optional[str] = None
+    # Per-routine tool selection. When null → inherit agent defaults.
+    # When set → only these tools are available during this routine.
+    tools: Optional[List[str]] = None
 
 
 class UpdatePulseRoutineRequest(BaseModel):
@@ -97,6 +100,7 @@ class UpdatePulseRoutineRequest(BaseModel):
     color: Optional[str] = None
     planningModel: Optional[str] = None
     executorModel: Optional[str] = None
+    tools: Optional[List[str]] = None
 
 
 class ReorderRequest(BaseModel):
@@ -153,6 +157,7 @@ def _model_to_response(r: PulseRoutine) -> dict:
         "pulseColumns": r.pulse_columns,
         "planningModel": r.planning_model,
         "executorModel": r.executor_model,
+        "tools": r.tools,
         "sortOrder": r.sort_order,
         "lastRunAt": r.last_run_at,
         "totalRuns": r.total_runs,
@@ -266,6 +271,7 @@ async def create_pulse_routine(
         pulse_columns=req.pulseColumns,
         planning_model=req.planningModel,
         executor_model=req.executorModel,
+        tools=req.tools,
         sort_order=next_order,
         color=color,
         created_at=ts,
@@ -371,6 +377,8 @@ async def update_pulse_routine(
         update_fields["executor_model"] = (
             req.executorModel or None
         )  # empty string → null
+    if req.tools is not None:
+        update_fields["tools"] = req.tools if req.tools else None  # empty list → null
 
     if update_fields:
         update_fields["updated_at"] = now_ms()

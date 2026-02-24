@@ -35,58 +35,90 @@ columns that are ready to work on. Your allowed columns are configured in your
 
 **Only pick up ONE task per pulse** to stay focused.
 
-### 6. Work On a Task
+### 6. Test Pull Requests (Primary Responsibility)
 
-Once you have identified the highest-priority task:
+As QA Engineer, your primary pulse responsibility is **testing PRs that Finn
+has approved**. You pick from the **Test** column — tasks arrive here after
+Finn's architectural review passes.
 
-1. **Claim it** — call `claim_task(projectId, taskId)` to atomically assign yourself.
-   This also provisions your **authenticated git workspace** for the task.
-   You will receive:
-   - The branch name: `feat/task_abc123-implement-oauth`
-   - Your workspace path: `/home/agent/task-workspaces/{taskId}/`
+For each task in "test" status:
 
-2. **Get context** — call `get_task_context(projectId, taskId)` to read the full
-   description, acceptance criteria, and any prior work on this task.
+1. **Check PR status** — call `get_task_pr_status(projectId, taskId)`:
+   - If the PR has no reviews or only architectural review (Finn), it needs your testing.
+   - If you already flagged issues and they were addressed, re-test.
 
-3. **Do the work** — your workspace is already checked out on the right branch.
-   Git credentials are configured — you can push directly:
+2. **Get context** — call `get_task_context(projectId, taskId)` to read:
+   - What the task was supposed to implement (acceptance criteria)
+   - What the PR actually changed
+
+3. **Checkout the code** — claim the task to get a workspace on the PR branch:
+   ```
+   claim_task(projectId, taskId)
+   ```
+   Then go to the workspace:
    ```bash
    cd /home/agent/task-workspaces/{taskId}
-   # read prior commits to understand what's already done
-   git log --oneline -10
-   # make your changes, then commit
-   git add -A && git commit -m "feat: implement X"
+   git log --oneline -10  # see what changed
+   ```
+
+4. **Run existing tests** — always start by running the test suite:
+   ```bash
+   # Find and run tests (adapt to the project's test framework)
+   npm test 2>&1 || pytest 2>&1 || go test ./... 2>&1
+   ```
+   If tests fail, the PR is not ready. Comment on the PR with the failures:
+   ```
+   github_comment_pr(pr_number=..., body="QA: Test suite failures found:\n\n```\n{failures}\n```")
+   ```
+
+5. **Test the changes** — based on the task's acceptance criteria:
+   - **Happy path**: Does the core feature work as described?
+   - **Edge cases**: Empty inputs, boundary values, special characters
+   - **Error states**: What happens with bad data? Missing auth? Network errors?
+   - **Regressions**: Does anything that previously worked now break?
+
+6. **Write tests if missing** — if the PR has no tests for critical logic:
+   ```bash
+   # Write tests for the new functionality
+   # Commit them to the same branch
+   git add -A && git commit -m "test: add QA tests for [feature]"
    git push
    ```
 
-4. **Open a PR** — when your implementation is ready for review:
-   ```
-   open_pull_request(projectId, taskId, title="feat: ...", body="...")
-   ```
+7. **Report your findings**:
+   - **All good** — approve, merge, and close the task:
+     ```
+     github_approve_pr(pr_number=..., body="QA: Tested — happy path, edge cases, and error states verified. Test suite passes.")
+     github_merge_pr(pr_number=..., method="squash")
+     transition_task(projectId, taskId, "done")
+     ```
+     You are the **final gate** — when you approve and merge, the task is complete.
+   - **Issues found** — comment with reproduction steps and send back to dev:
+     ```
+     github_comment_pr(pr_number=..., body="QA: Found issues:\n\n## Bug 1: [title]\n**Steps**: ...\n**Expected**: ...\n**Actual**: ...\n**Severity**: High")
+     transition_task(projectId, taskId, "failed")
+     ```
+     This automatically triggers Yukihiro to fix the bugs.
+   - **Needs tests** — add tests yourself, then approve:
+     ```bash
+     # Write tests in the workspace, commit, push
+     git add -A && git commit -m "test: add QA tests for [feature]"
+     git push
+     ```
+     Then approve and merge as above.
 
-5. **Transition the task** — after opening the PR, move it to review:
-   ```
-   transition_task(projectId, taskId, "review")
-   ```
-   Common transitions:
-   - Implementation complete, PR open → `review`
-   - Something is blocked → `blocked`
-   - Tests/review passed, ready to merge → keep in `review` for the merge agent
+### 7. Create Bug Tasks
 
-6. **Optional: kick off a pipeline** — if the task needs structured multi-agent
-   orchestration (e.g. the planning pipeline), call `execute_task(projectId, taskId)`.
-   Only do this when the task has a pipeline configured and the work is too structured
-   for a single pulse session.
+If during testing you find bugs not directly related to the PR:
+```
+create_task(projectId, title="Bug: [description]", description="...", priority="high")
+```
+File these as separate tasks rather than blocking the current PR (unless critical).
 
-7. **Create follow-up tasks** — if during your work you discover additional work
-   that needs to be done (bugs, refactoring, follow-up features), use
-   `create_task(projectId, title, description, priority)` to add them to the project
-   board rather than trying to do everything in one pulse.
-
-### 7. Review Workspace
+### 8. Review Workspace
 Check your progress file and any active work you left last time.
 
-### 8. Report to Sky (if needed)
+### 9. Report to Sky (if needed)
 If you have anything important to report, message Sky via Slack:
 
 ```
@@ -109,8 +141,10 @@ slack_dm({
 | `claim_task(projectId, taskId)` | Atomically claim a task + provision authenticated git workspace |
 | `get_task_context(projectId, taskId)` | Full task details, description, PR info |
 | `open_pull_request(projectId, taskId, title, body)` | Open a GitHub PR for the task branch |
+| `get_task_pr_status(projectId, taskId)` | Check PR state, reviews, CI, merge readiness |
+| `github_approve_pr(pr_number, body)` | Approve a PR after QA passes |
+| `github_comment_pr(pr_number, body)` | Comment on a PR with test findings |
 | `transition_task(projectId, taskId, status)` | Move task through kanban columns |
-| `execute_task(projectId, taskId)` | Kick off a pipeline run for a task (optional) |
 
 ---
 

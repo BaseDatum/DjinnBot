@@ -10,6 +10,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     UniqueConstraint,
+    JSON,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -45,6 +46,24 @@ class Project(Base, TimestampWithCompletedMixin):
     # at any time in the dashboard; agents read it before starting work via
     # the get_project_vision tool.
     vision: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # Template this project was created from (null for legacy projects).
+    template_id: Mapped[Optional[str]] = mapped_column(
+        String(64),
+        ForeignKey("project_templates.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    # Status semantics — copied from template at creation, editable per project.
+    # Tells the engine which statuses have special meaning.
+    # {
+    #   "initial": ["backlog"],
+    #   "terminal_done": ["done"],
+    #   "terminal_fail": ["failed"],
+    #   "blocked": ["blocked"],
+    #   "in_progress": ["in_progress"],
+    #   "claimable": ["backlog", "ready", "planning"],
+    # }
+    # When NULL, falls back to the legacy hardcoded semantics for backward compat.
+    status_semantics: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
     # Multi-user: DjinnBot user whose API keys are used for automated runs
     # (pipeline steps, pulse sessions) in this project. When NULL, the system
     # falls back to instance-level keys.
@@ -239,6 +258,8 @@ class OnboardingSession(Base):
     context: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
     # The underlying chat session ID for the current agent container
     chat_session_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    # Template to use when creating the project (null = legacy software-dev default)
+    template_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     # Model used for this onboarding session
     model: Mapped[str] = mapped_column(
         String(128), nullable=False, default="openrouter/anthropic/claude-sonnet-4-5"

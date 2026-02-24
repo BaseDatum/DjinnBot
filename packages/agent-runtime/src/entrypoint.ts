@@ -4,7 +4,7 @@ import { startCommandListener } from './redis/listener.js';
 import { RedisPublisher } from './redis/publisher.js';
 import { ContainerAgentRunner } from './agent/runner.js';
 import { startFileWatcher } from './tools/watcher.js';
-import type { StepStartEvent, StepEndEvent } from '@djinnbot/core';
+import type { StepStartEvent, StepEndEvent, StructuredOutputCommand } from '@djinnbot/core';
 
 async function main(): Promise<void> {
   const config = loadConfig();
@@ -197,6 +197,62 @@ async function main(): Promise<void> {
       // Abort the current agent step
       runner.abort();
       
+      // Publish idle status
+      await publisher.publishStatus({ type: 'idle', runId: config.runId });
+    },
+
+    onStructuredOutput: async (cmd: StructuredOutputCommand) => {
+      console.log(`[AgentRuntime] Received structured output request: ${cmd.requestId}`);
+
+      // Publish busy status
+      await publisher.publishStatus({
+        type: 'busy',
+        runId: config.runId,
+        requestId: cmd.requestId,
+      });
+
+      // Publish step start event
+      const stepStart: Omit<StepStartEvent, 'timestamp'> = {
+        type: 'stepStart',
+        requestId: cmd.requestId,
+        stepNumber: 1,
+      };
+      await publisher.publishEvent(stepStart);
+
+      try {
+        const result = await runner.runStructuredOutput({
+          requestId: cmd.requestId,
+          systemPrompt: cmd.systemPrompt,
+          userPrompt: cmd.prompt,
+          outputSchema: cmd.outputSchema,
+          outputMethod: cmd.outputMethod,
+          temperature: cmd.temperature,
+          model: cmd.model,
+        });
+
+        // Publish step end event — result is the raw JSON for structured output
+        const stepEnd: Omit<StepEndEvent, 'timestamp'> = {
+          type: 'stepEnd',
+          requestId: cmd.requestId,
+          stepNumber: 1,
+          result: result.rawJson || result.error || '',
+          success: result.success,
+        };
+        await publisher.publishEvent(stepEnd);
+      } catch (err) {
+        const error = err instanceof Error ? err.message : String(err);
+        console.error(`[AgentRuntime] Structured output failed:`, error);
+
+        const stepEnd: Omit<StepEndEvent, 'timestamp'> = {
+          type: 'stepEnd',
+          requestId: cmd.requestId,
+          stepNumber: 1,
+          result: error,
+          success: false,
+        };
+        await publisher.publishEvent(stepEnd);
+      }
+
       // Publish idle status
       await publisher.publishStatus({ type: 'idle', runId: config.runId });
     },

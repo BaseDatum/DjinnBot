@@ -1,5 +1,6 @@
 import { join } from 'node:path';
 import { statSync } from 'node:fs';
+import { execSync } from 'node:child_process';
 import { AgentLifecycleManager } from './agent-lifecycle.js';
 import { AgentLifecycleTracker } from '../lifecycle/agent-lifecycle-tracker.js';
 import { EventBus } from '../events/event-bus.js';
@@ -11,7 +12,6 @@ import type { AgentPersona, PersonaLoader } from './persona-loader.js';
 import type { ContextAssembler } from '../memory/context-assembler.js';
 import type { ProgressFileManager } from '../memory/progress-file.js';
 import type { AgentMemoryManager } from '../memory/agent-memory.js';
-import { StructuredOutputRunner } from './structured-output-runner.js';
 import type { WorkspaceManager } from './workspace-manager.js';
 
 export interface AgentExecutorConfig {
@@ -33,7 +33,7 @@ export interface AgentExecutorConfig {
   lifecycleManager?: AgentLifecycleManager;
   lifecycleTracker?: AgentLifecycleTracker;
   sessionPersister?: import('../sessions/session-persister.js').SessionPersister;
-  /** API base URL forwarded to StructuredOutputRunner for DB key injection */
+  /** API base URL (kept for backward compat in config interface) */
   apiBaseUrl?: string;
   /** Lookup the default model from an agent's config.yml (via AgentRegistry). */
   getAgentDefaultModel?: (agentId: string) => string | undefined;
@@ -74,6 +74,17 @@ export interface RunAgentOptions {
   thinkingLevel?: string;
   /** DjinnBot user ID who initiated this run — for per-user provider key resolution. */
   userId?: string;
+  /** JSON Schema for structured output. When set, the runner makes a constrained
+   *  decoding API call instead of running a full agent loop with tools. */
+  outputSchema?: {
+    name: string;
+    schema: Record<string, unknown>;
+    strict?: boolean;
+  };
+  /** How to enforce structured output.
+   *  'response_format' = use provider's native JSON Schema enforcement (default)
+   *  'tool_use' = wrap schema as a tool call for providers without native support */
+  outputMethod?: 'response_format' | 'tool_use';
 }
 
 export interface AgentRunResult {
@@ -91,7 +102,6 @@ export interface AgentRunResult {
 export class AgentExecutor {
   private eventBus: EventBus;
   private agentRunner: AgentRunner;
-  private structuredRunner: StructuredOutputRunner;
   private personaLoader: PersonaLoader;
   private pipelines: Map<string, PipelineConfig>;
   private getOutputs: (runId: string) => Record<string, string>;
@@ -135,37 +145,6 @@ export class AgentExecutor {
     this.sessionPersister = config.sessionPersister;
     this.getAgentDefaultModel = config.getAgentDefaultModel;
     this.getRunModelOverride = config.getRunModelOverride;
-    
-    // Initialize structured output runner
-    this.structuredRunner = new StructuredOutputRunner({
-      apiBaseUrl: config.apiBaseUrl,
-      onStreamChunk: (runId, stepId, chunk) => {
-        // Emit STEP_OUTPUT event for streaming
-        this.eventBus.publish(runChannel(runId), {
-          type: 'STEP_OUTPUT',
-          runId,
-          stepId,
-          chunk,
-          timestamp: Date.now(),
-        }).catch(err => {
-          console.error(`[AgentExecutor] Failed to publish STEP_OUTPUT:`, err);
-        });
-
-        // Persist to session database
-        if (this.sessionPersister) {
-          this.sessionPersister.addEvent(`${runId}_${stepId}`, {
-            type: 'output',
-            timestamp: Date.now(),
-            data: {
-              stream: 'stdout',
-              content: chunk,
-            },
-          }).catch(err => {
-            console.error(`[AgentExecutor] Failed to persist output event:`, err);
-          });
-        }
-      },
-    });
   }
 
   /** Get the underlying agent runner (for pulse sessions, etc.) */
@@ -196,6 +175,42 @@ export class AgentExecutor {
       this.getAgentDefaultModel?.(agentId) ??
       'openrouter/moonshotai/kimi-k2.5'
     );
+  }
+
+  /**
+   * Map structured output JSON to step output keys.
+   * Parses the raw JSON and maps top-level fields to the declared output keys.
+   */
+  private mapStructuredOutputs(
+    rawJson: string,
+    outputKeys?: string[],
+  ): Record<string, string> {
+    const outputs: Record<string, string> = {};
+    try {
+      const data = JSON.parse(rawJson);
+      if (outputKeys) {
+        for (const outputKey of outputKeys) {
+          if (outputKey in data) {
+            const val = data[outputKey];
+            outputs[outputKey] = typeof val === 'string' ? val : JSON.stringify(val);
+          }
+        }
+      }
+      // Store the full JSON as a special output
+      outputs['_structured_json'] = rawJson;
+
+      // If only one output key and it's not in the data, store the whole thing
+      if (outputKeys?.length === 1 && !outputs[outputKeys[0]]) {
+        outputs[outputKeys[0]] = rawJson;
+      }
+    } catch (err) {
+      console.error(`[AgentExecutor] Failed to parse structured output JSON:`, err);
+      outputs['_structured_json'] = rawJson;
+      if (outputKeys?.length === 1) {
+        outputs[outputKeys[0]] = rawJson;
+      }
+    }
+    return outputs;
   }
 
   /**
@@ -440,75 +455,12 @@ export class AgentExecutor {
       const userId = this.getRunUserId ? await this.getRunUserId(runId) : undefined;
       const runModelOverride = this.getRunModelOverride ? await this.getRunModelOverride(runId) : undefined;
 
-      // Check if this step uses structured output
+      // Log if this step uses structured output
       if (stepConfig.outputSchema) {
-        console.log(`[AgentExecutor] Using structured output for step ${stepId}`);
-        
-        // Publish STEP_STARTED
-        const sessionId = `session_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
-        await this.eventBus.publish(runChannel(runId), {
-          type: 'STEP_STARTED',
-          runId,
-          stepId,
-          sessionId,
-          timestamp: Date.now(),
-        });
-
-        const result = await this.structuredRunner.run({
-          runId,
-          stepId: stepConfig.id,
-          model: this.resolveStepModel(stepConfig, agentConfig, pipeline, agentId, runModelOverride),
-          systemPrompt,
-          userPrompt,
-          outputSchema: stepConfig.outputSchema,
-          outputMethod: stepConfig.outputMethod,
-          timeout: (stepConfig.timeoutSeconds ?? pipeline.defaults.timeoutSeconds ?? 300) * 1000,
-          userId,
-        });
-
-        console.log(`[AgentExecutor] Structured output result: success=${result.success}, hasData=${!!result.data}, error=${result.error || 'none'}`);
-        if (result.success && result.data) {
-          // Map the structured data to step outputs
-          const outputs: Record<string, string> = {};
-          if (stepConfig.outputs) {
-            for (const outputKey of stepConfig.outputs) {
-              if (outputKey in (result.data as any)) {
-                const val = (result.data as any)[outputKey];
-                outputs[outputKey] = typeof val === 'string' ? val : JSON.stringify(val);
-              }
-            }
-          }
-          // Also store the full JSON as a special output
-          outputs['_structured_json'] = result.rawJson;
-
-          // If only one output key and it's not in the data, store the whole thing
-          if (stepConfig.outputs?.length === 1 && !outputs[stepConfig.outputs[0]]) {
-            outputs[stepConfig.outputs[0]] = result.rawJson;
-          }
-
-          // Record work complete in lifecycle tracker
-          const duration = Date.now() - startTime;
-          if (this.lifecycleTracker) {
-            await this.lifecycleTracker.recordWorkComplete(
-              agentId,
-              runId,
-              stepId,
-              outputs,
-              duration
-            );
-          }
-
-          // Publish completion (which includes auto-commit)
-          await this.publishStepComplete(runId, stepId, agentId, outputs, result.rawJson);
-          return;
-        } else {
-          console.error(`[AgentExecutor] Structured output failed for step ${stepId}: ${result.error}`);
-          console.warn(`[AgentExecutor] Falling back to normal agent execution`);
-          // Fall through to normal agent execution as fallback
-        }
+        console.log(`[AgentExecutor] Step ${stepId} uses structured output — routing through agentRunner`);
       }
 
-      // Publish STEP_STARTED (for non-structured or fallback path)
+      // Publish STEP_STARTED
       const sessionId = `session_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
       await this.eventBus.publish(runChannel(runId), {
         type: 'STEP_STARTED',
@@ -558,7 +510,22 @@ export class AgentExecutor {
                 if (projectId) {
                   // Look up the task branch so the crash-recovered worktree lands on the
                   // correct feat/{taskId} branch rather than creating a new ephemeral run branch.
-                  const taskBranch = this.getRunTaskBranch ? await this.getRunTaskBranch(runId) : undefined;
+                  // Only pass taskBranch if the project workspace has a git remote (linked repo).
+                  // Non-git projects use empty git repos where worktrees work but remote checks fail.
+                  let taskBranch = this.getRunTaskBranch ? await this.getRunTaskBranch(runId) : undefined;
+                  if (taskBranch) {
+                    try {
+                      const wsDir = process.env.WORKSPACES_DIR || '/data/workspaces';
+                      const projectPath = join(wsDir, projectId);
+                      execSync('git remote get-url origin', {
+                        cwd: projectPath, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'],
+                      });
+                    } catch {
+                      // No remote — don't pass taskBranch to avoid the safety check failure
+                      console.log(`[AgentExecutor] Project ${projectId} has no git remote, skipping task branch`);
+                      taskBranch = undefined;
+                    }
+                  }
                   await this.workspaceManager.createRunWorktreeAsync(projectId, runId, undefined, taskBranch);
                 } else {
                   this.workspaceManager.ensureRunWorkspace(runId);
@@ -605,7 +572,9 @@ export class AgentExecutor {
       }
 
       try {
-        // Run the agent (normal path)
+        // Run the agent — structured output steps include outputSchema/outputMethod
+        // so the runner can make a constrained decoding API call instead of a full
+        // agent loop. The runner returns the raw JSON in parsedOutputs._structured_json.
         const result = await this.agentRunner.runAgent({
           runId,
           stepId,
@@ -628,10 +597,22 @@ export class AgentExecutor {
           maxTurns: stepConfig.maxTurns ?? pipeline.defaults.maxTurns ?? 999,
           projectId,
           userId,
+          // Structured output config (when step has outputSchema)
+          outputSchema: stepConfig.outputSchema,
+          outputMethod: stepConfig.outputMethod,
         });
 
-        // Parse the output (prefer parsedOutputs from tools, fall back to parsing)
-        const parsedOutputs = result.parsedOutputs ?? parseOutputKeyValues(result.output);
+        // For structured output steps, map the JSON result to step output keys
+        let parsedOutputs: Record<string, string>;
+        if (stepConfig.outputSchema && result.parsedOutputs?._structured_json) {
+          parsedOutputs = this.mapStructuredOutputs(
+            result.parsedOutputs._structured_json,
+            stepConfig.outputs,
+          );
+        } else {
+          // Parse the output (prefer parsedOutputs from tools, fall back to parsing)
+          parsedOutputs = result.parsedOutputs ?? parseOutputKeyValues(result.output);
+        }
 
         // Check for status in output
         const status = parsedOutputs.status?.toLowerCase();

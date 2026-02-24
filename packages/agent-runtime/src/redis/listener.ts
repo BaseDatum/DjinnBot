@@ -1,12 +1,13 @@
 import { Redis } from 'ioredis';
 import { channels, commandMessageSchema } from '@djinnbot/core';
-import type { AgentStepCommand, ToolCommand, ShutdownCommand, AbortCommand } from '@djinnbot/core';
+import type { AgentStepCommand, ToolCommand, ShutdownCommand, AbortCommand, StructuredOutputCommand } from '@djinnbot/core';
 
 export interface CommandHandler {
   onAgentStep: (cmd: AgentStepCommand) => Promise<void>;
   onTool: (cmd: ToolCommand) => Promise<void>;
   onShutdown: (cmd: ShutdownCommand) => Promise<void>;
   onAbort: (cmd: AbortCommand) => Promise<void>;
+  onStructuredOutput?: (cmd: StructuredOutputCommand) => Promise<void>;
 }
 
 export async function startCommandListener(
@@ -35,6 +36,13 @@ export async function startCommandListener(
           break;
         case 'abort':
           await handler.onAbort(cmd);
+          break;
+        case 'structuredOutput':
+          if (handler.onStructuredOutput) {
+            await handler.onStructuredOutput(cmd);
+          } else {
+            console.warn('[CommandListener] Received structuredOutput command but no handler registered');
+          }
           break;
       }
     } catch (err) {

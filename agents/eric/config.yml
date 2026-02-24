@@ -6,7 +6,6 @@ pulse_blackouts:
   type: recurring
 pulse_columns:
 - Backlog
-- Ready
 pulse_container_timeout_ms: 120000
 pulse_enabled: false
 pulse_interval_minutes: 30
@@ -15,8 +14,6 @@ pulse_offset_minutes: 3
 pulse_one_offs: []
 pulse_transitions_to:
 - planning
-- ready
-- in_progress
 thinkingModel: z-ai/glm-5
 thinking_level: 'off'
 thinking_model: xai/grok-4-1-fast-reasoning

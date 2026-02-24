@@ -5,6 +5,8 @@ import {
   ArrowLeft,
   Trash2,
   Github,
+  Zap,
+  LayoutTemplate,
 } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useState, useEffect, useCallback, useRef } from 'react';
@@ -16,6 +18,7 @@ import {
   deleteProject,
   fetchProjectAgents,
   fetchAgents,
+  fetchProjectTemplate,
 } from '@/lib/api';
 import { ProjectBoardView } from '@/components/projects/ProjectBoardView';
 import { TaskDetailPanel } from '@/components/projects/TaskDetailPanel';
@@ -26,6 +29,8 @@ import { SlackSettings } from '@/components/projects/SlackSettings';
 import { KeyUserSettings } from '@/components/projects/KeyUserSettings';
 import { VisionSettings } from '@/components/projects/VisionSettings';
 import { ProjectActivityFeed, type ActivityEntry } from '@/components/projects/ProjectActivityFeed';
+import { ProjectSettingsPanel } from '@/components/projects/ProjectSettingsPanel';
+import { ProjectSwarmHistory } from '@/components/projects/ProjectSwarmHistory';
 import { DependencyGraph } from '@/components/DependencyGraph';
 import { GanttChart } from '@/components/GanttChart';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
@@ -80,6 +85,8 @@ function ProjectBoardPage() {
   const [confirmAction, setConfirmAction] = useState<{
     title: string; desc: string; action: () => void
   } | null>(null);
+  const [showSwarmHistory, setShowSwarmHistory] = useState(false);
+  const [templateName, setTemplateName] = useState<string | null>(null);
 
   // Activity feed — accumulate rich SSE events instead of just refreshing
   // Persist a per-project "cleared at" cutoff so clearing survives page refreshes.
@@ -132,6 +139,17 @@ function ProjectBoardPage() {
       .then((d) => setPipelines(Array.isArray(d) ? d : d.pipelines || []))
       .catch(() => {});
   }, [loadProject]);
+
+  // Fetch template name for header badge
+  useEffect(() => {
+    if (!project?.template_id) {
+      setTemplateName(null);
+      return;
+    }
+    fetchProjectTemplate(project.template_id)
+      .then((t) => setTemplateName(t.name))
+      .catch(() => setTemplateName(null));
+  }, [project?.template_id]);
 
   // Load team agents for column roster
   useEffect(() => {
@@ -307,9 +325,24 @@ function ProjectBoardPage() {
             <Badge variant="outline" className="text-xs shrink-0">
               {done}/{tasks.length} done
             </Badge>
+            {templateName && (
+              <Badge variant="outline" className="text-xs shrink-0 gap-1">
+                <LayoutTemplate className="w-3 h-3" />
+                {templateName}
+              </Badge>
+            )}
           </div>
 
           <div className="flex items-center gap-2 shrink-0">
+            <Button
+              size="sm"
+              variant="ghost"
+              className="gap-1.5"
+              onClick={() => setShowSwarmHistory(true)}
+              title="Swarm History"
+            >
+              <Zap className="h-3.5 w-3.5 text-amber-500" />
+            </Button>
             <Button
               size="sm"
               variant="ghost"
@@ -404,6 +437,7 @@ function ProjectBoardPage() {
         {view === 'settings' && (
           <div className="flex-1 p-4 md:px-6 overflow-auto">
             <div className="max-w-2xl mx-auto space-y-6">
+              <ProjectSettingsPanel project={project} />
               <VisionSettings
                 projectId={projectId}
                 currentVision={project.vision ?? null}
@@ -476,6 +510,13 @@ function ProjectBoardPage() {
           />
         </>
       )}
+
+      {/* Swarm history slide-over */}
+      <ProjectSwarmHistory
+        projectId={projectId}
+        open={showSwarmHistory}
+        onClose={() => setShowSwarmHistory(false)}
+      />
     </div>
   );
 }

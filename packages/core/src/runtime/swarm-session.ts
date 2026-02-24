@@ -35,6 +35,8 @@ export interface SwarmSessionDeps {
     deviationRules: string;
     modelOverride?: string;
     timeoutSeconds: number;
+    /** When spawned from a swarm, the unique task key for per-executor branch isolation. */
+    swarmTaskKey?: string;
   }) => Promise<string>;
 
   /**
@@ -55,6 +57,36 @@ export interface SwarmSessionDeps {
    * Persist swarm state to Redis (for recovery and polling).
    */
   persistState: (swarmId: string, state: SwarmSessionState) => Promise<void>;
+
+  /**
+   * Merge executor branches after swarm completion (Option B integration).
+   * Called when all tasks succeed. Merges per-executor branches into the
+   * canonical feat/{taskId} branch and optionally opens a PR.
+   *
+   * Returns merge result summary, or null if not available.
+   */
+  mergeExecutorBranches?: (params: {
+    projectId: string;
+    targetBranch: string;
+    executorBranches: string[];
+  }) => Promise<{
+    success: boolean;
+    merged: string[];
+    conflicts: Array<{ branch: string; error: string }>;
+    pushed: boolean;
+    pushError?: string;
+  }>;
+
+  /**
+   * Open a PR for the integrated branch after swarm completion.
+   * Returns PR info or null if not available.
+   */
+  openPullRequest?: (params: {
+    projectId: string;
+    taskId: string;
+    title: string;
+    body: string;
+  }) => Promise<{ pr_number: number; pr_url: string } | null>;
 }
 
 const DEFAULT_MAX_CONCURRENT = 3;
@@ -243,6 +275,13 @@ class SwarmSession {
       const summary = this.buildSummary();
       const allSucceeded = summary.failed === 0 && summary.skipped === 0 && summary.cancelled === 0;
 
+      // ── Post-swarm branch integration (Option B) ────────────────────────
+      // When all tasks succeed and mergeExecutorBranches is available, merge
+      // the per-executor branches into the canonical task branch.
+      if (allSucceeded && !this.cancelled && this.deps.mergeExecutorBranches) {
+        await this.integrateExecutorBranches();
+      }
+
       if (allSucceeded && !this.cancelled) {
         await this.publishEvent({
           type: 'swarm:completed',
@@ -292,6 +331,7 @@ class SwarmSession {
           deviationRules: this.deviationRules,
           modelOverride: taskDef.model,
           timeoutSeconds: taskDef.timeoutSeconds ?? DEFAULT_TASK_TIMEOUT_SECONDS,
+          swarmTaskKey: task.key,
         });
 
         task.status = 'running';
@@ -476,6 +516,83 @@ class SwarmSession {
       totalDurationMs: Date.now() - this.startedAt,
       taskResults,
     };
+  }
+
+  /**
+   * After all swarm tasks complete, merge per-executor branches into a
+   * single canonical task branch and optionally open a PR.
+   *
+   * Groups completed tasks by taskId (kanban task) and merges all executor
+   * branches that share the same task. Solo tasks don't need merging.
+   */
+  private async integrateExecutorBranches(): Promise<void> {
+    if (!this.deps.mergeExecutorBranches) return;
+
+    // Group completed tasks by their kanban taskId
+    const taskGroups = new Map<string, { projectId: string; branches: string[] }>();
+    for (const [, state] of this.tasks) {
+      if (state.status !== 'completed') continue;
+      const def = this.taskDefs.get(state.key);
+      if (!def) continue;
+
+      const group = taskGroups.get(def.taskId) ?? { projectId: def.projectId, branches: [] };
+      // The executor branch name is feat/{taskId}-{swarmTaskKey}
+      // which was set when the run was created via spawn_executor
+      // We reconstruct it here from the task key
+      const baseBranch = `feat/${def.taskId}`;
+      const executorBranch = `${baseBranch}-${state.key}`;
+      group.branches.push(executorBranch);
+      taskGroups.set(def.taskId, group);
+    }
+
+    for (const [taskId, { projectId, branches }] of taskGroups) {
+      if (branches.length <= 1) {
+        // Solo executor — its branch is already the right one, no merge needed.
+        // Or we could rename it to the canonical branch, but push already happened
+        // during run finalization.
+        console.log(`[SwarmSession] Task ${taskId}: single executor, no merge needed`);
+        continue;
+      }
+
+      const targetBranch = `feat/${taskId}`;
+      console.log(`[SwarmSession] Merging ${branches.length} executor branches into ${targetBranch}`);
+
+      try {
+        const result = await this.deps.mergeExecutorBranches({
+          projectId,
+          targetBranch,
+          executorBranches: branches,
+        });
+
+        if (result.success && result.pushed) {
+          console.log(`[SwarmSession] Successfully integrated ${result.merged.length} branches into ${targetBranch}`);
+
+          // Optionally open a PR
+          if (this.deps.openPullRequest) {
+            try {
+              const pr = await this.deps.openPullRequest({
+                projectId,
+                taskId,
+                title: `feat: swarm integration for task ${taskId}`,
+                body: `Automated PR from swarm execution.\n\nMerged branches:\n${result.merged.map(b => `- ${b}`).join('\n')}`,
+              });
+              if (pr) {
+                console.log(`[SwarmSession] Opened PR #${pr.pr_number} for ${targetBranch}`);
+              }
+            } catch (prErr) {
+              console.warn(`[SwarmSession] Failed to open PR for ${targetBranch}:`, prErr);
+            }
+          }
+        } else if (result.conflicts.length > 0) {
+          console.warn(
+            `[SwarmSession] Merge conflicts for ${targetBranch}:`,
+            result.conflicts.map(c => `${c.branch}: ${c.error}`).join('; ')
+          );
+        }
+      } catch (err) {
+        console.error(`[SwarmSession] Failed to integrate branches for task ${taskId}:`, err);
+      }
+    }
   }
 
   cancel(): void {

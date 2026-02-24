@@ -66,6 +66,10 @@ __all__ = [
     "_serialize_workflow",
     "_publish_event",
     "_validate_pipeline_exists",
+    # Dynamic status helpers
+    "get_valid_statuses_for_project",
+    "get_project_semantics",
+    "get_semantic_statuses",
 ]
 
 router = APIRouter()
@@ -80,6 +84,13 @@ class CreateProjectRequest(BaseModel):
     name: str
     description: str = ""
     repository: Optional[str] = None
+    # Template: specify a template ID/slug to create from, or omit for legacy default.
+    templateId: Optional[str] = None
+    # Custom columns: if provided (and no templateId), creates with custom columns.
+    # Each entry: {name: str, position: int, wip_limit: int|null, statuses: [str]}
+    columns: Optional[list[dict]] = None
+    # Custom status semantics: if provided with custom columns.
+    statusSemantics: Optional[dict] = None
 
     @field_validator("repository")
     @classmethod
@@ -128,18 +139,9 @@ class CreateTaskRequest(BaseModel):
 class UpdateTaskRequest(BaseModel):
     title: Optional[str] = None
     description: Optional[str] = None
-    status: Optional[
-        Literal[
-            "backlog",
-            "planning",
-            "ready",
-            "in_progress",
-            "review",
-            "blocked",
-            "done",
-            "failed",
-        ]
-    ] = None
+    # Status is now dynamic — validated against the project's column definitions
+    # at the endpoint level, not at the Pydantic schema level.
+    status: Optional[str] = None
     priority: Optional[Literal["P0", "P1", "P2", "P3"]] = None
     assignedAgent: Optional[str] = None
     workflowId: Optional[str] = None
@@ -212,6 +214,9 @@ class ValidateRepositoryRequest(BaseModel):
 # CONSTANTS
 # ══════════════════════════════════════════════════════════════════════════
 
+# LEGACY — kept for backward compatibility with onboarding.py and other callers.
+# New code should use project templates instead.
+# These match the "software-dev" built-in template.
 DEFAULT_COLUMNS = [
     {
         "name": "Backlog",
@@ -226,42 +231,102 @@ DEFAULT_COLUMNS = [
         "task_statuses": ["planning"],
     },
     {
-        "name": "Blocked",
+        "name": "Planned",
         "position": 2,
+        "wip_limit": None,
+        "task_statuses": ["planned"],
+    },
+    {
+        "name": "UX",
+        "position": 3,
+        "wip_limit": None,
+        "task_statuses": ["ux"],
+    },
+    {
+        "name": "Blocked",
+        "position": 4,
         "wip_limit": None,
         "task_statuses": ["blocked"],
     },
     {
         "name": "Ready",
-        "position": 3,
+        "position": 5,
         "wip_limit": None,
         "task_statuses": ["ready"],
     },
     {
         "name": "In Progress",
-        "position": 4,
+        "position": 6,
         "wip_limit": 5,
         "task_statuses": ["in_progress"],
     },
     {
         "name": "Review",
-        "position": 5,
+        "position": 7,
         "wip_limit": None,
         "task_statuses": ["review"],
     },
     {
+        "name": "Test",
+        "position": 8,
+        "wip_limit": None,
+        "task_statuses": ["test"],
+    },
+    {
         "name": "Done",
-        "position": 6,
+        "position": 9,
         "wip_limit": None,
         "task_statuses": ["done"],
     },
     {
         "name": "Failed",
-        "position": 7,
+        "position": 10,
         "wip_limit": None,
         "task_statuses": ["failed"],
     },
 ]
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# DYNAMIC STATUS HELPERS
+# ══════════════════════════════════════════════════════════════════════════
+
+
+async def get_valid_statuses_for_project(
+    session: AsyncSession, project_id: str
+) -> set[str]:
+    """Get all valid task statuses for a project by reading its kanban columns."""
+    result = await session.execute(
+        select(KanbanColumn).where(KanbanColumn.project_id == project_id)
+    )
+    columns = result.scalars().all()
+    all_statuses: set[str] = set()
+    for col in columns:
+        statuses = json.loads(col.task_statuses) if col.task_statuses else []
+        all_statuses.update(statuses)
+    return all_statuses
+
+
+async def get_project_semantics(session: AsyncSession, project_id: str) -> dict:
+    """Get the status semantics for a project.
+
+    Returns the project's own status_semantics if set, otherwise
+    falls back to the legacy hardcoded semantics.
+    """
+    from app.routers.project_templates import LEGACY_STATUS_SEMANTICS
+
+    result = await session.execute(
+        select(Project.status_semantics).where(Project.id == project_id)
+    )
+    semantics = result.scalar_one_or_none()
+    if semantics:
+        return semantics
+    return LEGACY_STATUS_SEMANTICS
+
+
+def get_semantic_statuses(semantics: dict, key: str) -> set[str]:
+    """Get the set of statuses for a semantic key (e.g. 'terminal_done')."""
+    return set(semantics.get(key, []))
 
 
 # ══════════════════════════════════════════════════════════════════════════

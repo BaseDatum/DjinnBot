@@ -32,6 +32,11 @@ from app.models import Run, Task, Project
 from app import dependencies
 from app.utils import now_ms, gen_id
 from app.logging_config import get_logger
+from app.routers.projects.execution import (
+    _get_task_branch,
+    _set_task_branch,
+    _task_branch_name,
+)
 
 logger = get_logger(__name__)
 
@@ -198,6 +203,11 @@ class SpawnExecutorRequest(BaseModel):
     timeout_seconds: int = Field(
         default=300, ge=30, le=600, description="Max execution time"
     )
+    swarm_task_key: Optional[str] = Field(
+        None,
+        description="When spawned from a swarm, the unique task key within the DAG. "
+        "Used to create per-executor branches (feat/{taskId}-{key}) for parallel isolation.",
+    )
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -257,6 +267,26 @@ async def spawn_executor(
             f"Pre-flight injection: added {len(lessons_section)} chars of lessons"
         )
 
+    # ── Resolve task branch ──────────────────────────────────────────────
+    # Ensures the executor's worktree is created on a persistent feat/ branch
+    # instead of an ephemeral run/{runId} branch.
+    #
+    # For solo executors: branch = feat/{taskId}-{slug} (canonical task branch)
+    # For swarm executors: branch = feat/{taskId}-{swarmTaskKey} (per-executor)
+    task_branch: str | None = None
+    if task:
+        branch = _get_task_branch(task)
+        if not branch:
+            branch = _task_branch_name(task.id, task.title)
+            _set_task_branch(task, branch)
+            await session.commit()
+
+        if req.swarm_task_key:
+            # Swarm parallel isolation: each executor gets a unique branch
+            task_branch = f"{branch}-{req.swarm_task_key}"
+        else:
+            task_branch = branch
+
     # Store metadata in human_context for the engine to use
     human_context = json.dumps(
         {
@@ -282,6 +312,7 @@ async def spawn_executor(
         outputs="{}",
         human_context=human_context,
         model_override=req.model_override,
+        task_branch=task_branch,
         created_at=now,
         updated_at=now,
     )

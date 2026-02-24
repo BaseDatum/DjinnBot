@@ -27,6 +27,10 @@ interface KanbanColumnProps {
   columnAgents?: TeamAgent[];
   /** Map of task_id → swarm_id for tasks in active swarms */
   swarmTaskMap?: Map<string, string>;
+  /** Set of selected task IDs for swarm launch */
+  selectedTaskIds?: Set<string>;
+  /** Callback to toggle task selection for swarm */
+  onToggleSwarmSelect?: (taskId: string) => void;
 }
 
 export function KanbanColumn({
@@ -38,6 +42,8 @@ export function KanbanColumn({
   onTaskCreated,
   columnAgents = [],
   swarmTaskMap,
+  selectedTaskIds,
+  onToggleSwarmSelect,
 }: KanbanColumnProps) {
   const [showAdd, setShowAdd] = useState(false);
   const [newTitle, setNewTitle] = useState('');
@@ -124,6 +130,8 @@ export function KanbanColumn({
               dependencies={dependencies}
               onClick={() => onTaskClick(task)}
               swarmId={swarmTaskMap?.get(task.id)}
+              isSwarmSelected={selectedTaskIds?.has(task.id)}
+              onToggleSwarmSelect={onToggleSwarmSelect}
             />
           ))}
         </SortableContext>

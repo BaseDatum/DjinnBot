@@ -21,6 +21,11 @@ class Run(Base, TimestampWithCompletedMixin):
     current_step_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     human_context: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
+    # Git branch for this run's worktree (e.g. "feat/task_abc123-oauth").
+    # When set, the engine creates the worktree on this branch instead of
+    # an ephemeral run/{runId} branch.  Shared across retries of the same task.
+    task_branch: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
+
     # Multi-user key resolution fields
     initiated_by_user_id: Mapped[Optional[str]] = mapped_column(
         String(64),

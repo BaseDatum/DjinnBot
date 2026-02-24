@@ -1,4 +1,4 @@
-import { useMemo, useCallback } from 'react';
+import { useMemo, useCallback, useEffect } from 'react';
 import {
   ReactFlow,
   Background,
@@ -138,45 +138,86 @@ interface SwarmDAGProps {
 export function SwarmDAG({ tasks, onTaskClick }: SwarmDAGProps) {
   const now = Date.now();
 
-  const { nodes: initialNodes, edges: initialEdges } = useMemo(() => {
+  // Build a stable key from task statuses to avoid re-layouting on every render.
+  // We only need to re-layout when the set of tasks or their dependency edges change,
+  // but we update node data (status, elapsed, etc.) on every tasks change.
+  const taskKeys = useMemo(() => tasks.map(t => t.key).sort().join(','), [tasks]);
+  const depKeys = useMemo(
+    () => tasks.flatMap(t => t.dependencies.map(d => `${d}->${t.key}`)).sort().join(','),
+    [tasks],
+  );
+
+  // Compute layout only when the graph structure changes (new tasks or new edges)
+  const layout = useMemo(() => {
     const nodes: Node[] = tasks.map(t => ({
       id: t.key,
       type: 'swarmTask',
-      data: {
-        task: t,
-        elapsed: t.status === 'running' && t.started_at ? now - t.started_at : undefined,
-      } satisfies TaskNodeData,
+      data: { task: t } satisfies TaskNodeData,
       position: { x: 0, y: 0 },
     }));
 
     const edges: Edge[] = [];
     for (const t of tasks) {
       for (const dep of t.dependencies) {
-        const depTask = tasks.find(d => d.key === dep);
-        const isComplete = depTask?.status === 'completed';
-        const isFailed = depTask?.status === 'failed' || depTask?.status === 'skipped';
-
         edges.push({
           id: `${dep}->${t.key}`,
           source: dep,
           target: t.key,
           type: 'smoothstep',
-          animated: t.status === 'running' || t.status === 'ready',
-          style: {
-            stroke: isComplete ? '#22c55e' : isFailed ? '#ef4444' : '#71717a',
-            strokeWidth: isComplete ? 2 : 1.5,
-            strokeDasharray: isFailed ? '4 4' : undefined,
-          },
           markerEnd: { type: MarkerType.ArrowClosed, width: 12, height: 12 },
         });
       }
     }
 
     return layoutDAG(nodes, edges);
-  }, [tasks, now]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [taskKeys, depKeys]);
 
-  const [, , onNodesChange] = useNodesState(initialNodes);
-  const [, , onEdgesChange] = useEdgesState(initialEdges);
+  // Derive display nodes/edges with current status every time tasks change
+  const displayNodes = useMemo(() => {
+    return layout.nodes.map(n => {
+      const task = tasks.find(t => t.key === n.id);
+      if (!task) return n;
+      return {
+        ...n,
+        data: {
+          task,
+          elapsed: task.status === 'running' && task.started_at ? now - task.started_at : undefined,
+        } satisfies TaskNodeData,
+      };
+    });
+  }, [layout.nodes, tasks, now]);
+
+  const displayEdges = useMemo(() => {
+    return layout.edges.map(e => {
+      const depTask = tasks.find(t => t.key === e.source);
+      const targetTask = tasks.find(t => t.key === e.target);
+      const isComplete = depTask?.status === 'completed';
+      const isFailed = depTask?.status === 'failed' || depTask?.status === 'skipped';
+
+      return {
+        ...e,
+        animated: targetTask?.status === 'running' || targetTask?.status === 'ready',
+        style: {
+          stroke: isComplete ? '#22c55e' : isFailed ? '#ef4444' : '#71717a',
+          strokeWidth: isComplete ? 2 : 1.5,
+          strokeDasharray: isFailed ? '4 4' : undefined,
+        },
+      };
+    });
+  }, [layout.edges, tasks]);
+
+  // Use ReactFlow controlled state, syncing whenever our computed data changes
+  const [nodes, setNodes, onNodesChange] = useNodesState(displayNodes);
+  const [edges, setEdges, onEdgesChange] = useEdgesState(displayEdges);
+
+  useEffect(() => {
+    setNodes(displayNodes);
+  }, [displayNodes, setNodes]);
+
+  useEffect(() => {
+    setEdges(displayEdges);
+  }, [displayEdges, setEdges]);
 
   const handleNodeClick = useCallback((_: any, node: Node) => {
     onTaskClick?.(node.id);
@@ -185,8 +226,8 @@ export function SwarmDAG({ tasks, onTaskClick }: SwarmDAGProps) {
   return (
     <div className="w-full h-full">
       <ReactFlow
-        nodes={initialNodes}
-        edges={initialEdges}
+        nodes={nodes}
+        edges={edges}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onNodeClick={handleNodeClick}

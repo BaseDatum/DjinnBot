@@ -6,7 +6,7 @@ pulse_blackouts:
   type: recurring
 pulse_columns:
 - Ready
-- In Progress
+- Failed
 pulse_container_timeout_ms: 120000
 pulse_enabled: false
 pulse_interval_minutes: 30
@@ -16,7 +16,6 @@ pulse_one_offs: []
 pulse_transitions_to:
 - in_progress
 - review
-- done
 skills_disabled: []
 thinkingModel: moonshotai/kimi-k2.5
 thinking_level: 'off'

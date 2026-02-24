@@ -31,14 +31,16 @@ from app.logging_config import get_logger
 from app.utils import gen_id, now_ms
 from app.constants import DEFAULT_CHAT_MODEL
 from app.routers.projects._common import DEFAULT_COLUMNS
+from app.models.project_template import ProjectTemplate
+from app.routers.project_templates import LEGACY_STATUS_SEMANTICS
 
 logger = get_logger(__name__)
 router = APIRouter()
 
-# The first agent for every onboarding session
+# The first agent for every onboarding session (legacy / software-dev default)
 FIRST_AGENT_ID = "stas"
 
-# Ordered fallback chain if agent lookup fails
+# Ordered fallback chain if agent lookup fails (legacy / software-dev default)
 AGENT_CHAIN = ["stas", "jim", "eric", "finn"]
 
 # Agent display metadata (display name + emoji)
@@ -59,6 +61,10 @@ AGENT_META: dict[str, dict] = {
 
 class CreateOnboardingSessionRequest(BaseModel):
     model: Optional[str] = DEFAULT_CHAT_MODEL
+    # Template to use for the onboarding flow. When set, the agent chain
+    # and project columns come from the template. When null, uses the
+    # legacy software-dev defaults (Stas -> Jim -> Eric -> Finn).
+    templateId: Optional[str] = None
 
 
 class SendOnboardingMessageRequest(BaseModel):
@@ -96,6 +102,9 @@ class FinalizeRequest(BaseModel):
     repository: Optional[str] = None
     # The full accumulated context dict
     context: Optional[dict] = None
+    # Template to use if not already set on the session.
+    # This allows the finalize endpoint to create projects from any template.
+    templateId: Optional[str] = None
 
 
 class OnboardingMessageResponse(BaseModel):
@@ -125,6 +134,7 @@ class OnboardingSessionResponse(BaseModel):
     id: str
     status: str
     project_id: Optional[str]
+    template_id: Optional[str] = None
     current_agent_id: str
     current_agent_name: str
     current_agent_emoji: str
@@ -203,6 +213,7 @@ def _serialize_session(
         id=session.id,
         status=session.status,
         project_id=session.project_id,
+        template_id=session.template_id,
         current_agent_id=session.current_agent_id,
         current_agent_name=name,
         current_agent_emoji=emoji,
@@ -466,12 +477,52 @@ async def _create_project_with_columns(
     repository: Optional[str],
     accumulated_ctx: dict,
     now: int,
+    template_id: Optional[str] = None,
 ) -> str:
-    """Create a Project row and its default kanban columns. Returns project_id."""
+    """Create a Project row and its kanban columns. Returns project_id.
+
+    When template_id is provided, loads the template and uses its columns
+    and status semantics. Otherwise falls back to DEFAULT_COLUMNS (legacy
+    software-dev board).
+    """
     project_id = gen_id("proj_")
 
     # Synthesize the project vision from accumulated onboarding context
     vision = _synthesize_project_vision(project_name, accumulated_ctx)
+
+    # Resolve template
+    resolved_template_id = None
+    status_semantics = None
+    default_pipeline_id = None
+    columns_to_create = None
+
+    if template_id:
+        result = await db.execute(
+            select(ProjectTemplate).where(
+                (ProjectTemplate.id == template_id)
+                | (ProjectTemplate.slug == template_id)
+            )
+        )
+        template = result.scalar_one_or_none()
+        if template:
+            resolved_template_id = template.id
+            status_semantics = template.status_semantics
+            default_pipeline_id = template.default_pipeline_id
+            columns_to_create = []
+            for col_def in template.board_columns:
+                columns_to_create.append(
+                    {
+                        "name": col_def["name"],
+                        "position": col_def["position"],
+                        "wip_limit": col_def.get("wip_limit"),
+                        "task_statuses": col_def.get(
+                            "statuses", col_def.get("task_statuses", [])
+                        ),
+                    }
+                )
+
+    if not columns_to_create:
+        columns_to_create = DEFAULT_COLUMNS
 
     project = Project(
         id=project_id,
@@ -479,6 +530,9 @@ async def _create_project_with_columns(
         description=description if isinstance(description, str) else "",
         status="active",
         repository=repository if isinstance(repository, str) else None,
+        template_id=resolved_template_id,
+        status_semantics=status_semantics,
+        default_pipeline_id=default_pipeline_id,
         onboarding_context=json.dumps(accumulated_ctx),
         vision=vision,
         created_at=now,
@@ -487,7 +541,7 @@ async def _create_project_with_columns(
     db.add(project)
     await db.flush()
 
-    for col_def in DEFAULT_COLUMNS:
+    for col_def in columns_to_create:
         col = KanbanColumn(
             id=gen_id("col_"),
             project_id=project_id,
@@ -638,24 +692,53 @@ async def create_onboarding_session(
     now = now_ms()
     session_id = gen_id("onb_")
     model = req.model or DEFAULT_CHAT_MODEL
-    name, emoji = _agent_meta(FIRST_AGENT_ID)
+
+    # Resolve template to determine agent chain
+    template_id = None
+    first_agent_id = FIRST_AGENT_ID
+    if req.templateId:
+        tmpl_result = await db.execute(
+            select(ProjectTemplate).where(
+                (ProjectTemplate.id == req.templateId)
+                | (ProjectTemplate.slug == req.templateId)
+            )
+        )
+        template = tmpl_result.scalar_one_or_none()
+        if template:
+            template_id = template.id
+            # Use template's onboarding agent chain if defined
+            if (
+                template.onboarding_agent_chain
+                and len(template.onboarding_agent_chain) > 0
+            ):
+                first_agent_id = template.onboarding_agent_chain[0]
+            else:
+                # Template has no onboarding chain — this shouldn't be called
+                # but fall back gracefully to the default
+                logger.warning(
+                    f"Template {template.slug} has no onboarding agent chain, "
+                    f"using default ({FIRST_AGENT_ID})"
+                )
+
+    name, emoji = _agent_meta(first_agent_id)
 
     # Pre-create a placeholder for the proactive assistant greeting.
     # The engine needs a message ID before the container starts so it can
     # persist the response via /internal/chat/messages/{id}/complete.
     greeting_msg_id = gen_id("ombm_")
 
-    # Start the Stas container, passing the greeting message ID so the
+    # Start the first agent container, passing the greeting message ID so the
     # engine sets currentMessageId before the proactive turn fires.
     chat_session_id = await _start_agent_container(
-        FIRST_AGENT_ID, model, session_id, greeting_message_id=greeting_msg_id
+        first_agent_id, model, session_id, greeting_message_id=greeting_msg_id
     )
 
     onb = OnboardingSession(
         id=session_id,
         status="active",
         project_id=None,
-        current_agent_id=FIRST_AGENT_ID,
+        current_agent_id=first_agent_id,
+        template_id=template_id,
         phase="intake",
         context="{}",
         chat_session_id=chat_session_id,
@@ -1141,9 +1224,15 @@ async def handoff_onboarding_agent(
         )
         db.add(completion_msg)
 
-        # Create project + kanban columns via shared helper
+        # Create project + kanban columns via shared helper (template-aware)
         project_id = await _create_project_with_columns(
-            db, project_name, description, repository, accumulated_ctx, now
+            db,
+            project_name,
+            description,
+            repository,
+            accumulated_ctx,
+            now,
+            template_id=onb.template_id,
         )
 
         # Mark session completed
@@ -1350,9 +1439,18 @@ async def finalize_onboarding_session(
     description = req.description or accumulated_ctx.get("summary", "")
     repository = req.repository or accumulated_ctx.get("repo")
 
-    # Create project + kanban columns via shared helper
+    # Resolve template: session template > request template > null (legacy)
+    template_id = onb.template_id or req.templateId
+
+    # Create project + kanban columns via shared helper (template-aware)
     project_id = await _create_project_with_columns(
-        db, req.project_name, description, repository, accumulated_ctx, now
+        db,
+        req.project_name,
+        description,
+        repository,
+        accumulated_ctx,
+        now,
+        template_id=template_id,
     )
 
     # Mark session completed and link to project
@@ -1465,7 +1563,6 @@ async def stop_onboarding_agent(
     }
 
 
-@router.post("/sessions/{session_id}/abandon")
 @router.patch("/sessions/{session_id}/abandon")
 async def abandon_onboarding_session(
     session_id: str,

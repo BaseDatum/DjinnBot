@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_async_session
 from app.models import Project, Task, KanbanColumn
+from app.models.project_template import ProjectTemplate
 from app.utils import now_ms, gen_id
 from app.logging_config import get_logger
 
@@ -31,9 +32,92 @@ router = APIRouter()
 async def create_project(
     req: CreateProjectRequest, session: AsyncSession = Depends(get_async_session)
 ):
-    """Create a new project with default kanban columns."""
-    logger.debug(f"Creating project: name={req.name}, repository={req.repository}")
+    """Create a new project from a template, custom columns, or legacy defaults.
+
+    Priority:
+    1. templateId — load columns + semantics from template
+    2. columns + statusSemantics — custom project definition
+    3. Neither — fall back to legacy DEFAULT_COLUMNS (software-dev)
+    """
+    logger.debug(
+        f"Creating project: name={req.name}, repository={req.repository}, "
+        f"templateId={req.templateId}"
+    )
     now = now_ms()
+
+    template_id = None
+    status_semantics = None
+    columns_to_create = None
+    default_pipeline_id = None
+
+    if req.templateId:
+        # --- Template-based creation ---
+        result = await session.execute(
+            select(ProjectTemplate).where(
+                (ProjectTemplate.id == req.templateId)
+                | (ProjectTemplate.slug == req.templateId)
+            )
+        )
+        template = result.scalar_one_or_none()
+        if not template:
+            from fastapi import HTTPException
+
+            raise HTTPException(
+                status_code=404,
+                detail=f"Template '{req.templateId}' not found",
+            )
+
+        template_id = template.id
+        status_semantics = template.status_semantics
+        default_pipeline_id = template.default_pipeline_id
+
+        # Template columns use "statuses" key; convert to DB format "task_statuses"
+        columns_to_create = []
+        for col_def in template.board_columns:
+            columns_to_create.append(
+                {
+                    "name": col_def["name"],
+                    "position": col_def["position"],
+                    "wip_limit": col_def.get("wip_limit"),
+                    "task_statuses": col_def.get(
+                        "statuses", col_def.get("task_statuses", [])
+                    ),
+                }
+            )
+
+    elif req.columns:
+        # --- Custom columns ---
+        columns_to_create = []
+        for col_def in req.columns:
+            columns_to_create.append(
+                {
+                    "name": col_def["name"],
+                    "position": col_def["position"],
+                    "wip_limit": col_def.get("wip_limit") or col_def.get("wipLimit"),
+                    "task_statuses": col_def.get(
+                        "statuses", col_def.get("task_statuses", [])
+                    ),
+                }
+            )
+        if req.statusSemantics:
+            status_semantics = req.statusSemantics
+        else:
+            # Auto-derive basic semantics from columns
+            all_statuses = []
+            for c in columns_to_create:
+                all_statuses.extend(c["task_statuses"])
+            status_semantics = {
+                "initial": [all_statuses[0]] if all_statuses else [],
+                "terminal_done": [all_statuses[-1]] if all_statuses else [],
+                "terminal_fail": [],
+                "blocked": [],
+                "in_progress": [],
+                "claimable": [all_statuses[0]] if all_statuses else [],
+            }
+
+    else:
+        # --- Legacy fallback ---
+        columns_to_create = DEFAULT_COLUMNS
 
     project = Project(
         id=gen_id("proj_"),
@@ -41,19 +125,22 @@ async def create_project(
         description=req.description,
         status="active",
         repository=req.repository,
+        template_id=template_id,
+        status_semantics=status_semantics,
+        default_pipeline_id=default_pipeline_id,
         created_at=now,
         updated_at=now,
     )
     session.add(project)
 
-    # Create default kanban columns
-    for col_def in DEFAULT_COLUMNS:
+    # Create kanban columns
+    for col_def in columns_to_create:
         column = KanbanColumn(
             id=gen_id("col_"),
             project_id=project.id,
             name=col_def["name"],
             position=col_def["position"],
-            wip_limit=col_def["wip_limit"],
+            wip_limit=col_def.get("wip_limit"),
             task_statuses=json.dumps(col_def["task_statuses"]),
         )
         session.add(column)
@@ -68,6 +155,7 @@ async def create_project(
         "id": project.id,
         "name": project.name,
         "status": "active",
+        "template_id": template_id,
         "created_at": now,
     }
 
@@ -185,6 +273,8 @@ async def get_project(
         "default_pipeline_id": project.default_pipeline_id,
         "slack_channel_id": project.slack_channel_id,
         "slack_notify_user_id": project.slack_notify_user_id,
+        "template_id": project.template_id,
+        "status_semantics": project.status_semantics,
         "key_user_id": project.key_user_id,
         "onboarding_context": project.onboarding_context,
         "vision": project.vision,
