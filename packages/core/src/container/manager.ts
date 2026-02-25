@@ -322,8 +322,14 @@ export class ContainerManager {
           Memory: memoryLimit ?? DEFAULT_MEMORY_LIMIT,
           NanoCpus: (cpuLimit ?? DEFAULT_CPU_LIMIT) * 1e9,
           // CAP_SYS_ADMIN + /dev/fuse for JuiceFS FUSE mounts inside the container.
-          // This is the same privilege level the juicefs-mount compose service uses.
+          // SecurityOpt disables both the default seccomp profile and AppArmor
+          // confinement — both of which block the mount syscall even when
+          // CAP_SYS_ADMIN is granted.  On Ubuntu/Debian VPS hosts Docker's
+          // "docker-default" AppArmor profile denies mount; seccomp alone is
+          // not sufficient.  This matches the effective privileges of the
+          // juicefs-mount compose service (which uses `privileged: true`).
           CapAdd: ['SYS_ADMIN'],
+          SecurityOpt: ['seccomp=unconfined', 'apparmor=unconfined'],
           Devices: [{ PathOnHost: '/dev/fuse', PathInContainer: '/dev/fuse', CgroupPermissions: 'rwm' }],
           // Chromium (Playwright) uses /dev/shm heavily for rendering.
           // Docker defaults /dev/shm to 64MB which causes SIGBUS crashes on
