@@ -1,0 +1,5 @@
+# Copy this to terraform.tfvars and fill in your tokens
+# Get tokens from https://api.slack.com/apps -> Your App Configuration Tokens -> Generate Token
+
+slack_app_config_token = "xoxe.xoxp-..."
+slack_refresh_token    = "xoxe-..."
