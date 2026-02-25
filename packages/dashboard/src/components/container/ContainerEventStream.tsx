@@ -266,8 +266,8 @@ export function ContainerEventStream({ events, maxHeight = '400px' }: ContainerE
   }, {} as Record<string, number>);
   
   return (
-    <Card className="flex flex-col">
-      <CardHeader className="pb-3">
+    <Card className="flex flex-col h-full overflow-hidden">
+      <CardHeader className="flex-shrink-0 pb-3">
         <div className="flex items-center justify-between">
           <CardTitle className="text-sm">Container Events</CardTitle>
           <div className="flex items-center gap-2">
@@ -279,8 +279,8 @@ export function ContainerEventStream({ events, maxHeight = '400px' }: ContainerE
           </div>
         </div>
       </CardHeader>
-      <CardContent className="flex-1 min-h-0 p-0">
-        <ScrollArea style={{ height: maxHeight }}>
+      <CardContent className="flex-1 min-h-0 p-0 overflow-hidden">
+        <ScrollArea className="h-full">
           <div className="p-4">
             {displayEvents.length > 0 ? (
               displayEvents.map((event) => (

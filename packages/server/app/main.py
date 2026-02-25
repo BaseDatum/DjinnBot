@@ -745,11 +745,13 @@ async def status():
     # Check GitHub App status
     github_status = {"configured": False, "healthy": False}
     try:
+        from app.database import AsyncSessionLocal
         from app.routers.github import _validate_github_config
 
-        validation_result = await _validate_github_config()
-        github_status["configured"] = True
-        github_status["healthy"] = validation_result["healthy"]
+        async with AsyncSessionLocal() as session:
+            validation_result = await _validate_github_config(session)
+            github_status["configured"] = True
+            github_status["healthy"] = validation_result["healthy"]
     except Exception:
         pass
 

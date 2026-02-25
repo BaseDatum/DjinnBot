@@ -1466,7 +1466,6 @@ export interface PulseRoutine {
   name: string;
   description: string | null;
   instructions: string;
-  sourceFile: string | null;
   enabled: boolean;
   intervalMinutes: number;
   offsetMinutes: number;
@@ -1581,12 +1580,7 @@ export async function reorderPulseRoutines(agentId: string, routineIds: string[]
   return handleResponse(res, 'Failed to reorder pulse routines');
 }
 
-export async function seedPulseRoutines(agentId: string): Promise<{ seeded: boolean; routines: PulseRoutine[] }> {
-  const res = await authFetch(`${API_BASE}/agents/${agentId}/pulse-routines/seed`, {
-    method: 'POST',
-  });
-  return handleResponse(res, 'Failed to seed pulse routines');
-}
+
 
 // ── Project Agent Assignment ──────────────────────────────────────────────
 

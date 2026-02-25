@@ -194,6 +194,8 @@ function RunDetailPage() {
     fetchRunLogs(runId).then((logs) => {
       const historicalSegments: OutputSegment[] = [];
       const historicalSlackMessages: SlackMessage[] = [];
+      const historicalContainerEvents: ContainerEvent[] = [];
+      let lastContainerStatus: ContainerStatus | null = null;
       
       for (const event of logs) {
         switch (event.type) {
@@ -273,11 +275,58 @@ function RunDetailPage() {
             }
             break;
           }
+
+          // Container lifecycle events (published by engine via ContainerRunner)
+          case 'CONTAINER_CREATED':
+          case 'CONTAINER_STARTING':
+          case 'CONTAINER_READY':
+          case 'CONTAINER_STOPPING':
+          case 'CONTAINER_DESTROYED':
+            historicalContainerEvents.push(event as ContainerEvent);
+            if (event.type === 'CONTAINER_READY') lastContainerStatus = 'ready';
+            if (event.type === 'CONTAINER_DESTROYED') lastContainerStatus = null;
+            break;
+
+          // Container internal status events
+          case 'ready':
+          case 'busy':
+          case 'idle':
+          case 'error':
+          case 'exiting':
+            lastContainerStatus = event.type as ContainerStatus;
+            historicalContainerEvents.push(event as ContainerEvent);
+            break;
+
+          // Container step events
+          case 'stepStart':
+          case 'stepEnd':
+            historicalContainerEvents.push(event as ContainerEvent);
+            break;
+
+          // Container tool events
+          case 'toolStart':
+          case 'toolEnd':
+            historicalContainerEvents.push(event as ContainerEvent);
+            break;
+
+          // Container output events
+          case 'stdout':
+          case 'stderr':
+            historicalContainerEvents.push(event as ContainerEvent);
+            break;
+
+          // Container messaging events
+          case 'agentMessage':
+          case 'slackDm':
+            historicalContainerEvents.push(event as ContainerEvent);
+            break;
         }
       }
       
       setSegments(historicalSegments);
       setSlackMessages(historicalSlackMessages);
+      setContainerEvents(historicalContainerEvents);
+      setContainerStatus(lastContainerStatus);
       setHistoryLoaded(true);
     }).catch((err) => {
       console.warn('Failed to load historical logs:', err);

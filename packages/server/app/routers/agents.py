@@ -28,7 +28,7 @@ class FileUpdateRequest(BaseModel):
 
 AGENTS_DIR = os.getenv("AGENTS_DIR", "./agents")
 VAULTS_DIR = os.getenv("VAULTS_DIR", "/data/vaults")
-PERSONA_FILES = ["IDENTITY.md", "SOUL.md", "AGENTS.md", "DECISION.md", "PULSE.md"]
+PERSONA_FILES = ["IDENTITY.md", "SOUL.md", "AGENTS.md", "DECISION.md"]
 
 EXCLUDED_DIRS = {"templates", ".clawvault", ".git", "node_modules"}
 
@@ -678,7 +678,7 @@ async def update_agent_file(agent_id: str, filename: str, req: FileUpdateRequest
     """Update an agent persona file."""
     logger.debug(f"Updating file: {filename} for agent: {agent_id}")
     # Validate filename — only allow known persona files
-    ALLOWED_FILES = {"IDENTITY.md", "SOUL.md", "AGENTS.md", "DECISION.md", "PULSE.md"}
+    ALLOWED_FILES = {"IDENTITY.md", "SOUL.md", "AGENTS.md", "DECISION.md"}
     if filename not in ALLOWED_FILES:
         raise HTTPException(
             status_code=400,

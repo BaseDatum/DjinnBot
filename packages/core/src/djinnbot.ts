@@ -925,8 +925,7 @@ export class DjinnBot {
   }
 
   /** Run a pulse session - agent "wakes up" and reviews their workspace with tools.
-   *  When context.routineId is set, uses the routine's custom instructions
-   *  instead of the default PULSE.md file.
+   *  When context.routineId is set, uses the routine's custom instructions from the DB.
    */
   private async runPulseSession(
     agentId: string, 
@@ -958,7 +957,7 @@ export class DjinnBot {
         ? context.routinePulseColumns
         : await this.loadAgentPulseColumns(agentId);
 
-      // Load instructions: routine instructions > PULSE.md file
+      // Load instructions: routine instructions from DB > default prompt
       const [persona, pulseInstructions] = await Promise.all([
         this.personaLoader.loadPersonaForSession(agentId, {
           sessionType: 'pulse',
@@ -1043,55 +1042,15 @@ export class DjinnBot {
   /**
    * Load the pulse prompt for a session.
    * 
-   * Priority:
-   * 1. Routine instructions from DB (if context has routineInstructions and no sourceFile)
-   * 2. Routine sourceFile from disk (if sourceFile is set — means not yet edited in dashboard)
-   * 3. Agent's PULSE.md from disk (legacy)
-   * 4. Template PULSE.md
-   * 5. Hardcoded default
+   * Uses the routine's DB-stored instructions when available,
+   * otherwise falls back to a hardcoded default prompt.
    */
   private async loadPulsePrompt(
     agentId: string,
     context?: import('./runtime/agent-pulse.js').PulseContext,
   ): Promise<string> {
-    let template: string | undefined;
-
-    // Case 1: Routine with DB-stored instructions (sourceFile cleared by dashboard edit)
-    if (context?.routineId && context.routineInstructions && !context.routineSourceFile) {
-      template = context.routineInstructions;
-    }
-
-    // Case 2: Routine with sourceFile — read from disk so manual file edits are picked up
-    if (!template && context?.routineSourceFile) {
-      try {
-        const { readFile } = await import('node:fs/promises');
-        const filePath = join(this.config.agentsDir, agentId, context.routineSourceFile);
-        template = await readFile(filePath, 'utf-8');
-      } catch {
-        // File may have been removed — fall back to DB instructions
-        if (context.routineInstructions) {
-          template = context.routineInstructions;
-        }
-      }
-    }
-
-    // Case 3: No routine — legacy PULSE.md from disk
-    if (!template) {
-      const agentPulsePath = join(this.config.agentsDir, agentId, 'PULSE.md');
-      const templatePath = join(this.config.agentsDir, '_templates', 'PULSE.md');
-      
-      try {
-        const { readFile } = await import('node:fs/promises');
-        template = await readFile(agentPulsePath, 'utf-8');
-      } catch {
-        try {
-          const { readFile } = await import('node:fs/promises');
-          template = await readFile(templatePath, 'utf-8');
-        } catch {
-          template = this.getDefaultPulsePrompt();
-        }
-      }
-    }
+    // Use routine instructions from DB if available
+    let template = context?.routineInstructions || this.getDefaultPulsePrompt();
     
     // Replace placeholders
     const agent = this.agentRegistry.get(agentId);
@@ -1103,7 +1062,7 @@ export class DjinnBot {
 
   /**
    * Fetch pulse routines for an agent from the API server.
-   * Returns an empty array if the agent has no routines (triggers legacy fallback).
+   * Returns an empty array if the agent has no routines.
    */
   private async fetchAgentPulseRoutines(agentId: string): Promise<import('./runtime/pulse-types.js').PulseRoutine[]> {
     const apiUrl = process.env.DJINNBOT_API_URL || 'http://api:8000';
@@ -1118,7 +1077,6 @@ export class DjinnBot {
         name: r.name,
         description: r.description,
         instructions: r.instructions,
-        sourceFile: r.sourceFile,
         enabled: r.enabled,
         intervalMinutes: r.intervalMinutes,
         offsetMinutes: r.offsetMinutes,

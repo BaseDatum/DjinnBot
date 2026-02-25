@@ -47,13 +47,14 @@ export function DashboardQuickActionsDesktop({ agents }: DashboardQuickActionsPr
   };
 
   const loadRoutines = async (agentId: string) => {
-    if (routinesCache[agentId] || routinesLoading[agentId]) return;
+    if (routinesLoading[agentId]) return;
+    if (routinesCache[agentId] !== undefined) return;
     setRoutinesLoading((l) => ({ ...l, [agentId]: true }));
     try {
       const data = await fetchPulseRoutines(agentId);
-      setRoutinesCache((c) => ({ ...c, [agentId]: data.routines }));
+      const routines = Array.isArray(data) ? data : (data?.routines ?? []);
+      setRoutinesCache((c) => ({ ...c, [agentId]: routines }));
     } catch {
-      // Silently fail — show empty list
       setRoutinesCache((c) => ({ ...c, [agentId]: [] }));
     } finally {
       setRoutinesLoading((l) => ({ ...l, [agentId]: false }));
@@ -258,11 +259,13 @@ export function DashboardQuickActionsMobile({
   if (agents.length === 0) return null;
 
   const loadRoutines = async (agentId: string) => {
-    if (routinesCache[agentId] || routinesLoading[agentId]) return;
+    if (routinesLoading[agentId]) return;
+    if (routinesCache[agentId] !== undefined) return;
     setRoutinesLoading((l) => ({ ...l, [agentId]: true }));
     try {
       const data = await fetchPulseRoutines(agentId);
-      setRoutinesCache((c) => ({ ...c, [agentId]: data.routines }));
+      const routines = Array.isArray(data) ? data : (data?.routines ?? []);
+      setRoutinesCache((c) => ({ ...c, [agentId]: routines }));
     } catch {
       setRoutinesCache((c) => ({ ...c, [agentId]: [] }));
     } finally {

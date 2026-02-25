@@ -49,7 +49,7 @@ export interface PulseDependencies {
   /** 
    * Run a full agent session with tools for the pulse (agent wakes up).
    * When a routineId is provided, the session runner should use the routine's
-   * instructions instead of the default PULSE.md.
+   * instructions from the database.
    */
   runPulseSession?: (agentId: string, context: PulseContext) => Promise<PulseSessionResult>;
   /**
@@ -96,10 +96,8 @@ export interface PulseContext {
   routineId?: string;
   /** The routine name for logging/display */
   routineName?: string;
-  /** The routine's custom instructions (replaces PULSE.md) */
+  /** The routine's custom instructions from the database */
   routineInstructions?: string;
-  /** The routine's source file (if instructions should be read from disk) */
-  routineSourceFile?: string;
   /** Override pulse columns for this routine */
   routinePulseColumns?: string[];
   /** Override timeout for this routine */
@@ -716,7 +714,6 @@ export class AgentPulse {
             const routine = routines.find(r => r.id === routineId);
             if (routine) {
               context.routineInstructions = routine.instructions;
-              context.routineSourceFile = routine.sourceFile;
               context.routinePulseColumns = routine.pulseColumns;
               context.routineTimeoutMs = routine.timeoutMs;
               context.routinePlanningModel = routine.planningModel;

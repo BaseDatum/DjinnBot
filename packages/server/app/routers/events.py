@@ -80,14 +80,19 @@ async def stream_run_events(run_id: str):
 
 @router.get("/stream")
 async def stream_all_events():
-    """SSE endpoint — streams all pipeline events via the global events stream."""
+    """SSE endpoint — streams all pipeline events via the global events stream.
+
+    Starts from the latest position ('$') so only new events are delivered.
+    The dashboard fetches current state from /status on load; this stream
+    provides real-time updates going forward.
+    """
     if not dependencies.redis_client:
         raise HTTPException(status_code=503, detail="Redis not connected")
 
     stream_key = "djinnbot:events:global"
 
     async def event_generator():
-        last_id = "0"
+        last_id = "$"
 
         while True:
             try:

@@ -117,13 +117,6 @@ export interface PulseRoutine {
   /** The markdown prompt used as the pulse instructions for this routine */
   instructions: string;
 
-  /**
-   * If set, the runtime reads instructions from this file on disk instead of
-   * the `instructions` field — until the user edits instructions via the
-   * dashboard, at which point this is cleared.
-   */
-  sourceFile?: string;
-
   /** Schedule config */
   enabled: boolean;
   intervalMinutes: number;

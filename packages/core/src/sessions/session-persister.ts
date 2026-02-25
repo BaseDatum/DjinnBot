@@ -95,7 +95,6 @@ export class SessionPersister {
       // Publish to per-session channel for live streaming
       const channel = `djinnbot:sessions:${sessionId}`;
       const payload = JSON.stringify(event);
-      console.log(`[SessionPersister] Publishing to ${channel}: ${event.type}`);
       await this.redis.publish(channel, payload);
 
       // Publish to live channel for session list updates

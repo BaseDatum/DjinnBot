@@ -8,7 +8,6 @@ import { PulseRoutineCard } from '@/components/pulse/PulseRoutineCard';
 import { PulseRoutineEditor } from '@/components/pulse/PulseRoutineEditor';
 import {
   fetchPulseRoutines,
-  seedPulseRoutines,
   createPulseRoutine,
   togglePulseRoutine,
   triggerPulseRoutine,
@@ -54,13 +53,8 @@ export function AgentPulseTab({ agentId, config, onConfigChange }: AgentPulseTab
   const loadRoutines = useCallback(async () => {
     try {
       const data = await fetchPulseRoutines(agentId);
-      if (data.routines.length > 0) {
-        setRoutines(data.routines);
-      } else {
-        // No routines yet — seed from PULSE.md
-        const seeded = await seedPulseRoutines(agentId);
-        setRoutines(seeded.routines);
-      }
+      const routines = Array.isArray(data) ? data : (data?.routines ?? []);
+      setRoutines(routines);
     } catch (err) {
       console.error('Failed to load routines:', err);
       toast.error('Failed to load pulse routines');

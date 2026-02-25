@@ -64,8 +64,9 @@ function DashboardHome() {
     loadData();
   }, []);
 
-  // Debounce ref for SSE updates that need full refresh (recent runs, etc.)
+  // Debounce refs for SSE-triggered refreshes
   const refreshTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const refreshStatusTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const debouncedRefreshRuns = useCallback(() => {
     if (refreshTimeoutRef.current) {
@@ -82,25 +83,46 @@ function DashboardHome() {
     }, 300);
   }, []);
 
+  const debouncedRefreshStatus = useCallback(() => {
+    if (refreshStatusTimeoutRef.current) {
+      clearTimeout(refreshStatusTimeoutRef.current);
+    }
+    refreshStatusTimeoutRef.current = setTimeout(() => {
+      fetchStatus()
+        .then(status => {
+          setStatusData(prev => ({
+            ...prev,
+            active_runs: status.active_runs ?? 0,
+            completed_runs_last_hour: status.completed_runs_last_hour ?? prev.completed_runs_last_hour,
+          }));
+        })
+        .catch(() => {});
+      refreshStatusTimeoutRef.current = null;
+    }, 300);
+  }, []);
+
   // Cleanup
   useEffect(() => {
     return () => {
       if (refreshTimeoutRef.current) clearTimeout(refreshTimeoutRef.current);
+      if (refreshStatusTimeoutRef.current) clearTimeout(refreshStatusTimeoutRef.current);
     };
   }, []);
 
   // Connect to global SSE stream for real-time updates
-  // active_runs is updated directly from SSE event payloads (no polling)
+  // active_runs is refreshed from the /status endpoint on run lifecycle events
+  // (SSE event payloads carry stale counts from historical stream replay)
   useSSE<any>({
     url: `${API_BASE}/events/stream`,
     enabled: !loading,
     onMessage: (event) => {
-      // Update active_runs live from the event payload when available
-      if (event.activeRuns !== undefined) {
-        setStatusData(prev => ({ ...prev, active_runs: event.activeRuns }));
+      // Refresh active_runs from the authoritative /status endpoint on run lifecycle events
+      if (['RUN_CREATED', 'RUN_COMPLETE', 'RUN_FAILED', 'RUN_STATUS_CHANGED', 'RUN_UPDATED'].includes(event.type)) {
+        debouncedRefreshStatus();
+        debouncedRefreshRuns();
       }
-      // Refresh recent runs list on run lifecycle events
-      if (['RUN_CREATED', 'RUN_COMPLETE', 'RUN_FAILED', 'RUN_STATUS_CHANGED', 'STEP_STARTED', 'STEP_COMPLETE'].includes(event.type)) {
+      // Refresh recent runs list on step events too
+      if (['STEP_STARTED', 'STEP_COMPLETE'].includes(event.type)) {
         debouncedRefreshRuns();
       }
     },

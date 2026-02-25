@@ -307,7 +307,9 @@ export class ContainerRunner implements AgentRunner {
         this.eventReceiver.onEvent((evtRunId, msg) => {
           if (evtRunId !== runId) return;
           
-          console.log(`[ContainerRunner] Received event: ${msg.type} for run ${runId}`);
+          if (msg.type !== 'thinking') {
+            console.log(`[ContainerRunner] Received event: ${msg.type} for run ${runId}`);
+          }
 
           switch (msg.type) {
             case 'stepEnd':

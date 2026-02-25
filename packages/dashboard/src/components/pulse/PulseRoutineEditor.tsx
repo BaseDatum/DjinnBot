@@ -1,15 +1,12 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Badge } from '@/components/ui/badge';
 import { ProviderModelSelector } from '@/components/ui/ProviderModelSelector';
 import {
   Moon,
   Plus,
   Trash2,
-  Save,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { updatePulseRoutine } from '@/lib/api';
@@ -151,7 +148,7 @@ export function PulseRoutineEditor({ routine, agentId, onUpdated }: PulseRoutine
       <div>
         <Label className="text-sm">Instructions (Markdown)</Label>
         <p className="text-[10px] text-muted-foreground mb-1">
-          The prompt sent to the agent for this pulse routine. Replaces the default PULSE.md.
+          The prompt sent to the agent for this pulse routine.
         </p>
         <textarea
           value={instructions}
@@ -160,11 +157,6 @@ export function PulseRoutineEditor({ routine, agentId, onUpdated }: PulseRoutine
           spellCheck={false}
           placeholder="# Pulse Routine&#10;&#10;Write instructions for what this agent should do during this pulse..."
         />
-        {routine.sourceFile && instructions === routine.instructions && (
-          <p className="text-[10px] text-muted-foreground mt-1">
-            Linked to file: <code>{routine.sourceFile}</code> — editing here will unlink from the file.
-          </p>
-        )}
       </div>
 
       {/* Schedule */}

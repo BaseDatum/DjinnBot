@@ -1,7 +1,8 @@
 """Pulse routine CRUD API endpoints.
 
 Provides per-agent named pulse routines with independent instructions,
-schedules, and execution settings.
+schedules, and execution settings.  All routine data is stored in the
+database — there is no file-based fallback.
 
 Endpoints:
 - GET    /api/v1/agents/{agent_id}/pulse-routines          - List routines
@@ -13,7 +14,6 @@ Endpoints:
 - PATCH  /api/v1/agents/{agent_id}/pulse-routines/{id}/toggle    - Toggle enable
 - POST   /api/v1/agents/{agent_id}/pulse-routines/reorder        - Reorder
 - POST   /api/v1/agents/{agent_id}/pulse-routines/{id}/duplicate - Duplicate
-- POST   /api/v1/agents/{agent_id}/pulse-routines/seed           - Seed from PULSE.md
 """
 
 import json
@@ -113,7 +113,6 @@ class PulseRoutineResponse(BaseModel):
     name: str
     description: Optional[str]
     instructions: str
-    sourceFile: Optional[str]
     enabled: bool
     intervalMinutes: int
     offsetMinutes: int
@@ -146,7 +145,6 @@ def _model_to_response(r: PulseRoutine) -> dict:
         "name": r.name,
         "description": r.description,
         "instructions": r.instructions,
-        "sourceFile": r.source_file,
         "enabled": r.enabled,
         "intervalMinutes": r.interval_minutes,
         "offsetMinutes": r.offset_minutes,
@@ -347,8 +345,6 @@ async def update_pulse_routine(
         update_fields["description"] = req.description
     if req.instructions is not None:
         update_fields["instructions"] = req.instructions
-        # Clear source_file flag when instructions are edited via dashboard
-        update_fields["source_file"] = None
     if req.enabled is not None:
         update_fields["enabled"] = req.enabled
     if req.intervalMinutes is not None:
@@ -581,83 +577,6 @@ async def reorder_pulse_routines(
     await db.commit()
 
     return {"status": "reordered"}
-
-
-@router.post("/agents/{agent_id}/pulse-routines/seed")
-async def seed_from_pulse_file(
-    agent_id: str,
-    db: AsyncSession = Depends(get_async_session),
-):
-    """Seed a 'Default' routine from the agent's PULSE.md file (migration helper).
-
-    Only creates the routine if the agent has zero routines.  If the agent already
-    has routines, this is a no-op.  Returns the created or existing routines.
-    """
-    _validate_agent_exists(agent_id)
-
-    # Check if routines already exist
-    existing = await db.execute(
-        select(func.count())
-        .select_from(PulseRoutine)
-        .where(PulseRoutine.agent_id == agent_id)
-    )
-    count = existing.scalar() or 0
-    if count > 0:
-        result = await db.execute(
-            select(PulseRoutine)
-            .where(PulseRoutine.agent_id == agent_id)
-            .order_by(PulseRoutine.sort_order)
-        )
-        routines = result.scalars().all()
-        return {"seeded": False, "routines": [_model_to_response(r) for r in routines]}
-
-    # Load PULSE.md
-    pulse_path = os.path.join(AGENTS_DIR, agent_id, "PULSE.md")
-    template_path = os.path.join(AGENTS_DIR, "_templates", "PULSE.md")
-
-    instructions = ""
-    source_file = None
-    if os.path.isfile(pulse_path):
-        with open(pulse_path, "r") as f:
-            instructions = f.read()
-        source_file = "PULSE.md"
-    elif os.path.isfile(template_path):
-        with open(template_path, "r") as f:
-            instructions = f.read()
-        source_file = "_templates/PULSE.md"
-
-    # Load existing schedule from config.yml for defaults
-    from app.routers.pulses import _get_pulse_schedule
-
-    schedule = _get_pulse_schedule(agent_id)
-
-    ts = now_ms()
-    routine = PulseRoutine(
-        id=PulseRoutine.generate_id(),
-        agent_id=agent_id,
-        name="Default",
-        description="Standard pulse routine (migrated from PULSE.md)",
-        instructions=instructions,
-        source_file=source_file,
-        enabled=schedule.enabled,
-        interval_minutes=schedule.intervalMinutes,
-        offset_minutes=schedule.offsetMinutes,
-        blackouts=[b.model_dump(exclude_none=True) for b in schedule.blackouts],
-        one_offs=schedule.oneOffs,
-        timeout_ms=None,  # Inherit from agent config
-        max_concurrent=1,
-        pulse_columns=None,  # Inherit from agent config
-        sort_order=0,
-        color=ROUTINE_COLORS[0],
-        created_at=ts,
-        updated_at=ts,
-    )
-    db.add(routine)
-    await db.commit()
-    await db.refresh(routine)
-
-    await _notify_schedule_change(agent_id, routine.id)
-    return {"seeded": True, "routines": [_model_to_response(routine)]}
 
 
 @router.post("/pulse-routines/{routine_id}/record-run")

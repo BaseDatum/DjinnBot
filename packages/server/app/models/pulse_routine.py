@@ -32,11 +32,8 @@ class PulseRoutine(Base, PrefixedIdMixin, TimestampMixin):
     # --- prompt ---
     instructions: Mapped[str] = mapped_column(Text, nullable=False, default="")
 
-    # If this was auto-migrated from a PULSE.md file on disk, this field
-    # records the source filename.  While set AND instructions have not been
-    # edited via the dashboard, the runtime will prefer to read from the file
-    # (so manual edits to the file are picked up).  Cleared on first dashboard
-    # edit.
+    # Legacy field — no longer used. Kept for backward compatibility with
+    # existing rows; new routines always store instructions in the DB.
     source_file: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
 
     # --- schedule ---

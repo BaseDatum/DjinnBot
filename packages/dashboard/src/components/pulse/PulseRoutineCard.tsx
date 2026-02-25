@@ -1,4 +1,3 @@
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import {
@@ -85,11 +84,6 @@ export function PulseRoutineCard({
                 <span className="font-semibold text-sm group-hover:underline truncate">
                   {routine.name}
                 </span>
-                {routine.sourceFile && (
-                  <Badge variant="outline" className="text-[10px] shrink-0">
-                    from file
-                  </Badge>
-                )}
               </div>
               {preview && (
                 <p className="text-xs text-muted-foreground mt-0.5 line-clamp-1">
