@@ -359,10 +359,25 @@ export class AgentPulse {
             this.scheduleNextPulse();
           }
           return;
+        } else {
+          // No routines configured — disable legacy schedule so we don't
+          // spawn empty pulse sessions for agents with no routines.
+          this.scheduler.setAgentSchedule(agentId, {
+            ...DEFAULT_PULSE_SCHEDULE,
+            enabled: false,
+          });
+          console.log(`[AgentPulse] No routines for ${agentId}, pulse disabled`);
+          
+          if (this.running && this.nextPulseTimeout) {
+            clearTimeout(this.nextPulseTimeout);
+            this.scheduleNextPulse();
+          }
+          return;
         }
       }
 
       // Fallback: legacy agent-level schedule from config.yml
+      // (only reached when getAgentPulseRoutines dep is not provided)
       const scheduleConfig = this.deps.getAgentPulseSchedule 
         ? await this.deps.getAgentPulseSchedule(agentId)
         : {};
