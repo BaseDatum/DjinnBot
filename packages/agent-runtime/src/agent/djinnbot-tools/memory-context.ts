@@ -2,6 +2,7 @@ import { Type, type Static } from '@sinclair/typebox';
 import type { AgentTool, AgentToolResult, AgentToolUpdateCallback } from '@mariozechner/pi-agent-core';
 // @ts-ignore — clawvault is an ESM package declared in package.json; types resolve at build time
 import { buildContext, type ContextResult } from 'clawvault';
+import { SharedVaultClient } from './shared-vault-api.js';
 
 // ── Schemas ────────────────────────────────────────────────────────────────
 
@@ -54,13 +55,15 @@ interface VoidDetails {}
 export interface MemoryContextToolsConfig {
   agentId: string;
   vaultPath: string;
-  sharedPath: string;
+  /** DjinnBot API base URL for shared vault context operations. */
+  apiBaseUrl: string;
 }
 
 // ── Tool factory ───────────────────────────────────────────────────────────
 
 export function createMemoryContextTools(config: MemoryContextToolsConfig): AgentTool[] {
-  const { vaultPath, sharedPath } = config;
+  const { vaultPath, apiBaseUrl } = config;
+  const sharedVaultApi = new SharedVaultClient(apiBaseUrl);
 
   return [
     {
@@ -94,20 +97,13 @@ export function createMemoryContextTools(config: MemoryContextToolsConfig): Agen
         const maxHops = Math.max(1, Math.min(p.maxHops || 2, 3));
         const limit = 5;
 
-        const vaultPaths: { path: string; label: string }[] = [];
-        if (scope === 'personal' || scope === 'all') {
-          vaultPaths.push({ path: vaultPath, label: 'Personal' });
-        }
-        if (scope === 'shared' || scope === 'all') {
-          vaultPaths.push({ path: sharedPath, label: 'Shared' });
-        }
-
         const sections: string[] = [];
 
-        for (const v of vaultPaths) {
+        // ── Personal vault context (local ClawVault on JuiceFS mount) ──────
+        if (scope === 'personal' || scope === 'all') {
           try {
             const result: ContextResult = await buildContext(p.task, {
-              vaultPath: v.path,
+              vaultPath,
               limit,
               format: 'markdown',
               recent: true,
@@ -119,15 +115,39 @@ export function createMemoryContextTools(config: MemoryContextToolsConfig): Agen
 
             if (result.context.length > 0) {
               sections.push(
-                `## ${v.label} Context (profile: ${result.profile}, ${result.context.length} entries)\n\n` +
+                `## Personal Context (profile: ${result.profile}, ${result.context.length} entries)\n\n` +
                 result.markdown
               );
             } else {
-              sections.push(`## ${v.label} Context\nNo relevant context found for: ${p.task}`);
+              sections.push(`## Personal Context\nNo relevant context found for: ${p.task}`);
             }
           } catch (err) {
-            console.error(`[context_query] ${v.label} context build failed for ${v.path}:`, err);
-            sections.push(`## ${v.label} Context\nContext retrieval failed — vault may not be initialized yet.`);
+            console.error(`[context_query] Personal context build failed for ${vaultPath}:`, err);
+            sections.push(`## Personal Context\nContext retrieval failed — vault may not be initialized yet.`);
+          }
+        }
+
+        // ── Shared vault context (via API — engine maintains the index) ────
+        if (scope === 'shared' || scope === 'all') {
+          try {
+            const result = await sharedVaultApi.buildContext(p.task, {
+              limit,
+              budget,
+              profile,
+              maxHops,
+            });
+
+            if (result.entries > 0) {
+              sections.push(
+                `## Shared Context (profile: ${result.profile}, ${result.entries} entries)\n\n` +
+                result.context
+              );
+            } else {
+              sections.push(`## Shared Context\nNo relevant context found for: ${p.task}`);
+            }
+          } catch (err) {
+            console.error(`[context_query] Shared context API failed:`, err);
+            sections.push(`## Shared Context\nContext retrieval failed — API may be unavailable.`);
           }
         }
 

@@ -1,10 +1,14 @@
-"""Memory scoring endpoints — retrieval outcome tracking + adaptive scores.
+"""Memory scoring endpoints — agent-driven valuations + adaptive scores.
 
-The agent runtime posts retrieval batches after each step completes.
-The API upserts aggregated scores and serves them back at recall time.
+Scoring is driven entirely by agent valuations (rate_memories tool), NOT by
+step success/failure.  The agent runtime posts:
+  1. Retrieval batches (analytics + access counting) after each step.
+  2. Valuation batches (the PRIMARY scoring signal) when the agent calls
+     rate_memories.
+  3. Knowledge gap reports when the agent identifies missing knowledge.
 
 All tuning parameters are stored in global_settings and editable via the
-admin dashboard. The scoring engine reads them on every computation so
+admin dashboard.  The scoring engine reads them on every computation so
 changes take effect immediately.
 """
 
@@ -18,7 +22,12 @@ from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_async_session
-from app.models.memory_score import MemoryRetrievalLog, MemoryScore
+from app.models.memory_score import (
+    MemoryRetrievalLog,
+    MemoryValuation,
+    MemoryGap,
+    MemoryScore,
+)
 from app.models.settings import GlobalSetting
 from app.logging_config import get_logger
 from app.utils import gen_id, now_ms
@@ -30,12 +39,12 @@ router = APIRouter()
 # ── Default constants (overridden by global_settings) ────────────────────────
 
 DEFAULTS = {
-    "min_accesses_for_signal": 3,
+    "min_valuations_for_signal": 3,
     "recency_half_life_days": 30,
     "rehabilitation_half_life_days": 90,
     "adaptive_score_floor": 0.35,
     "frequency_log_cap": 50,
-    "blend_success_weight": 0.60,
+    "blend_usefulness_weight": 0.60,
     "blend_recency_weight": 0.25,
     "blend_frequency_weight": 0.15,
     "recency_floor": 0.30,
@@ -54,16 +63,15 @@ _config_cache: dict = dict(DEFAULTS)
 class MemoryScoringConfig(BaseModel):
     """All tunable parameters for the memory scoring system."""
 
-    min_accesses_for_signal: int = Field(
-        default=DEFAULTS["min_accesses_for_signal"],
+    min_valuations_for_signal: int = Field(
+        default=DEFAULTS["min_valuations_for_signal"],
         ge=1,
         le=50,
         description=(
-            "Minimum number of times a memory must be retrieved before its "
-            "success/failure ratio is trusted. Below this threshold, the memory "
-            "uses a neutral score of 0.5 (neither boosted nor penalized). "
-            "Higher values make the system more conservative — it needs more "
-            "evidence before adjusting a memory's ranking."
+            "Minimum number of agent valuations a memory must have before its "
+            "usefulness rate is trusted. Below this threshold, the memory uses "
+            "a neutral score of 0.5 (neither boosted nor penalized). Higher "
+            "values make the system more conservative."
         ),
     )
 
@@ -74,8 +82,7 @@ class MemoryScoringConfig(BaseModel):
         description=(
             "Controls how quickly the recency component of the score decays. "
             "After this many days without being retrieved, a memory's recency "
-            "signal drops to half its original value. Lower values cause stale "
-            "memories to lose ranking faster; higher values keep them relevant longer."
+            "signal drops to half its original value."
         ),
     )
 
@@ -84,11 +91,9 @@ class MemoryScoringConfig(BaseModel):
         ge=7,
         le=730,
         description=(
-            "Controls how fast old negative scores fade toward neutral (0.5). "
-            "This prevents 'permanent punishment' — a memory that was irrelevant "
-            "in the past shouldn't be penalized forever. After this many days of "
-            "not being retrieved, half the negative signal is erased. After 4x "
-            "this period, ~94% is erased."
+            "Controls how fast old negative usefulness scores fade toward "
+            "neutral (0.5). Prevents permanent punishment — a memory rated "
+            "not-useful in the past shouldn't be penalized forever."
         ),
     )
 
@@ -98,11 +103,8 @@ class MemoryScoringConfig(BaseModel):
         le=0.5,
         description=(
             "Hard minimum for any memory's adaptive score. Even the most "
-            "downvoted memory cannot score below this. Combined with the "
-            "blend formula, this caps the maximum penalty a memory can "
-            "receive. At 0.35 with default blend factors, the worst-case "
-            "penalty is ~19.5%%. Set to 0.5 to disable adaptive scoring "
-            "entirely (all memories treated equally)."
+            "downvoted memory cannot score below this. Set to 0.5 to "
+            "disable adaptive scoring entirely."
         ),
     )
 
@@ -113,20 +115,19 @@ class MemoryScoringConfig(BaseModel):
         description=(
             "Normalizes the frequency component. A memory retrieved this many "
             "times reaches the maximum frequency signal (1.0). The scale is "
-            "logarithmic, so the first few retrievals matter most. Lower values "
-            "mean the frequency signal saturates faster."
+            "logarithmic."
         ),
     )
 
-    blend_success_weight: float = Field(
-        default=DEFAULTS["blend_success_weight"],
+    blend_usefulness_weight: float = Field(
+        default=DEFAULTS["blend_usefulness_weight"],
         ge=0.0,
         le=1.0,
         description=(
-            "How much the success/failure ratio influences the adaptive score. "
-            "This is the dominant signal — memories that led to successful "
-            "outcomes rank higher. The three blend weights (success, recency, "
-            "frequency) should sum to 1.0."
+            "How much the agent's usefulness ratings influence the adaptive "
+            "score. This is the dominant signal — memories that agents rated "
+            "as useful rank higher. The three blend weights (usefulness, "
+            "recency, frequency) should sum to 1.0."
         ),
     )
 
@@ -136,8 +137,7 @@ class MemoryScoringConfig(BaseModel):
         le=1.0,
         description=(
             "How much recency (time since last retrieval) influences the "
-            "adaptive score. Higher values favor recently-accessed memories. "
-            "The three blend weights should sum to 1.0."
+            "adaptive score. The three blend weights should sum to 1.0."
         ),
     )
 
@@ -147,7 +147,6 @@ class MemoryScoringConfig(BaseModel):
         le=1.0,
         description=(
             "How much access frequency influences the adaptive score. "
-            "Higher values favor memories that are retrieved often. "
             "The three blend weights should sum to 1.0."
         ),
     )
@@ -159,8 +158,7 @@ class MemoryScoringConfig(BaseModel):
         description=(
             "Minimum value for the recency component. Even a memory that "
             "hasn't been accessed in years retains at least this much recency "
-            "signal. Prevents very old memories from being completely "
-            "deprioritized by the recency component alone."
+            "signal."
         ),
     )
 
@@ -172,9 +170,7 @@ class MemoryScoringConfig(BaseModel):
             "Controls how much adaptive scores can boost or penalize the raw "
             "search score. The final blended score is: "
             "rawScore x (base_factor + boost_factor x adaptiveScore). "
-            "At 0.30, a perfect adaptive score gives +30%% boost, "
-            "while the worst score gives -30%% penalty. Set to 0.0 to "
-            "disable score blending entirely."
+            "Set to 0.0 to disable score blending entirely."
         ),
     )
 
@@ -184,10 +180,8 @@ class MemoryScoringConfig(BaseModel):
         le=1.0,
         description=(
             "The baseline multiplier for raw search scores before adaptive "
-            "blending is applied. At 0.70, even a memory with the worst "
-            "adaptive score retains 70%% of its raw relevance score. "
-            "base_factor + boost_factor should equal ~1.0 so that a "
-            "neutral adaptive score (0.5) leaves raw scores unchanged."
+            "blending. base_factor + boost_factor should equal ~1.0 so that "
+            "a neutral adaptive score (0.5) leaves raw scores unchanged."
         ),
     )
 
@@ -212,16 +206,35 @@ class RecordRetrievalsRequest(BaseModel):
     session_id: Optional[str] = None
     run_id: Optional[str] = None
     request_id: Optional[str] = None
-    step_success: Optional[bool] = None
     retrievals: List[RetrievalEvent]
+
+
+class ValuationEvent(BaseModel):
+    """One agent-authored usefulness rating for a recalled memory."""
+
+    memory_id: str
+    memory_title: Optional[str] = None
+    useful: bool
+
+
+class RecordValuationsRequest(BaseModel):
+    """Batch of agent valuations posted by the rate_memories tool."""
+
+    agent_id: str
+    session_id: Optional[str] = None
+    run_id: Optional[str] = None
+    valuations: List[ValuationEvent]
+    gap: Optional[str] = None
+    gap_query: Optional[str] = None
 
 
 class MemoryScoreResponse(BaseModel):
     memory_id: str
     access_count: int
-    success_count: int
-    failure_count: int
-    success_rate: float
+    valuation_count: int
+    useful_count: int
+    not_useful_count: int
+    usefulness_rate: float
     adaptive_score: float
     last_accessed: int
 
@@ -232,6 +245,19 @@ class MemoryScoresListResponse(BaseModel):
     # Blend factors so the runtime can apply the correct formula
     blend_base_factor: float = DEFAULTS["blend_base_factor"]
     blend_boost_factor: float = DEFAULTS["blend_boost_factor"]
+
+
+class MemoryGapResponse(BaseModel):
+    id: str
+    agent_id: str
+    description: str
+    query_attempted: Optional[str]
+    created_at: int
+
+
+class MemoryGapsListResponse(BaseModel):
+    gaps: List[MemoryGapResponse]
+    total: int
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -248,53 +274,57 @@ def _days_to_ms(days) -> float:
 
 def compute_adaptive_score(
     access_count: int,
-    success_count: int,
-    failure_count: int,
+    valuation_count: int,
+    useful_count: int,
     last_accessed_ms: int,
     now: int,
 ) -> tuple[float, float]:
-    """Compute (success_rate, adaptive_score) from raw counters.
+    """Compute (usefulness_rate, adaptive_score) from counters.
 
-    All tuning parameters are read from the config cache (populated from
-    global_settings on startup and on every GET/PUT /config call).
+    The PRIMARY signal is the agent's own usefulness ratings — not step
+    success/failure.  Agents call rate_memories after consuming recalled
+    memories, providing direct ground-truth about whether each memory
+    helped with the current task.
 
-    Key design decisions to prevent "downvoted into oblivion":
+    Key design decisions:
 
-    1. **Rehabilitation**: success_rate drifts back toward 0.5 (neutral) based
-       on how long ago the memory was last accessed. Old failures shouldn't
-       penalize a memory forever — the context that caused them may no longer
-       be relevant.
+    1. **Agent-driven signal**: usefulness_rate comes from explicit agent
+       valuations (boolean useful/not-useful).  This replaces the old
+       step-success proxy which was noisy and meaningless in chat contexts.
 
-    2. **Hard floor**: adaptive_score is clamped to a configurable minimum.
-       Combined with the blend formula, this caps the maximum penalty any
-       memory can receive. A keyword-matched memory will always surface.
+    2. **Rehabilitation**: usefulness_rate drifts back toward 0.5 (neutral)
+       based on how long ago the memory was last accessed/valued.  Old
+       "not useful" ratings fade — context changes over time.
 
-    3. **Neutral prior**: Memories below min_accesses_for_signal start at 0.5
-       so a single failure doesn't tank the score.
+    3. **Hard floor**: adaptive_score is clamped to a configurable minimum.
+       A keyword-matched memory will always surface.
+
+    4. **Neutral prior**: Memories below min_valuations_for_signal start at
+       0.5 so a single "not useful" doesn't tank the score.
 
     Returns:
-        (success_rate, adaptive_score) both in [0, 1].
+        (usefulness_rate, adaptive_score) both in [0, 1].
     """
-    min_accesses = int(_cfg("min_accesses_for_signal"))
+    min_valuations = int(_cfg("min_valuations_for_signal"))
     rehab_hl_ms = _days_to_ms(_cfg("rehabilitation_half_life_days"))
     recency_hl_ms = _days_to_ms(_cfg("recency_half_life_days"))
     recency_floor = float(_cfg("recency_floor"))
     freq_cap = math.log(max(2, int(_cfg("frequency_log_cap"))))
     floor = float(_cfg("adaptive_score_floor"))
-    w_success = float(_cfg("blend_success_weight"))
+    w_usefulness = float(_cfg("blend_usefulness_weight"))
     w_recency = float(_cfg("blend_recency_weight"))
     w_freq = float(_cfg("blend_frequency_weight"))
 
-    # 1. Raw success rate (or neutral prior for low-data)
-    if access_count < min_accesses:
-        raw_success_rate = 0.5
+    # 1. Raw usefulness rate (or neutral prior for low-data)
+    if valuation_count < min_valuations:
+        raw_usefulness_rate = 0.5
     else:
-        raw_success_rate = success_count / access_count
+        raw_usefulness_rate = useful_count / valuation_count
 
-    # 2. Rehabilitation: blend success_rate toward 0.5 based on age
+    # 2. Rehabilitation: blend usefulness toward 0.5 based on age
     age_ms = max(0, now - last_accessed_ms)
     rehab_factor = 2 ** (-age_ms / rehab_hl_ms) if rehab_hl_ms > 0 else 1.0
-    success_rate = raw_success_rate * rehab_factor + 0.5 * (1.0 - rehab_factor)
+    usefulness_rate = raw_usefulness_rate * rehab_factor + 0.5 * (1.0 - rehab_factor)
 
     # 3. Recency weight — exponential decay, floored
     recency = (
@@ -307,12 +337,12 @@ def compute_adaptive_score(
     frequency = min(1.0, math.log(access_count + 1) / freq_cap)
 
     # 5. Blend components
-    adaptive = success_rate * w_success + recency * w_recency + frequency * w_freq
+    adaptive = usefulness_rate * w_usefulness + recency * w_recency + frequency * w_freq
 
     # 6. Hard floor — prevent total suppression
     adaptive = max(floor, adaptive)
 
-    return round(success_rate, 4), round(adaptive, 4)
+    return round(usefulness_rate, 4), round(adaptive, 4)
 
 
 # ── Internal endpoints (called by agent runtime) ────────────────────────────
@@ -326,7 +356,8 @@ async def record_retrievals(
     """Record a batch of memory retrievals from a completed step.
 
     Called fire-and-forget by the agent runtime after each step.
-    Inserts raw events and upserts aggregated scores atomically.
+    Inserts raw events and increments access_count on score rows.
+    No longer carries step_success — scoring is agent-driven.
     """
     if not body.retrievals:
         return {"ok": True, "logged": 0, "scores_updated": 0}
@@ -347,18 +378,16 @@ async def record_retrievals(
             query=event.query,
             retrieval_source=event.retrieval_source,
             raw_score=event.raw_score,
-            step_success=body.step_success,
             created_at=now,
         )
         db.add(log_entry)
         logged += 1
 
-    # 2. Upsert aggregated scores for each unique memory_id in the batch
+    # 2. Upsert access_count for each unique memory_id in the batch
     seen_memory_ids = {e.memory_id for e in body.retrievals}
     scores_updated = 0
 
     for memory_id in seen_memory_ids:
-        # Fetch existing score row (if any)
         result = await db.execute(
             select(MemoryScore).where(
                 and_(
@@ -370,41 +399,34 @@ async def record_retrievals(
         existing = result.scalar_one_or_none()
 
         if existing:
-            # Update counters
             existing.access_count += 1
-            if body.step_success is True:
-                existing.success_count += 1
-            elif body.step_success is False:
-                existing.failure_count += 1
             existing.last_accessed = now
             existing.updated_at = now
 
-            # Recompute derived scores
-            sr, adaptive = compute_adaptive_score(
+            # Recompute adaptive score with updated access count
+            ur, adaptive = compute_adaptive_score(
                 existing.access_count,
-                existing.success_count,
-                existing.failure_count,
+                existing.valuation_count,
+                existing.useful_count,
                 now,
                 now,
             )
-            existing.success_rate = sr
+            existing.usefulness_rate = ur
             existing.adaptive_score = adaptive
         else:
-            # Create new score entry
-            sc = 1 if body.step_success is True else 0
-            fc = 1 if body.step_success is False else 0
-            sr, adaptive = compute_adaptive_score(1, sc, fc, now, now)
-
+            ur, adaptive = compute_adaptive_score(1, 0, 0, now, now)
             new_score = MemoryScore(
                 id=gen_id("ms_"),
                 agent_id=body.agent_id,
                 memory_id=memory_id,
                 access_count=1,
-                success_count=sc,
-                failure_count=fc,
-                success_rate=sr,
+                valuation_count=0,
+                useful_count=0,
+                not_useful_count=0,
+                usefulness_rate=ur,
                 adaptive_score=adaptive,
                 last_accessed=now,
+                last_valued=None,
                 created_at=now,
                 updated_at=now,
             )
@@ -415,6 +437,115 @@ async def record_retrievals(
     await db.commit()
 
     return {"ok": True, "logged": logged, "scores_updated": scores_updated}
+
+
+@router.post("/internal/memory-valuations")
+async def record_valuations(
+    body: RecordValuationsRequest,
+    db: AsyncSession = Depends(get_async_session),
+):
+    """Record agent-authored memory valuations from the rate_memories tool.
+
+    This is the PRIMARY scoring signal.  Each valuation is an explicit
+    "useful" or "not useful" judgment from the agent about a specific memory.
+    """
+    now = now_ms()
+    valuations_logged = 0
+    scores_updated = 0
+
+    # 1. Insert individual valuation events
+    for v in body.valuations:
+        entry = MemoryValuation(
+            id=gen_id("mv_"),
+            agent_id=body.agent_id,
+            session_id=body.session_id,
+            run_id=body.run_id,
+            memory_id=v.memory_id,
+            memory_title=v.memory_title,
+            useful=v.useful,
+            created_at=now,
+        )
+        db.add(entry)
+        valuations_logged += 1
+
+    # 2. Upsert aggregated scores for each rated memory
+    for v in body.valuations:
+        result = await db.execute(
+            select(MemoryScore).where(
+                and_(
+                    MemoryScore.agent_id == body.agent_id,
+                    MemoryScore.memory_id == v.memory_id,
+                )
+            )
+        )
+        existing = result.scalar_one_or_none()
+
+        if existing:
+            existing.valuation_count += 1
+            if v.useful:
+                existing.useful_count += 1
+            else:
+                existing.not_useful_count += 1
+            existing.last_valued = now
+            existing.updated_at = now
+
+            ur, adaptive = compute_adaptive_score(
+                existing.access_count,
+                existing.valuation_count,
+                existing.useful_count,
+                existing.last_accessed,
+                now,
+            )
+            existing.usefulness_rate = ur
+            existing.adaptive_score = adaptive
+        else:
+            # Memory was rated but somehow has no retrieval record — create one
+            uc = 1 if v.useful else 0
+            nuc = 0 if v.useful else 1
+            ur, adaptive = compute_adaptive_score(1, 1, uc, now, now)
+            new_score = MemoryScore(
+                id=gen_id("ms_"),
+                agent_id=body.agent_id,
+                memory_id=v.memory_id,
+                access_count=1,
+                valuation_count=1,
+                useful_count=uc,
+                not_useful_count=nuc,
+                usefulness_rate=ur,
+                adaptive_score=adaptive,
+                last_accessed=now,
+                last_valued=now,
+                created_at=now,
+                updated_at=now,
+            )
+            db.add(new_score)
+
+        scores_updated += 1
+
+    # 3. Record knowledge gap if provided
+    gap_id = None
+    if body.gap and body.gap.strip():
+        gap_id = gen_id("mg_")
+        db.add(
+            MemoryGap(
+                id=gap_id,
+                agent_id=body.agent_id,
+                session_id=body.session_id,
+                run_id=body.run_id,
+                description=body.gap.strip(),
+                query_attempted=body.gap_query,
+                created_at=now,
+            )
+        )
+
+    await db.commit()
+
+    return {
+        "ok": True,
+        "valuations_logged": valuations_logged,
+        "scores_updated": scores_updated,
+        "gap_id": gap_id,
+    }
 
 
 @router.get("/internal/memory-scores/{agent_id}")
@@ -429,7 +560,6 @@ async def get_memory_scores(
     """Get adaptive scores for an agent's memories.
 
     Called by the agent runtime at recall time to blend with raw search scores.
-    Optionally filter to specific memory_ids (comma-separated).
     """
     query = select(MemoryScore).where(MemoryScore.agent_id == agent_id)
 
@@ -439,7 +569,6 @@ async def get_memory_scores(
             query = query.where(MemoryScore.memory_id.in_(ids))
 
     # Recompute adaptive scores on read to account for time decay
-    # (last_accessed ages since the score row was last written)
     now = now_ms()
 
     result = await db.execute(query.limit(limit))
@@ -450,8 +579,8 @@ async def get_memory_scores(
         # Recompute with current time for accurate recency decay
         _, live_adaptive = compute_adaptive_score(
             row.access_count,
-            row.success_count,
-            row.failure_count,
+            row.valuation_count,
+            row.useful_count,
             row.last_accessed,
             now,
         )
@@ -459,9 +588,10 @@ async def get_memory_scores(
             MemoryScoreResponse(
                 memory_id=row.memory_id,
                 access_count=row.access_count,
-                success_count=row.success_count,
-                failure_count=row.failure_count,
-                success_rate=row.success_rate,
+                valuation_count=row.valuation_count,
+                useful_count=row.useful_count,
+                not_useful_count=row.not_useful_count,
+                usefulness_rate=row.usefulness_rate,
                 adaptive_score=live_adaptive,
                 last_accessed=row.last_accessed,
             )
@@ -473,6 +603,35 @@ async def get_memory_scores(
         blend_base_factor=float(_cfg("blend_base_factor")),
         blend_boost_factor=float(_cfg("blend_boost_factor")),
     )
+
+
+@router.get("/internal/memory-gaps/{agent_id}")
+async def get_memory_gaps(
+    agent_id: str,
+    limit: int = Query(50, ge=1, le=500),
+    db: AsyncSession = Depends(get_async_session),
+) -> MemoryGapsListResponse:
+    """Get knowledge gaps reported by an agent."""
+    result = await db.execute(
+        select(MemoryGap)
+        .where(MemoryGap.agent_id == agent_id)
+        .order_by(MemoryGap.created_at.desc())
+        .limit(limit)
+    )
+    rows = result.scalars().all()
+
+    gaps = [
+        MemoryGapResponse(
+            id=row.id,
+            agent_id=row.agent_id,
+            description=row.description,
+            query_attempted=row.query_attempted,
+            created_at=row.created_at,
+        )
+        for row in rows
+    ]
+
+    return MemoryGapsListResponse(gaps=gaps, total=len(gaps))
 
 
 # ── Scoring configuration endpoints (admin dashboard) ───────────────────────

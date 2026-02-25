@@ -46,7 +46,7 @@ import { formatModelChip } from '@/lib/format';
 import { KeySourceBadge } from '@/components/ui/KeySourceBadge';
 import { SessionTokenStats } from '@/components/ui/SessionTokenStats';
 import { Link } from '@tanstack/react-router';
-import { loadLastModel, saveLastModel } from './ChatSidebarFlyout';
+
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -320,21 +320,16 @@ export function FloatingChatWidget() {
   // Show unread badge
   const activeCount = panes.length;
 
-  // Load sessions when agent is selected; prefer last-used model, then agent default
-  useEffect(() => {
+   // Load sessions when agent is selected; use agent's configured default model
+   useEffect(() => {
     if (!spawnAgentId) {
       setExistingSessions([]);
       setSpawnSessionId('__new__');
       return;
     }
-    const lastModel = loadLastModel(spawnAgentId);
-    if (lastModel) {
-      setSpawnModel(lastModel);
-    } else {
-      const agent = agents.find(a => a.id === spawnAgentId);
-      if (agent?.model) {
-        setSpawnModel(agent.model);
-      }
+    const agent = agents.find(a => a.id === spawnAgentId);
+    if (agent?.model) {
+      setSpawnModel(agent.model);
     }
     setLoadingSessions(true);
     listChatSessions(spawnAgentId, { limit: 10 })
@@ -363,8 +358,6 @@ export function FloatingChatWidget() {
         sessionId = session.id;
         model = session.model || spawnModel;
       }
-      // Persist the model the user chose so it's the default next time
-      saveLastModel(spawnAgentId, model);
       openChat(spawnAgentId, model, sessionId);
       setSpawnAgentId('');
       setSpawnSessionId('__new__');
@@ -725,7 +718,7 @@ export function FloatingChatWidget() {
           )}
 
           {/* Chat pane body */}
-          <div className="flex-1 min-h-0 overflow-hidden">
+          <div className="flex-1 min-h-0 min-w-0 overflow-hidden">
             {panes.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-full gap-3 text-muted-foreground">
                 <MessageSquare className="h-10 w-10 opacity-20" />

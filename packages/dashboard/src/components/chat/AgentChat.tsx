@@ -439,7 +439,7 @@ export function AgentChat({
   );
 
   return (
-    <div className="flex flex-col h-full min-h-0 overflow-hidden">
+    <div className="flex flex-col h-full min-h-0 min-w-0 overflow-hidden">
       {/* Connection status strip */}
       <div className="flex items-center gap-2 px-3 py-1.5 border-b bg-muted/10 shrink-0">
         <ConnectionBadge />
@@ -476,8 +476,8 @@ export function AgentChat({
       </div>
 
       {/* Messages */}
-      <ScrollArea className="flex-1 px-4 py-3" ref={scrollAreaRef}>
-        <div className="space-y-4">
+      <ScrollArea className="flex-1 min-w-0 min-h-0 px-4 py-3" ref={scrollAreaRef}>
+        <div className="space-y-4 min-w-0 overflow-hidden">
           {messages.length === 0 && sessionStatus === 'starting' && (
             <div className="flex flex-col items-center justify-center h-40 text-muted-foreground gap-3">
               <span className="text-3xl">{agentEmoji || '\uD83E\uDD16'}</span>

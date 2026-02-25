@@ -286,7 +286,8 @@ export class PersonaLoader {
     lines.push('1. Pipeline task work goes in `/home/agent/run-workspace/`');
     lines.push('2. Pulse task work goes in `/home/agent/task-workspaces/{taskId}/` (provisioned by claim_task)');
     lines.push('2. Use `recall` and `remember` tools for memory, not direct file access to clawvault');
-    lines.push('3. Your home directory persists across sessions');
+    lines.push('3. After using recalled memories, call `rate_memories` to mark which were useful — this improves future retrieval');
+    lines.push('4. Your home directory persists across sessions');
 
     if (sessionContext) {
       lines.push('');

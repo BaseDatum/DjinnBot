@@ -9,7 +9,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import { UserPlus, X, Bot, Zap, ChevronDown, ChevronUp } from 'lucide-react';
+import { UserPlus, X, Bot, Zap, ChevronDown, ChevronUp, Settings2 } from 'lucide-react';
 import {
   fetchProjectAgents,
   assignAgentToProject,
@@ -19,13 +19,10 @@ import {
   fetchAgentLifecycle,
   type ProjectAgent,
 } from '@/lib/api';
+import { RoutineMappingPanel } from '@/components/pulse/RoutineMappingPanel';
 import styles from './TeamPanel.module.css';
 
-const COLUMN_MAP: Record<string, string> = {
-  lead: 'Ready, Review',
-  member: 'Ready, In Progress',
-  reviewer: 'Review',
-};
+
 
 interface TeamPanelProps {
   projectId: string;
@@ -66,6 +63,7 @@ export function TeamPanel({ projectId }: TeamPanelProps) {
   const [showAdd, setShowAdd] = useState(false);
   const [addAgentId, setAddAgentId] = useState('');
   const [addRole, setAddRole] = useState<ProjectAgent['role']>('member');
+  const [expandedAgentId, setExpandedAgentId] = useState<string | null>(null);
 
   const { data: projectAgents = [], isLoading } = useQuery({
     queryKey: ['projectAgents', projectId],
@@ -242,68 +240,79 @@ export function TeamPanel({ projectId }: TeamPanelProps) {
         <div className={styles.teamList}>
           {projectAgents.map((pa) => {
             const agent = agentMap.get(pa.agent_id);
-            const defaultCols = COLUMN_MAP[pa.role] || '';
             const isRemoving = removeMutation.isPending && removeMutation.variables === pa.agent_id;
+            const isExpanded = expandedAgentId === pa.agent_id;
 
             return (
-              <div
-                key={pa.agent_id}
-                className={`${styles.agentRow} ${isRemoving ? 'opacity-50 pointer-events-none' : ''}`}
-              >
-                {/* Avatar */}
-                <div className={styles.avatar}>{agent?.emoji || '🤖'}</div>
+              <div key={pa.agent_id} className={isRemoving ? 'opacity-50 pointer-events-none' : ''}>
+                <div
+                  className={styles.agentRow}
+                >
+                  {/* Avatar */}
+                  <div className={styles.avatar}>{agent?.emoji || '🤖'}</div>
 
-                {/* Name + column chips */}
-                <div className={styles.agentInfo}>
-                  <div className={styles.agentName}>{agent?.name || pa.agent_id}</div>
-                  {defaultCols && (
-                    <div className={styles.columns}>
-                      {defaultCols.split(', ').map((col) => (
-                        <span key={col} className={styles.columnChip}>
-                          {col}
-                        </span>
-                      ))}
-                    </div>
-                  )}
+                  {/* Name + routine mappings toggle */}
+                  <div className={styles.agentInfo}>
+                    <div className={styles.agentName}>{agent?.name || pa.agent_id}</div>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-5 px-1 text-[10px] gap-0.5 text-muted-foreground mt-0.5"
+                      onClick={() => setExpandedAgentId(isExpanded ? null : pa.agent_id)}
+                    >
+                      <Settings2 className="h-2.5 w-2.5" />
+                      Routine Mappings
+                      {isExpanded ? <ChevronUp className="h-2.5 w-2.5" /> : <ChevronDown className="h-2.5 w-2.5" />}
+                    </Button>
+                  </div>
+
+                  {/* Pulse indicator */}
+                  <AgentPulseStatus agentId={pa.agent_id} />
+
+                  {/* Role selector */}
+                  <Select
+                    value={pa.role}
+                    onValueChange={(v) =>
+                      roleMutation.mutate({ agentId: pa.agent_id, role: v as ProjectAgent['role'] })
+                    }
+                  >
+                    <SelectTrigger className={`${styles.roleSelect} h-7 text-xs`}>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="lead">Lead</SelectItem>
+                      <SelectItem value="member">Member</SelectItem>
+                      <SelectItem value="reviewer">Reviewer</SelectItem>
+                    </SelectContent>
+                  </Select>
+
+                  {/* Remove button — always visible on touch, hover-only on mouse */}
+                  <TooltipProvider>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className={`${styles.removeBtn} h-7 w-7 text-muted-foreground hover:text-destructive hover:bg-destructive/10`}
+                          onClick={() => removeMutation.mutate(pa.agent_id)}
+                          aria-label={`Remove ${agent?.name || pa.agent_id}`}
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>Remove from project</TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
                 </div>
 
-                {/* Pulse indicator */}
-                <AgentPulseStatus agentId={pa.agent_id} />
-
-                {/* Role selector */}
-                <Select
-                  value={pa.role}
-                  onValueChange={(v) =>
-                    roleMutation.mutate({ agentId: pa.agent_id, role: v as ProjectAgent['role'] })
-                  }
-                >
-                  <SelectTrigger className={`${styles.roleSelect} h-7 text-xs`}>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="lead">Lead</SelectItem>
-                    <SelectItem value="member">Member</SelectItem>
-                    <SelectItem value="reviewer">Reviewer</SelectItem>
-                  </SelectContent>
-                </Select>
-
-                {/* Remove button — always visible on touch, hover-only on mouse */}
-                <TooltipProvider>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className={`${styles.removeBtn} h-7 w-7 text-muted-foreground hover:text-destructive hover:bg-destructive/10`}
-                        onClick={() => removeMutation.mutate(pa.agent_id)}
-                        aria-label={`Remove ${agent?.name || pa.agent_id}`}
-                      >
-                        <X className="h-3.5 w-3.5" />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>Remove from project</TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
+                {/* Expandable routine mapping panel */}
+                {isExpanded && (
+                  <RoutineMappingPanel
+                    projectId={projectId}
+                    agentId={pa.agent_id}
+                    className="px-3 pb-3 pt-2 space-y-3 border border-t-0 rounded-b-lg -mt-px bg-muted/10"
+                  />
+                )}
               </div>
             );
           })}

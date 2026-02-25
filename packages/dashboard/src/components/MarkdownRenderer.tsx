@@ -27,7 +27,7 @@ function extractText(node: React.ReactNode): string {
 
 export const MarkdownRenderer = memo(function MarkdownRenderer({ content, className }: MarkdownRendererProps) {
   return (
-    <div className={`prose prose-invert prose-sm max-w-none ${className ?? ''}`}>
+    <div className={`prose prose-invert prose-sm max-w-none overflow-hidden ${className ?? ''}`}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         rehypePlugins={[rehypeHighlight]}

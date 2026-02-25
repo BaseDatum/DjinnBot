@@ -22,19 +22,16 @@ async function main(): Promise<void> {
   await broadcastSubscriber.connect();
 
   // Create agent runner with mounted paths.
-  // IMPORTANT: Use config.personalVaultPath / config.sharedVaultPath — these
-  // have symlinks resolved via realpathSync.  Raw env vars like
-  // CLAWVAULT_PERSONAL point to symlinks (e.g. /home/agent/clawvault/shared →
-  // /djinnbot-data/vaults/shared) and glob v10 cannot expand '**' through
-  // symlinks, which causes the graph builder to find zero files.
-  console.log(`[AgentRuntime] Vault paths: personal=${config.personalVaultPath}, shared=${config.sharedVaultPath}`);
+  // The personal vault is a real JuiceFS FUSE mount point — no symlinks.
+  // The shared vault is accessed via the DjinnBot API (not mounted locally).
+  console.log(`[AgentRuntime] Vault path: ${config.clawvaultPath}, API: ${config.apiBaseUrl}`);
   const runner = new ContainerAgentRunner({
     publisher,
     redis,
     agentId: process.env.AGENT_ID || 'unknown',
     workspacePath: config.workspacePath,
-    vaultPath: config.personalVaultPath,
-    sharedPath: config.sharedVaultPath,
+    vaultPath: config.clawvaultPath,
+    apiBaseUrl: config.apiBaseUrl,
     model: process.env.AGENT_MODEL,
     agentsDir: process.env.AGENTS_DIR,
     thinkingLevel: process.env.AGENT_THINKING_LEVEL,

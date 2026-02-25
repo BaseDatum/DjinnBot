@@ -290,9 +290,11 @@ async def update_routine_mapping(
                     status_code=400,
                     detail=f"Invalid column IDs: {sorted(invalid)}",
                 )
-        update_fields["column_ids"] = req.columnIds or None
+        update_fields["column_ids"] = req.columnIds if req.columnIds else None
     if req.toolOverrides is not None:
-        update_fields["tool_overrides"] = req.toolOverrides or None
+        update_fields["tool_overrides"] = (
+            req.toolOverrides if req.toolOverrides else None
+        )
     if req.enabled is not None:
         update_fields["enabled"] = req.enabled
 

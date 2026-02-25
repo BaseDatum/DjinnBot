@@ -1,3 +1,4 @@
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import {
@@ -7,12 +8,14 @@ import {
   ChevronRight,
   Clock,
   Zap,
+  FolderKanban,
 } from 'lucide-react';
 import type { PulseRoutine } from '@/lib/api';
 
 interface PulseRoutineCardProps {
   routine: PulseRoutine;
   isExpanded: boolean;
+  mappedProjects?: Array<{ projectId: string; projectName: string }>;
   onToggle: () => void;
   onExpand: () => void;
   onTrigger: () => void;
@@ -41,6 +44,7 @@ function formatRelativeTime(timestamp: number | null): string {
 export function PulseRoutineCard({
   routine,
   isExpanded,
+  mappedProjects,
   onToggle,
   onExpand,
   onTrigger,
@@ -116,6 +120,28 @@ export function PulseRoutineCard({
             <span>Last: {formatRelativeTime(routine.lastRunAt)}</span>
           )}
         </div>
+
+        {/* Mapped projects */}
+        {mappedProjects && mappedProjects.length > 0 && (
+          <div className="flex items-center gap-1.5 mt-2 flex-wrap">
+            <FolderKanban className="h-3 w-3 text-muted-foreground shrink-0" />
+            {mappedProjects.map((p) => (
+              <Badge
+                key={p.projectId}
+                variant="outline"
+                className="text-[10px] font-normal"
+              >
+                {p.projectName}
+              </Badge>
+            ))}
+          </div>
+        )}
+        {mappedProjects && mappedProjects.length === 0 && (
+          <div className="flex items-center gap-1 mt-2 text-[10px] text-muted-foreground">
+            <FolderKanban className="h-3 w-3 shrink-0" />
+            <span>Not mapped to any projects</span>
+          </div>
+        )}
 
         {/* Action buttons (always visible) */}
         <div className="flex items-center gap-1 mt-2">

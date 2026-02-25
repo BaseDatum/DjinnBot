@@ -27,7 +27,7 @@ import { fetchAgent, fetchAgentMemory, fetchAgentConfig, updateAgentConfig, upda
 import { useAutoSave } from '@/hooks/useAutoSave';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useChatSessions } from '@/components/chat/ChatSessionContext';
-import { loadLastModel } from '@/components/chat/ChatSidebarFlyout';
+
 import { MemoryGraphContainer } from '@/components/MemoryGraphContainer';
 import { MemoryExplorer } from '@/components/memory/MemoryExplorer';
 import { AgentInbox } from '@/components/inbox/AgentInbox';
@@ -136,8 +136,8 @@ function AgentDetailPage() {
   };
 
   const handleChat = useCallback(async () => {
-    // Prefer last-used model override, then agent's configured model
-    const chatModel = loadLastModel(agentId) || config.model || '';
+    // Always use the agent's configured model
+    const chatModel = config.model || '';
     openChat(agentId, chatModel);
     setWidgetOpen(true);
   }, [agentId, config.model, openChat, setWidgetOpen]);

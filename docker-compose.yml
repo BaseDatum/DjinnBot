@@ -25,7 +25,8 @@ services:
       - "${BIND_HOST:-0.0.0.0}:${REDIS_PORT:-6379}:6379"
     volumes:
       - redis-data:/data
-    command: redis-server --appendonly yes
+    # --databases 16 ensures DB 2 is available for JuiceFS metadata
+    command: redis-server --appendonly yes --databases 16
     networks:
       - djinnbot_default
     healthcheck:
@@ -33,6 +34,102 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+
+  # ── RustFS: S3-compatible object storage backend for JuiceFS ──
+  # Internal only — no ports exposed to the host by default.
+  rustfs:
+    image: rustfs/rustfs:latest
+    container_name: djinnbot-rustfs
+    environment:
+      - RUSTFS_VOLUMES=/data
+      - RUSTFS_ADDRESS=0.0.0.0:9000
+      - RUSTFS_CONSOLE_ADDRESS=0.0.0.0:9001
+      - RUSTFS_CONSOLE_ENABLE=true
+      - RUSTFS_ACCESS_KEY=${RUSTFS_ACCESS_KEY:-djinnbot-rustfs-admin}
+      - RUSTFS_SECRET_KEY=${RUSTFS_SECRET_KEY:-djinnbot-rustfs-secret}
+    volumes:
+      - rustfs-data:/data
+    ports:
+      - "${BIND_HOST:-0.0.0.0}:${RUSTFS_CONSOLE_PORT:-9001}:9001"
+    networks:
+      - djinnbot_default
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "sh",
+          "-c",
+          "curl -sf http://localhost:9000/health || exit 1",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ── JuiceFS FUSE mount: exposes RustFS S3 data as a POSIX filesystem ──
+  # Runs `juicefs format` (idempotent) then `juicefs mount`.
+  # The FUSE mount is bind-propagated to the Docker host via :rshared,
+  # making it available to all containers (including dynamically spawned agents)
+  # as a regular host directory.
+  juicefs-mount:
+    image: juicedata/mount:ce-v1.3.1
+    container_name: djinnbot-juicefs
+    privileged: true
+    environment:
+      - REDIS_URL=redis://redis:6379/2
+      - RUSTFS_ACCESS_KEY=${RUSTFS_ACCESS_KEY:-djinnbot-rustfs-admin}
+      - RUSTFS_SECRET_KEY=${RUSTFS_SECRET_KEY:-djinnbot-rustfs-secret}
+      - JUICEFS_VOLUME_NAME=${JUICEFS_VOLUME_NAME:-djinnbot}
+      - JUICEFS_CACHE_SIZE=${JUICEFS_CACHE_SIZE:-20480}
+    volumes:
+      # The FUSE mount point — :rshared propagates within the Docker VM.
+      # /jfs lives inside the Docker Desktop VM (not on the macOS host via virtiofs),
+      # so shared mount propagation works correctly.
+      - juicefs-data:/jfs
+      # Local cache for read performance
+      - juicefs-cache:/var/jfsCache
+    command:
+      - sh
+      - -c
+      - |
+        # Format the volume (idempotent — no-op if already formatted)
+        juicefs format \
+          --storage s3 \
+          --bucket http://rustfs:9000/djinnbot \
+          --access-key "$$RUSTFS_ACCESS_KEY" \
+          --secret-key "$$RUSTFS_SECRET_KEY" \
+          --trash-days 7 \
+          "$$REDIS_URL" \
+          "$$JUICEFS_VOLUME_NAME" 2>/dev/null || true
+
+        # Mount with production-tuned options
+        exec juicefs mount \
+          --cache-dir /var/jfsCache \
+          --cache-size "$$JUICEFS_CACHE_SIZE" \
+          --backup-meta 3600 \
+          --no-usage-report \
+          --buffer-size 300 \
+          --prefetch 1 \
+          --max-uploads 20 \
+          --attr-cache 1 \
+          --entry-cache 1 \
+          --dir-entry-cache 1 \
+          "$$REDIS_URL" \
+          /jfs
+    networks:
+      - djinnbot_default
+    depends_on:
+      redis:
+        condition: service_healthy
+      rustfs:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "sh", "-c", "mountpoint -q /jfs"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
 
   api:
     build:
@@ -62,8 +159,7 @@ services:
       - GITHUB_APP_NAME=${GITHUB_APP_NAME:-djinnbot}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - MCPO_BASE_URL=http://djinnbot-mcpo:8000
-      # Internal service-to-service auth token — protects the plaintext secrets /env endpoint
-      # and acts as a first-class API key for engine/agent-runtime when auth is enabled.
+      # Internal service-to-service auth token
       - ENGINE_INTERNAL_TOKEN=${ENGINE_INTERNAL_TOKEN:-}
       # Authentication
       - AUTH_ENABLED=${AUTH_ENABLED:-false}
@@ -72,11 +168,8 @@ services:
       - SECRET_ENCRYPTION_KEY=${SECRET_ENCRYPTION_KEY:-}
       - CORS_ORIGINS=${CORS_ORIGINS:-*}
     volumes:
-      # NOTE: We mount only djinnbot-data to /data. The sandboxes, workspaces, and runs
-      # directories are subdirectories within djinnbot-data (/data/sandboxes, etc).
-      # This avoids mount shadowing issues where separate volumes would override
-      # subdirectories and cause data to appear in different locations.
-      - djinnbot-data:/data
+      # JuiceFS-backed data directory (host bind mount from FUSE)
+      - juicefs-data:/data
       - ./pipelines:/pipelines
       - ./agents:/agents
       - ./skills:/skills:ro
@@ -87,6 +180,8 @@ services:
       postgres:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      juicefs-mount:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/v1/status"]
@@ -129,8 +224,6 @@ services:
       - QMD_QUERY_EXPANSION_PROVIDER=openai
       - QMD_ALLOW_SQLITE_EXTENSIONS=1
       # HOME=/data puts the qmd index at /data/.cache/qmd/index.sqlite (on the shared volume).
-      # Agent containers symlink /home/agent/.cache/qmd → /djinnbot-data/.cache/qmd so they
-      # all share the same index without needing HOME overridden at the agent level.
       - HOME=/data
       - SLACK_CHANNEL_ID=${SLACK_CHANNEL_ID:-}
       - SLACK_CHIEKO_BOT_TOKEN=${SLACK_CHIEKO_BOT_TOKEN:-}
@@ -166,18 +259,19 @@ services:
       - MCPO_API_KEY=${MCPO_API_KEY:-changeme}
       - MCPO_BASE_URL=http://djinnbot-mcpo:8000
       - MCPO_CONFIG_PATH=/data/mcp/config.json
-      - DJINNBOT_API_URL=http://api:8000
-      # Internal service-to-service auth token — protects the plaintext secrets /env endpoint.
-      # The engine sends this token when fetching secrets and injects it into agent containers.
+      # Internal service-to-service auth token
       - ENGINE_INTERNAL_TOKEN=${ENGINE_INTERNAL_TOKEN:-}
       # Docker image for agent runtime containers (overridable via dashboard or env)
       - AGENT_RUNTIME_IMAGE=${AGENT_RUNTIME_IMAGE:-ghcr.io/basedatum/djinnbot/agent-runtime:latest}
+      # ── JuiceFS direct-mount for agent containers ──
+      # Agent containers mount JuiceFS subdirectories directly over the network
+      # (no Docker volume indirection). The engine passes these credentials when
+      # spawning containers via ContainerManager.
+      - JFS_META_URL=redis://redis:6379/2
+      - JFS_AGENT_CACHE_SIZE=${JFS_AGENT_CACHE_SIZE:-2048}
     volumes:
-      # NOTE: We mount only djinnbot-data to /data. The sandboxes, workspaces, and runs
-      # directories are subdirectories within djinnbot-data (/data/sandboxes, etc).
-      # This avoids mount shadowing issues where separate volumes would override
-      # subdirectories and cause data to appear in different locations.
-      - djinnbot-data:/data
+      # JuiceFS-backed data directory (host bind mount from FUSE)
+      - juicefs-data:/data
       - ./pipelines:/pipelines:ro
       - ./agents:/agents:ro
       - ./skills:/skills:ro
@@ -192,6 +286,8 @@ services:
       api:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      juicefs-mount:
         condition: service_healthy
     restart: unless-stopped
 
@@ -214,7 +310,7 @@ services:
     ports:
       - "${BIND_HOST:-0.0.0.0}:${MCPO_PORT:-8001}:8000"
     volumes:
-      - djinnbot-data:/data
+      - juicefs-data:/data
       # Bind-mount the project-root ./mcp/ directory so config.json is always
       # readable at /data/mcp/config.json without needing it in the Docker volume.
       # The engine also writes to this path when servers are added via the UI.
@@ -249,19 +345,6 @@ services:
       api:
         condition: service_healthy
 
-  # Agent runtime template - dynamically created per run
-  # agent-runtime:
-  #   build:
-  #     context: .
-  #     dockerfile: Dockerfile.agent-runtime
-  #   environment:
-  #     - RUN_ID=${RUN_ID}
-  #     - REDIS_URL=redis://redis:6379
-  #   volumes:
-  #     - ./data/runs/${RUN_ID}:/workspace
-  #   networks:
-  #     - djinnbot
-
   # Pull-only service — ensures the agent-runtime image is available locally.
   # The engine spawns agent containers dynamically via Docker API, so this
   # image is never started by Compose, but must be pre-pulled.
@@ -278,16 +361,6 @@ networks:
 volumes:
   postgres-data:
   redis-data:
-  # UNIFIED DATA VOLUME - contains all agent data as subdirectories:
-  #
-  # /data/                              <- djinnbot-data volume root
-  # ├── sandboxes/{agentId}/           <- Agent home directories (.local/, configs)
-  # ├── vaults/{agentId}/              <- ClawVault personal memories
-  # ├── vaults/shared/                 <- Shared team memories  
-  # ├── workspaces/{projectId}/        <- Project git repos (main branches)
-  # └── runs/{runId}/                  <- Run git worktrees (run branches)
-  #
-  # WHY UNIFIED: Using separate volumes for subdirectories causes "mount shadowing"
-  # where the child volume overrides the parent, making data appear in different
-  # locations for different services. A single volume avoids this entirely.
-  djinnbot-data:
+  rustfs-data:
+  juicefs-cache:
+  juicefs-data:

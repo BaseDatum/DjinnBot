@@ -1,80 +1,85 @@
+import AVFoundation
 import Foundation
 import FluidAudio
 
 // MARK: - StreamingTranscriptionService
 
-/// Wraps FluidAudio's AsrManager for real-time streaming speech-to-text.
-/// Accumulates audio in a sliding buffer, runs chunked transcription
-/// via Parakeet TDT v3, and emits partial + final transcript segments.
+/// Wraps two FluidAudio StreamingAsrManagers (Parakeet TDT v3, 600M params)
+/// for real-time speech-to-text: one for microphone audio and one for system
+/// audio. Each receives a coherent, single-source audio stream.
 ///
-/// Uses FluidAudio's built-in VAD to feed only speech chunks, lowering
-/// latency and compute overhead compared to fixed-interval transcription.
+/// Uses the `.streaming` config preset (11s chunks, 2s left/right context)
+/// which gives ~13s latency to first result but high accuracy (~2.5% WER).
+///
+/// StreamingAsrManager semantics:
+/// - `isConfirmed == true`: The PREVIOUS volatile text was promoted to
+///   confirmed. `update.text` is the deduplicated tail (new volatile).
+/// - `isConfirmed == false`: `update.text` is the current volatile/partial.
 @MainActor
 final class StreamingTranscriptionService: ObservableObject {
     
+    // MARK: - Audio Source
+    
+    enum AudioSource {
+        case mic
+        case system
+    }
+    
     // MARK: - Published State
     
-    /// Whether the FluidAudio ASR pipeline is loaded and ready.
     @Published var isReady: Bool = false
-    
-    /// Current partial (unconfirmed) text being decoded.
     @Published var partialText: String = ""
-    
-    /// Error message if pipeline fails.
     @Published var errorMessage: String?
     
     // MARK: - Callbacks
     
-    /// Called when a final (confirmed) transcript segment is produced.
-    /// Parameters: (text, startTime, endTime)
     var onFinalSegment: ((_ text: String, _ startTime: TimeInterval, _ endTime: TimeInterval) -> Void)?
-    
-    /// Called when partial (in-progress) text updates.
-    /// Parameters: (text, startTime)
     var onPartialUpdate: ((_ text: String, _ startTime: TimeInterval) -> Void)?
     
     // MARK: - Private
     
-    private var asrManager: AsrManager?
+    /// Cached ASR models for reuse across sessions.
+    private var cachedModels: AsrModels?
     
-    /// Accumulated audio buffer (16 kHz mono Float32).
-    private var audioBuffer: [Float] = []
+    /// Separate streaming managers for each audio source.
+    private var micManager: StreamingAsrManager?
+    private var systemManager: StreamingAsrManager?
     
-    /// Maximum buffer length in samples (30 seconds at 16 kHz).
-    private let maxBufferLength = 30 * 16000
+    /// Tasks consuming transcription updates from each manager.
+    private var micConsumerTask: Task<Void, Never>?
+    private var systemConsumerTask: Task<Void, Never>?
     
-    /// Minimum buffer length before attempting transcription (1.5 seconds).
-    private let minBufferLength = 24000  // 1.5s at 16kHz
+    private var streamStartTime: Date?
     
-    /// Overlap when sliding the window forward (keeps context).
-    private let overlapLength = 8000  // 0.5s
+    /// Current partial (volatile) text from each source.
+    private var micPartialText: String = ""
+    private var systemPartialText: String = ""
     
-    /// Timer for periodic transcription attempts.
-    private var transcriptionTimer: Timer?
-    
-    /// Interval between transcription runs.
-    private let transcriptionInterval: TimeInterval = 1.0
-    
-    /// Track confirmed text to detect new final segments.
-    private var lastConfirmedText: String = ""
-    
-    /// Timestamp tracking.
-    private var bufferStartTime: TimeInterval = 0
-    private var currentTimestamp: TimeInterval = 0
-    
-    /// Concurrency guard.
-    private var isTranscribing: Bool = false
+    /// Audio format for converting raw samples to AVAudioPCMBuffer.
+    private let audioFormat = AVAudioFormat(
+        commonFormat: .pcmFormatFloat32,
+        sampleRate: 16000,
+        channels: 1,
+        interleaved: true
+    )!
     
     // MARK: - Model Loading
     
-    /// Load the FluidAudio ASR pipeline. Call once at app launch or when models are downloaded.
     func loadModel() async {
         do {
-            let models = try await AsrModels.downloadAndLoad()
-            let manager = AsrManager()
-            try await manager.initialize(models: models)
+            let models: AsrModels
+            if let cached = cachedModels {
+                models = cached
+            } else {
+                models = try await AsrModels.downloadAndLoad()
+                self.cachedModels = models
+            }
             
-            self.asrManager = manager
+            // Validate models
+            let testManager = AsrManager(config: .default)
+            try await testManager.initialize(models: models)
+            testManager.cleanup()
+            
             self.isReady = true
             self.errorMessage = nil
             print("[Dialogue] FluidAudio ASR loaded (Parakeet TDT v3)")
@@ -84,124 +89,198 @@ final class StreamingTranscriptionService: ObservableObject {
         }
     }
     
-    /// Check if models are already downloaded locally.
     static func modelsExistLocally() -> Bool {
-        // FluidAudio stores models in its own managed cache directory.
-        // AsrModels.downloadIfNeeded() is a no-op if models are present.
-        let cacheDir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
-        let modelDir = cacheDir
-            .appendingPathComponent("FluidAudio")
-            .appendingPathComponent("models")
-        return FileManager.default.fileExists(atPath: modelDir.path)
+        let cacheDir = AsrModels.defaultCacheDirectory(for: .v3)
+        return FileManager.default.fileExists(atPath: cacheDir.path)
     }
     
     // MARK: - Streaming Interface
     
-    /// Start accepting audio buffers for streaming transcription.
     func startStreaming() {
-        guard isReady else { return }
+        guard isReady, let models = cachedModels else { return }
         
-        audioBuffer.removeAll(keepingCapacity: true)
-        lastConfirmedText = ""
+        micPartialText = ""
+        systemPartialText = ""
         partialText = ""
-        bufferStartTime = 0
-        currentTimestamp = 0
-        isTranscribing = false
+        streamStartTime = Date()
         
-        // Periodic transcription
-        transcriptionTimer = Timer.scheduledTimer(withTimeInterval: transcriptionInterval, repeats: true) { [weak self] _ in
-            Task { @MainActor [weak self] in
-                await self?.runTranscription()
+        // Use .streaming config: 11s chunks, 2s left/right context, 0.80 confirmation
+        let mic = StreamingAsrManager(config: .streaming)
+        let sys = StreamingAsrManager(config: .streaming)
+        self.micManager = mic
+        self.systemManager = sys
+        
+        Task {
+            do {
+                try await mic.start(models: models, source: .microphone)
+                try await sys.start(models: models, source: .system)
+                
+                micConsumerTask = Task { @MainActor [weak self] in
+                    for await update in await mic.transcriptionUpdates {
+                        guard let self else { break }
+                        self.handleUpdate(update, from: .mic)
+                    }
+                }
+                
+                systemConsumerTask = Task { @MainActor [weak self] in
+                    for await update in await sys.transcriptionUpdates {
+                        guard let self else { break }
+                        self.handleUpdate(update, from: .system)
+                    }
+                }
+                
+                print("[Dialogue] Streaming ASR started (dual-source: mic + system, .streaming config)")
+            } catch {
+                print("[Dialogue] Failed to start streaming ASR: \(error)")
+                self.errorMessage = "Streaming start failed: \(error.localizedDescription)"
             }
         }
     }
     
-    /// Stop streaming and flush any remaining audio.
     func stopStreaming() async {
-        transcriptionTimer?.invalidate()
-        transcriptionTimer = nil
+        let elapsed = streamStartTime.map { Date().timeIntervalSince($0) } ?? 0
         
-        // Final transcription of remaining buffer
-        await runTranscription(isFinal: true)
+        // Emit any remaining partial text as final before finishing
+        if !micPartialText.isEmpty {
+            onFinalSegment?(micPartialText, max(elapsed - 1.0, 0), elapsed)
+            micPartialText = ""
+        }
+        if !systemPartialText.isEmpty {
+            onFinalSegment?(systemPartialText, max(elapsed - 1.0, 0), elapsed)
+            systemPartialText = ""
+        }
         
-        audioBuffer.removeAll()
+        // Finish both managers
+        if let mic = micManager {
+            do {
+                let finalText = try await mic.finish()
+                let trimmed = finalText.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty {
+                    print("[Dialogue] Mic final transcript: \(trimmed.prefix(80))...")
+                }
+            } catch {
+                print("[Dialogue] Mic streaming finish error: \(error)")
+            }
+        }
+        
+        if let sys = systemManager {
+            do {
+                let finalText = try await sys.finish()
+                let trimmed = finalText.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty {
+                    print("[Dialogue] System final transcript: \(trimmed.prefix(80))...")
+                }
+            } catch {
+                print("[Dialogue] System streaming finish error: \(error)")
+            }
+        }
+        
+        micConsumerTask?.cancel()
+        systemConsumerTask?.cancel()
+        micConsumerTask = nil
+        systemConsumerTask = nil
+        micManager = nil
+        systemManager = nil
         partialText = ""
     }
     
-    /// Feed new audio samples into the streaming buffer.
-    /// Called from AudioEngineManager's onAudioBuffer callback.
-    func appendAudio(samples: [Float], timestamp: TimeInterval) {
-        audioBuffer.append(contentsOf: samples)
-        currentTimestamp = timestamp
-        
-        // Slide window if buffer exceeds max
-        if audioBuffer.count > maxBufferLength {
-            let removeCount = audioBuffer.count - maxBufferLength + overlapLength
-            audioBuffer.removeFirst(removeCount)
-            bufferStartTime = timestamp - Double(audioBuffer.count) / 16000.0
+    func appendMicAudio(samples: [Float], timestamp: TimeInterval) {
+        guard let manager = micManager else { return }
+        let buffer = createAudioBuffer(from: samples)
+        Task {
+            await manager.streamAudio(buffer)
         }
     }
     
-    // MARK: - Transcription
+    func appendSystemAudio(samples: [Float], timestamp: TimeInterval) {
+        guard let manager = systemManager else { return }
+        let buffer = createAudioBuffer(from: samples)
+        Task {
+            await manager.streamAudio(buffer)
+        }
+    }
     
-    private func runTranscription(isFinal: Bool = false) async {
-        guard !isTranscribing, isReady, audioBuffer.count >= minBufferLength else { return }
-        guard let manager = asrManager else { return }
+    // MARK: - Batch Transcription
+    
+    func transcribeBatch(audioSamples: [Float]) async throws -> String {
+        let models = try await AsrModels.downloadAndLoad()
+        let manager = AsrManager(config: .default)
+        try await manager.initialize(models: models)
+        defer { manager.cleanup() }
         
-        isTranscribing = true
-        defer { isTranscribing = false }
+        var speechAudio = audioSamples
+        let trailingSilenceSamples = 16_000
+        let maxSingleChunkSamples = 240_000
+        if speechAudio.count + trailingSilenceSamples <= maxSingleChunkSamples {
+            speechAudio += [Float](repeating: 0, count: trailingSilenceSamples)
+        }
         
-        let samples = audioBuffer
-        let startTime = bufferStartTime
+        let result = try await manager.transcribe(speechAudio)
+        return result.text
+    }
+    
+    // MARK: - Private Helpers
+    
+    /// Handle a transcription update from either the mic or system manager.
+    ///
+    /// When `isConfirmed == true`, the previous volatile text was just promoted
+    /// internally. `update.text` is the deduplicated tail (trailing punctuation
+    /// etc. from the chunk boundary). We combine them as the confirmed segment.
+    private func handleUpdate(_ update: StreamingTranscriptionUpdate, from source: AudioSource) {
+        let chunkText = update.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let elapsed = streamStartTime.map { Date().timeIntervalSince($0) } ?? 0
         
-        do {
-            // Use FluidAudio's chunked streaming transcription.
-            // AsrManager handles VAD internally and transcribes speech segments.
-            let result = try await manager.transcribe(samples)
+        if update.isConfirmed {
+            let previousPartial = source == .mic ? micPartialText : systemPartialText
             
-            let fullText = result.text.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
+            // Build confirmed segment: previous partial + deduplicated tail
+            let confirmedSegment = [previousPartial, chunkText]
+                .filter { !$0.isEmpty }
+                .joined(separator: " ")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
             
-            if isFinal || hasNewConfirmedContent(fullText) {
-                // Emit final segment
-                let endTime = startTime + Double(samples.count) / 16000.0
-                let newText = extractNewContent(from: fullText)
-                
-                if !newText.isEmpty {
-                    lastConfirmedText = fullText
-                    onFinalSegment?(newText, startTime, endTime)
-                }
-                
-                partialText = ""
-            } else {
-                // Update partial
-                let newText = extractNewContent(from: fullText)
-                if !newText.isEmpty {
-                    partialText = newText
-                    onPartialUpdate?(newText, startTime)
-                }
+            if !confirmedSegment.isEmpty {
+                let segmentDuration = Double(confirmedSegment.count) / 15.0
+                onFinalSegment?(confirmedSegment, max(elapsed - segmentDuration, 0), elapsed)
             }
-        } catch {
-            print("[Dialogue] Transcription error: \(error)")
+            
+            // Clear partial (confirmed segment was emitted)
+            switch source {
+            case .mic: micPartialText = ""
+            case .system: systemPartialText = ""
+            }
+            updateMergedPartialText()
+            
+        } else if !chunkText.isEmpty {
+            // Non-empty volatile: update partial display
+            switch source {
+            case .mic: micPartialText = chunkText
+            case .system: systemPartialText = chunkText
+            }
+            updateMergedPartialText()
+            onPartialUpdate?(partialText, elapsed)
         }
+        // Empty volatile updates ignored to prevent clearing valid partial text
     }
     
-    /// Detect if there's new confirmed content beyond what we already emitted.
-    private func hasNewConfirmedContent(_ text: String) -> Bool {
-        // Simple heuristic: if text is significantly longer than partial, it's confirmed
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.count > lastConfirmedText.count + 20
+    private func updateMergedPartialText() {
+        let parts = [micPartialText, systemPartialText].filter { !$0.isEmpty }
+        partialText = parts.joined(separator: " ")
     }
     
-    /// Extract only the new content not yet emitted as final.
-    private func extractNewContent(from fullText: String) -> String {
-        if lastConfirmedText.isEmpty { return fullText }
+    private func createAudioBuffer(from samples: [Float]) -> AVAudioPCMBuffer {
+        let sampleCount = samples.count
+        let buffer = AVAudioPCMBuffer(
+            pcmFormat: audioFormat,
+            frameCapacity: AVAudioFrameCount(sampleCount)
+        )!
+        buffer.frameLength = AVAudioFrameCount(sampleCount)
         
-        // Find where the confirmed text ends in the full text
-        if fullText.hasPrefix(lastConfirmedText) {
-            let newPart = String(fullText.dropFirst(lastConfirmedText.count))
-            return newPart.trimmingCharacters(in: .whitespacesAndNewlines)
+        samples.withUnsafeBufferPointer { srcPtr in
+            let dstPtr = buffer.floatChannelData![0]
+            memcpy(dstPtr, srcPtr.baseAddress!, sampleCount * MemoryLayout<Float>.stride)
         }
         
-        return fullText
+        return buffer
     }
 }

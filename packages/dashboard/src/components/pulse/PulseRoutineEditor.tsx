@@ -18,13 +18,7 @@ interface PulseRoutineEditorProps {
   onUpdated: (routine: PulseRoutine) => void;
 }
 
-// Legacy fallback columns — used only when the agent has no projects to read columns from.
-// In the modular workflow system, columns come from each project's template.
-const FALLBACK_COLUMNS = ['Backlog', 'Planning', 'Ready', 'In Progress', 'Review', 'Blocked', 'Done', 'Failed'] as const;
 
-const CORE_TOOLS = ['get_my_projects', 'get_ready_tasks', 'execute_task', 'get_task_context', 'transition_task'] as const;
-const GIT_TOOLS = ['claim_task', 'get_task_branch', 'open_pull_request', 'get_task_pr_status'] as const;
-const ALL_TOOLS = [...CORE_TOOLS, ...GIT_TOOLS];
 
 export function PulseRoutineEditor({ routine, agentId, onUpdated }: PulseRoutineEditorProps) {
   const [name, setName] = useState(routine.name);
@@ -35,10 +29,6 @@ export function PulseRoutineEditor({ routine, agentId, onUpdated }: PulseRoutine
   const [timeoutMs, setTimeoutMs] = useState(routine.timeoutMs);
   const [maxConcurrent, setMaxConcurrent] = useState(routine.maxConcurrent);
   const [blackouts, setBlackouts] = useState<PulseBlackout[]>(routine.blackouts);
-  const [pulseColumns, setPulseColumns] = useState<string[] | null>(routine.pulseColumns);
-  const [useCustomColumns, setUseCustomColumns] = useState(!!routine.pulseColumns);
-  const [tools, setTools] = useState<string[] | null>(routine.tools ?? null);
-  const [useCustomTools, setUseCustomTools] = useState(!!routine.tools);
   const [planningModel, setPlanningModel] = useState(routine.planningModel || '');
   const [executorModel, setExecutorModel] = useState(routine.executorModel || '');
 
@@ -93,12 +83,10 @@ export function PulseRoutineEditor({ routine, agentId, onUpdated }: PulseRoutine
       blackouts,
       timeoutMs: timeoutMs ?? undefined,
       maxConcurrent,
-      pulseColumns: useCustomColumns ? (pulseColumns ?? []) : undefined,
-      tools: useCustomTools ? (tools ?? []) : undefined,
       planningModel: planningModel || undefined,
       executorModel: executorModel || undefined,
     });
-  }, [name, description, instructions, intervalMinutes, offsetMinutes, blackouts, timeoutMs, maxConcurrent, pulseColumns, useCustomColumns, tools, useCustomTools, planningModel, executorModel, save]);
+  }, [name, description, instructions, intervalMinutes, offsetMinutes, blackouts, timeoutMs, maxConcurrent, planningModel, executorModel, save]);
 
   const markDirty = () => { dirty.current = true; };
 
@@ -283,6 +271,24 @@ export function PulseRoutineEditor({ routine, agentId, onUpdated }: PulseRoutine
         )}
       </div>
 
+      {/* Planning / Execution model explanation */}
+      <div className="rounded-lg border bg-muted/30 p-3 space-y-2">
+        <Label className="text-sm font-medium">How Pulse Routines Work</Label>
+        <p className="text-xs text-muted-foreground leading-relaxed">
+          Each pulse routine uses a <strong>dual-model system</strong>: a <strong>Planning Model</strong> reads
+          the routine instructions, reviews project state, and decides which tasks to pick up or what actions
+          to take. It then writes an execution prompt for the <strong>Executor Model</strong>, which carries
+          out the actual work (coding, writing, analysis, etc.) inside a sandboxed session. This separation
+          keeps planning lightweight and cost-effective while giving execution full tool access and context.
+        </p>
+        <p className="text-xs text-muted-foreground leading-relaxed">
+          Columns and tools are configured per-project via <strong>Routine Mappings</strong> on the
+          agent's Projects tab or the project's Team page. This lets the same routine behave differently
+          across projects &mdash; scanning different columns and using different tool sets depending on the
+          project's workflow.
+        </p>
+      </div>
+
       {/* Model overrides */}
       <div>
         <Label className="text-sm mb-2 block">Model Overrides</Label>
@@ -292,6 +298,9 @@ export function PulseRoutineEditor({ routine, agentId, onUpdated }: PulseRoutine
         <div className="space-y-3">
           <div>
             <Label className="text-xs text-muted-foreground">Planning Model</Label>
+            <p className="text-[10px] text-muted-foreground mb-1">
+              Reads context and decides what work to do. Lightweight and strategic.
+            </p>
             <ProviderModelSelector
               value={planningModel}
               onChange={(v) => { setPlanningModel(v); markDirty(); }}
@@ -301,6 +310,9 @@ export function PulseRoutineEditor({ routine, agentId, onUpdated }: PulseRoutine
           </div>
           <div>
             <Label className="text-xs text-muted-foreground">Executor Model</Label>
+            <p className="text-[10px] text-muted-foreground mb-1">
+              Carries out the actual work with full tool access in a sandboxed session.
+            </p>
             <ProviderModelSelector
               value={executorModel}
               onChange={(v) => { setExecutorModel(v); markDirty(); }}
@@ -309,142 +321,6 @@ export function PulseRoutineEditor({ routine, agentId, onUpdated }: PulseRoutine
             />
           </div>
         </div>
-      </div>
-
-      {/* Pulse Columns override */}
-      <div>
-        <div className="flex items-center gap-2 mb-2">
-          <Label className="text-sm">Pulse Columns</Label>
-          <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer">
-            <input
-              type="checkbox"
-              checked={useCustomColumns}
-              onChange={(e) => {
-                setUseCustomColumns(e.target.checked);
-                if (!e.target.checked) setPulseColumns(null);
-                markDirty();
-              }}
-              className="h-3.5 w-3.5"
-            />
-            Override agent defaults
-          </label>
-        </div>
-        {useCustomColumns && (
-          <>
-            <p className="text-[10px] text-muted-foreground mb-2">
-              These are column names. For project-specific column mappings, use the routine mapping on the agent's Projects tab.
-            </p>
-            <div className="flex flex-wrap gap-2">
-              {FALLBACK_COLUMNS.map((col) => {
-                const checked = (pulseColumns ?? []).includes(col);
-                return (
-                  <label key={col} className="flex items-center gap-1.5 text-xs cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={checked}
-                      onChange={() => {
-                        const current = pulseColumns ?? [];
-                        setPulseColumns(
-                          checked
-                            ? current.filter(c => c !== col)
-                            : [...current, col],
-                        );
-                        markDirty();
-                      }}
-                      className="h-3.5 w-3.5"
-                    />
-                    {col}
-                  </label>
-                );
-              })}
-            </div>
-          </>
-        )}
-      </div>
-
-      {/* Tool Selection */}
-      <div>
-        <div className="flex items-center gap-2 mb-2">
-          <Label className="text-sm">Tool Selection</Label>
-          <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer">
-            <input
-              type="checkbox"
-              checked={useCustomTools}
-              onChange={(e) => {
-                setUseCustomTools(e.target.checked);
-                if (!e.target.checked) setTools(null);
-                else if (!tools) setTools([...CORE_TOOLS]);
-                markDirty();
-              }}
-              className="h-3.5 w-3.5"
-            />
-            Override agent defaults
-          </label>
-        </div>
-        {useCustomTools && (
-          <div className="space-y-2">
-            <p className="text-[10px] text-muted-foreground">
-              Select which tools this routine can use. Different routines can have different tool sets.
-            </p>
-            <div>
-              <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Core Tools</span>
-              <div className="flex flex-wrap gap-2 mt-1">
-                {CORE_TOOLS.map((tool) => {
-                  const checked = (tools ?? []).includes(tool);
-                  return (
-                    <label key={tool} className="flex items-center gap-1.5 text-xs cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        onChange={() => {
-                          const current = tools ?? [];
-                          setTools(checked ? current.filter(t => t !== tool) : [...current, tool]);
-                          markDirty();
-                        }}
-                        className="h-3.5 w-3.5"
-                      />
-                      <span className="font-mono text-[11px]">{tool}</span>
-                    </label>
-                  );
-                })}
-              </div>
-            </div>
-            <div>
-              <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Git Tools</span>
-              <div className="flex flex-wrap gap-2 mt-1">
-                {GIT_TOOLS.map((tool) => {
-                  const checked = (tools ?? []).includes(tool);
-                  return (
-                    <label key={tool} className="flex items-center gap-1.5 text-xs cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        onChange={() => {
-                          const current = tools ?? [];
-                          setTools(checked ? current.filter(t => t !== tool) : [...current, tool]);
-                          markDirty();
-                        }}
-                        className="h-3.5 w-3.5"
-                      />
-                      <span className="font-mono text-[11px]">{tool}</span>
-                    </label>
-                  );
-                })}
-              </div>
-            </div>
-            <div className="flex gap-2 pt-1">
-              <Button variant="ghost" size="sm" className="h-6 text-[10px]" onClick={() => { setTools([...ALL_TOOLS]); markDirty(); }}>
-                Select All
-              </Button>
-              <Button variant="ghost" size="sm" className="h-6 text-[10px]" onClick={() => { setTools([...CORE_TOOLS]); markDirty(); }}>
-                Core Only
-              </Button>
-              <Button variant="ghost" size="sm" className="h-6 text-[10px]" onClick={() => { setTools([]); markDirty(); }}>
-                Clear All
-              </Button>
-            </div>
-          </div>
-        )}
       </div>
     </div>
   );

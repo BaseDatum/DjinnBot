@@ -46,29 +46,9 @@ interface ExistingSession {
 
 // ── Last-used model persistence (per agent) ─────────────────────────────────
 //
-// When the user overrides the model in the chat selector (e.g. switching from
-// the agent's default xai/ model to openrouter/), remember that choice so the
-// next session with the same agent uses their preferred model.
-
-const LAST_MODEL_KEY = 'djinnbot:chat-last-model';
-
-export function loadLastModel(agentId: string): string | null {
-  try {
-    const raw = localStorage.getItem(LAST_MODEL_KEY);
-    if (!raw) return null;
-    const map: Record<string, string> = JSON.parse(raw);
-    return map[agentId] || null;
-  } catch { return null; }
-}
-
-export function saveLastModel(agentId: string, model: string): void {
-  try {
-    const raw = localStorage.getItem(LAST_MODEL_KEY);
-    const map: Record<string, string> = raw ? JSON.parse(raw) : {};
-    map[agentId] = model;
-    localStorage.setItem(LAST_MODEL_KEY, JSON.stringify(map));
-  } catch {}
-}
+// Model override localStorage persistence has been removed.
+// New sessions always use the agent's configured default model.
+// Mid-session hot-swap only affects the current session.
 
 // ── Shared hook: toolbar form state ──────────────────────────────────────────
 
@@ -82,17 +62,12 @@ function useSpawnForm() {
   const [loadingSessions, setLoadingSessions] = useState(false);
   const [spawning, setSpawning] = useState(false);
 
-  // When agent changes, auto-populate model: prefer last-used override, then agent default
+  // When agent changes, auto-populate model from agent's configured default
   useEffect(() => {
     if (!agentId) { setExistingSessions([]); setSessionChoice('__new__'); return; }
-    const lastModel = loadLastModel(agentId);
-    if (lastModel) {
-      setModel(lastModel);
-    } else {
-      const agent = agents.find(a => a.id === agentId);
-      if (agent?.model) {
-        setModel(agent.model);
-      }
+    const agent = agents.find(a => a.id === agentId);
+    if (agent?.model) {
+      setModel(agent.model);
     }
     setLoadingSessions(true);
     listChatSessions(agentId, { limit: 10 })
@@ -121,8 +96,6 @@ function useSpawnForm() {
         sessionId = session.id;
         resolvedModel = session.model || model;
       }
-      // Persist the model the user chose so it's the default next time
-      saveLastModel(agentId, resolvedModel);
       openChat(agentId, resolvedModel, sessionId);
       setAgentId('');
       setSessionChoice('__new__');

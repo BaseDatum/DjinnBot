@@ -4,6 +4,7 @@ import type { RedisPublisher } from '../../redis/publisher.js';
 import { join, resolve } from 'node:path';
 // @ts-ignore — clawvault is an ESM package declared in package.json; types resolve at build time
 import { graphSummary, loadMemoryGraphIndex, buildOrUpdateMemoryGraphIndex, type MemoryGraph } from 'clawvault';
+import { SharedVaultClient } from './shared-vault-api.js';
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -12,15 +13,14 @@ import { graphSummary, loadMemoryGraphIndex, buildOrUpdateMemoryGraphIndex, type
  *
  * The engine (packages/core/src/main.ts) builds graph-index.json via
  * `clawvault graph --refresh` and writes it to the vault's .clawvault/
- * directory.  The agent runtime runs inside a Docker container where vault
- * paths are symlinks into a shared volume.
+ * directory.  The agent runtime sees this file via its JuiceFS mount of
+ * the vault subdirectory.
  *
  * `getMemoryGraph` (from clawvault) calls `buildOrUpdateMemoryGraphIndex`
  * which unconditionally re-globs for *.md files and WRITES a new
- * graph-index.json — even if it finds zero files (e.g. symlink not yet
- * resolved, glob timing issue).  This overwrites the engine's good index
- * with an empty one, causing all subsequent graph queries to return no
- * results.
+ * graph-index.json — even if it finds zero files (e.g. during container
+ * startup before the FUSE mount is fully settled).  This could overwrite
+ * the engine's good index with an empty one.
  *
  * Instead, we use `loadMemoryGraphIndex` (read-only — just reads the JSON
  * file) and only fall back to a full build when the index doesn't exist at
@@ -81,29 +81,15 @@ export interface MemoryGraphToolsConfig {
   publisher: RedisPublisher;
   agentId: string;
   vaultPath: string;
-  sharedPath: string;
+  /** DjinnBot API base URL for shared vault graph operations. */
+  apiBaseUrl: string;
 }
 
 // ── Tool factories ─────────────────────────────────────────────────────────
 
 export function createMemoryGraphTools(config: MemoryGraphToolsConfig): AgentTool[] {
-  const { publisher, agentId, vaultPath, sharedPath } = config;
-
-  /** Return vault paths to query based on scope. */
-  const vaultPathsForScope = (scope: string | undefined): { path: string; label: string }[] => {
-    switch (scope) {
-      case 'personal':
-        return [{ path: vaultPath, label: 'Personal' }];
-      case 'shared':
-        return [{ path: sharedPath, label: 'Shared' }];
-      case 'all':
-      default:
-        return [
-          { path: vaultPath, label: 'Personal' },
-          { path: sharedPath, label: 'Shared' },
-        ];
-    }
-  };
+  const { publisher, agentId, vaultPath, apiBaseUrl } = config;
+  const sharedVaultApi = new SharedVaultClient(apiBaseUrl);
 
   return [
     {
@@ -122,90 +108,115 @@ export function createMemoryGraphTools(config: MemoryGraphToolsConfig): AgentToo
         _onUpdate?: AgentToolUpdateCallback<VoidDetails>
       ): Promise<AgentToolResult<VoidDetails>> => {
         const p = params as GraphQueryParams;
-        const vaults = vaultPathsForScope(p.scope);
+        const scope = p.scope || 'all';
+
+        // Helper: query personal graph (local ClawVault)
+        const queryPersonalGraph = async (action: string): Promise<string> => {
+          try {
+            switch (action) {
+              case 'summary': {
+                const summary = await graphSummary({ vaultPath });
+                return `## Personal Graph\n${JSON.stringify(summary, null, 2)}`;
+              }
+              case 'neighbors': {
+                if (!p.nodeId) return '## Personal Graph\nnodeId required';
+                const maxHops = Math.min(p.maxHops || 1, 3);
+                const graph = await getGraphReadOnly(vaultPath);
+                const visited = new Set<string>();
+                let frontier = new Set<string>([p.nodeId]);
+                for (let hop = 0; hop < maxHops; hop++) {
+                  const next = new Set<string>();
+                  for (const nodeId of frontier) {
+                    for (const edge of graph.edges) {
+                      if (edge.source === nodeId && !visited.has(edge.target)) next.add(edge.target);
+                      if (edge.target === nodeId && !visited.has(edge.source)) next.add(edge.source);
+                    }
+                    visited.add(nodeId);
+                  }
+                  frontier = next;
+                  for (const n of next) visited.add(n);
+                }
+                visited.delete(p.nodeId);
+                const neighborNodes = graph.nodes.filter((n: any) => visited.has(n.id));
+                if (neighborNodes.length) {
+                  const lines = neighborNodes.map((n: any) => `- [${n.type}] ${n.title} (id: ${n.id})`);
+                  return `## Personal Graph\n${lines.join('\n')}`;
+                }
+                return `## Personal Graph\nNo neighbors found for node: ${p.nodeId}`;
+              }
+              case 'search': {
+                if (!p.query) return '## Personal Graph\nquery required';
+                const needle = p.query.toLowerCase();
+                const graph = await getGraphReadOnly(vaultPath);
+                const matches = graph.nodes.filter((n: any) =>
+                  n.title.toLowerCase().includes(needle) ||
+                  n.id.toLowerCase().includes(needle) ||
+                  n.tags?.some((t: string) => t.toLowerCase().includes(needle))
+                );
+                if (matches.length) {
+                  const lines = matches.map((n: any) => `- [${n.type}] ${n.title} (id: ${n.id}, degree: ${n.degree})`);
+                  return `## Personal Graph\n${lines.join('\n')}`;
+                }
+                return `## Personal Graph\nNo graph nodes found matching: ${p.query}`;
+              }
+              default: return `Unknown action: ${action}`;
+            }
+          } catch (err) {
+            console.error(`[graph_query] Personal graph ${action} failed:`, err);
+            return '## Personal Graph\nNo graph available.';
+          }
+        };
+
+        // Helper: query shared graph (via API)
+        const querySharedGraph = async (action: string): Promise<string> => {
+          try {
+            switch (action) {
+              case 'summary': {
+                const graphData = await sharedVaultApi.getGraph();
+                return `## Shared Graph\n${JSON.stringify(graphData.stats, null, 2)}`;
+              }
+              case 'neighbors': {
+                if (!p.nodeId) return '## Shared Graph\nnodeId required';
+                const maxHops = Math.min(p.maxHops || 1, 3);
+                const data = await sharedVaultApi.getNeighbors(p.nodeId, maxHops);
+                if (data.nodes.length) {
+                  const lines = data.nodes.map(n => `- [${n.type}] ${n.title} (id: ${n.id})`);
+                  return `## Shared Graph\n${lines.join('\n')}`;
+                }
+                return `## Shared Graph\nNo neighbors found for node: ${p.nodeId}`;
+              }
+              case 'search': {
+                if (!p.query) return '## Shared Graph\nquery required';
+                const needle = p.query.toLowerCase();
+                const graphData = await sharedVaultApi.getGraph();
+                const matches = graphData.nodes.filter(n =>
+                  n.title.toLowerCase().includes(needle) ||
+                  n.id.toLowerCase().includes(needle) ||
+                  n.tags?.some(t => t.toLowerCase().includes(needle))
+                );
+                if (matches.length) {
+                  const lines = matches.map(n => `- [${n.type}] ${n.title} (id: ${n.id}, degree: ${n.degree})`);
+                  return `## Shared Graph\n${lines.join('\n')}`;
+                }
+                return `## Shared Graph\nNo graph nodes found matching: ${p.query}`;
+              }
+              default: return `Unknown action: ${action}`;
+            }
+          } catch (err) {
+            console.error(`[graph_query] Shared graph API ${action} failed:`, err);
+            return '## Shared Graph\nNo graph available.';
+          }
+        };
 
         try {
-          switch (p.action) {
-            case 'summary': {
-              const sections: string[] = [];
-              for (const v of vaults) {
-                try {
-                  const summary = await graphSummary({ vaultPath: v.path });
-                  sections.push(`## ${v.label} Graph\n${JSON.stringify(summary, null, 2)}`);
-                } catch (err) {
-                  console.error(`[graph_query] ${v.label} summary failed for ${v.path}:`, err);
-                  sections.push(`## ${v.label} Graph\nNo graph available.`);
-                }
-              }
-              return { content: [{ type: 'text', text: sections.join('\n\n') }], details: {} };
-            }
-
-            case 'neighbors': {
-              if (!p.nodeId) return { content: [{ type: 'text', text: 'nodeId required' }], details: {} };
-              const maxHops = Math.min(p.maxHops || 1, 3);
-              const sections: string[] = [];
-              for (const v of vaults) {
-                try {
-                  const graph = await getGraphReadOnly(v.path);
-                  const visited = new Set<string>();
-                  let frontier = new Set<string>([p.nodeId]);
-                  for (let hop = 0; hop < maxHops; hop++) {
-                    const next = new Set<string>();
-                    for (const nodeId of frontier) {
-                      for (const edge of graph.edges) {
-                        if (edge.source === nodeId && !visited.has(edge.target)) next.add(edge.target);
-                        if (edge.target === nodeId && !visited.has(edge.source)) next.add(edge.source);
-                      }
-                      visited.add(nodeId);
-                    }
-                    frontier = next;
-                    for (const n of next) visited.add(n);
-                  }
-                  visited.delete(p.nodeId);
-                  const neighborNodes = graph.nodes.filter((n: any) => visited.has(n.id));
-                  if (neighborNodes.length) {
-                    const lines = neighborNodes.map((n: any) => `- [${n.type}] ${n.title} (id: ${n.id})`);
-                    sections.push(`## ${v.label} Graph\n${lines.join('\n')}`);
-                  } else {
-                    sections.push(`## ${v.label} Graph\nNo neighbors found for node: ${p.nodeId}`);
-                  }
-                } catch (err) {
-                  console.error(`[graph_query] ${v.label} neighbors failed for ${v.path}:`, err);
-                  sections.push(`## ${v.label} Graph\nNo graph available.`);
-                }
-              }
-              return { content: [{ type: 'text', text: sections.join('\n\n') }], details: {} };
-            }
-
-            case 'search': {
-              if (!p.query) return { content: [{ type: 'text', text: 'query required' }], details: {} };
-              const needle = p.query.toLowerCase();
-              const sections: string[] = [];
-              for (const v of vaults) {
-                try {
-                  const graph = await getGraphReadOnly(v.path);
-                  const matches = graph.nodes.filter((n: any) =>
-                    n.title.toLowerCase().includes(needle) ||
-                    n.id.toLowerCase().includes(needle) ||
-                    n.tags.some((t: string) => t.toLowerCase().includes(needle))
-                  );
-                  if (matches.length) {
-                    const lines = matches.map((n: any) => `- [${n.type}] ${n.title} (id: ${n.id}, degree: ${n.degree})`);
-                    sections.push(`## ${v.label} Graph\n${lines.join('\n')}`);
-                  } else {
-                    sections.push(`## ${v.label} Graph\nNo graph nodes found matching: ${p.query}`);
-                  }
-                } catch (err) {
-                  console.error(`[graph_query] ${v.label} search failed for ${v.path}:`, err);
-                  sections.push(`## ${v.label} Graph\nNo graph available.`);
-                }
-              }
-              return { content: [{ type: 'text', text: sections.join('\n\n') }], details: {} };
-            }
-
-            default:
-              return { content: [{ type: 'text', text: `Unknown action: ${p.action}` }], details: {} };
+          const sections: string[] = [];
+          if (scope === 'personal' || scope === 'all') {
+            sections.push(await queryPersonalGraph(p.action));
           }
+          if (scope === 'shared' || scope === 'all') {
+            sections.push(await querySharedGraph(p.action));
+          }
+          return { content: [{ type: 'text', text: sections.join('\n\n') }], details: {} };
         } catch (err) {
           return { content: [{ type: 'text', text: `Graph query failed: ${err}` }], details: {} };
         }

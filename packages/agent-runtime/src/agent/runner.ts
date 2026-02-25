@@ -32,7 +32,8 @@ export interface ContainerAgentRunnerOptions {
   agentId: string;
   workspacePath: string;
   vaultPath: string;
-  sharedPath: string;
+  /** DjinnBot API base URL — used for shared vault operations. */
+  apiBaseUrl: string;
   model?: string;
   runId?: string;
   /** Path to agents directory — used by skill tools. Defaults to AGENTS_DIR env var. */
@@ -290,9 +291,8 @@ export class ContainerAgentRunner {
       agentId: this.options.agentId,
       sessionId: this.options.runId || process.env.RUN_ID || 'unknown',
       vaultPath: this.options.vaultPath,
-      sharedPath: this.options.sharedPath,
+      apiBaseUrl: this.options.apiBaseUrl,
       agentsDir: this.options.agentsDir || process.env.AGENTS_DIR,
-      apiBaseUrl,
       pulseColumns,
       isPipelineRun,
       isPulseSession,
@@ -1025,14 +1025,14 @@ export class ContainerAgentRunner {
 
       // Check results
       if (this.stepCompleted) {
-        // Flush memory retrieval tracking (fire-and-forget)
-        this.retrievalTracker.flush(this.stepResult.success).catch(() => {});
+        // Flush memory retrieval tracking for analytics (no outcome — scoring is agent-driven)
+        this.retrievalTracker.flush().catch(() => {});
         return this.stepResult;
       }
 
       // Agent didn't call complete/fail — return raw output
-      // Flush memory retrieval tracking (fire-and-forget)
-      this.retrievalTracker.flush(true).catch(() => {});
+      // Flush memory retrieval tracking for analytics (no outcome — scoring is agent-driven)
+      this.retrievalTracker.flush().catch(() => {});
       return {
         output: this.rawOutput,
         success: true,
@@ -1041,8 +1041,8 @@ export class ContainerAgentRunner {
       const error = err instanceof Error ? err.message : String(err);
       console.error(`[AgentRunner] Step failed:`, error);
 
-      // Flush memory retrieval tracking with failure outcome (fire-and-forget)
-      this.retrievalTracker.flush(false).catch(() => {});
+      // Flush memory retrieval tracking for analytics (no outcome — scoring is agent-driven)
+      this.retrievalTracker.flush().catch(() => {});
       return {
         output: this.rawOutput,
         error,

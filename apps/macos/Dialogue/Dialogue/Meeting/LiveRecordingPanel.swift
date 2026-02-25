@@ -441,21 +441,21 @@ final class RecordingCoordinator: ObservableObject {
         // Configure audio engine
         availableDevices = AudioEngineManager.enumerateInputDevices()
         
-        // Microphone audio → ASR + diarization (tagged as mic source).
+        // Microphone audio → ASR (mic stream) + diarization (tagged as mic source).
         audioEngine.onAudioBuffer = { [weak self] samples, timestamp in
             Task { @MainActor [weak self] in
-                self?.transcriptionService.appendAudio(samples: samples, timestamp: timestamp)
+                self?.transcriptionService.appendMicAudio(samples: samples, timestamp: timestamp)
                 self?.diarizationService.appendAudio(samples: samples, timestamp: timestamp, source: .mic)
             }
         }
         
-        // System audio → ASR + diarization (tagged as system source).
-        // Kept in a separate buffer inside the diarization service so
-        // each source is processed as a coherent stream. The underlying
-        // SpeakerManager is shared, so speakers are clustered across both.
+        // System audio → ASR (system stream) + diarization (tagged as system source).
+        // Each source gets its own StreamingAsrManager for a coherent audio stream.
+        // The diarization service's SpeakerManager is shared, so speakers are
+        // clustered across both sources.
         systemAudioCapture.onAudioBuffer = { [weak self] samples, timestamp in
             Task { @MainActor [weak self] in
-                self?.transcriptionService.appendAudio(samples: samples, timestamp: timestamp)
+                self?.transcriptionService.appendSystemAudio(samples: samples, timestamp: timestamp)
                 self?.diarizationService.appendAudio(samples: samples, timestamp: timestamp, source: .system)
             }
         }

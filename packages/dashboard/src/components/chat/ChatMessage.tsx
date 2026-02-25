@@ -161,7 +161,7 @@ export const ChatMessage = memo(function ChatMessage({
             <Bot className="h-4 w-4 text-primary" />
           )}
         </div>
-        <div className="flex-1 min-w-0 max-w-[80%]">
+        <div className="flex-1 min-w-0 max-w-[80%] overflow-hidden">
           {hasAgentIdentity && (
             <span className="text-[10px] font-semibold uppercase tracking-wider mb-1 block text-primary/70">
               {message.agentName}
@@ -204,7 +204,7 @@ export const ChatMessage = memo(function ChatMessage({
         <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-purple-500/10">
           <Brain className={cn("h-4 w-4 text-purple-500", isStreaming && "animate-pulse")} />
         </div>
-        <div className="flex-1 max-w-[80%] overflow-hidden">
+        <div className="flex-1 min-w-0 max-w-[80%] overflow-hidden">
           <button
             onClick={() => setThinkingExpanded(!thinkingExpanded)}
             className="flex items-center gap-2 text-xs text-purple-500 hover:text-purple-400 transition-colors"
@@ -242,7 +242,7 @@ export const ChatMessage = memo(function ChatMessage({
     return (
       <div className="group flex gap-3">
         <div className="w-8" /> {/* Spacer for alignment */}
-        <div className="flex-1 max-w-[85%] overflow-hidden">
+        <div className="flex-1 min-w-0 max-w-[85%] overflow-hidden">
           <ToolCallCard
             toolName={message.toolName || 'unknown'}
             args={message.args ? JSON.stringify(message.args, null, 2) : undefined}

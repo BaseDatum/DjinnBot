@@ -16,7 +16,7 @@ services:
       POSTGRES_PASSWORD: djinnbot
       POSTGRES_DB: djinnbot
     ports:
-      - "${BIND_HOST:-127.0.0.1}:${POSTGRES_PORT:-5432}:5432"
+      - "${BIND_HOST:-0.0.0.0}:${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
     networks:
@@ -31,10 +31,11 @@ services:
     image: redis:7-alpine
     container_name: djinnbot-redis
     ports:
-      - "${BIND_HOST:-127.0.0.1}:${REDIS_PORT:-6379}:6379"
+      - "${BIND_HOST:-0.0.0.0}:${REDIS_PORT:-6379}:6379"
     volumes:
       - redis-data:/data
-    command: redis-server --appendonly yes
+    # --databases 16 ensures DB 2 is available for JuiceFS metadata
+    command: redis-server --appendonly yes --databases 16
     networks:
       - djinnbot_default
     healthcheck:
@@ -43,11 +44,107 @@ services:
       timeout: 5s
       retries: 5
 
+  # ── RustFS: S3-compatible object storage backend for JuiceFS ──
+  # Internal only — no ports exposed to the host by default.
+  rustfs:
+    image: rustfs/rustfs:latest
+    container_name: djinnbot-rustfs
+    environment:
+      - RUSTFS_VOLUMES=/data
+      - RUSTFS_ADDRESS=0.0.0.0:9000
+      - RUSTFS_CONSOLE_ADDRESS=0.0.0.0:9001
+      - RUSTFS_CONSOLE_ENABLE=true
+      - RUSTFS_ACCESS_KEY=${RUSTFS_ACCESS_KEY:-djinnbot-rustfs-admin}
+      - RUSTFS_SECRET_KEY=${RUSTFS_SECRET_KEY:-djinnbot-rustfs-secret}
+    volumes:
+      - rustfs-data:/data
+    ports:
+      - "${BIND_HOST:-0.0.0.0}:${RUSTFS_CONSOLE_PORT:-9001}:9001"
+    networks:
+      - djinnbot_default
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "sh",
+          "-c",
+          "curl -sf http://localhost:9000/health || exit 1",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ── JuiceFS FUSE mount: exposes RustFS S3 data as a POSIX filesystem ──
+  # Runs `juicefs format` (idempotent) then `juicefs mount`.
+  # The FUSE mount is bind-propagated to the Docker host via :rshared,
+  # making it available to all containers (including dynamically spawned agents)
+  # as a regular host directory.
+  juicefs-mount:
+    image: juicedata/mount:ce-v1.3.1
+    container_name: djinnbot-juicefs
+    privileged: true
+    environment:
+      - REDIS_URL=redis://redis:6379/2
+      - RUSTFS_ACCESS_KEY=${RUSTFS_ACCESS_KEY:-djinnbot-rustfs-admin}
+      - RUSTFS_SECRET_KEY=${RUSTFS_SECRET_KEY:-djinnbot-rustfs-secret}
+      - JUICEFS_VOLUME_NAME=${JUICEFS_VOLUME_NAME:-djinnbot}
+      - JUICEFS_CACHE_SIZE=${JUICEFS_CACHE_SIZE:-20480}
+    volumes:
+      # The FUSE mount point — :rshared propagates within the Docker VM.
+      # /jfs lives inside the Docker Desktop VM (not on the macOS host via virtiofs),
+      # so shared mount propagation works correctly.
+      - juicefs-data:/jfs
+      # Local cache for read performance
+      - juicefs-cache:/var/jfsCache
+    command:
+      - sh
+      - -c
+      - |
+        # Format the volume (idempotent — no-op if already formatted)
+        juicefs format \
+          --storage s3 \
+          --bucket http://rustfs:9000/djinnbot \
+          --access-key "$$RUSTFS_ACCESS_KEY" \
+          --secret-key "$$RUSTFS_SECRET_KEY" \
+          --trash-days 7 \
+          "$$REDIS_URL" \
+          "$$JUICEFS_VOLUME_NAME" 2>/dev/null || true
+
+        # Mount with production-tuned options
+        exec juicefs mount \
+          --cache-dir /var/jfsCache \
+          --cache-size "$$JUICEFS_CACHE_SIZE" \
+          --backup-meta 3600 \
+          --no-usage-report \
+          --buffer-size 300 \
+          --prefetch 1 \
+          --max-uploads 20 \
+          --attr-cache 1 \
+          --entry-cache 1 \
+          --dir-entry-cache 1 \
+          "$$REDIS_URL" \
+          /jfs
+    networks:
+      - djinnbot_default
+    depends_on:
+      redis:
+        condition: service_healthy
+      rustfs:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "sh", "-c", "mountpoint -q /jfs"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
   api:
     image: ghcr.io/basedatum/djinnbot/api:${DJINNBOT_VERSION:-latest}
     container_name: djinnbot-api
     ports:
-      - "${BIND_HOST:-127.0.0.1}:${API_PORT:-8000}:8000"
+      - "${BIND_HOST:-0.0.0.0}:${API_PORT:-8000}:8000"
     environment:
       - DATABASE_URL=postgresql+asyncpg://djinnbot:djinnbot@postgres:5432/djinnbot
       - REDIS_URL=redis://redis:6379
@@ -55,9 +152,13 @@ services:
       - PIPELINES_DIR=/pipelines
       - AGENTS_DIR=/agents
       - SKILLS_DIR=/skills
+      # Unified sandbox directory - each agent gets /data/sandboxes/{agentId}/
       - SANDBOXES_DIR=/data/sandboxes
+      # Project workspaces (git repos for each project)
       - WORKSPACES_DIR=/data/workspaces
+      # Shared runs for pipeline collaboration (run worktrees)
       - SHARED_RUNS_DIR=/data/runs
+      # GitHub App Configuration
       - GITHUB_APP_ID=${GITHUB_APP_ID:-}
       - GITHUB_APP_CLIENT_ID=${GITHUB_APP_CLIENT_ID:-}
       - GITHUB_APP_WEBHOOK_SECRET=${GITHUB_APP_WEBHOOK_SECRET:-}
@@ -65,7 +166,9 @@ services:
       - GITHUB_APP_NAME=${GITHUB_APP_NAME:-djinnbot}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - MCPO_BASE_URL=http://djinnbot-mcpo:8000
+      # Internal service-to-service auth token
       - ENGINE_INTERNAL_TOKEN=${ENGINE_INTERNAL_TOKEN:-}
+      # Authentication
       - AUTH_ENABLED=${AUTH_ENABLED:-false}
       - AUTH_SECRET_KEY=${AUTH_SECRET_KEY:-}
       - AUTH_TOTP_ISSUER=${AUTH_TOTP_ISSUER:-DjinnBot}
@@ -73,7 +176,8 @@ services:
       - CORS_ORIGINS=${CORS_ORIGINS:-*}
       - DJINNBOT_VERSION=${DJINNBOT_VERSION:-latest}
     volumes:
-      - djinnbot-data:/data
+      # JuiceFS-backed data directory (host bind mount from FUSE)
+      - juicefs-data:/data
       - ./pipelines:/pipelines
       - ./agents:/agents
       - ./skills:/skills:ro
@@ -85,6 +189,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      juicefs-mount:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/v1/status"]
       interval: 15s
@@ -92,11 +198,14 @@ services:
       retries: 3
 
   engine:
+    # Engine uses QMDR (remote qmd) for ClawVault semantic search
+    # Embeddings/reranking via OpenRouter API - no GPU or local inference required
     image: ghcr.io/basedatum/djinnbot/engine:${DJINNBOT_VERSION:-latest}
     cap_add:
       - SYS_ADMIN
     container_name: djinnbot-engine
     environment:
+      # API Store mode - use PostgreSQL via API instead of local SQLite
       - USE_API_STORE=true
       - DJINNBOT_API_URL=http://api:8000
       - DATABASE_URL=postgresql+asyncpg://djinnbot:djinnbot@postgres:5432/djinnbot
@@ -110,6 +219,7 @@ services:
       - MOCK_RUNNER=${MOCK_RUNNER:-false}
       - USE_CONTAINER_RUNNER=${USE_CONTAINER_RUNNER:-true}
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      # QMDR Configuration - uses OpenRouter for embeddings/reranking (no local GPU needed)
       - QMD_OPENAI_API_KEY=${OPENROUTER_API_KEY}
       - QMD_OPENAI_BASE_URL=https://openrouter.ai/api/v1
       - QMD_EMBED_PROVIDER=openai
@@ -119,6 +229,7 @@ services:
       - QMD_OPENAI_MODEL=openai/gpt-4o-mini
       - QMD_QUERY_EXPANSION_PROVIDER=openai
       - QMD_ALLOW_SQLITE_EXTENSIONS=1
+      # HOME=/data puts the qmd index at /data/.cache/qmd/index.sqlite (on the shared volume).
       - HOME=/data
       - SLACK_CHANNEL_ID=${SLACK_CHANNEL_ID:-}
       - SLACK_CHIEKO_BOT_TOKEN=${SLACK_CHIEKO_BOT_TOKEN:-}
@@ -141,25 +252,39 @@ services:
       - SLACK_YANG_APP_TOKEN=${SLACK_YANG_APP_TOKEN:-}
       - SLACK_YUKIHIRO_BOT_TOKEN=${SLACK_YUKIHIRO_BOT_TOKEN:-}
       - SLACK_YUKIHIRO_APP_TOKEN=${SLACK_YUKIHIRO_APP_TOKEN:-}
+      # Unified sandbox directory - each agent gets /data/sandboxes/{agentId}/
       - SANDBOXES_DIR=/data/sandboxes
+      # Project workspaces (git repos for each project)
       - WORKSPACES_DIR=/data/workspaces
+      # Shared runs for pipeline collaboration (run worktrees)
       - SHARED_RUNS_DIR=/data/runs
       - GITHUB_TOKEN=${GITHUB_TOKEN:-}
       - GITHUB_USER=${GITHUB_USER:-djinnbot}
       - LOG_LEVEL=${LOG_LEVEL:-DEBUG}
+      # MCP / mcpo integration
       - MCPO_API_KEY=${MCPO_API_KEY:-changeme}
       - MCPO_BASE_URL=http://djinnbot-mcpo:8000
       - MCPO_CONFIG_PATH=/data/mcp/config.json
-      - DJINNBOT_API_URL=http://api:8000
+      # Internal service-to-service auth token
       - ENGINE_INTERNAL_TOKEN=${ENGINE_INTERNAL_TOKEN:-}
       # Docker image for agent runtime containers (overridable via dashboard or env)
       - AGENT_RUNTIME_IMAGE=${AGENT_RUNTIME_IMAGE:-ghcr.io/basedatum/djinnbot/agent-runtime:${DJINNBOT_VERSION:-latest}}
+      # ── JuiceFS direct-mount for agent containers ──
+      # Agent containers mount JuiceFS subdirectories directly over the network
+      # (no Docker volume indirection). The engine passes these credentials when
+      # spawning containers via ContainerManager.
+      - JFS_META_URL=redis://redis:6379/2
+      - JFS_AGENT_CACHE_SIZE=${JFS_AGENT_CACHE_SIZE:-2048}
     volumes:
-      - djinnbot-data:/data
+      # JuiceFS-backed data directory (host bind mount from FUSE)
+      - juicefs-data:/data
       - ./pipelines:/pipelines:ro
       - ./agents:/agents:ro
       - ./skills:/skills:ro
+      # MCP config directory — same bind-mount as mcpo so the engine can write config.json
+      # and mcpo picks it up immediately via hot-reload.
       - ./mcp:/data/mcp
+      # Docker socket for spawning agent containers (required for USE_CONTAINER_RUNNER=true)
       - /var/run/docker.sock:/var/run/docker.sock
       # Compose files mounted for self-update (engine runs docker compose from /compose)
       - ./docker-compose.ghcr.yml:/compose/docker-compose.ghcr.yml:ro
@@ -171,6 +296,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      juicefs-mount:
+        condition: service_healthy
     restart: unless-stopped
 
   mcpo:
@@ -178,20 +305,30 @@ services:
     platform: linux/amd64
     container_name: djinnbot-mcpo
     environment:
+      # Pass secrets needed by MCP servers through to the container.
+      # mcpo substitutes ${VAR} references in config.json env blocks.
       - GITHUB_TOKEN=${GITHUB_TOKEN:-}
+    # mcpo reads config.json from the shared data volume.
+    # --hot-reload watches the file for changes and reloads servers without downtime.
+    # The engine writes /data/mcp/config.json via the MCP manager.
     command: >
       --config /data/mcp/config.json
       --hot-reload
       --port 8000
       --api-key "${MCPO_API_KEY:-changeme}"
     ports:
-      - "${BIND_HOST:-127.0.0.1}:${MCPO_PORT:-8001}:8000"
+      - "${BIND_HOST:-0.0.0.0}:${MCPO_PORT:-8001}:8000"
     volumes:
-      - djinnbot-data:/data
+      - juicefs-data:/data
+      # Bind-mount the project-root ./mcp/ directory so config.json is always
+      # readable at /data/mcp/config.json without needing it in the Docker volume.
+      # The engine also writes to this path when servers are added via the UI.
       - ./mcp:/data/mcp
     networks:
       - djinnbot_default
     restart: unless-stopped
+    # mcpo starts even if config.json doesn't exist yet — it will be created by the engine.
+    # We use unless-stopped so it comes back after the engine rewrites config.json.
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:8000/docs"]
       interval: 15s
@@ -205,9 +342,10 @@ services:
     environment:
       # Runtime API URL injection — no rebuild needed for custom domains.
       # The entrypoint.sh script writes this into config.js at container startup.
+      # Set in .env or override: VITE_API_URL=https://djinn.example.com docker compose up -d
       - VITE_API_URL=${VITE_API_URL:-http://localhost:8000}
     ports:
-      - "${BIND_HOST:-127.0.0.1}:${DASHBOARD_PORT:-3000}:80"
+      - "${BIND_HOST:-0.0.0.0}:${DASHBOARD_PORT:-3000}:80"
     networks:
       - djinnbot_default
     depends_on:
@@ -230,4 +368,6 @@ networks:
 volumes:
   postgres-data:
   redis-data:
-  djinnbot-data:
+  rustfs-data:
+  juicefs-cache:
+  juicefs-data:

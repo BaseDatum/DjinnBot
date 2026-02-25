@@ -78,6 +78,27 @@ def status(ctx: typer.Context):
             "green" if redis_ok else "red",
         )
 
+        # Storage backend (JuiceFS + RustFS) — present when build-from-source mode
+        storage = result.get("storage")
+        if storage:
+            jfs_ok = storage.get("juicefs_mounted", False)
+            print_status(
+                "JuiceFS",
+                "mounted" if jfs_ok else "not mounted",
+                "green" if jfs_ok else "red",
+            )
+            rustfs_ok = storage.get("rustfs_healthy", False)
+            print_status(
+                "RustFS",
+                "healthy" if rustfs_ok else "unhealthy",
+                "green" if rustfs_ok else "red",
+            )
+            if storage.get("juicefs_volume"):
+                print_status("JFS Volume", storage["juicefs_volume"])
+            data_path = storage.get("data_path")
+            if data_path:
+                print_status("Data Path", data_path)
+
         print_status("Active Runs", str(result.get("active_runs", 0)))
         print_status("Pipelines", str(result.get("total_pipelines", 0)))
         print_status("Agents", str(result.get("total_agents", 0)))

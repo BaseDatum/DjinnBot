@@ -758,11 +758,41 @@ async def status():
     # Version info — baked in at Docker build time, falls back to env or "dev"
     api_version = os.getenv("DJINNBOT_BUILD_VERSION", "dev")
 
+    # Storage backend health (JuiceFS + RustFS)
+    storage_status = None
+    data_path = os.getenv("DJINN_DATA_PATH", "/data")
+    try:
+        jfs_mounted = os.path.ismount(data_path)
+        # Also verify the mount is functional by checking readability
+        if jfs_mounted:
+            os.listdir(data_path)
+        rustfs_healthy = False
+        try:
+            import httpx
+
+            resp = httpx.get("http://rustfs:9000/health", timeout=3)
+            rustfs_healthy = resp.status_code == 200
+        except Exception:
+            pass
+        storage_status = {
+            "juicefs_mounted": jfs_mounted,
+            "rustfs_healthy": rustfs_healthy,
+            "data_path": data_path,
+            "juicefs_volume": os.getenv("JUICEFS_VOLUME_NAME", ""),
+        }
+    except Exception:
+        storage_status = {
+            "juicefs_mounted": False,
+            "rustfs_healthy": False,
+            "data_path": data_path,
+        }
+
     return {
         "status": "ok",
         "version": api_version,
         "engine_version": engine_version or "unknown",
         "redis_connected": redis_ok,
+        "storage": storage_status,
         "active_runs": active_runs,
         "total_pipelines": total_pipelines,
         "total_agents": total_agents,

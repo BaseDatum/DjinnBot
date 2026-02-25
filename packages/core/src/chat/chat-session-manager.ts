@@ -1581,7 +1581,12 @@ export class ChatSessionManager {
     const consolidationPrompt = [
       'This conversation is ending (idle timeout). Before the session closes:',
       '',
-      'Review our conversation and use the `remember` tool to save anything genuinely',
+      '**1. Rate memories you used.** If you recalled any memories during this conversation,',
+      'use `rate_memories` to rate which ones were actually useful. This directly improves',
+      'future retrieval — useful memories rank higher, unhelpful ones get deprioritized.',
+      'If you searched for something and couldn\'t find it, report that as a knowledge gap.',
+      '',
+      '**2. Save new memories.** Use the `remember` tool to save anything genuinely',
       'worth keeping — insights about this person, decisions made, things you learned,',
       'preferences or context about the relationship. Think like a person who just finished',
       'a meaningful conversation and is jotting down the important bits.',

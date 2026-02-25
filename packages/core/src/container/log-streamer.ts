@@ -28,7 +28,7 @@ const MERGED_MAXLEN = 10000;
 const CONTAINER_LIST_TTL = 120;
 
 /** Service type inferred from container name */
-type ServiceType = 'api' | 'engine' | 'dashboard' | 'mcpo' | 'postgres' | 'redis' | 'agent-runtime' | 'unknown';
+type ServiceType = 'api' | 'engine' | 'dashboard' | 'mcpo' | 'postgres' | 'redis' | 'juicefs' | 'rustfs' | 'agent-runtime' | 'unknown';
 
 interface TrackedContainer {
   containerId: string;
@@ -434,6 +434,8 @@ export class ContainerLogStreamer {
     if (name.includes('mcpo') && name.startsWith('djinnbot-')) return 'mcpo';
     if (name.includes('postgres') && name.startsWith('djinnbot-')) return 'postgres';
     if (name.includes('redis') && name.startsWith('djinnbot-')) return 'redis';
+    if (name.includes('juicefs') && name.startsWith('djinnbot-')) return 'juicefs';
+    if (name.includes('rustfs') && name.startsWith('djinnbot-')) return 'rustfs';
     if (name.startsWith('djinn-run-')) return 'agent-runtime';
     return 'unknown';
   }

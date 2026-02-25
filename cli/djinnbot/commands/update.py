@@ -224,7 +224,8 @@ def update(
         console.print(
             "[yellow]This installation is configured to build from source.[/yellow]\n"
             "[dim]To update, pull the latest code and rebuild:[/dim]\n"
-            "[dim]  cd {repo_dir} && git pull && docker compose up -d --build[/dim]\n\n"
+            f"[dim]  cd {repo_dir} && git pull && docker compose up -d --build[/dim]\n\n"
+            "[dim]Storage volumes (JuiceFS/RustFS, postgres, redis) are preserved across rebuilds.[/dim]\n"
             "[dim]To switch to pre-built images, re-run: djinn setup[/dim]"
         )
         raise typer.Exit(1)
@@ -386,4 +387,6 @@ def update(
     console.print(
         f"\n[dim]Installation: {repo_dir}[/dim]\n[dim]Version: {target_version}[/dim]"
     )
-    console.print("[dim]Data volumes have been preserved.[/dim]")
+    console.print(
+        "[dim]Data volumes have been preserved (postgres, redis, JuiceFS/RustFS).[/dim]"
+    )

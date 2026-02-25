@@ -109,11 +109,23 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     imagemagick \
     # PDF tools
     poppler-utils \
+    # FUSE — required for JuiceFS in-container mounts
+    fuse3 \
     # Misc development
     make \
     patch \
     diffutils \
     && rm -rf /var/lib/apt/lists/*
+
+# Install JuiceFS CE client — each container mounts its own subdirectories
+# directly over the network (Redis metadata + RustFS S3), providing true
+# filesystem-level isolation between agents.
+RUN ARCH=$(dpkg --print-architecture) && \
+    JFS_VERSION="1.3.1" && \
+    curl -fsSL "https://github.com/juicedata/juicefs/releases/download/v${JFS_VERSION}/juicefs-${JFS_VERSION}-linux-${ARCH}.tar.gz" -o /tmp/juicefs.tar.gz && \
+    tar -xzf /tmp/juicefs.tar.gz -C /usr/local/bin juicefs && \
+    chmod +x /usr/local/bin/juicefs && \
+    rm /tmp/juicefs.tar.gz
 
 # Install Node.js 22
 RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
@@ -214,10 +226,12 @@ COPY --from=builder /build/packages/agent-runtime/dist ./packages/agent-runtime/
 RUN test -f /app/node_modules/.bin/clawvault && \
     ln -sf /app/node_modules/.bin/clawvault /usr/local/bin/clawvault || true
 
-# Create mount points
-# Note: /home/agent is created here for build-time config (git, bun, etc.)
-# but will be REPLACED by a symlink at container startup (see manager.ts Cmd)
-RUN mkdir -p /workspace /vault /shared /home/agent
+# Create mount points for JuiceFS subdirectory mounts.
+# Each directory becomes an independent FUSE mount point at container startup,
+# giving the agent access only to its own data (true filesystem isolation).
+# The shared vault is NOT mounted — agents access it via the DjinnBot API.
+RUN mkdir -p /home/agent /home/agent/clawvault \
+    /home/agent/run-workspace /home/agent/project-workspace
 
 # Version injected at build time by CI (git tag)
 ARG BUILD_VERSION=dev
@@ -225,15 +239,12 @@ ENV DJINNBOT_BUILD_VERSION=${BUILD_VERSION}
 
 # Environment
 ENV NODE_ENV=production
-ENV WORKSPACE_PATH=/workspace
-ENV VAULT_PATH=/vault
-ENV SHARED_PATH=/shared
+ENV WORKSPACE_PATH=/home/agent/run-workspace
 ENV HOME=/home/agent
 ENV QMD_ALLOW_SQLITE_EXTENSIONS=1
 
-# Allow git to work with directories owned by other users (Docker volumes).
-# Use --system (/etc/gitconfig) so the setting survives at runtime regardless of
-# what HOME is pointed at (at runtime /home/agent is replaced by a symlink).
+# Allow git to work with directories owned by other users (JuiceFS FUSE mounts).
+# Use --system (/etc/gitconfig) so the setting applies globally.
 RUN git config --system --add safe.directory '*'
 
 # Verify tools
@@ -243,10 +254,10 @@ RUN echo "=== Agent Runtime Tools ===" && \
     rg --version | head -1 && fd --version && bat --version | head -1 && \
     jq --version && yq --version | head -1 && \
     bun --version && playwright --version && \
+    juicefs version && \
     qmd --version 2>/dev/null || echo "qmd: installed" && \
     echo "=== All tools verified! ==="
 
 # Use CMD instead of ENTRYPOINT so that manager.ts can provide a Cmd that
-# runs shell setup (symlinks, mkdir) before starting the node process.
-# With ENTRYPOINT, the Cmd is passed as arguments to ENTRYPOINT, not run instead.
+# runs JuiceFS mounts + git credential setup before starting the node process.
 CMD ["node", "/app/packages/agent-runtime/dist/entrypoint.js"]

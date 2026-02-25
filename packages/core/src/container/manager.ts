@@ -1,4 +1,5 @@
 import Docker from 'dockerode';
+import { mkdirSync } from 'node:fs';
 import { Redis, type Redis as RedisType } from 'ioredis';
 import { channels } from '../redis-protocol/index.js';
 
@@ -201,48 +202,78 @@ export class ContainerManager {
         // 404 = container doesn't exist, proceed to create normally
       }
 
-      // When running inside Docker (as engine does), we use named volumes
-      // instead of bind mounts since bind mounts would reference paths
-      // inside the engine container, not on the Docker host.
+      // ── JuiceFS direct-mount architecture ────────────────────────────────
       //
-      // UNIFIED VOLUME ARCHITECTURE:
-      // - Single volume: djinnbot_djinnbot-data → /djinnbot-data
-      // - All data lives within subdirectories of this volume:
-      //   * /djinnbot-data/runs/         - run git worktrees
-      //   * /djinnbot-data/workspaces/   - project git repositories
-      //   * /djinnbot-data/vaults/       - agent ClawVault memories (central storage)
-      //   * /djinnbot-data/sandboxes/    - agent home directories
+      // Each agent container mounts JuiceFS subdirectories directly over the
+      // network (Redis metadata + RustFS S3 object storage).  This gives true
+      // filesystem-level isolation: the kernel's FUSE mount namespace prevents
+      // agents from accessing each other's data — no symlinks, no shared volume.
       //
-      // Why single volume?
-      // We previously had separate volumes (runs-data, workspaces-data, sandboxes-data)
-      // but mounting both a parent directory AND subdirectories as separate volumes
-      // causes mount shadowing - the subdirectory mount hides the parent's contents.
-      // This led to data inconsistency where the API saw different data than agents.
+      // The container gets CAP_SYS_ADMIN + /dev/fuse and runs `juicefs mount
+      // --subdir <path>` for each mount point before starting the agent process.
       //
-      // Agent home directory structure (created by entrypoint cmd below):
-      // /home/agent/                              <- Symlinked to /djinnbot-data/sandboxes/{agentId}
-      // ├── .cache/qmd/                          <- Symlinked to /djinnbot-data/.cache/qmd (shared index)
-      // ├── .config/                             <- Symlinked to /djinnbot-data/.config (qmd index.yml lives here)
-      // ├── clawvault/
-      // │   ├── {agentId}/                       <- Symlinked to /djinnbot-data/vaults/{agentId}  ← CLAWVAULT_PATH
-      // │   └── shared/                          <- Symlinked to /djinnbot-data/vaults/shared
-      // ├── project-workspace/                   <- Symlinked to /djinnbot-data/workspaces/{projectId} (if project run)
-      // └── run-workspace/                       <- Symlinked to /djinnbot-data/runs/{runId} (the git worktree)
+      // Mount table (each is an independent FUSE mount):
+      //   juicefs --subdir /sandboxes/{agentId}    → /home/agent
+      //   juicefs --subdir /vaults/{agentId}       → /home/agent/clawvault
+      //   juicefs --subdir /runs/{runId}            → /home/agent/run-workspace
+      //   juicefs --subdir /workspaces/{projectId}  → /home/agent/project-workspace  (optional)
       //
-      // run-workspace is always the git worktree for this specific run.
-      // project-workspace is the full project repo (for history, cherry-pick, etc.) — only set for project runs.
+      // The shared vault is NOT mounted — agents access it via the DjinnBot API.
+      // This provides a real security boundary: agents can only read/write shared
+      // knowledge through validated API endpoints, not by touching the filesystem.
+
+      // JuiceFS metadata URL — same Redis DB 2 used by the compose juicefs-mount service.
+      const jfsMetaUrl = process.env.JFS_META_URL || 'redis://redis:6379/2';
 
       // Resolve which path maps to run-workspace inside the container.
       // Prefer the explicit runWorkspacePath; fall back to the legacy workspacePath field.
       const effectiveRunPath = runWorkspacePath ?? workspacePath;
 
-      // Extract relative path from /data/... to use with djinnbot-data volume.
+      // Extract relative path from /data/... to use as JuiceFS subdir.
       // e.g. "/data/runs/run_xxx" → "runs/run_xxx"
       const runRelative = effectiveRunPath.replace('/data/', '');
 
       // Project workspace relative path (only used when projectWorkspacePath is provided).
       // e.g. "/data/workspaces/proj_xxx" → "workspaces/proj_xxx"
       const projectRelative = projectWorkspacePath ? projectWorkspacePath.replace('/data/', '') : null;
+
+      // ── Pre-create JuiceFS subdirectories on the engine's mount ──────────
+      // `juicefs mount --subdir` requires the subdirectory to already exist.
+      // The engine has the JuiceFS volume mounted at /data, so we create
+      // the necessary paths here before the agent container tries to mount them.
+      const dataPath = process.env.DJINN_DATA_PATH || process.env.DATA_DIR || '/data';
+      const dirsToEnsure = [
+        `${dataPath}/sandboxes/${agentId}`,
+        `${dataPath}/vaults/${agentId}`,
+        `${dataPath}/${runRelative}`,
+        ...(projectRelative ? [`${dataPath}/${projectRelative}`] : []),
+      ];
+      for (const dir of dirsToEnsure) {
+        try { mkdirSync(dir, { recursive: true }); } catch { /* may already exist */ }
+      }
+
+      // ── Build the JuiceFS mount table ────────────────────────────────────
+      // Each entry: [subdir, mountpoint, readOnly?]
+      const jfsMounts: Array<[string, string, boolean]> = [
+        [`/sandboxes/${agentId}`, '/home/agent', false],
+        [`/vaults/${agentId}`, '/home/agent/clawvault', false],
+        [`/${runRelative}`, '/home/agent/run-workspace', false],
+      ];
+      if (projectRelative) {
+        jfsMounts.push([`/${projectRelative}`, '/home/agent/project-workspace', false]);
+      }
+
+      // Serialize the mount table as a compact env var for the boot script.
+      // Format: "subdir:mountpoint:ro|rw;subdir:mountpoint:ro|rw;..."
+      const jfsMountSpec = jfsMounts
+        .map(([subdir, target, ro]) => `${subdir}:${target}:${ro ? 'ro' : 'rw'}`)
+        .join(';');
+
+      // JuiceFS cache tuning for agent containers — smaller than the central
+      // mount since each container has its own cache.
+      const jfsCacheSize = process.env.JFS_AGENT_CACHE_SIZE || '2048'; // 2GB default
+
+      const apiUrl = config.env?.DJINNBOT_API_URL || process.env.DJINNBOT_API_URL || 'http://api:8000';
 
       const containerOpts: Docker.ContainerCreateOptions = {
         Image: image,
@@ -252,20 +283,25 @@ export class ContainerManager {
           `AGENT_ID=${agentId}`,
           `REDIS_URL=${process.env.REDIS_URL || 'redis://redis:6379'}`,
           `WORKSPACE_PATH=/home/agent/run-workspace`,
-          // ClawVault path environment variables
-          // These are consumed by agent-runtime/src/entrypoint.ts
-          // CLAWVAULT_PATH points to the personal vault directly so that
-          // `clawvault search` without --vault resolves the correct vault.
-          `CLAWVAULT_PATH=/home/agent/clawvault/${agentId}`,
-          `CLAWVAULT_PERSONAL=/home/agent/clawvault/${agentId}`,
-          `CLAWVAULT_SHARED=/home/agent/clawvault/shared`,
+          // ClawVault path — personal vault only (mounted via JuiceFS).
+          // The shared vault is accessed via the DjinnBot API, not mounted.
+          `CLAWVAULT_PATH=/home/agent/clawvault`,
           `HOME=/home/agent`,
+          // DjinnBot API URL — used by agent-runtime for shared vault operations
+          // and other API calls (git credentials, task management, etc.)
+          `DJINNBOT_API_URL=${apiUrl}`,
           // Git identity — ensures commits made by the agent inside the container
           // are attributed to the agent rather than failing with "user not configured".
           `GIT_AUTHOR_NAME=${agentId}`,
           `GIT_AUTHOR_EMAIL=${agentId}@djinnbot.local`,
           `GIT_COMMITTER_NAME=djinnbot`,
           `GIT_COMMITTER_EMAIL=djinnbot@local`,
+          // ── JuiceFS connection credentials ──────────────────────────────────
+          // The boot script uses these to run `juicefs mount --subdir` for each
+          // mount point before starting the agent process.
+          `JFS_META_URL=${jfsMetaUrl}`,
+          `JFS_MOUNT_SPEC=${jfsMountSpec}`,
+          `JFS_CACHE_SIZE=${jfsCacheSize}`,
           // QMD/QMDR config — injected from process.env, which is populated at engine
           // startup from the DB (syncProviderApiKeysToDb) so DB-configured values are
           // reflected here even if the original env var was absent at boot time.
@@ -280,115 +316,56 @@ export class ContainerManager {
           ...Object.entries(env).map(([k, v]) => `${k}=${v}`),
         ],
         HostConfig: {
-          // SECURITY NOTES:
-          // ================
-          // We mount the main djinnbot-data volume for agent access. Docker volumes
-          // don't support true subpath isolation (unlike Kubernetes). This means:
-          //
-          // 1. /djinnbot-data contains ALL agent vaults and sandboxes - agents could
-          //    theoretically access other agents' data by navigating to
-          //    /djinnbot-data/vaults/{other-agent}/ or /djinnbot-data/sandboxes/{other-agent}/
-          //
-          // 2. We mitigate this by:
-          //    a) Setting up symlinks so /vault, /shared, /home/agent point to correct paths
-          //    b) NOT exposing /djinnbot-data in environment variables
-          //    c) Running agents with limited permissions (non-root) - TODO
-          //    d) Agents are expected to use symlinked paths, not raw volume paths
-          //
-          // 3. For TRUE isolation, we would need either:
-          //    a) Run engine on host (not in Docker) with bind mounts to specific paths
-          //    b) Use a read-only base + copy-on-write overlay per agent
-          //    c) Use nsjail or gVisor for sandboxing
-          //
-          // Mount structure:
-          // - djinnbot_djinnbot-data → /djinnbot-data (single unified volume)
-          //
-          // The entrypoint command creates symlinks to provide clean paths for agents:
-          //   /workspace, /vault, /shared, /home/agent → subdirectories in /djinnbot-data
-          Mounts: [
-            // UNIFIED DATA VOLUME - contains everything:
-            //   /djinnbot-data/sandboxes/{agentId}/          - agent home directories
-            //   /djinnbot-data/vaults/{agentId}/             - ClawVault memories (central storage)
-            //   /djinnbot-data/vaults/shared/                - shared team memories
-            //   /djinnbot-data/workspaces/{projId}/          - project git repos
-            //   /djinnbot-data/runs/{runId}/                 - run git worktrees
-            //
-            // Vaults are stored centrally at /djinnbot-data/vaults/ (for API/dashboard access)
-            // and symlinked into each agent's home under /home/agent/clawvault/.
-            //
-            // NOTE: This gives agents access to ALL data (other agents' vaults, etc.)
-            // Security isolation is soft - via symlinks and convention, not hard mounts.
-            // For true isolation, we'd need nsjail, gVisor, or host-side bind mounts.
-            {
-              Type: 'volume',
-              Source: 'djinnbot_djinnbot-data',
-              Target: '/djinnbot-data',
-              ReadOnly: false,
-            },
-          ],
+          // No Docker volume mounts — each container mounts JuiceFS directly
+          // over the network using its own FUSE client.
           NetworkMode: 'djinnbot_djinnbot_default',
           Memory: memoryLimit ?? DEFAULT_MEMORY_LIMIT,
           NanoCpus: (cpuLimit ?? DEFAULT_CPU_LIMIT) * 1e9,
+          // CAP_SYS_ADMIN + /dev/fuse for JuiceFS FUSE mounts inside the container.
+          // This is the same privilege level the juicefs-mount compose service uses.
+          CapAdd: ['SYS_ADMIN'],
+          Devices: [{ PathOnHost: '/dev/fuse', PathInContainer: '/dev/fuse', CgroupPermissions: 'rwm' }],
           // Chromium (Playwright) uses /dev/shm heavily for rendering.
           // Docker defaults /dev/shm to 64MB which causes SIGBUS crashes on
           // non-trivial pages. 256MB is sufficient for typical headless usage.
           ShmSize: 256 * 1024 * 1024,
           AutoRemove: true,
         },
-        // Set up unified agent home directory structure with symlinks.
-        // Creates /home/agent with organized subdirectories for vaults and workspaces.
-        // The agent's home directory is actually at /djinnbot-data/sandboxes/{agentId}
-        // and contains symlinks to the central vault storage and workspace directories.
+        // Boot script: mount JuiceFS subdirectories, set up git credentials, start agent.
         Cmd: [
           'sh', '-c',
-          // Exit immediately if any command fails (prevents starting in broken state)
+          // Exit immediately if any command fails
           `set -e && ` +
-          // Symlink /data → /djinnbot-data so git's absolute worktree paths (written by the
-          // engine, which mounts the volume at /data) resolve correctly inside the container
-          // (which mounts the same volume at /djinnbot-data).
-          `ln -sfn /djinnbot-data /data && ` +
-          // Create the sandbox directory structure.
-          // NOTE: Do NOT mkdir run-workspace or project-workspace here — they are
-          // replaced by symlinks below. Previous runs leave them as dangling
-          // symlinks (target worktree deleted), and mkdir -p fails with EEXIST
-          // on dangling symlinks, crashing the container at startup.
-          `rm -f /djinnbot-data/sandboxes/${agentId}/run-workspace ` +
-          `/djinnbot-data/sandboxes/${agentId}/project-workspace && ` +
-          `mkdir -p /djinnbot-data/sandboxes/${agentId}/clawvault ` +
-          `/djinnbot-data/sandboxes/${agentId}/task-workspaces && ` +
-          // Ensure central vault directories and the run worktree directory exist
-          `mkdir -p /djinnbot-data/vaults/${agentId} /djinnbot-data/vaults/shared /djinnbot-data/${runRelative} && ` +
-          // Symlink agent home to sandbox directory (rm -rf first in case it exists as a directory)
-          `rm -rf /home/agent && ln -sfn /djinnbot-data/sandboxes/${agentId} /home/agent && ` +
-          // Symlink entire vault directories (not contents) - cleaner and ensures all files are accessible
-          `rm -rf /home/agent/clawvault/${agentId} && ln -sfn /djinnbot-data/vaults/${agentId} /home/agent/clawvault/${agentId} && ` +
-          `rm -rf /home/agent/clawvault/shared && ln -sfn /djinnbot-data/vaults/shared /home/agent/clawvault/shared && ` +
-          // Symlink run-workspace → the run's git worktree (/djinnbot-data/runs/{runId})
-          `rm -rf /home/agent/run-workspace && ln -sfn /djinnbot-data/${runRelative} /home/agent/run-workspace && ` +
-          // Symlink project-workspace → the project's main git repo (only for project runs)
-          (projectRelative
-            ? `mkdir -p /djinnbot-data/${projectRelative} && rm -rf /home/agent/project-workspace && ln -sfn /djinnbot-data/${projectRelative} /home/agent/project-workspace && `
-            : ``) +
-          // Symlink the qmd index so agents share the same index as the engine
-          // Engine stores index at /data/.cache/qmd = /djinnbot-data/.cache/qmd in containers
-          `mkdir -p /home/agent/.cache /djinnbot-data/.cache/qmd && ` +
-          `rm -rf /home/agent/.cache/qmd && ln -sfn /djinnbot-data/.cache/qmd /home/agent/.cache/qmd && ` +
-          // Symlink .config so qmd can find its index.yml (collection registry)
-          // qmd resolves config dir as ~/.config/qmd; the registry lives on the
-          // shared volume at /djinnbot-data/.config
-          `mkdir -p /djinnbot-data/.config && ` +
-          `rm -rf /home/agent/.config && ln -sfn /djinnbot-data/.config /home/agent/.config && ` +
+          // ── Mount JuiceFS subdirectories ─────────────────────────────────────
+          // Parse JFS_MOUNT_SPEC (semicolon-delimited entries of subdir:target:mode)
+          // and mount each as an independent FUSE filesystem.
+          `echo "[boot] Mounting JuiceFS subdirectories..." && ` +
+          `IFS=';' && for entry in $JFS_MOUNT_SPEC; do ` +
+          `  subdir=$(echo "$entry" | cut -d: -f1) && ` +
+          `  target=$(echo "$entry" | cut -d: -f2) && ` +
+          `  mode=$(echo "$entry" | cut -d: -f3) && ` +
+          `  ro_flag="" && ` +
+          `  if [ "$mode" = "ro" ]; then ro_flag="--read-only"; fi && ` +
+          `  echo "[boot]   $subdir -> $target ($mode)" && ` +
+          `  mkdir -p "$target" && ` +
+          `  juicefs mount ` +
+          `    --subdir "$subdir" ` +
+          `    --cache-dir /tmp/jfscache ` +
+          `    --cache-size "$JFS_CACHE_SIZE" ` +
+          `    --no-usage-report ` +
+          `    --attr-cache 1 ` +
+          `    --entry-cache 1 ` +
+          `    --dir-entry-cache 1 ` +
+          `    --background ` +
+          `    $ro_flag ` +
+          `    "$JFS_META_URL" ` +
+          `    "$target" && ` +
+          `  echo "[boot]   mounted $target" || ` +
+          `  { echo "[boot] FATAL: failed to mount $subdir at $target"; exit 1; }; ` +
+          `done && unset IFS && ` +
+          `echo "[boot] All JuiceFS mounts ready" && ` +
           // ── Git credential helper ───────────────────────────────────────────
-          // Pipeline runs: engine injects credentials into the remote URL before push.
-          // Pulse sessions: agent pushes directly from inside the container, so we
-          // install a global git credential helper that calls the DjinnBot API at
-          // push time for a fresh GitHub App token.
-          //
-          // The script is base64-encoded so it survives sh -c quoting intact.
-          // API_URL and AGENT_ID are substituted here (build time) so the script
-          // is self-contained once written to disk.
           (() => {
-            const apiUrl = config.env?.DJINNBOT_API_URL || process.env.DJINNBOT_API_URL || 'http://api:8000';
             const script = [
               '#!/bin/sh',
               '# djinnbot-git-credential: fetches a GitHub App token from the DjinnBot API.',
@@ -414,7 +391,6 @@ export class ContainerManager {
               `git config --global credential.helper /usr/local/bin/djinnbot-git-credential && `
             );
           })() +
-          // ── End credential helper ────────────────────────────────────────────
           // Start the agent runtime
           `exec node /app/packages/agent-runtime/dist/entrypoint.js`
         ],

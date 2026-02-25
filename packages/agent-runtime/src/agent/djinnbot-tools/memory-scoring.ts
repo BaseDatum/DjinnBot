@@ -1,16 +1,19 @@
 /**
  * MemoryRetrievalTracker — tracks which memories were surfaced during
- * recall/wake calls within a step, then flushes the batch to the API
- * with the step outcome (success/failure) after the step completes.
+ * recall/wake calls within a step, then flushes retrieval analytics to the
+ * API.  Also sends agent-driven valuations (rate_memories tool) and
+ * provides score-blending at recall time.
  *
- * Also provides score-blending: fetches adaptive scores from the API
- * and merges them with raw BM25/vector scores at recall time.
+ * Scoring is driven ENTIRELY by agent valuations — the rate_memories tool
+ * posts explicit "useful / not useful" judgments.  Step success/failure is
+ * NOT used as a scoring signal.
  *
  * Architecture:
  *   - Shared instance between memory tools and the runner
  *   - Tools call track() for each surfaced memory
- *   - Runner calls flush() after step completes with the outcome
- *   - Tools call getAdaptiveScores() to blend scores at recall time
+ *   - Runner calls flush() after step completes (analytics only, no outcome)
+ *   - rate_memories tool calls submitValuations() with agent ratings
+ *   - recall tool calls getAdaptiveScores() to blend scores at recall time
  */
 
 import { authFetch } from '../../api/auth-fetch.js';
@@ -26,11 +29,18 @@ export interface TrackedRetrieval {
 export interface AdaptiveScore {
   memoryId: string;
   accessCount: number;
-  successCount: number;
-  failureCount: number;
-  successRate: number;
+  valuationCount: number;
+  usefulCount: number;
+  notUsefulCount: number;
+  usefulnessRate: number;
   adaptiveScore: number;
   lastAccessed: number;
+}
+
+export interface MemoryValuationInput {
+  memoryId: string;
+  memoryTitle?: string;
+  useful: boolean;
 }
 
 export class MemoryRetrievalTracker {
@@ -65,11 +75,22 @@ export class MemoryRetrievalTracker {
   }
 
   /**
-   * Flush all tracked retrievals to the API with the step outcome.
+   * Get the list of tracked retrievals (for the rate_memories tool to
+   * know which memories were surfaced this step).
+   */
+  get tracked(): ReadonlyArray<TrackedRetrieval> {
+    return this.retrievals;
+  }
+
+  /**
+   * Flush all tracked retrievals to the API for analytics and access counting.
    * Called by the runner after each step completes.
    * Fire-and-forget — errors are logged but don't block.
+   *
+   * NOTE: No step outcome is sent.  Scoring is driven entirely by agent
+   * valuations via submitValuations().
    */
-  async flush(stepSuccess: boolean | null): Promise<void> {
+  async flush(): Promise<void> {
     if (this.retrievals.length === 0) return;
 
     const batch = this.retrievals.splice(0);
@@ -81,8 +102,6 @@ export class MemoryRetrievalTracker {
       agent_id: this.agentId,
       session_id: sessionId,
       run_id: runId,
-      request_id: undefined, // Could be wired from requestIdRef if needed
-      step_success: stepSuccess,
       retrievals: batch.map(r => ({
         memory_id: r.memoryId,
         memory_title: r.memoryTitle,
@@ -100,6 +119,63 @@ export class MemoryRetrievalTracker {
       });
     } catch (err) {
       console.warn('[MemoryRetrievalTracker] Failed to flush retrievals:', err);
+    }
+  }
+
+  /**
+   * Submit agent-driven memory valuations to the API.
+   * Called by the rate_memories tool.
+   */
+  async submitValuations(
+    valuations: MemoryValuationInput[],
+    gap?: string,
+    gapQuery?: string,
+  ): Promise<{ ok: boolean; valuationsLogged: number; gapId?: string }> {
+    const sessionId = process.env.SESSION_ID || process.env.CHAT_SESSION_ID || undefined;
+    const runId = process.env.RUN_ID || undefined;
+
+    const payload = {
+      agent_id: this.agentId,
+      session_id: sessionId,
+      run_id: runId,
+      valuations: valuations.map(v => ({
+        memory_id: v.memoryId,
+        memory_title: v.memoryTitle,
+        useful: v.useful,
+      })),
+      gap: gap || null,
+      gap_query: gapQuery || null,
+    };
+
+    try {
+      const resp = await authFetch(`${this.apiBaseUrl}/v1/internal/memory-valuations`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      if (!resp.ok) {
+        console.warn(`[MemoryRetrievalTracker] Valuation submit failed: ${resp.status}`);
+        return { ok: false, valuationsLogged: 0 };
+      }
+
+      const data = await resp.json() as {
+        ok: boolean;
+        valuations_logged: number;
+        gap_id?: string;
+      };
+
+      // Invalidate score cache since valuations changed scores
+      this.scoreCacheAge = 0;
+
+      return {
+        ok: data.ok,
+        valuationsLogged: data.valuations_logged,
+        gapId: data.gap_id,
+      };
+    } catch (err) {
+      console.warn('[MemoryRetrievalTracker] Failed to submit valuations:', err);
+      return { ok: false, valuationsLogged: 0 };
     }
   }
 
@@ -150,9 +226,10 @@ export class MemoryRetrievalTracker {
         scores: Array<{
           memory_id: string;
           access_count: number;
-          success_count: number;
-          failure_count: number;
-          success_rate: number;
+          valuation_count: number;
+          useful_count: number;
+          not_useful_count: number;
+          usefulness_rate: number;
           adaptive_score: number;
           last_accessed: number;
         }>;
@@ -172,9 +249,10 @@ export class MemoryRetrievalTracker {
         const score: AdaptiveScore = {
           memoryId: s.memory_id,
           accessCount: s.access_count,
-          successCount: s.success_count,
-          failureCount: s.failure_count,
-          successRate: s.success_rate,
+          valuationCount: s.valuation_count,
+          usefulCount: s.useful_count,
+          notUsefulCount: s.not_useful_count,
+          usefulnessRate: s.usefulness_rate,
           adaptiveScore: s.adaptive_score,
           lastAccessed: s.last_accessed,
         };
@@ -191,9 +269,9 @@ export class MemoryRetrievalTracker {
 
   /**
    * Blend raw search scores with adaptive scores.
-   * 
+   *
    * Formula: blended = rawScore * (baseFactor + boostFactor * adaptiveScore)
-   * 
+   *
    * The base and boost factors are configurable via the admin dashboard.
    * Defaults: base=0.70, boost=0.30. The server guarantees
    * adaptive_score >= floor (default 0.35), so no memory can be

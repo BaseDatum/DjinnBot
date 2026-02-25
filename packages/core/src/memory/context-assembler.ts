@@ -169,7 +169,7 @@ export class ContextAssembler {
         );
         if (memoryContext && memoryContext.trim().length > 0) {
           sections.push('## Your Knowledge Graph Memory');
-          sections.push('_Use the recall and graph_query tools to explore your memory further._');
+          sections.push('_Use the recall and graph_query tools to explore your memory further. After using recalled memories, call rate_memories to mark which were useful._');
           sections.push('');
           sections.push(memoryContext);
           sections.push('');

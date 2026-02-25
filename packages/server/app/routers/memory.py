@@ -677,6 +677,211 @@ async def vault_graph_ws(websocket: WebSocket, agent_id: str):
         watcher.remove_client(websocket)
 
 
+# ── Shared vault API endpoints for agent containers ─────────────────────────
+#
+# Agent containers do NOT mount the shared vault filesystem. Instead they
+# interact with shared knowledge through these endpoints. The engine maintains
+# the shared vault (indexing, embeddings, graph rebuilds) on its JuiceFS mount.
+#
+# IMPORTANT: These must be declared BEFORE the catch-all {agent_id}/{filename:path}
+# routes below, otherwise FastAPI matches /vaults/shared/search as
+# /vaults/{agent_id="shared"}/{filename="search"} and returns 404.
+
+
+class SharedStoreRequest(BaseModel):
+    category: str
+    title: str
+    content: str
+    frontmatter: dict | None = None
+    agent_id: str
+
+
+class SharedContextRequest(BaseModel):
+    task: str
+    limit: int = 5
+    budget: int = 4000
+    profile: str = "auto"
+    maxHops: int = 2
+
+
+@router.get("/vaults/shared/search")
+async def search_shared_vault(q: str, limit: int = 10):
+    """Search the shared vault. Used by agent containers for recall with scope=shared."""
+    shared_dir = os.path.join(VAULTS_DIR, "shared")
+    if not os.path.isdir(shared_dir):
+        return []
+
+    if not q or not q.strip():
+        raise HTTPException(status_code=400, detail="Query parameter 'q' is required")
+
+    query = q.lower()
+    results = []
+
+    for root, dirs, files in os.walk(shared_dir):
+        dirs[:] = [d for d in dirs if d not in EXCLUDED_DIRS]
+        for filename in files:
+            if not filename.endswith(".md"):
+                continue
+            filepath = os.path.join(root, filename)
+            file_content = _read_file(filepath)
+            if file_content is None:
+                continue
+
+            content_lower = file_content.lower()
+            if query in content_lower:
+                pos = content_lower.find(query)
+                start = max(0, pos - 100)
+                end = min(len(file_content), pos + len(q) + 100)
+                snippet = file_content[start:end]
+                if start > 0:
+                    snippet = "..." + snippet
+                if end < len(file_content):
+                    snippet = snippet + "..."
+
+                score = content_lower.count(query)
+                rel_path = os.path.relpath(filepath, shared_dir)
+                meta, _ = _parse_frontmatter(file_content)
+
+                results.append(
+                    {
+                        "filename": rel_path,
+                        "snippet": snippet,
+                        "score": score,
+                        "title": meta.get("title"),
+                        "category": meta.get("category") or rel_path.split(os.sep)[0]
+                        if os.sep in rel_path
+                        else None,
+                    }
+                )
+
+            if len(results) >= limit:
+                break
+        if len(results) >= limit:
+            break
+
+    results.sort(key=lambda x: x["score"], reverse=True)
+    return results[:limit]
+
+
+@router.post("/vaults/shared/store")
+async def store_shared_memory(req: SharedStoreRequest):
+    """Write a memory to the shared vault. Used by agent containers for remember(shared=true)."""
+    shared_dir = os.path.join(VAULTS_DIR, "shared")
+    os.makedirs(shared_dir, exist_ok=True)
+
+    # Build the markdown file with frontmatter
+    slug = re.sub(r"[^a-z0-9]+", "-", req.title.lower()).strip("-")
+    filename = os.path.join(req.category, f"{slug}.md")
+
+    fm = {
+        "title": req.title,
+        "category": req.category,
+        "created": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "author": req.agent_id,
+    }
+    if req.frontmatter:
+        fm.update(req.frontmatter)
+
+    fm_lines = ["---"]
+    for k, v in fm.items():
+        if isinstance(v, list):
+            fm_lines.append(f"{k}: [{', '.join(str(i) for i in v)}]")
+        else:
+            fm_lines.append(f"{k}: {v}")
+    fm_lines.append("---")
+    fm_lines.append("")
+    fm_lines.append(req.content)
+
+    filepath = os.path.join(shared_dir, filename)
+    # Verify path stays within shared vault
+    filepath = os.path.realpath(os.path.join(shared_dir, filename))
+    if not filepath.startswith(os.path.realpath(shared_dir)):
+        raise HTTPException(status_code=400, detail="Path traversal detected")
+
+    parent = os.path.dirname(filepath)
+    os.makedirs(parent, exist_ok=True)
+
+    with open(filepath, "w", encoding="utf-8") as f:
+        f.write("\n".join(fm_lines))
+
+    # Signal the engine to re-index
+    if dependencies.redis_client:
+        try:
+            await dependencies.redis_client.publish(
+                "djinnbot:vault:updated",
+                json.dumps(
+                    {
+                        "agentId": req.agent_id,
+                        "sharedUpdated": True,
+                        "timestamp": int(time.time() * 1000),
+                    }
+                ),
+            )
+        except Exception:
+            pass  # Non-fatal
+
+    return {"filename": filename}
+
+
+@router.post("/vaults/shared/context")
+async def shared_vault_context(req: SharedContextRequest):
+    """Build context from the shared vault. Used by agent containers for context_query(scope=shared)."""
+    shared_dir = os.path.join(VAULTS_DIR, "shared")
+    if not os.path.isdir(shared_dir):
+        return {"context": "", "entries": 0, "profile": req.profile}
+
+    # Use the existing search to find relevant files, then return formatted context.
+    # This is a simplified version — we do keyword search + return formatted markdown.
+    query = req.task.lower()
+    scored_files: list[
+        tuple[float, str, str, dict]
+    ] = []  # (score, path, content, meta)
+
+    for root, dirs, files in os.walk(shared_dir):
+        dirs[:] = [d for d in dirs if d not in EXCLUDED_DIRS]
+        for filename in files:
+            if not filename.endswith(".md"):
+                continue
+            filepath = os.path.join(root, filename)
+            file_content = _read_file(filepath)
+            if file_content is None:
+                continue
+
+            meta, body = _parse_frontmatter(file_content)
+            content_lower = body.lower() if body else ""
+
+            # Simple relevance scoring: keyword frequency + title match bonus
+            score = content_lower.count(query)
+            title = meta.get("title", "")
+            if title and query in title.lower():
+                score += 5
+
+            if score > 0:
+                rel_path = os.path.relpath(filepath, shared_dir)
+                scored_files.append((score, rel_path, body or "", meta))
+
+    # Sort by score, take top N
+    scored_files.sort(key=lambda x: x[0], reverse=True)
+    top = scored_files[: req.limit]
+
+    if not top:
+        return {"context": "", "entries": 0, "profile": req.profile}
+
+    # Format as markdown context
+    sections = []
+    for score, path, body, meta in top:
+        title = meta.get("title", path)
+        category = meta.get("category", "")
+        prefix = f"[{category}] " if category else ""
+        # Truncate body to fit budget (rough estimate: 4 chars per token)
+        max_chars = max(200, (req.budget // max(1, len(top))) * 4)
+        truncated = body[:max_chars] + ("..." if len(body) > max_chars else "")
+        sections.append(f"### {prefix}{title}\n{truncated}")
+
+    context_text = "\n\n".join(sections)
+    return {"context": context_text, "entries": len(top), "profile": req.profile}
+
+
 # --- Catch-all file routes AFTER specific routes ---
 
 
@@ -788,19 +993,3 @@ async def create_vault_file(agent_id: str, req: MemoryFileCreate):
         raise HTTPException(status_code=500, detail=f"Failed to write file: {str(e)}")
 
     return {"filename": filename, "size": len(req.content), "created": True}
-
-    # Resolve and verify the path stays within the vault
-    vault_dir = os.path.join(VAULTS_DIR, agent_id)
-    filepath = os.path.realpath(os.path.join(vault_dir, filename))
-    if not filepath.startswith(os.path.realpath(vault_dir)):
-        raise HTTPException(status_code=400, detail="Path traversal detected")
-
-    if not os.path.isfile(filepath):
-        raise HTTPException(status_code=404, detail="Memory file not found")
-
-    try:
-        os.remove(filepath)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to delete file: {str(e)}")
-
-    return {"agent_id": agent_id, "filename": filename, "deleted": True}

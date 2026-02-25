@@ -47,6 +47,7 @@ REQUIRED_SECRETS = {
     "ENGINE_INTERNAL_TOKEN": ("token_urlsafe", 32),
     "AUTH_SECRET_KEY": ("token_urlsafe", 64),
     "MCPO_API_KEY": ("token_urlsafe", 32),
+    "RUSTFS_SECRET_KEY": ("token_urlsafe", 32),
 }
 
 SUPPORTED_PROVIDERS = [
@@ -617,7 +618,9 @@ def _identify_port_owner(port: int) -> Optional[str]:
     return None
 
 
-def step_check_ports(env_path: Path, use_proxy: bool, repo_dir: Path) -> None:
+def step_check_ports(
+    env_path: Path, use_proxy: bool, repo_dir: Path, image_mode: str = "build"
+) -> None:
     """Check for port conflicts. Auto-handles conflicts from own stack."""
     console.print(Panel("[bold]Port Check[/bold]"))
 
@@ -628,6 +631,12 @@ def step_check_ports(env_path: Path, use_proxy: bool, repo_dir: Path) -> None:
         5432: "PostgreSQL",
         int(get_env_value(env_path, "MCPO_PORT") or "8001"): "MCP Proxy",
     }
+
+    # Build mode uses JuiceFS + RustFS; RustFS console is exposed to the host
+    if image_mode == "build":
+        ports_to_check[
+            int(get_env_value(env_path, "RUSTFS_CONSOLE_PORT") or "9001")
+        ] = "RustFS Console"
 
     if use_proxy:
         ports_to_check[80] = "HTTP (Traefik)"
@@ -643,6 +652,8 @@ def step_check_ports(env_path: Path, use_proxy: bool, repo_dir: Path) -> None:
         "djinnbot-mcpo",
         "djinnbot-dashboard",
         "djinnbot-traefik",
+        "djinnbot-rustfs",
+        "djinnbot-juicefs",
     }
 
     external_conflicts = []
@@ -1663,7 +1674,11 @@ def _troubleshoot_api(docker: list[str], repo_dir: Path) -> None:
     """Print troubleshooting tips for API failures."""
     console.print("  [dim]Possible causes:[/dim]")
     console.print("    - Services still starting (database migrations)")
+    console.print("    - JuiceFS mount not ready (API depends on it)")
     console.print("    - Check API logs: docker compose logs api --tail=30")
+    console.print(
+        "    - Check storage: docker compose logs rustfs juicefs-mount --tail=20"
+    )
 
     # Quick peek at API container status
     try:
@@ -1704,6 +1719,10 @@ def _print_troubleshooting(
         console.print("  - Wait 1-2 minutes for database migrations to complete")
         console.print("  - Check: docker compose logs api --tail=50")
         console.print("  - Check: docker compose logs postgres --tail=20")
+        console.print(
+            "  - Check storage backend: docker compose logs rustfs juicefs-mount --tail=20"
+        )
+        console.print("  - The API waits for JuiceFS to be healthy before starting")
         console.print("")
 
     if api_ok and not dash_ok:
@@ -1754,7 +1773,13 @@ def _show_diagnostic_logs(
     """Show recent logs from key services for troubleshooting."""
     compose_cmd = [*docker, "compose"]
 
-    services = [("api", 20), ("dashboard", 10), ("postgres", 10)]
+    services = [
+        ("api", 20),
+        ("dashboard", 10),
+        ("postgres", 10),
+        ("rustfs", 10),
+        ("juicefs-mount", 15),
+    ]
     for svc, lines in services:
         console.print(f"\n[bold]--- {svc} logs (last {lines} lines) ---[/bold]")
         try:
@@ -1823,6 +1848,7 @@ def step_print_summary(
     table.add_row("API", f"[cyan]{api_url}[/cyan]")
     if ssl_enabled:
         table.add_row("SSL", "[green]Enabled (auto-renewing)[/green]")
+    table.add_row("Storage", "JuiceFS + RustFS (S3-compatible)")
     table.add_row("Install Dir", str(repo_dir))
     if provider_id:
         table.add_row("Provider", provider_id)
@@ -1847,9 +1873,10 @@ def step_print_summary(
     console.print(f"  djinn provider set-key    Add/change a provider API key")
     console.print(f"")
     console.print(f"[bold]Docker commands[/bold] (run from {repo_dir}):")
-    console.print(f"  docker compose logs -f    Stream all logs")
-    console.print(f"  docker compose restart    Restart all services")
-    console.print(f"  docker compose down       Stop all services")
+    console.print(f"  docker compose logs -f               Stream all logs")
+    console.print(f"  docker compose logs rustfs juicefs-mount  Storage logs")
+    console.print(f"  docker compose restart               Restart all services")
+    console.print(f"  docker compose down                  Stop all services")
     if ssl_enabled:
         console.print(
             f"  docker compose -f proxy/docker-compose.yml logs  Traefik logs"
@@ -1928,7 +1955,7 @@ def setup(
     use_proxy = use_proxy or ssl_enabled
 
     # ── Step 6: Port check ──────────────────────────────────────────
-    step_check_ports(env_path, use_proxy, repo_dir)
+    step_check_ports(env_path, use_proxy, repo_dir, image_mode)
 
     # ── SSL configuration (sets VITE_API_URL, BIND_HOST, etc.) ──────
     if ssl_enabled:

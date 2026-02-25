@@ -44,6 +44,8 @@ const SERVICE_BG_COLORS: Record<string, string> = {
   mcpo: 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20',
   postgres: 'bg-cyan-500/10 text-cyan-400 border-cyan-500/20',
   redis: 'bg-red-500/10 text-red-400 border-red-500/20',
+  juicefs: 'bg-teal-500/10 text-teal-400 border-teal-500/20',
+  rustfs: 'bg-amber-500/10 text-amber-400 border-amber-500/20',
   'agent-runtime': 'bg-orange-500/10 text-orange-400 border-orange-500/20',
   unknown: 'bg-gray-500/10 text-gray-400 border-gray-500/20',
 };
@@ -81,7 +83,7 @@ function ContainerSelector({
 
   // Sort: infrastructure first, then agent-runtimes
   const sortedTypes = useMemo(() => {
-    const order = ['api', 'engine', 'dashboard', 'mcpo', 'postgres', 'redis', 'agent-runtime', 'unknown'];
+    const order = ['api', 'engine', 'dashboard', 'mcpo', 'postgres', 'redis', 'juicefs', 'rustfs', 'agent-runtime', 'unknown'];
     return [...groups.keys()].sort((a, b) => {
       const ai = order.indexOf(a);
       const bi = order.indexOf(b);

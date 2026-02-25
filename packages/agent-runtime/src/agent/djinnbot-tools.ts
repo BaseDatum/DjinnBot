@@ -30,14 +30,10 @@ export interface DjinnBotToolsConfig {
   /** Session ID for this container instance — used by work ledger for lock ownership. */
   sessionId: string;
   vaultPath: string;
-  sharedPath: string;
+  /** DjinnBot API base URL — used for shared vault API calls and other services. */
+  apiBaseUrl: string;
   /** Absolute path to the agents directory — used for skill registry. */
   agentsDir?: string;
-  /**
-   * DjinnBot API base URL (no /api suffix).
-   * Defaults to DJINNBOT_API_URL env var, then 'http://api:8000'.
-   */
-  apiBaseUrl?: string;
   /**
    * Kanban column names this agent works from during pulse.
    * Defaults to PULSE_COLUMNS env var (comma-separated), then ['Backlog','Ready'].
@@ -68,8 +64,8 @@ export interface DjinnBotToolsConfig {
 
 export function createDjinnBotTools(config: DjinnBotToolsConfig): AgentTool[] {
   const {
-    publisher, redis, requestIdRef, agentId, sessionId, vaultPath, sharedPath,
-    onComplete, onFail, apiBaseUrl, pulseColumns,
+    publisher, redis, requestIdRef, agentId, sessionId, vaultPath, apiBaseUrl,
+    onComplete, onFail, pulseColumns,
     isOnboardingSession = false,
     retrievalTracker,
   } = config;
@@ -77,11 +73,11 @@ export function createDjinnBotTools(config: DjinnBotToolsConfig): AgentTool[] {
   return [
     ...createStepControlTools({ onComplete, onFail }),
 
-    ...createMemoryTools({ publisher, agentId, vaultPath, sharedPath, retrievalTracker }),
+    ...createMemoryTools({ publisher, agentId, vaultPath, apiBaseUrl, retrievalTracker }),
 
-    ...createMemoryGraphTools({ publisher, agentId, vaultPath, sharedPath }),
+    ...createMemoryGraphTools({ publisher, agentId, vaultPath, apiBaseUrl }),
 
-    ...createMemoryContextTools({ agentId, vaultPath, sharedPath }),
+    ...createMemoryContextTools({ agentId, vaultPath, apiBaseUrl }),
 
     ...createMessagingTools({ publisher, requestIdRef, vaultPath }),
 

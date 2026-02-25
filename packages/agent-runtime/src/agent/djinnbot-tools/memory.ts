@@ -3,12 +3,12 @@ import type { AgentTool, AgentToolResult, AgentToolUpdateCallback } from '@mario
 import type { RedisPublisher } from '../../redis/publisher.js';
 import { exec } from 'node:child_process';
 import { promisify } from 'node:util';
-import { mkdir, writeFile } from 'node:fs/promises';
-import { join, dirname } from 'node:path';
+import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 // @ts-ignore — clawvault is an ESM package declared in package.json; types resolve at build time
 import { ClawVault } from 'clawvault';
 import { MemoryRetrievalTracker } from './memory-scoring.js';
+import { SharedVaultClient } from './shared-vault-api.js';
 
 const execAsync = promisify(exec);
 
@@ -47,6 +47,26 @@ const RecallParamsSchema = Type.Object({
 });
 type RecallParams = Static<typeof RecallParamsSchema>;
 
+const RateMemoriesParamsSchema = Type.Object({
+  ratings: Type.Array(Type.Object({
+    memoryId: Type.String({ description: 'ID of the memory to rate (as returned by recall/context_query)' }),
+    useful: Type.Boolean({ description: 'Was this memory useful for your current task?' }),
+  }), {
+    description: 'Rate each recalled memory as useful or not useful',
+    minItems: 1,
+  }),
+  gap: Type.Optional(Type.String({
+    description:
+      'Knowledge you needed but could NOT find in memory. Be specific — ' +
+      'e.g. "PostgreSQL connection pool config for prod" rather than "database info". ' +
+      'This helps the team identify and fill knowledge holes.',
+  })),
+  gap_query: Type.Optional(Type.String({
+    description: 'The search query you tried that failed to find what you needed',
+  })),
+});
+type RateMemoriesParams = Static<typeof RateMemoriesParamsSchema>;
+
 const ShareKnowledgeParamsSchema = Type.Object({
   category: Type.Union([
     Type.Literal('pattern'),
@@ -72,7 +92,8 @@ export interface MemoryToolsConfig {
   publisher: RedisPublisher;
   agentId: string;
   vaultPath: string;
-  sharedPath: string;
+  /** DjinnBot API base URL for shared vault operations. */
+  apiBaseUrl: string;
   /** Optional retrieval tracker for adaptive memory scoring. */
   retrievalTracker?: MemoryRetrievalTracker;
 }
@@ -80,11 +101,10 @@ export interface MemoryToolsConfig {
 // ── Tool factories ─────────────────────────────────────────────────────────
 
 export function createMemoryTools(config: MemoryToolsConfig): AgentTool[] {
-  const { publisher, agentId, vaultPath, sharedPath, retrievalTracker } = config;
+  const { publisher, agentId, vaultPath, apiBaseUrl, retrievalTracker } = config;
 
-  // ── ClawVault instances (loaded once, reused per call) ──────────────────
+  // ── Personal vault (local JuiceFS mount, agent-owned qmd index) ────────
   let personalVault: InstanceType<typeof ClawVault> | null = null;
-  let sharedVault: InstanceType<typeof ClawVault> | null = null;
 
   const getPersonalVault = async (): Promise<InstanceType<typeof ClawVault>> => {
     if (!personalVault) {
@@ -94,13 +114,8 @@ export function createMemoryTools(config: MemoryToolsConfig): AgentTool[] {
     return personalVault;
   };
 
-  const getSharedVault = async (): Promise<InstanceType<typeof ClawVault>> => {
-    if (!sharedVault) {
-      sharedVault = new ClawVault(sharedPath);
-      await sharedVault.load();
-    }
-    return sharedVault;
-  };
+  // ── Shared vault (API-backed, engine maintains the index) ──────────────
+  const sharedVaultApi = new SharedVaultClient(apiBaseUrl);
 
   return [
     {
@@ -140,18 +155,19 @@ export function createMemoryTools(config: MemoryToolsConfig): AgentTool[] {
         console.log(`[remember] ${agentId}: personal vault write OK → ${memoryId}`);
 
         if (p.shared) {
-          console.log(`[remember] ${agentId}: shared=true → writing to shared vault: ${join(sharedPath, p.type, slug + '.md')}`);
-          const sv = await getSharedVault();
-          await sv.store({
-            category: p.type,
-            title: p.title,
-            content: p.content,
-            frontmatter: extraFm,
-            overwrite: true,
-            qmdUpdate: false,
-            qmdEmbed: false,
-          });
-          console.log(`[remember] ${agentId}: shared vault write OK → ${memoryId}`);
+          console.log(`[remember] ${agentId}: shared=true → writing to shared vault via API`);
+          try {
+            await sharedVaultApi.store({
+              category: p.type,
+              title: p.title,
+              content: p.content,
+              frontmatter: extraFm,
+              agent_id: agentId,
+            });
+            console.log(`[remember] ${agentId}: shared vault write OK → ${memoryId}`);
+          } catch (err) {
+            console.error(`[remember] ${agentId}: shared vault API write failed:`, err);
+          }
         } else {
           console.warn(`[remember] ${agentId}: shared=false — "${p.title}" stored in PERSONAL vault ONLY. If this is project knowledge, you should have used shared: true!`);
         }
@@ -189,14 +205,10 @@ export function createMemoryTools(config: MemoryToolsConfig): AgentTool[] {
         const allHits: ScoredHit[] = [];
         const fallbackSections: string[] = [];
 
-        const searchVault = async (
-          getVault: () => Promise<InstanceType<typeof ClawVault>>,
-          source: string,
-          retrievalSource: string,
-          fallbackDir: string,
-        ): Promise<void> => {
+        // ── Search personal vault (local ClawVault on JuiceFS mount) ────────
+        const searchPersonalVault = async (): Promise<void> => {
           try {
-            const vault = await getVault();
+            const vault = await getPersonalVault();
             const hits = await vault.query(p.query, { limit: 5 });
             for (const h of hits) {
               const rawScore = h.score ?? 0;
@@ -208,33 +220,53 @@ export function createMemoryTools(config: MemoryToolsConfig): AgentTool[] {
                 title,
                 content,
                 rawScore,
-                blendedScore: rawScore, // Will be updated after adaptive lookup
-                source,
-                retrievalSource,
+                blendedScore: rawScore,
+                source: 'personal',
+                retrievalSource: 'bm25',
               });
             }
           } catch {
-            // Grep fallback — no scoring data available
+            // Grep fallback for personal vault
             try {
               const safeQuery = p.query.replace(/"/g, '').replace(/`/g, '');
               const { stdout } = await execAsync(
-                `grep -r -i "${safeQuery}" "${fallbackDir}" --include="*.md" 2>/dev/null | head -n 20`,
+                `grep -r -i "${safeQuery}" "${vaultPath}" --include="*.md" 2>/dev/null | head -n 20`,
                 { encoding: 'utf8', timeout: 30000, shell: '/bin/bash' },
               );
               const lines = stdout.split('\n').filter(Boolean);
               if (lines.length) {
-                fallbackSections.push(`## ${source === 'personal' ? 'Personal Memory' : 'Shared Knowledge'} (grep fallback)`, ...lines.map((l: string) => `  ${l}`));
+                fallbackSections.push('## Personal Memory (grep fallback)', ...lines.map((l: string) => `  ${l}`));
               }
             } catch { /* no results */ }
           }
         };
 
+        // ── Search shared vault (via API — engine maintains the index) ─────
+        const searchSharedVault = async (): Promise<void> => {
+          try {
+            const results = await sharedVaultApi.search(p.query, 5);
+            for (const r of results) {
+              allHits.push({
+                memoryId: r.filename?.replace(/\.md$/, '') ?? r.title ?? 'unknown',
+                title: r.title ?? r.filename ?? 'Untitled',
+                content: r.snippet ?? '',
+                rawScore: r.score ?? 0,
+                blendedScore: r.score ?? 0,
+                source: 'shared',
+                retrievalSource: 'shared_api',
+              });
+            }
+          } catch (err) {
+            console.warn('[recall] Shared vault API search failed:', err);
+          }
+        };
+
         if (scope === 'personal' || scope === 'all') {
-          await searchVault(getPersonalVault, 'personal', 'bm25', vaultPath);
+          await searchPersonalVault();
         }
 
         if (scope === 'shared' || scope === 'all') {
-          await searchVault(getSharedVault, 'shared', 'shared_bm25', sharedPath);
+          await searchSharedVault();
         }
 
         // ── Adaptive score blending ──────────────────────────────────────────
@@ -318,6 +350,72 @@ export function createMemoryTools(config: MemoryToolsConfig): AgentTool[] {
     },
 
     {
+      name: 'rate_memories',
+      description:
+        'Rate how useful recalled memories were for your current task. ' +
+        'Call this after using results from recall or context_query. ' +
+        'Your ratings directly improve future memory retrieval — memories you mark as useful ' +
+        'will rank higher in future searches, and those marked not-useful will be deprioritized. ' +
+        'You can also report knowledge gaps — things you needed but couldn\'t find.',
+      label: 'rate_memories',
+      parameters: RateMemoriesParamsSchema,
+      execute: async (
+        _toolCallId: string,
+        params: unknown,
+        _signal?: AbortSignal,
+        _onUpdate?: AgentToolUpdateCallback<VoidDetails>
+      ): Promise<AgentToolResult<VoidDetails>> => {
+        const p = params as RateMemoriesParams;
+
+        if (!retrievalTracker) {
+          return {
+            content: [{ type: 'text', text: 'Memory scoring not available — ratings not recorded.' }],
+            details: {},
+          };
+        }
+
+        const valuations = p.ratings.map(r => ({
+          memoryId: r.memoryId,
+          memoryTitle: undefined as string | undefined,
+          useful: r.useful,
+        }));
+
+        // Try to enrich with titles from tracked retrievals
+        for (const v of valuations) {
+          const tracked = retrievalTracker.tracked.find(t => t.memoryId === v.memoryId);
+          if (tracked?.memoryTitle) {
+            v.memoryTitle = tracked.memoryTitle;
+          }
+        }
+
+        const result = await retrievalTracker.submitValuations(
+          valuations,
+          p.gap,
+          p.gap_query,
+        );
+
+        const parts: string[] = [];
+        const usefulCount = p.ratings.filter(r => r.useful).length;
+        const notUsefulCount = p.ratings.filter(r => !r.useful).length;
+
+        parts.push(`Rated ${p.ratings.length} memories: ${usefulCount} useful, ${notUsefulCount} not useful.`);
+
+        if (p.gap) {
+          parts.push(`Knowledge gap recorded: "${p.gap}"`);
+        }
+
+        if (!result.ok) {
+          parts.push('(Warning: ratings may not have been persisted — API error)');
+        }
+
+        return {
+          content: [{ type: 'text', text: parts.join(' ') }],
+          details: {},
+        };
+      },
+    },
+
+    {
       name: 'share_knowledge',
       description: 'Share a pattern, decision, or issue with the team',
       label: 'share_knowledge',
@@ -329,26 +427,26 @@ export function createMemoryTools(config: MemoryToolsConfig): AgentTool[] {
         _onUpdate?: AgentToolUpdateCallback<VoidDetails>
       ): Promise<AgentToolResult<VoidDetails>> => {
         const p = params as ShareKnowledgeParams;
-        const id = randomUUID().slice(0, 8);
-        const filePath = join(sharedPath, p.category, `${id}.md`);
 
-        const content = [
-          '---',
-          `category: ${p.category}`,
-          `importance: ${p.importance || 'medium'}`,
-          `created: ${new Date().toISOString()}`,
-          `author: ${process.env.AGENT_ID || 'unknown'}`,
-          '---',
-          '',
-          p.content,
-        ].join('\n');
+        try {
+          const result = await sharedVaultApi.store({
+            category: p.category,
+            title: `${p.category}-${randomUUID().slice(0, 8)}`,
+            content: p.content,
+            frontmatter: {
+              category: p.category,
+              importance: p.importance || 'medium',
+              author: process.env.AGENT_ID || 'unknown',
+            },
+            agent_id: agentId,
+          });
 
-        await mkdir(dirname(filePath), { recursive: true });
-        await writeFile(filePath, content, 'utf8');
+          publisher.publishVaultUpdated(agentId, true).catch(() => {});
 
-        publisher.publishVaultUpdated(agentId, true).catch(() => {});
-
-        return { content: [{ type: 'text', text: `Knowledge shared: ${p.category}/${id}` }], details: {} };
+          return { content: [{ type: 'text', text: `Knowledge shared: ${result.filename}` }], details: {} };
+        } catch (err) {
+          return { content: [{ type: 'text', text: `Failed to share knowledge: ${err}` }], details: {} };
+        }
       },
     },
   ];

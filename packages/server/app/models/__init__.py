@@ -70,7 +70,12 @@ from app.models.project_template import ProjectTemplate
 from app.models.project_agent_routine import ProjectAgentRoutine
 from app.models.admin_notification import AdminNotification
 from app.models.agent_tool_override import AgentToolOverride
-from app.models.memory_score import MemoryRetrievalLog, MemoryScore
+from app.models.memory_score import (
+    MemoryRetrievalLog,
+    MemoryValuation,
+    MemoryGap,
+    MemoryScore,
+)
 
 __all__ = [
     # Pydantic models (backward compatibility)
@@ -148,5 +153,7 @@ __all__ = [
     "AgentToolOverride",
     # Memory scoring
     "MemoryRetrievalLog",
+    "MemoryValuation",
+    "MemoryGap",
     "MemoryScore",
 ]

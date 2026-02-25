@@ -14,6 +14,8 @@ import {
   duplicatePulseRoutine,
   deletePulseRoutine,
   updateAgentConfig,
+  fetchAgentProjects,
+  fetchRoutineMappings,
 } from '@/lib/api';
 import { toast } from 'sonner';
 import {
@@ -26,7 +28,9 @@ import {
 import type { PulseRoutine } from '@/lib/api';
 import type { AgentConfig } from '@/types/config';
 
-const PULSE_COLUMNS = ['Backlog', 'Planning', 'Ready', 'In Progress', 'Review', 'Blocked', 'Done', 'Failed'] as const;
+/** Mapping from routine ID → list of project names it's mapped to */
+type RoutineProjectMap = Record<string, Array<{ projectId: string; projectName: string }>>;
+
 
 interface AgentPulseTabProps {
   agentId: string;
@@ -41,6 +45,7 @@ export function AgentPulseTab({ agentId, config, onConfigChange }: AgentPulseTab
   const [showNewForm, setShowNewForm] = useState(false);
   const [newName, setNewName] = useState('');
   const [creating, setCreating] = useState(false);
+  const [routineProjectMap, setRoutineProjectMap] = useState<RoutineProjectMap>({});
 
   // Config auto-save state
   const [configSaveState, setConfigSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
@@ -55,6 +60,31 @@ export function AgentPulseTab({ agentId, config, onConfigChange }: AgentPulseTab
       const data = await fetchPulseRoutines(agentId);
       const routines = Array.isArray(data) ? data : (data?.routines ?? []);
       setRoutines(routines);
+
+      // Load project mappings for each routine
+      try {
+        const projects = await fetchAgentProjects(agentId);
+        const map: RoutineProjectMap = {};
+        await Promise.all(
+          projects.map(async (proj: any) => {
+            try {
+              const mapData = await fetchRoutineMappings(proj.project_id, agentId);
+              for (const m of mapData.mappings) {
+                if (!map[m.routineId]) map[m.routineId] = [];
+                map[m.routineId].push({
+                  projectId: proj.project_id,
+                  projectName: proj.project_name,
+                });
+              }
+            } catch {
+              // Ignore per-project mapping errors
+            }
+          })
+        );
+        setRoutineProjectMap(map);
+      } catch {
+        // Non-critical — project mappings are supplementary info
+      }
     } catch (err) {
       console.error('Failed to load routines:', err);
       toast.error('Failed to load pulse routines');
@@ -95,7 +125,7 @@ export function AgentPulseTab({ agentId, config, onConfigChange }: AgentPulseTab
     return () => {
       if (saveTimer.current) clearTimeout(saveTimer.current);
     };
-  }, [config.pulseContainerTimeoutMs, config.pulseColumns]);
+  }, [config.pulseContainerTimeoutMs]);
 
   // ── Routine CRUD handlers ──────────────────────────────────────────────
 
@@ -108,7 +138,7 @@ export function AgentPulseTab({ agentId, config, onConfigChange }: AgentPulseTab
     try {
       const routine = await createPulseRoutine(agentId, {
         name: newName.trim(),
-        instructions: `# ${newName.trim()} Routine\n\nYou are {{AGENT_NAME}}. This is your "${newName.trim()}" pulse routine.\n\n## Steps\n\n1. \n2. \n3. \n`,
+        instructions: `# ${newName.trim()} Routine\n\nYou are {{AGENT_NAME}}. This is your "${newName.trim()}" pulse routine.\n\n## Planning Phase\nDuring planning, review your assigned projects and identify work to do:\n1. Call get_my_projects() to see your active projects\n2. For each project, call get_ready_tasks() to find available work\n3. Decide which tasks to pick up based on priority and your current workload\n\n## Execution\nFor each task you decide to work on, write a clear execution prompt that describes:\n- What needs to be done\n- The acceptance criteria\n- Any relevant context from the task description\n\nThe executor model will carry out the actual work in a sandboxed session with full tool access.\n`,
       });
       setRoutines(prev => [...prev, routine]);
       setNewName('');
@@ -256,6 +286,7 @@ export function AgentPulseTab({ agentId, config, onConfigChange }: AgentPulseTab
               <PulseRoutineCard
                 routine={routine}
                 isExpanded={expandedId === routine.id}
+                mappedProjects={routineProjectMap[routine.id]}
                 onToggle={() => handleToggle(routine)}
                 onExpand={() => setExpandedId(expandedId === routine.id ? null : routine.id)}
                 onTrigger={() => handleTrigger(routine)}
@@ -372,50 +403,7 @@ export function AgentPulseTab({ agentId, config, onConfigChange }: AgentPulseTab
         </CardContent>
       </Card>
 
-      {/* ── Default Pulse Columns ───────────────────────────────────────── */}
-      <Card>
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <CardTitle className="text-sm">Default Pulse Columns</CardTitle>
-            {configSaveState === 'saving' && (
-              <span className="text-xs text-muted-foreground animate-pulse">Saving...</span>
-            )}
-            {configSaveState === 'saved' && (
-              <span className="text-xs text-green-500">Saved</span>
-            )}
-            {configSaveState === 'error' && (
-              <span className="text-xs text-destructive">Failed</span>
-            )}
-          </div>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <p className="text-xs text-muted-foreground">
-            Default kanban columns scanned during pulses. Individual routines can override these.
-          </p>
-          {PULSE_COLUMNS.map((col) => {
-            const checked = (config.pulseColumns ?? []).includes(col);
-            return (
-              <label key={col} className="flex items-center gap-3 cursor-pointer select-none">
-                <input
-                  type="checkbox"
-                  checked={checked}
-                  onChange={() => {
-                    const current = config.pulseColumns ?? [];
-                    onConfigChange({
-                      ...config,
-                      pulseColumns: checked
-                        ? current.filter((c) => c !== col)
-                        : [...current, col],
-                    });
-                  }}
-                  className="h-4 w-4 rounded border"
-                />
-                <span className="text-sm">{col}</span>
-              </label>
-            );
-          })}
-        </CardContent>
-      </Card>
+      {/* Note: Pulse columns are now configured per-project via routine mappings */}
     </div>
   );
 }
