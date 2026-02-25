@@ -46,6 +46,7 @@ import { formatModelChip } from '@/lib/format';
 import { KeySourceBadge } from '@/components/ui/KeySourceBadge';
 import { SessionTokenStats } from '@/components/ui/SessionTokenStats';
 import { Link } from '@tanstack/react-router';
+import { loadLastModel, saveLastModel } from './ChatSidebarFlyout';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -98,6 +99,7 @@ export function FloatingChatWidget() {
     agents,
     openChat,
     closePane,
+    updatePaneModel,
     widgetOpen,
     setWidgetOpen,
   } = useChatSessions();
@@ -318,16 +320,21 @@ export function FloatingChatWidget() {
   // Show unread badge
   const activeCount = panes.length;
 
-  // Load sessions when agent is selected and auto-populate model from agent config
+  // Load sessions when agent is selected; prefer last-used model, then agent default
   useEffect(() => {
     if (!spawnAgentId) {
       setExistingSessions([]);
       setSpawnSessionId('__new__');
       return;
     }
-    const agent = agents.find(a => a.id === spawnAgentId);
-    if (agent?.model) {
-      setSpawnModel(agent.model);
+    const lastModel = loadLastModel(spawnAgentId);
+    if (lastModel) {
+      setSpawnModel(lastModel);
+    } else {
+      const agent = agents.find(a => a.id === spawnAgentId);
+      if (agent?.model) {
+        setSpawnModel(agent.model);
+      }
     }
     setLoadingSessions(true);
     listChatSessions(spawnAgentId, { limit: 10 })
@@ -356,6 +363,8 @@ export function FloatingChatWidget() {
         sessionId = session.id;
         model = session.model || spawnModel;
       }
+      // Persist the model the user chose so it's the default next time
+      saveLastModel(spawnAgentId, model);
       openChat(spawnAgentId, model, sessionId);
       setSpawnAgentId('');
       setSpawnSessionId('__new__');
@@ -696,12 +705,20 @@ export function FloatingChatWidget() {
             </div>
           )}
 
-          {/* Active pane model info bar */}
+          {/* Active pane model info bar — clickable model selector for mid-session switching */}
           {activePane && (
             <div className="flex items-center gap-1.5 px-3 py-1 border-b bg-muted/10 shrink-0">
-              <span className="text-[10px] text-muted-foreground">
-                {formatModelChip(activePane.model)}
-              </span>
+              {activePane.sessionStatus === 'running' ? (
+                <ModelSelector
+                  value={activePane.model}
+                  onChange={(newModel) => updatePaneModel(activePane.paneId, newModel)}
+                  className="h-6 text-[10px] w-auto min-w-[120px] max-w-[180px]"
+                />
+              ) : (
+                <span className="text-[10px] text-muted-foreground">
+                  {formatModelChip(activePane.model)}
+                </span>
+              )}
               {activePane.keyResolution && <KeySourceBadge keyResolution={activePane.keyResolution} />}
               {activePane.sessionId && <SessionTokenStats sessionId={activePane.sessionId} />}
             </div>

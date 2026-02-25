@@ -73,8 +73,7 @@ export interface SwarmSessionDeps {
     success: boolean;
     merged: string[];
     conflicts: Array<{ branch: string; error: string }>;
-    pushed: boolean;
-    pushError?: string;
+    metadata?: Record<string, unknown>;
   }>;
 
   /**
@@ -564,7 +563,7 @@ class SwarmSession {
           executorBranches: branches,
         });
 
-        if (result.success && result.pushed) {
+        if (result.success && result.metadata?.pushed) {
           console.log(`[SwarmSession] Successfully integrated ${result.merged.length} branches into ${targetBranch}`);
 
           // Optionally open a PR

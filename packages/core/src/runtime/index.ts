@@ -25,8 +25,21 @@ export { createPulseTools } from './pulse-tools.js';
 export { createGitHubTools } from './github-tools.js';
 export type { GitHubToolCallbacks } from './github-tools.js';
 
-export { WorkspaceManager } from './workspace-manager.js';
-export type { WorkspaceInfo } from './workspace-manager.js';
+export { WorkspaceManager, GitWorktreeWorkspaceManager } from './workspace-manager.js';
+export type { WorkspaceManagerConfig } from './workspace-manager.js';
+export { PersistentDirectoryWorkspaceManager, SimpleWorkspaceManager } from './simple-workspace-manager.js';
+export { WorkspaceManagerFactory } from './workspace-manager-factory.js';
+export type {
+  IWorkspaceManager,
+  IVersionControlProvider,
+  ITaskWorkspaceProvider,
+  IBranchIntegrationProvider,
+  WorkspaceInfo,
+  FinalizeResult,
+  WorkspaceType,
+  ProjectWorkspaceConfig,
+  CreateRunWorkspaceOptions,
+} from './workspace-types.js';
 
 export { AgentLifecycleManager } from './agent-lifecycle.js';
 export type { AgentState, AgentLifecycle, QueueResult } from './agent-lifecycle.js';

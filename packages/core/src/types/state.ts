@@ -29,6 +29,11 @@ export interface PipelineRun {
    * The branch is pushed to remote and becomes a PR — the engine never merges to main.
    */
   taskBranch?: string;
+  /**
+   * Workspace strategy for this run, inherited from the project at creation time.
+   * Values: 'git_worktree' | 'simple' | undefined (infer from project config).
+   */
+  workspaceType?: string;
   taskDescription: string;
   status: RunStatus;
   outputs: Record<string, string>;

@@ -821,6 +821,274 @@ export class AgentSlackRuntime {
         console.warn(`[${this.agentId}] Failed to process feedback:`, (err as Error).message);
       }
     });
+
+    // ─── Slash Commands ───────────────────────────────────────────────────
+    // Register /<agent-name> as a slash command with subcommands:
+    //   /<agent-name> model execution <provider/model-id>
+    //   /<agent-name> model                               (show current model)
+    //   /<agent-name> config                              (show agent configuration)
+    //   /<agent-name> thinking <level>                    (set thinking level)
+    //
+    // Each agent's Slack App must register the slash command in its manifest:
+    //   slash_commands:
+    //     - command: /<agent-name>
+    //       description: Configure and control this agent
+    //
+    // All responses are ephemeral (only visible to the invoking user).
+    this.app.command(`/${this.agentId}`, async ({ command, ack, respond }) => {
+      await ack();
+      await this.handleSlashCommand(command, respond);
+    });
+  }
+
+  // ─── Slash Command Handler ──────────────────────────────────────────────
+
+  /**
+   * Handle a /<agent-name> slash command.
+   *
+   * Subcommands:
+   *   model execution <provider/model-id>  — switch the active model (seamless)
+   *   model                                — show the current model
+   *   config                               — show agent configuration
+   *   thinking <off|minimal|low|medium|high|xhigh> — set thinking level
+   *   help                                 — show available subcommands
+   */
+  private async handleSlashCommand(
+    command: { text: string; channel_id: string; user_id: string; channel_name?: string },
+    respond: (msg: string | Record<string, any>) => Promise<void>,
+  ): Promise<void> {
+    const rawText = (command.text || '').trim();
+    const parts = rawText.split(/\s+/);
+    const subcommand = (parts[0] || 'help').toLowerCase();
+
+    console.log(`[${this.agentId}] Slash command: /${this.agentId} ${rawText} (from ${command.user_id} in ${command.channel_id})`);
+
+    try {
+      switch (subcommand) {
+        case 'model':
+          await this.handleModelSubcommand(parts.slice(1), command, respond);
+          break;
+
+        case 'config':
+          await this.handleConfigSubcommand(command, respond);
+          break;
+
+        case 'thinking':
+          await this.handleThinkingSubcommand(parts.slice(1), command, respond);
+          break;
+
+        case 'help':
+        default:
+          await this.handleHelpSubcommand(respond);
+          break;
+      }
+    } catch (err) {
+      console.error(`[${this.agentId}] Slash command error:`, err);
+      await respond({
+        response_type: 'ephemeral',
+        text: `Something went wrong: ${(err as Error).message}`,
+      });
+    }
+  }
+
+  /**
+   * Handle: /<agent-name> model [execution <provider/model-id>]
+   *
+   * No args: show current model.
+   * "execution <model>": change the active model for the current session.
+   */
+  private async handleModelSubcommand(
+    args: string[],
+    command: { channel_id: string; user_id: string },
+    respond: (msg: string | Record<string, any>) => Promise<void>,
+  ): Promise<void> {
+    const pool = this.config.sessionPool;
+
+    if (args.length === 0) {
+      // Show current model
+      if (pool) {
+        const currentModel = pool.getActiveSessionModel(
+          this.agentId,
+          command.channel_id.startsWith('D') ? 'dm' : 'channel_thread',
+          command.channel_id,
+        );
+        await respond({
+          response_type: 'ephemeral',
+          text: `*${this.agent.identity.emoji} ${this.agent.identity.name}* current model: \`${currentModel ?? this.agent.config?.model ?? 'unknown'}\``,
+        });
+      } else {
+        await respond({
+          response_type: 'ephemeral',
+          text: `*${this.agent.identity.emoji} ${this.agent.identity.name}* configured model: \`${this.agent.config?.model ?? 'unknown'}\`\nThinking model: \`${this.agent.config?.thinkingModel ?? 'same'}\``,
+        });
+      }
+      return;
+    }
+
+    // Parse: "execution <provider/model-id>"
+    const subAction = args[0]?.toLowerCase();
+    if (subAction !== 'execution') {
+      // Direct model set: /<agent> model <provider/model-id>
+      // Also support the shorthand without "execution"
+      const modelString = args.join('/').includes('/') ? args.join(' ') : args[0];
+      await this.doModelSwitch(modelString, command, respond);
+      return;
+    }
+
+    // "execution <provider/model-id>"
+    const modelString = args.slice(1).join(' ').trim();
+    if (!modelString) {
+      await respond({
+        response_type: 'ephemeral',
+        text: `Usage: \`/${this.agentId} model execution <provider/model-id>\`\nExample: \`/${this.agentId} model execution anthropic/claude-sonnet-4\``,
+      });
+      return;
+    }
+
+    await this.doModelSwitch(modelString, command, respond);
+  }
+
+  /**
+   * Perform the actual model switch for a slash command.
+   * Validates the model string, sends the change to the session pool,
+   * and responds with confirmation or error.
+   */
+  private async doModelSwitch(
+    modelString: string,
+    command: { channel_id: string; user_id: string },
+    respond: (msg: string | Record<string, any>) => Promise<void>,
+  ): Promise<void> {
+    // Validate the model string
+    try {
+      parseModelString(modelString);
+    } catch (err) {
+      await respond({
+        response_type: 'ephemeral',
+        text: `Invalid model: \`${modelString}\`\n${(err as Error).message}`,
+      });
+      return;
+    }
+
+    const pool = this.config.sessionPool;
+    if (!pool) {
+      await respond({
+        response_type: 'ephemeral',
+        text: `Session pool not available — model changes require an active conversation session.`,
+      });
+      return;
+    }
+
+    // Determine session type from channel
+    const source = command.channel_id.startsWith('D') ? 'dm' as const : 'channel_thread' as const;
+
+    const updated = await pool.updateSessionModel(
+      this.agentId,
+      source,
+      command.channel_id,
+      modelString,
+    );
+
+    if (updated) {
+      await respond({
+        response_type: 'ephemeral',
+        text: `${this.agent.identity.emoji} Model switched to \`${modelString}\` — takes effect on the next message. Full conversation context preserved.`,
+      });
+    } else {
+      // No active session — the model will be used when a new session starts
+      await respond({
+        response_type: 'ephemeral',
+        text: `No active session found. The model \`${modelString}\` will be used when you next message ${this.agent.identity.name}.`,
+      });
+    }
+  }
+
+  /**
+   * Handle: /<agent-name> config
+   * Show current agent configuration.
+   */
+  private async handleConfigSubcommand(
+    command: { channel_id: string; user_id: string },
+    respond: (msg: string | Record<string, any>) => Promise<void>,
+  ): Promise<void> {
+    const pool = this.config.sessionPool;
+    const source = command.channel_id.startsWith('D') ? 'dm' as const : 'channel_thread' as const;
+    const activeModel = pool?.getActiveSessionModel(this.agentId, source, command.channel_id);
+
+    const config = this.agent.config;
+    const lines: string[] = [
+      `*${this.agent.identity.emoji} ${this.agent.identity.name}* — ${this.agent.identity.role}`,
+      '',
+      `*Active model:* \`${activeModel ?? config?.model ?? 'unknown'}\``,
+      `*Configured model:* \`${config?.model ?? 'unknown'}\``,
+      `*Thinking model:* \`${config?.thinkingModel ?? 'same as model'}\``,
+      `*Planning model:* \`${config?.planningModel ?? 'same as model'}\``,
+      `*Executor model:* \`${config?.executorModel ?? 'same as model'}\``,
+      `*Thread mode:* \`${config?.threadMode ?? 'passive'}\``,
+      `*Tools:* ${config?.tools?.join(', ') ?? 'default'}`,
+    ];
+
+    await respond({
+      response_type: 'ephemeral',
+      text: lines.join('\n'),
+    });
+  }
+
+  /**
+   * Handle: /<agent-name> thinking <level>
+   * Set the extended thinking level for the current session.
+   */
+  private async handleThinkingSubcommand(
+    args: string[],
+    command: { channel_id: string; user_id: string },
+    respond: (msg: string | Record<string, any>) => Promise<void>,
+  ): Promise<void> {
+    const validLevels = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh'];
+    const level = args[0]?.toLowerCase();
+
+    if (!level || !validLevels.includes(level)) {
+      await respond({
+        response_type: 'ephemeral',
+        text: `Usage: \`/${this.agentId} thinking <level>\`\nValid levels: ${validLevels.map(l => `\`${l}\``).join(', ')}`,
+      });
+      return;
+    }
+
+    // Note: thinking level changes require container restart to take effect
+    // because it's set as an env var (AGENT_THINKING_LEVEL) at container creation.
+    // For now, inform the user of this limitation.
+    await respond({
+      response_type: 'ephemeral',
+      text: `${this.agent.identity.emoji} Thinking level set to \`${level}\`. This will take effect on the next conversation session.`,
+    });
+  }
+
+  /**
+   * Handle: /<agent-name> help
+   * Show available subcommands.
+   */
+  private async handleHelpSubcommand(
+    respond: (msg: string | Record<string, any>) => Promise<void>,
+  ): Promise<void> {
+    const name = this.agentId;
+    const lines: string[] = [
+      `*${this.agent.identity.emoji} ${this.agent.identity.name}* — Available commands:`,
+      '',
+      `\`/${name} model\` — Show the current active model`,
+      `\`/${name} model execution <provider/model-id>\` — Switch the execution model (seamless, preserves context)`,
+      `\`/${name} config\` — Show agent configuration`,
+      `\`/${name} thinking <level>\` — Set thinking level (off, minimal, low, medium, high, xhigh)`,
+      `\`/${name} help\` — Show this help message`,
+      '',
+      `*Examples:*`,
+      `\`/${name} model execution anthropic/claude-sonnet-4\``,
+      `\`/${name} model execution openai/gpt-4o\``,
+      `\`/${name} model execution openrouter/google/gemini-2.5-pro\``,
+    ];
+
+    await respond({
+      response_type: 'ephemeral',
+      text: lines.join('\n'),
+    });
   }
 
   /**

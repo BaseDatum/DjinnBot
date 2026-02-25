@@ -347,10 +347,14 @@ export class ContainerManager {
           // engine, which mounts the volume at /data) resolve correctly inside the container
           // (which mounts the same volume at /djinnbot-data).
           `ln -sfn /djinnbot-data /data && ` +
-          // Create the sandbox directory structure (vault entries will be symlinks, not dirs)
+          // Create the sandbox directory structure.
+          // NOTE: Do NOT mkdir run-workspace or project-workspace here — they are
+          // replaced by symlinks below. Previous runs leave them as dangling
+          // symlinks (target worktree deleted), and mkdir -p fails with EEXIST
+          // on dangling symlinks, crashing the container at startup.
+          `rm -f /djinnbot-data/sandboxes/${agentId}/run-workspace ` +
+          `/djinnbot-data/sandboxes/${agentId}/project-workspace && ` +
           `mkdir -p /djinnbot-data/sandboxes/${agentId}/clawvault ` +
-          `/djinnbot-data/sandboxes/${agentId}/project-workspace ` +
-          `/djinnbot-data/sandboxes/${agentId}/run-workspace ` +
           `/djinnbot-data/sandboxes/${agentId}/task-workspaces && ` +
           // Ensure central vault directories and the run worktree directory exist
           `mkdir -p /djinnbot-data/vaults/${agentId} /djinnbot-data/vaults/shared /djinnbot-data/${runRelative} && ` +
@@ -476,7 +480,20 @@ export class ContainerManager {
     } catch (error) {
       const err = error as Error;
       console.error(`[ContainerManager] Failed to start container for run ${runId}:`, err.message);
-      
+
+      // Attempt to capture container logs before cleanup (AutoRemove may have
+      // already destroyed it, but if it's still around this is invaluable for
+      // diagnosing startup crashes).
+      try {
+        const logStream = await container.logs({ stdout: true, stderr: true, tail: 50 });
+        const logs = typeof logStream === 'string' ? logStream : logStream.toString('utf-8');
+        if (logs.trim()) {
+          console.error(`[ContainerManager] Container logs for run ${runId}:\n${logs}`);
+        }
+      } catch {
+        // Container already gone (AutoRemove) — nothing we can do
+      }
+
       // Clean up on failure
       info.status = 'stopped';
       this.containers.delete(runId);

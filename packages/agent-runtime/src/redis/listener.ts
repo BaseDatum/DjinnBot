@@ -1,6 +1,6 @@
 import { Redis } from 'ioredis';
 import { channels, commandMessageSchema } from '@djinnbot/core';
-import type { AgentStepCommand, ToolCommand, ShutdownCommand, AbortCommand, StructuredOutputCommand } from '@djinnbot/core';
+import type { AgentStepCommand, ToolCommand, ShutdownCommand, AbortCommand, StructuredOutputCommand, ChangeModelCommand } from '@djinnbot/core';
 
 export interface CommandHandler {
   onAgentStep: (cmd: AgentStepCommand) => Promise<void>;
@@ -8,6 +8,8 @@ export interface CommandHandler {
   onShutdown: (cmd: ShutdownCommand) => Promise<void>;
   onAbort: (cmd: AbortCommand) => Promise<void>;
   onStructuredOutput?: (cmd: StructuredOutputCommand) => Promise<void>;
+  /** Called when the engine sends a model change command between turns. */
+  onChangeModel?: (cmd: ChangeModelCommand) => Promise<void>;
 }
 
 export async function startCommandListener(
@@ -42,6 +44,13 @@ export async function startCommandListener(
             await handler.onStructuredOutput(cmd);
           } else {
             console.warn('[CommandListener] Received structuredOutput command but no handler registered');
+          }
+          break;
+        case 'changeModel':
+          if (handler.onChangeModel) {
+            await handler.onChangeModel(cmd);
+          } else {
+            console.warn('[CommandListener] Received changeModel command but no handler registered');
           }
           break;
       }

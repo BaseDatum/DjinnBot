@@ -21,6 +21,10 @@ final class ChatSessionManager: ObservableObject {
     /// Whether we're currently creating/starting a new session.
     @Published var isStartingSession: Bool = false
     
+    /// Message queued to be sent once the session is ready.
+    /// Used by the warp-up bar to reliably send without race conditions.
+    @Published var queuedMessage: String?
+    
     // MARK: - Configuration
     
     /// Default agent ID — stored in UserDefaults, configurable in Settings.
@@ -141,7 +145,26 @@ final class ChatSessionManager: ObservableObject {
         }
     }
     
+    /// Send a user message, queuing it if the session isn't ready yet.
+    /// Creates a new session automatically if none exists.
+    /// This is the preferred entry point from the UI — it never races.
+    func sendMessageWhenReady(_ text: String) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        
+        if let session = activeSession, (session.status == .running || session.status == .ready) {
+            sendMessage(trimmed)
+        } else {
+            // Queue the message — it will be sent when the session becomes ready.
+            queuedMessage = trimmed
+            if activeSession == nil {
+                createNewSession()
+            }
+        }
+    }
+    
     /// Send a user message in the active session.
+    /// Callers should prefer `sendMessageWhenReady` unless the session is known to be ready.
     func sendMessage(_ text: String) {
         guard let session = activeSession else {
             errorMessage = "No active session"
@@ -156,9 +179,9 @@ final class ChatSessionManager: ObservableObject {
         session.messages.append(userMsg)
         session.isGenerating = true
         
-        // Add a placeholder streaming assistant message
-        let assistantMsg = ChatMessage(role: .assistant, content: "", isStreaming: true)
-        session.messages.append(assistantMsg)
+        // NOTE: We no longer create an assistant placeholder here.
+        // Messages (thinking, tool calls, assistant text) are created on-demand
+        // as SSE events arrive, which ensures correct display ordering.
         
         Task {
             do {
@@ -170,8 +193,8 @@ final class ChatSessionManager: ObservableObject {
                     )
                     session.status = SessionStatus(rawValue: restartResponse.status) ?? .starting
                     startStatusPolling(for: session)
-                    // Wait a moment for session to start
-                    try await Task.sleep(nanoseconds: 1_000_000_000)
+                    // Wait for session to become ready
+                    try await Task.sleep(nanoseconds: 2_000_000_000)
                 }
                 
                 let response = try await service.sendMessage(
@@ -189,17 +212,10 @@ final class ChatSessionManager: ObservableObject {
                 
             } catch {
                 session.isGenerating = false
-                assistantMsg.isStreaming = false
-                assistantMsg.content = ""
                 
                 // Add error message
                 let errorMsg = ChatMessage(role: .error, content: error.localizedDescription)
                 session.messages.append(errorMsg)
-                
-                // Remove empty assistant placeholder
-                if assistantMsg.content.isEmpty {
-                    session.messages.removeAll { $0.id == assistantMsg.id }
-                }
                 
                 print("[Chat] Send message error: \(error)")
             }
@@ -278,6 +294,7 @@ final class ChatSessionManager: ObservableObject {
             
         case .thinkingDelta(let text):
             appendThinking(text, in: session)
+            scheduleStreamingUIUpdate(for: session)
             
         case .toolStart(let toolName, let toolCallId):
             let toolMsg = ChatMessage(
@@ -308,6 +325,11 @@ final class ChatSessionManager: ObservableObject {
                     if msg.content.isEmpty {
                         msg.content = result
                     }
+                } else {
+                    // No streaming assistant message was created (tokens were missed).
+                    // Create one now with the complete result.
+                    let assistantMsg = ChatMessage(role: .assistant, content: result, isStreaming: true)
+                    session.messages.append(assistantMsg)
                 }
             } else if !success, let result = result {
                 let errorMsg = ChatMessage(role: .error, content: result)
@@ -342,19 +364,29 @@ final class ChatSessionManager: ObservableObject {
         }
     }
     
-    /// Append streaming text to the last assistant message.
+    /// Append streaming text to the assistant message, creating it on-demand.
+    /// Because the message is created when text actually arrives (not upfront),
+    /// it appears after any thinking / tool-call messages — fixing display order.
     private func appendToStreamingMessage(_ text: String, in session: ChatSession) {
         if let msg = session.messages.last(where: { $0.role == .assistant && $0.isStreaming }) {
             msg.content += text
-            scheduleStreamingUIUpdate(for: session)
+        } else {
+            // Create the assistant message now — it will sort after tool calls naturally.
+            let assistantMsg = ChatMessage(role: .assistant, content: text, isStreaming: true)
+            session.messages.append(assistantMsg)
         }
+        scheduleStreamingUIUpdate(for: session)
     }
     
-    /// Append thinking text to the last assistant message.
+    /// Append thinking text as a dedicated .thinking message.
+    /// Created on-demand so it appears in the correct chronological position
+    /// (before tool calls and assistant text).
     private func appendThinking(_ text: String, in session: ChatSession) {
-        if let msg = session.messages.last(where: { $0.role == .assistant && $0.isStreaming }) {
-            msg.thinkingContent = (msg.thinkingContent ?? "") + text
-            scheduleStreamingUIUpdate(for: session)
+        if let msg = session.messages.last(where: { $0.role == .thinking }) {
+            msg.content += text
+        } else {
+            let thinkingMsg = ChatMessage(role: .thinking, content: text)
+            session.messages.append(thinkingMsg)
         }
     }
     
@@ -377,6 +409,8 @@ final class ChatSessionManager: ObservableObject {
         for msg in session.messages where msg.isStreaming {
             msg.isStreaming = false
         }
+        // Notify UI of final state change
+        session.objectWillChange.send()
     }
     
     // MARK: - Status Polling
@@ -409,6 +443,12 @@ final class ChatSessionManager: ObservableObject {
                         }
                         // Session is ready — connect SSE
                         connectSSE(for: session)
+                        
+                        // Send any queued message now that the session is ready.
+                        if let queued = self.queuedMessage {
+                            self.queuedMessage = nil
+                            self.sendMessage(queued)
+                        }
                         return
                     }
                     

@@ -303,6 +303,18 @@ async def spawn_executor(
     # Create the run — uses 'execute' pipeline (single-step, minimal overhead)
     run_id = gen_id("run_")
 
+    # Look up project workspace_type to propagate to the run
+    project_workspace_type: str | None = None
+    try:
+        project_result = await session.execute(
+            select(Project).where(Project.id == req.project_id)
+        )
+        project = project_result.scalar_one_or_none()
+        if project:
+            project_workspace_type = project.workspace_type
+    except Exception:
+        pass  # Non-fatal — engine falls back to inference
+
     run = Run(
         id=run_id,
         pipeline_id="execute",
@@ -313,6 +325,7 @@ async def spawn_executor(
         human_context=human_context,
         model_override=req.model_override,
         task_branch=task_branch,
+        workspace_type=project_workspace_type,
         created_at=now,
         updated_at=now,
     )

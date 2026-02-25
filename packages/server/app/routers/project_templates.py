@@ -103,6 +103,7 @@ BUILTIN_TEMPLATES = [
         "onboarding_agent_chain": ["stas", "jim", "eric", "finn"],
         "metadata": {
             "git_integration": True,
+            "workspace_type": "git_worktree",
             "review_stages": ["spec", "quality"],
         },
         "sort_order": 0,
@@ -134,6 +135,7 @@ BUILTIN_TEMPLATES = [
         "onboarding_agent_chain": None,
         "metadata": {
             "git_integration": False,
+            "workspace_type": "persistent_directory",
         },
         "sort_order": 1,
     },
@@ -187,6 +189,7 @@ BUILTIN_TEMPLATES = [
         "onboarding_agent_chain": None,
         "metadata": {
             "git_integration": False,
+            "workspace_type": "persistent_directory",
         },
         "sort_order": 2,
     },
@@ -239,6 +242,7 @@ BUILTIN_TEMPLATES = [
         "onboarding_agent_chain": None,
         "metadata": {
             "git_integration": False,
+            "workspace_type": "persistent_directory",
         },
         "sort_order": 3,
     },
@@ -316,7 +320,9 @@ def _serialize_template(t: ProjectTemplate) -> dict:
 
 
 async def seed_builtin_templates(db: Optional[AsyncSession] = None):
-    """Seed built-in templates. Idempotent — skips if slug already exists.
+    """Seed built-in templates. Idempotent — creates missing templates and
+    updates metadata on existing built-in templates to pick up new fields
+    (e.g. workspace_type).
 
     Called at server startup and via POST /v1/project-templates/seed.
     """
@@ -329,11 +335,36 @@ async def seed_builtin_templates(db: Optional[AsyncSession] = None):
 
     try:
         created = []
+        updated = []
         for tmpl_def in BUILTIN_TEMPLATES:
-            existing = await db.execute(
+            result = await db.execute(
                 select(ProjectTemplate).where(ProjectTemplate.slug == tmpl_def["slug"])
             )
-            if existing.scalar_one_or_none():
+            existing = result.scalar_one_or_none()
+
+            if existing:
+                # Update metadata and key fields on existing built-in templates
+                # so new fields (workspace_type, etc.) propagate without manual re-seed.
+                new_meta = tmpl_def.get("metadata", {})
+                old_meta = existing.template_metadata or {}
+                needs_update = False
+
+                if old_meta != new_meta:
+                    existing.template_metadata = new_meta
+                    needs_update = True
+                if existing.status_semantics != tmpl_def["status_semantics"]:
+                    existing.status_semantics = tmpl_def["status_semantics"]
+                    needs_update = True
+                if existing.board_columns != tmpl_def["columns"]:
+                    existing.board_columns = tmpl_def["columns"]
+                    needs_update = True
+                if existing.default_pipeline_id != tmpl_def.get("default_pipeline_id"):
+                    existing.default_pipeline_id = tmpl_def.get("default_pipeline_id")
+                    needs_update = True
+
+                if needs_update:
+                    existing.updated_at = now_ms()
+                    updated.append(tmpl_def["slug"])
                 continue
 
             ts = now_ms()
@@ -356,11 +387,14 @@ async def seed_builtin_templates(db: Optional[AsyncSession] = None):
             db.add(tmpl)
             created.append(tmpl_def["slug"])
 
-        if created:
+        if created or updated:
             await db.commit()
-            logger.info(f"Seeded built-in templates: {', '.join(created)}")
+            if created:
+                logger.info(f"Seeded built-in templates: {', '.join(created)}")
+            if updated:
+                logger.info(f"Updated built-in templates: {', '.join(updated)}")
 
-        return {"seeded": created}
+        return {"seeded": created, "updated": updated}
     finally:
         if close_session:
             await db.close()

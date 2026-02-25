@@ -45,14 +45,9 @@ steps:
       5. Write or update tests to cover the bug
       6. Commit with message: "fix: <description>"
 
-      Write your outputs:
-      - ROOT_CAUSE.md — What caused the bug
-      - FIX_NOTES.md — What you changed and why
-      - FILES_CHANGED.txt — List of files modified
+      When done, summarize root cause and what you changed.
     outputs:
-      - root_cause
-      - fix_notes
-      - files_changed
+      - summary
     onComplete: VALIDATE
 
   # 2. Validate the fix

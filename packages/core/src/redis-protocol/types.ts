@@ -33,6 +33,9 @@ export const agentStepCommandSchema = baseMessageSchema.extend({
   tools: z.array(z.string()).default([]),
   maxSteps: z.number().default(999),
   attachments: z.array(attachmentMetaSchema).optional(),
+  /** Optional model override for this turn. When set, the runner hot-swaps
+   *  to this model seamlessly (preserving full conversation context). */
+  model: z.string().optional(),
 });
 
 export type AgentStepCommand = z.infer<typeof agentStepCommandSchema>;
@@ -61,6 +64,15 @@ export const abortCommandSchema = baseMessageSchema.extend({
 
 export type AbortCommand = z.infer<typeof abortCommandSchema>;
 
+export const changeModelCommandSchema = baseMessageSchema.extend({
+  type: z.literal("changeModel"),
+  requestId: z.string().optional(),
+  /** New model string in "provider/model-id" format. */
+  model: z.string(),
+});
+
+export type ChangeModelCommand = z.infer<typeof changeModelCommandSchema>;
+
 export const structuredOutputCommandSchema = baseMessageSchema.extend({
   type: z.literal("structuredOutput"),
   requestId: z.string(),
@@ -84,6 +96,7 @@ export const commandMessageSchema = z.discriminatedUnion("type", [
   shutdownCommandSchema,
   abortCommandSchema,
   structuredOutputCommandSchema,
+  changeModelCommandSchema,
 ]);
 
 export type CommandMessage =
@@ -91,7 +104,8 @@ export type CommandMessage =
   | ToolCommand
   | ShutdownCommand
   | AbortCommand
-  | StructuredOutputCommand;
+  | StructuredOutputCommand
+  | ChangeModelCommand;
 
 // ============================================================================
 // Output Messages (Container → Engine)
@@ -101,6 +115,9 @@ export const stdoutMessageSchema = baseMessageSchema.extend({
   type: z.literal("stdout"),
   requestId: z.string().optional(),
   data: z.string(),
+  /** Distinguish assistant text tokens from tool (bash) streaming output.
+   *  'assistant' (default) = LLM text delta, 'tool' = bash stdout/stderr. */
+  source: z.enum(["assistant", "tool"]).optional(),
 });
 
 export type StdoutMessage = z.infer<typeof stdoutMessageSchema>;
@@ -109,6 +126,7 @@ export const stderrMessageSchema = baseMessageSchema.extend({
   type: z.literal("stderr"),
   requestId: z.string().optional(),
   data: z.string(),
+  source: z.enum(["assistant", "tool"]).optional(),
 });
 
 export type StderrMessage = z.infer<typeof stderrMessageSchema>;

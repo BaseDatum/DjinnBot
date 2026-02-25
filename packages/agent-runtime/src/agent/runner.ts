@@ -170,6 +170,56 @@ export class ContainerAgentRunner {
   }
 
   /**
+   * Hot-swap the model for this runner.
+   *
+   * Uses pi-agent-core's `agent.setModel()` which preserves full conversation
+   * context (all messages, tool calls, and results) seamlessly — no Agent
+   * recreation needed.  The new model takes effect on the very next turn.
+   *
+   * Called from the entrypoint when:
+   *  - A `changeModel` command arrives between turns (from /model slash command)
+   *  - An `agentStep` command carries a `model` override field
+   */
+  setModel(modelString: string): void {
+    // Skip redundant swap when the model string hasn't changed (e.g. onChangeModel
+    // already applied the same model that onAgentStep carries as an override).
+    if (this.options.model === modelString) {
+      console.log(`[AgentRunner] Model already set to ${modelString}, skipping swap`);
+      return;
+    }
+
+    const previousModel = this.options.model;
+    this.options.model = modelString;
+    // Invalidate the cached resolved model so getModel() re-resolves on next turn
+    this.resolvedModel = null;
+
+    // If the persistent agent is already running, hot-swap immediately via
+    // pi-agent-core's setModel() — this preserves the full conversation
+    // history without recreating the Agent.
+    if (this.persistentAgent) {
+      try {
+        const newModel = this.getModel();
+        this.persistentAgent.setModel(newModel);
+        console.log(`[AgentRunner] Model hot-swapped: ${previousModel} → ${modelString} (resolved: ${newModel.id})`);
+      } catch (err) {
+        console.error(`[AgentRunner] Failed to resolve new model "${modelString}", reverting:`, err);
+        // Revert on failure so the agent doesn't break
+        this.options.model = previousModel;
+        this.resolvedModel = null;
+      }
+    } else {
+      console.log(`[AgentRunner] Model set to ${modelString} (will take effect on next turn)`);
+    }
+  }
+
+  /**
+   * Get the current model string (for reporting in slash commands etc.).
+   */
+  getModelString(): string {
+    return this.options.model || 'anthropic/claude-sonnet-4';
+  }
+
+  /**
    * Mark MCP tool cache as stale. Called when the engine sends an
    * invalidateMcpTools command (triggered by grant/revoke in the API).
    * The next runStep() will re-fetch tool definitions from the API.

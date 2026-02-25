@@ -66,6 +66,14 @@ export interface StderrEvent {
   timestamp: number;
 }
 
+// Container Lifecycle Events (published by engine, not container-internal)
+export interface ContainerLifecycleEvent {
+  type: 'CONTAINER_CREATED' | 'CONTAINER_STARTING' | 'CONTAINER_READY' | 'CONTAINER_STOPPING' | 'CONTAINER_DESTROYED';
+  runId: string;
+  detail?: string;
+  timestamp: number;
+}
+
 // Messaging Events
 export interface AgentMessageEvent {
   type: 'agentMessage';
@@ -88,6 +96,7 @@ export interface SlackDmEvent {
 // Union type for all container events
 export type ContainerEvent =
   | ContainerStatusEvent
+  | ContainerLifecycleEvent
   | StepStartEvent
   | StepEndEvent
   | ToolStartEvent

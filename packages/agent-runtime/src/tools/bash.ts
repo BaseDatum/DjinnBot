@@ -48,6 +48,7 @@ export async function executeBash(
         type: 'stdout',
         requestId,
         data,
+        source: 'tool',
       }).catch(console.error);
     });
 
@@ -59,6 +60,7 @@ export async function executeBash(
         type: 'stderr',
         requestId,
         data,
+        source: 'tool',
       }).catch(console.error);
     });
 

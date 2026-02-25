@@ -1,6 +1,5 @@
 import { join } from 'node:path';
 import { statSync } from 'node:fs';
-import { execSync } from 'node:child_process';
 import { AgentLifecycleManager } from './agent-lifecycle.js';
 import { AgentLifecycleTracker } from '../lifecycle/agent-lifecycle-tracker.js';
 import { EventBus } from '../events/event-bus.js';
@@ -12,7 +11,8 @@ import type { AgentPersona, PersonaLoader } from './persona-loader.js';
 import type { ContextAssembler } from '../memory/context-assembler.js';
 import type { ProgressFileManager } from '../memory/progress-file.js';
 import type { AgentMemoryManager } from '../memory/agent-memory.js';
-import type { WorkspaceManager } from './workspace-manager.js';
+import type { IWorkspaceManager, WorkspaceType } from './workspace-types.js';
+import type { WorkspaceManagerFactory } from './workspace-manager-factory.js';
 
 export interface AgentExecutorConfig {
   eventBus: EventBus;
@@ -29,7 +29,13 @@ export interface AgentExecutorConfig {
   contextAssembler?: ContextAssembler;
   progressFiles?: ProgressFileManager;
   agentMemoryManager?: AgentMemoryManager;
-  workspaceManager?: WorkspaceManager;
+  workspaceManager?: IWorkspaceManager;
+  /** Factory for per-run workspace manager resolution. When set, the executor
+   *  resolves the correct manager for each run instead of always using the
+   *  default workspaceManager. */
+  workspaceManagerFactory?: WorkspaceManagerFactory;
+  /** Lookup the workspace type for a run (from the DB). */
+  getRunWorkspaceType?: (runId: string) => string | undefined | Promise<string | undefined>;
   lifecycleManager?: AgentLifecycleManager;
   lifecycleTracker?: AgentLifecycleTracker;
   sessionPersister?: import('../sessions/session-persister.js').SessionPersister;
@@ -117,7 +123,9 @@ export class AgentExecutor {
   private unsubscribers: Map<string, () => void> = new Map();
   private activeRuns: Set<string> = new Set();
   private abortControllers: Map<string, AbortController> = new Map();
-  private workspaceManager?: WorkspaceManager;
+  private workspaceManager?: IWorkspaceManager;
+  private workspaceManagerFactory?: WorkspaceManagerFactory;
+  private getRunWorkspaceType?: AgentExecutorConfig['getRunWorkspaceType'];
   private lifecycleManager?: AgentLifecycleManager;
   private lifecycleTracker?: AgentLifecycleTracker;
   private sessionPersister?: import('../sessions/session-persister.js').SessionPersister;
@@ -137,6 +145,8 @@ export class AgentExecutor {
     this.getRunTaskBranch = config.getRunTaskBranch;
     this.getLoopState = config.getLoopState;
     this.workspaceManager = config.workspaceManager;
+    this.workspaceManagerFactory = config.workspaceManagerFactory;
+    this.getRunWorkspaceType = config.getRunWorkspaceType;
     this.contextAssembler = config.contextAssembler;
     this.progressFiles = config.progressFiles;
     this.agentMemoryManager = config.agentMemoryManager;
@@ -150,6 +160,36 @@ export class AgentExecutor {
   /** Get the underlying agent runner (for pulse sessions, etc.) */
   getAgentRunner(): AgentRunner {
     return this.agentRunner;
+  }
+
+  /**
+   * Resolve the workspace manager for a specific run.
+   *
+   * When a factory + workspace type getter is available, resolves the correct
+   * manager for the run's project type (e.g. PersistentDirectoryWM for kanban).
+   * Falls back to the default workspace manager when the factory is unavailable
+   * or when resolution fails.
+   */
+  private async resolveRunWorkspaceManager(
+    runId: string,
+    projectId?: string,
+  ): Promise<IWorkspaceManager | undefined> {
+    if (this.workspaceManagerFactory) {
+      try {
+        const workspaceType = this.getRunWorkspaceType
+          ? await this.getRunWorkspaceType(runId)
+          : undefined;
+        if (workspaceType || projectId) {
+          return this.workspaceManagerFactory.resolve({
+            projectId: projectId || 'unknown',
+            workspaceType: workspaceType as WorkspaceType | undefined,
+          });
+        }
+      } catch (err) {
+        console.warn(`[AgentExecutor] Failed to resolve workspace manager for run ${runId}, using default:`, err);
+      }
+    }
+    return this.workspaceManager;
   }
 
   /**
@@ -485,50 +525,45 @@ export class AgentExecutor {
       // (before the structured output check) for per-user key resolution.
       const projectId = this.getRunProjectId ? await this.getRunProjectId(runId) : undefined;
 
-      if (this.workspaceManager) {
+      // Resolve the correct workspace manager for this run (may differ per project type).
+      const wm = await this.resolveRunWorkspaceManager(runId, projectId);
+
+      if (wm) {
         try {
           // Compute run workspace path (deterministic: SHARED_RUNS_DIR/{runId})
           // Only set for pipeline runs (runId starts with 'run_')
           const isPipelineRun = runId.startsWith('run_');
           if (isPipelineRun) {
-            const runsDir = process.env.SHARED_RUNS_DIR || '/data/runs';
-            runWorkspacePath = `${runsDir}/${runId}`;
-
-            // Project workspace path — the project's main git repo
-            if (projectId) {
-              projectWorkspacePath = `${workspacesDir}/${projectId}`;
+            // For persistent_directory workspaces, the run path IS the project path.
+            // For git_worktree, it's SHARED_RUNS_DIR/{runId}.
+            if (wm.type === 'persistent_directory' && projectId) {
+              runWorkspacePath = `${workspacesDir}/${projectId}`;
+              projectWorkspacePath = runWorkspacePath;
+            } else {
+              const runsDir = process.env.SHARED_RUNS_DIR || '/data/runs';
+              runWorkspacePath = `${runsDir}/${runId}`;
+              if (projectId) {
+                projectWorkspacePath = `${workspacesDir}/${projectId}`;
+              }
             }
 
-            console.log(`[AgentExecutor] Run workspace: ${runWorkspacePath}${projectId ? `, Project workspace: ${projectWorkspacePath}` : ' (no project)'}`);
+            console.log(`[AgentExecutor] Run workspace: ${runWorkspacePath}${projectId ? `, Project workspace: ${projectWorkspacePath}` : ' (no project)'} (${wm.type})`);
 
             // Only create the workspace if it doesn't already exist.
             // PipelineEngine.setupRunWorkspace() creates it before the first step is queued.
             // We only fall through here as a safety net for retried/crash-recovered steps.
-            if (!this.workspaceManager.getRunPath(runId)) {
+            if (!wm.getRunPath(runId)) {
               console.log(`[AgentExecutor] Run workspace missing — creating (crash-recovery path)`);
               try {
                 if (projectId) {
                   // Look up the task branch so the crash-recovered worktree lands on the
                   // correct feat/{taskId} branch rather than creating a new ephemeral run branch.
-                  // Only pass taskBranch if the project workspace has a git remote (linked repo).
-                  // Non-git projects use empty git repos where worktrees work but remote checks fail.
-                  let taskBranch = this.getRunTaskBranch ? await this.getRunTaskBranch(runId) : undefined;
-                  if (taskBranch) {
-                    try {
-                      const wsDir = process.env.WORKSPACES_DIR || '/data/workspaces';
-                      const projectPath = join(wsDir, projectId);
-                      execSync('git remote get-url origin', {
-                        cwd: projectPath, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'],
-                      });
-                    } catch {
-                      // No remote — don't pass taskBranch to avoid the safety check failure
-                      console.log(`[AgentExecutor] Project ${projectId} has no git remote, skipping task branch`);
-                      taskBranch = undefined;
-                    }
-                  }
-                  await this.workspaceManager.createRunWorktreeAsync(projectId, runId, undefined, taskBranch);
+                  // The workspace manager implementation handles git-specific checks internally
+                  // (e.g. whether a remote exists) — the executor doesn't need to know.
+                  const taskBranch = this.getRunTaskBranch ? await this.getRunTaskBranch(runId) : undefined;
+                  await wm.createRunWorkspaceAsync(projectId, runId, { taskBranch });
                 } else {
-                  this.workspaceManager.ensureRunWorkspace(runId);
+                  wm.ensureRunWorkspace(runId);
                 }
               } catch (wsErr) {
                 const errorMsg = `Failed to create run workspace: ${wsErr instanceof Error ? wsErr.message : String(wsErr)}`;
@@ -541,7 +576,7 @@ export class AgentExecutor {
 
           // Watch the run workspace for file changes (pipeline activity feed)
           if (runWorkspacePath) {
-            unwatchWorkspace = this.workspaceManager.watchWorkspace(runWorkspacePath, (filePath, action) => {
+            unwatchWorkspace = wm.watchWorkspace(runWorkspacePath, (filePath, action) => {
               // Collect file metadata (size) for create/modify events
               let size: number | undefined;
               if (action !== 'delete') {
@@ -790,13 +825,15 @@ export class AgentExecutor {
     const timestamp = Date.now();
 
     // AUTO-COMMIT WORKSPACE CHANGES BEFORE PUBLISHING EVENT
+    // Only attempt if the workspace manager supports version control (e.g. git).
     let commitHash: string | undefined;
-    if (this.workspaceManager) {
+    if (this.workspaceManager?.supportsVersionControl()) {
+      const vcs = this.workspaceManager.asVersionControlProvider!();
       const runPath = this.workspaceManager.getRunPath(runId);
       if (runPath) {
         try {
           const summary = this.extractCommitSummary(outputs);
-          const hash = this.workspaceManager.commitStep(runPath, stepId, agentId, summary);
+          const hash = vcs.commitStep(runPath, stepId, agentId, summary);
           if (hash) {
             commitHash = hash;
             console.log(`[AgentExecutor] Auto-committed step ${stepId}: ${hash.slice(0, 8)}`);
@@ -805,8 +842,6 @@ export class AgentExecutor {
           }
         } catch (err) {
           console.error(`[AgentExecutor] Failed to commit step ${stepId}:`, err);
-          // Don't fail the step if commit fails — git issues shouldn't block progress
-          // But publish an event so dashboard can show warning
           await this.eventBus.publish(runChannel(runId), {
             type: 'COMMIT_FAILED',
             runId,
@@ -832,12 +867,13 @@ export class AgentExecutor {
           content: `**Outputs:**\n${outputsFormatted}\n\n**Raw Output:**\n\`\`\`\n${rawOutput}\n\`\`\``,
         });
 
-        // COMMIT PROGRESS FILE UPDATE IF WE HAVE A WORKTREE
-        if (this.workspaceManager && commitHash) {
+        // COMMIT PROGRESS FILE UPDATE IF WE HAVE VCS
+        if (this.workspaceManager?.supportsVersionControl() && commitHash) {
+          const vcs = this.workspaceManager.asVersionControlProvider!();
           const runPath = this.workspaceManager.getRunPath(runId);
           if (runPath) {
             try {
-              const progressCommitHash = this.workspaceManager.commitStep(
+              const progressCommitHash = vcs.commitStep(
                 runPath,
                 `${stepId}-progress`,
                 'system',

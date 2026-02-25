@@ -80,12 +80,9 @@ steps:
       2. Write clean, tested code
       3. Commit with message: "feat: <description>"
 
-      Write your outputs:
-      - IMPLEMENTATION_NOTES.md — What you did
-      - FILES_CHANGED.txt — List of files modified
+      When done, write a brief summary of what you implemented.
     outputs:
-      - implementation_notes
-      - files_changed
+      - summary
     onComplete: REVIEW
 
   # 3. Code Review

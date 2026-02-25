@@ -19,6 +19,9 @@ export type { AbortCommand } from "./types.js";
 export { structuredOutputCommandSchema } from "./types.js";
 export type { StructuredOutputCommand } from "./types.js";
 
+export { changeModelCommandSchema } from "./types.js";
+export type { ChangeModelCommand } from "./types.js";
+
 export { commandMessageSchema } from "./types.js";
 export type { CommandMessage } from "./types.js";
 

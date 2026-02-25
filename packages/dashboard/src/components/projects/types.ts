@@ -93,6 +93,7 @@ export interface Project {
   vision?: string;
   template_id?: string | null;
   status_semantics?: StatusSemantics | null;
+  workspace_type?: string | null;
   columns: Column[];
   tasks: Task[];
   dependencies: Dependency[];

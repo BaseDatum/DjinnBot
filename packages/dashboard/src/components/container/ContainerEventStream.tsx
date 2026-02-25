@@ -25,6 +25,59 @@ function formatEventForDisplay(event: ContainerEvent): ContainerEventDisplay {
   const baseId = `${event.type}-${event.timestamp}`;
   
   switch (event.type) {
+    // Container lifecycle events (published by engine)
+    case 'CONTAINER_CREATED':
+      return {
+        id: baseId,
+        timestamp: event.timestamp,
+        category: 'status',
+        label: 'Container created',
+        description: event.detail || 'Container image pulled and created',
+        variant: 'info' as const,
+        data: event,
+      };
+    case 'CONTAINER_STARTING':
+      return {
+        id: baseId,
+        timestamp: event.timestamp,
+        category: 'status',
+        label: 'Container starting',
+        description: 'Waiting for container to become ready...',
+        variant: 'default' as const,
+        data: event,
+      };
+    case 'CONTAINER_READY':
+      return {
+        id: baseId,
+        timestamp: event.timestamp,
+        category: 'status',
+        label: 'Container ready',
+        description: 'Container started and accepting commands',
+        variant: 'success' as const,
+        data: event,
+      };
+    case 'CONTAINER_STOPPING':
+      return {
+        id: baseId,
+        timestamp: event.timestamp,
+        category: 'status',
+        label: 'Container stopping',
+        description: 'Shutting down container...',
+        variant: 'default' as const,
+        data: event,
+      };
+    case 'CONTAINER_DESTROYED':
+      return {
+        id: baseId,
+        timestamp: event.timestamp,
+        category: 'status',
+        label: 'Container destroyed',
+        description: 'Container removed',
+        variant: 'default' as const,
+        data: event,
+      };
+
+    // Container internal status events
     case 'ready':
     case 'busy':
     case 'idle':
@@ -128,15 +181,17 @@ function formatEventForDisplay(event: ContainerEvent): ContainerEventDisplay {
         data: event,
       };
     
-    default:
+    default: {
+      const unknownEvent = event as any;
       return {
         id: baseId,
-        timestamp: event.timestamp,
-        category: 'output',
-        label: 'Unknown event',
-        description: JSON.stringify(event),
-        variant: 'default',
+        timestamp: unknownEvent.timestamp ?? Date.now(),
+        category: 'output' as const,
+        label: unknownEvent.type ?? 'Unknown event',
+        description: JSON.stringify(unknownEvent),
+        variant: 'default' as const,
       };
+    }
   }
 }
 

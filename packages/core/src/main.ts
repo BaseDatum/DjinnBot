@@ -407,7 +407,10 @@ function initSwarmManager(): SwarmSessionManager {
     mergeExecutorBranches: async (params) => {
       if (!djinnBot) throw new Error('DjinnBot not initialized');
       const wm = djinnBot.getWorkspaceManager();
-      return wm.mergeExecutorBranches(params.projectId, params.targetBranch, params.executorBranches);
+      if (!wm.supportsBranchIntegration()) {
+        throw new Error(`Workspace manager '${wm.type}' does not support branch integration`);
+      }
+      return wm.asBranchIntegrationProvider!().mergeBranches(params.projectId, params.targetBranch, params.executorBranches);
     },
 
     // Post-swarm PR creation (uses the API's existing PR endpoint)
@@ -695,16 +698,20 @@ async function handleGlobalEvent(event: { type: string; agentId?: string; [key: 
       console.log(`[Engine] Creating task worktree for ${agentId}/${taskId} on ${taskBranch}`);
       try {
         const wm = djinnBot.getWorkspaceManager();
-        const result = await wm.createTaskWorktree(agentId, projectId, taskId, taskBranch);
+        if (!wm.supportsTaskWorkspaces()) {
+          throw new Error(`Workspace manager '${wm.type}' does not support task workspaces`);
+        }
+        const taskWm = wm.asTaskWorkspaceProvider!();
+        const result = await taskWm.createTaskWorkspace(agentId, projectId, taskId, { taskBranch });
         // Publish result so Python API can unblock the waiting HTTP response
         if (opsRedis) {
           await opsRedis.setex(
             `djinnbot:workspace:${agentId}:${taskId}`,
             300, // 5 min TTL — enough for the HTTP response to read it
-            JSON.stringify({ success: true, worktreePath: result.worktreePath, branch: result.branch, alreadyExists: result.alreadyExists }),
+            JSON.stringify({ success: true, worktreePath: result.workspacePath, branch: result.metadata?.branch, alreadyExists: result.alreadyExists }),
           );
         }
-        console.log(`[Engine] Task worktree ready at ${result.worktreePath}`);
+        console.log(`[Engine] Task workspace ready at ${result.workspacePath}`);
       } catch (err) {
         console.error(`[Engine] Failed to create task worktree for ${agentId}/${taskId}:`, err);
         if (opsRedis) {
@@ -724,7 +731,9 @@ async function handleGlobalEvent(event: { type: string; agentId?: string; [key: 
       console.log(`[Engine] Removing task worktree for ${agentId}/${taskId}`);
       try {
         const wm = djinnBot.getWorkspaceManager();
-        wm.removeTaskWorktree(agentId, projectId, taskId);
+        if (wm.supportsTaskWorkspaces()) {
+          wm.asTaskWorkspaceProvider!().removeTaskWorkspace(agentId, projectId, taskId);
+        }
       } catch (err) {
         console.error(`[Engine] Failed to remove task worktree for ${agentId}/${taskId}:`, err);
       }

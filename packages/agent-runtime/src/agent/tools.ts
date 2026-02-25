@@ -85,6 +85,7 @@ export function createContainerTools(config: ToolsConfig): Tool[] {
           type: 'stderr',
           requestId: requestIdRef.current,
           data: errorMsg,
+          source: 'tool',
         }).catch(console.error);
         return { exitCode: 1 };
       }
@@ -133,6 +134,7 @@ export function createContainerTools(config: ToolsConfig): Tool[] {
             type: 'stdout',
             requestId: requestIdRef.current,
             data: data.toString(),
+            source: 'tool',
           }).catch(console.error);
         });
 
@@ -142,6 +144,7 @@ export function createContainerTools(config: ToolsConfig): Tool[] {
             type: 'stderr',
             requestId: requestIdRef.current,
             data: data.toString(),
+            source: 'tool',
           }).catch(console.error);
         });
 
@@ -161,6 +164,7 @@ export function createContainerTools(config: ToolsConfig): Tool[] {
             type: 'stderr',
             requestId: requestIdRef.current,
             data: errorMsg,
+            source: 'tool',
           }).catch(console.error);
           resolve({ exitCode: 1 });
         });

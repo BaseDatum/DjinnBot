@@ -110,7 +110,7 @@ async function main(): Promise<void> {
   // we weren't listening yet.
   await startCommandListener(subscriber, config.runId, {
     onAgentStep: async (cmd) => {
-      console.log(`[AgentRuntime] Received agent step: ${cmd.requestId}`);
+      console.log(`[AgentRuntime] Received agent step: ${cmd.requestId}${cmd.model ? ` (model override: ${cmd.model})` : ''}`);
 
       // Publish busy status
       await publisher.publishStatus({
@@ -128,6 +128,12 @@ async function main(): Promise<void> {
       await publisher.publishEvent(stepStart);
 
       try {
+        // If the command carries a model override, hot-swap the model before
+        // running the step. This preserves full conversation context seamlessly.
+        if (cmd.model && cmd.model !== runner.getModelString()) {
+          runner.setModel(cmd.model);
+        }
+
         // Run the agent step.
         // agentSystemPrompt is read from AGENT_SYSTEM_PROMPT env var (set by
         // ChatSessionManager from the agent's persona files). It is only used
@@ -199,6 +205,13 @@ async function main(): Promise<void> {
       
       // Publish idle status
       await publisher.publishStatus({ type: 'idle', runId: config.runId });
+    },
+
+    onChangeModel: async (cmd) => {
+      console.log(`[AgentRuntime] Model change requested: ${cmd.model}`);
+      // Hot-swap the model — takes effect on the next agentStep.
+      // Conversation context is fully preserved.
+      runner.setModel(cmd.model);
     },
 
     onStructuredOutput: async (cmd: StructuredOutputCommand) => {

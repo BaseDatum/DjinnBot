@@ -231,14 +231,9 @@ steps:
       4. Commit your changes
       5. Document what you did
       
-      Write your outputs:
-      - IMPLEMENTATION_NOTES.md — What you did, decisions made
-      - FILES_CHANGED.txt — List of files modified
-      - COMMIT_HASH.txt — Git commit reference
+      When done, write a brief summary of what you implemented.
     outputs:
-      - implementation_notes
-      - files_changed
-      - commit_hash
+      - summary
     loop:
       over: task_breakdown_json
       onEachComplete: REVIEW

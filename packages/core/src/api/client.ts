@@ -110,6 +110,7 @@ export class ApiClient {
         currentStepId: r.current_step,
         humanContext: r.human_context,
         taskBranch: r.task_branch ?? undefined,
+        workspaceType: r.workspace_type ?? undefined,
         userId: r.key_user_id ?? undefined,
         initiatedByUserId: r.initiated_by_user_id ?? undefined,
         modelOverride: r.model_override ?? undefined,

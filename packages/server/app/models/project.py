@@ -64,6 +64,11 @@ class Project(Base, TimestampWithCompletedMixin):
     # }
     # When NULL, falls back to the legacy hardcoded semantics for backward compat.
     status_semantics: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    # Workspace strategy for this project. Determines how run workspaces are
+    # provisioned by the engine. Values: 'git_worktree' (default for projects
+    # with a linked repository), 'persistent_directory' (plain directory, no VCS).
+    # When NULL, the engine infers from the presence of a repository URL.
+    workspace_type: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
     # Multi-user: DjinnBot user whose API keys are used for automated runs
     # (pipeline steps, pulse sessions) in this project. When NULL, the system
     # falls back to instance-level keys.

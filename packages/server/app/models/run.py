@@ -26,6 +26,11 @@ class Run(Base, TimestampWithCompletedMixin):
     # an ephemeral run/{runId} branch.  Shared across retries of the same task.
     task_branch: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
 
+    # Workspace strategy inherited from the project at run creation time.
+    # Stored on the run so the engine doesn't need to look up the project
+    # to decide which workspace manager to use. Values match Project.workspace_type.
+    workspace_type: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+
     # Multi-user key resolution fields
     initiated_by_user_id: Mapped[Optional[str]] = mapped_column(
         String(64),

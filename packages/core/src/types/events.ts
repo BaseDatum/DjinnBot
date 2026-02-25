@@ -92,4 +92,5 @@ export type PipelineEvent =
   | ContainerRedisCloseEvent
   | ContainerRedisReconnectingEvent
   | ContainerCrashEvent
-  | ContainerStartErrorEvent;
+  | ContainerStartErrorEvent
+  | { type: 'CONTAINER_CREATED' | 'CONTAINER_STARTING' | 'CONTAINER_READY' | 'CONTAINER_STOPPING' | 'CONTAINER_DESTROYED'; runId: string; detail?: string; timestamp: number };

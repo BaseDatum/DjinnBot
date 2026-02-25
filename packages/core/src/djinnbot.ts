@@ -21,7 +21,10 @@ import type { PipelineConfig } from './types/pipeline.js';
 import type { PipelineRun } from './types/state.js';
 import { runChannel } from './events/channels.js';
 import { AgentRegistry } from './agents/index.js';
-import { WorkspaceManager } from './runtime/workspace-manager.js';
+import { GitWorktreeWorkspaceManager } from './runtime/workspace-manager.js';
+import { PersistentDirectoryWorkspaceManager } from './runtime/simple-workspace-manager.js';
+import { WorkspaceManagerFactory } from './runtime/workspace-manager-factory.js';
+import type { IWorkspaceManager } from './runtime/workspace-types.js';
 import { AgentLifecycleManager } from './runtime/agent-lifecycle.js';
 import { AgentInbox } from './events/agent-inbox.js';
 import { AgentPulse } from './runtime/agent-pulse.js';
@@ -69,7 +72,8 @@ export class DjinnBot {
   private redis?: Redis;
   private sessionPersister?: SessionPersister;
 
-  private workspaceManager: WorkspaceManager;
+  private workspaceManager: IWorkspaceManager;
+  private workspaceManagerFactory: WorkspaceManagerFactory;
 
   constructor(private config: DjinnBotConfig) {
     // Initialize store (SQLite or API-based)
@@ -80,10 +84,21 @@ export class DjinnBot {
     }
     this.store.initialize();
 
-    // Initialize workspace manager with repository lookup callback
-    this.workspaceManager = new WorkspaceManager({
+    // Initialize workspace managers via factory
+    const gitWm = new GitWorktreeWorkspaceManager({
       getProjectRepository: (projectId: string) => this.store.getProjectRepository(projectId)
     });
+    const persistentDirWm = new PersistentDirectoryWorkspaceManager();
+
+    this.workspaceManagerFactory = new WorkspaceManagerFactory();
+    this.workspaceManagerFactory.register(gitWm);
+    this.workspaceManagerFactory.register(persistentDirWm);
+    this.workspaceManagerFactory.setDefault(gitWm);
+
+    // Default workspace manager — used for task worktrees, merge, and
+    // any operations that don't have per-project resolution context.
+    this.workspaceManager = gitWm;
+
     this.eventBus = new EventBus({ redisUrl: config.redisUrl });
 
     this.personaLoader = new PersonaLoader(config.agentsDir);
@@ -135,9 +150,9 @@ export class DjinnBot {
       getInstalledTools: (agentId: string) => {
         return this.lifecycleManager.getInstalledTools(agentId);
       },
-      // Git context — branch, base, and recent step commits for the agent's workspace
+      // Workspace context — branch/commit info for git workspaces, empty for others
       getWorkspaceGitContext: (runId: string) => {
-        return this.workspaceManager.getWorkspaceGitContext(runId);
+        return this.workspaceManager.getWorkspaceContext(runId);
       },
     });
     
@@ -150,6 +165,8 @@ export class DjinnBot {
     this.engine = new PipelineEngine({
       eventBus: this.eventBus,
       store: this.store,
+      workspaceManager: this.workspaceManager,
+      workspaceManagerFactory: this.workspaceManagerFactory,
       onRunCompleted: async (runId, outputs) => {
         await this.taskRunTracker?.handleRunCompleted(runId, outputs);
       },
@@ -193,6 +210,8 @@ export class DjinnBot {
       contextAssembler: this.contextAssembler,
       progressFiles: this.progressFiles,
       workspaceManager: this.workspaceManager,
+      workspaceManagerFactory: this.workspaceManagerFactory,
+      getRunWorkspaceType: async (runId: string) => (await this.store.getRun(runId))?.workspaceType,
       lifecycleManager: this.lifecycleManager,
       getRunProjectId: async (runId: string) => (await this.store.getRun(runId))?.projectId,
       getRunUserId: async (runId: string) => (await this.store.getRun(runId))?.userId,
@@ -347,6 +366,14 @@ export class DjinnBot {
             console.error(`[DjinnBot] Failed to send Slack DM from container:`, err);
             return `Failed to send Slack DM: ${(err as Error).message}`;
           }
+        },
+        onContainerEvent: (runId, event) => {
+          this.eventBus.publish(runChannel(runId), {
+            type: event.type as any,
+            runId,
+            detail: event.detail,
+            timestamp: event.timestamp,
+          }).catch(err => console.error('[DjinnBot] Failed to publish container event:', err));
         },
       });
     }
@@ -689,9 +716,14 @@ export class DjinnBot {
     return this.agentRegistry;
   }
 
-  /** Expose WorkspaceManager for engine-level workspace operations (e.g. task worktree creation). */
-  getWorkspaceManager(): WorkspaceManager {
+  /** Expose the default workspace manager for engine-level operations (e.g. task worktree creation). */
+  getWorkspaceManager(): IWorkspaceManager {
     return this.workspaceManager;
+  }
+
+  /** Expose the workspace manager factory for per-project resolution. */
+  getWorkspaceManagerFactory(): WorkspaceManagerFactory {
+    return this.workspaceManagerFactory;
   }
 
   /** Get the pulse timeline for all agents */

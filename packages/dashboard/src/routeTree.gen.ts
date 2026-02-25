@@ -9,6 +9,7 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as UsageRouteImport } from './routes/usage'
 import { Route as SkillsRouteImport } from './routes/skills'
 import { Route as SetupRouteImport } from './routes/setup'
 import { Route as SettingsRouteImport } from './routes/settings'
@@ -17,7 +18,6 @@ import { Route as MemoryRouteImport } from './routes/memory'
 import { Route as McpRouteImport } from './routes/mcp'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as ChatRouteImport } from './routes/chat'
-import { Route as UsageRouteImport } from './routes/usage'
 import { Route as AdminRouteImport } from './routes/admin'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as RunsIndexRouteImport } from './routes/runs/index'
@@ -31,7 +31,13 @@ import { Route as PipelinesPipelineIdRouteImport } from './routes/pipelines/$pip
 import { Route as McpConfigureRouteImport } from './routes/mcp.configure'
 import { Route as AuthCallbackRouteImport } from './routes/auth/callback'
 import { Route as AgentsAgentIdRouteImport } from './routes/agents/$agentId'
+import { Route as RunsSwarmSwarmIdRouteImport } from './routes/runs/swarm.$swarmId'
 
+const UsageRoute = UsageRouteImport.update({
+  id: '/usage',
+  path: '/usage',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const SkillsRoute = SkillsRouteImport.update({
   id: '/skills',
   path: '/skills',
@@ -70,11 +76,6 @@ const LoginRoute = LoginRouteImport.update({
 const ChatRoute = ChatRouteImport.update({
   id: '/chat',
   path: '/chat',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const UsageRoute = UsageRouteImport.update({
-  id: '/usage',
-  path: '/usage',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AdminRoute = AdminRouteImport.update({
@@ -142,6 +143,11 @@ const AgentsAgentIdRoute = AgentsAgentIdRouteImport.update({
   path: '/agents/$agentId',
   getParentRoute: () => rootRouteImport,
 } as any)
+const RunsSwarmSwarmIdRoute = RunsSwarmSwarmIdRouteImport.update({
+  id: '/runs/swarm/$swarmId',
+  path: '/runs/swarm/$swarmId',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -166,6 +172,7 @@ export interface FileRoutesByFullPath {
   '/pipelines/': typeof PipelinesIndexRoute
   '/projects/': typeof ProjectsIndexRoute
   '/runs/': typeof RunsIndexRoute
+  '/runs/swarm/$swarmId': typeof RunsSwarmSwarmIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -190,6 +197,7 @@ export interface FileRoutesByTo {
   '/pipelines': typeof PipelinesIndexRoute
   '/projects': typeof ProjectsIndexRoute
   '/runs': typeof RunsIndexRoute
+  '/runs/swarm/$swarmId': typeof RunsSwarmSwarmIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -215,6 +223,7 @@ export interface FileRoutesById {
   '/pipelines/': typeof PipelinesIndexRoute
   '/projects/': typeof ProjectsIndexRoute
   '/runs/': typeof RunsIndexRoute
+  '/runs/swarm/$swarmId': typeof RunsSwarmSwarmIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -241,6 +250,7 @@ export interface FileRouteTypes {
     | '/pipelines/'
     | '/projects/'
     | '/runs/'
+    | '/runs/swarm/$swarmId'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -265,6 +275,7 @@ export interface FileRouteTypes {
     | '/pipelines'
     | '/projects'
     | '/runs'
+    | '/runs/swarm/$swarmId'
   id:
     | '__root__'
     | '/'
@@ -289,6 +300,7 @@ export interface FileRouteTypes {
     | '/pipelines/'
     | '/projects/'
     | '/runs/'
+    | '/runs/swarm/$swarmId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -312,10 +324,18 @@ export interface RootRouteChildren {
   PipelinesIndexRoute: typeof PipelinesIndexRoute
   ProjectsIndexRoute: typeof ProjectsIndexRoute
   RunsIndexRoute: typeof RunsIndexRoute
+  RunsSwarmSwarmIdRoute: typeof RunsSwarmSwarmIdRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/usage': {
+      id: '/usage'
+      path: '/usage'
+      fullPath: '/usage'
+      preLoaderRoute: typeof UsageRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/skills': {
       id: '/skills'
       path: '/skills'
@@ -370,13 +390,6 @@ declare module '@tanstack/react-router' {
       path: '/chat'
       fullPath: '/chat'
       preLoaderRoute: typeof ChatRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/usage': {
-      id: '/usage'
-      path: '/usage'
-      fullPath: '/usage'
-      preLoaderRoute: typeof UsageRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/admin': {
@@ -470,6 +483,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AgentsAgentIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/runs/swarm/$swarmId': {
+      id: '/runs/swarm/$swarmId'
+      path: '/runs/swarm/$swarmId'
+      fullPath: '/runs/swarm/$swarmId'
+      preLoaderRoute: typeof RunsSwarmSwarmIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -515,6 +535,7 @@ const rootRouteChildren: RootRouteChildren = {
   PipelinesIndexRoute: PipelinesIndexRoute,
   ProjectsIndexRoute: ProjectsIndexRoute,
   RunsIndexRoute: RunsIndexRoute,
+  RunsSwarmSwarmIdRoute: RunsSwarmSwarmIdRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

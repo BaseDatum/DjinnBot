@@ -119,6 +119,14 @@ async def create_project(
         # --- Legacy fallback ---
         columns_to_create = DEFAULT_COLUMNS
 
+    # Resolve workspace_type from template metadata, or infer from repository
+    workspace_type = None
+    if req.templateId and template:
+        tmpl_meta = template.template_metadata or {}
+        workspace_type = tmpl_meta.get("workspace_type")
+    if workspace_type is None and req.repository:
+        workspace_type = "git_worktree"
+
     project = Project(
         id=gen_id("proj_"),
         name=req.name,
@@ -128,6 +136,7 @@ async def create_project(
         template_id=template_id,
         status_semantics=status_semantics,
         default_pipeline_id=default_pipeline_id,
+        workspace_type=workspace_type,
         created_at=now,
         updated_at=now,
     )
@@ -205,6 +214,7 @@ async def list_projects(
                 "task_counts": task_counts,
                 "total_tasks": sum(task_counts.values()),
                 "completed_tasks": task_counts.get("done", 0),
+                "workspace_type": p.workspace_type,
             }
         )
 
@@ -278,6 +288,7 @@ async def get_project(
         "key_user_id": project.key_user_id,
         "onboarding_context": project.onboarding_context,
         "vision": project.vision,
+        "workspace_type": project.workspace_type,
         "created_at": project.created_at,
         "updated_at": project.updated_at,
         "completed_at": project.completed_at,

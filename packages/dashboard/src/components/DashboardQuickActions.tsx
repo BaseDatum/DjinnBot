@@ -4,6 +4,7 @@ import { MessagesSquare, Activity, Bot, ChevronRight, X, Loader2 } from 'lucide-
 import { fetchAgentConfig, fetchPulseRoutines, triggerPulseRoutine } from '@/lib/api';
 import type { PulseRoutine } from '@/lib/api';
 import { useChatSessions } from '@/components/chat/ChatSessionContext';
+import { loadLastModel } from '@/components/chat/ChatSidebarFlyout';
 import { toast } from 'sonner';
 
 interface Agent {
@@ -77,8 +78,9 @@ export function DashboardQuickActionsDesktop({ agents }: DashboardQuickActionsPr
     if (chatting[agentId]) return;
     setChatting((c) => ({ ...c, [agentId]: true }));
     try {
+      const lastModel = loadLastModel(agentId);
       const config = await fetchAgentConfig(agentId).catch(() => ({ model: '' }));
-      const chatModel = (config as { model?: string }).model || '';
+      const chatModel = lastModel || (config as { model?: string }).model || '';
       openChat(agentId, chatModel);
       setWidgetOpen(true);
     } catch (err) {
@@ -286,8 +288,9 @@ export function DashboardQuickActionsMobile({
     if (chatting[agentId]) return;
     setChatting((c) => ({ ...c, [agentId]: true }));
     try {
+      const lastModel = loadLastModel(agentId);
       const config = await fetchAgentConfig(agentId).catch(() => ({ model: '' }));
-      const chatModel = (config as { model?: string }).model || '';
+      const chatModel = lastModel || (config as { model?: string }).model || '';
       openChat(agentId, chatModel);
       setWidgetOpen(true);
       setOpen(false);

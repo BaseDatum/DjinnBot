@@ -2,6 +2,20 @@ import { authFetch } from '../api/auth-fetch.js';
 import { execSync } from 'node:child_process';
 import { existsSync, mkdirSync, rmSync, watch, statSync } from 'node:fs';
 import { join } from 'node:path';
+import type {
+  IWorkspaceManager,
+  IVersionControlProvider,
+  ITaskWorkspaceProvider,
+  IBranchIntegrationProvider,
+  WorkspaceInfo,
+  FinalizeResult,
+  WorkspaceType,
+  ProjectWorkspaceConfig,
+  CreateRunWorkspaceOptions,
+} from './workspace-types.js';
+
+// Re-export shared types from the canonical location
+export type { WorkspaceInfo, FinalizeResult } from './workspace-types.js';
 
 const WORKSPACES_DIR = process.env.WORKSPACES_DIR || '/data/workspaces';
 // SHARED_RUNS_DIR aligns with docker-compose env var used by both engine and API
@@ -19,12 +33,6 @@ interface GitTokenResponse {
   expires_at: number;
   installation_id: number;
   repo_url: string;
-}
-
-export interface WorkspaceInfo {
-  projectPath: string;
-  runPath: string;
-  branch: string;
 }
 
 /**
@@ -48,7 +56,17 @@ export interface WorkspaceManagerConfig {
   getProjectRepository?: (projectId: string) => string | null | Promise<string | null>;
 }
 
-export class WorkspaceManager {
+/**
+ * Git worktree-based workspace manager.
+ *
+ * Creates isolated git worktrees for each run, supports persistent task
+ * branches, push-to-remote, and multi-branch merge (swarm integration).
+ *
+ * Requires: a git repository (either cloned or initialised empty).
+ */
+export class GitWorktreeWorkspaceManager implements IWorkspaceManager, IVersionControlProvider, ITaskWorkspaceProvider, IBranchIntegrationProvider {
+  readonly type: WorkspaceType = 'git_worktree';
+
   private getProjectRepository?: (projectId: string) => string | null | Promise<string | null>;
 
   /**
@@ -60,9 +78,56 @@ export class WorkspaceManager {
 
   constructor(config?: WorkspaceManagerConfig) {
     this.getProjectRepository = config?.getProjectRepository;
-    console.log(`[WorkspaceManager] Initialized with repo lookup callback: ${!!this.getProjectRepository}`);
+    console.log(`[GitWorktreeWorkspaceManager] Initialized with repo lookup callback: ${!!this.getProjectRepository}`);
     mkdirSync(WORKSPACES_DIR, { recursive: true });
     mkdirSync(RUNS_DIR, { recursive: true });
+  }
+
+  // ── IWorkspaceManager capability checks ───────────────────────────────
+
+  supportsVersionControl(): boolean {
+    return true;
+  }
+
+  supportsTaskWorkspaces(): boolean {
+    return true;
+  }
+
+  supportsBranchIntegration(): boolean {
+    return true;
+  }
+
+  asVersionControlProvider(): IVersionControlProvider {
+    return this;
+  }
+
+  asTaskWorkspaceProvider(): ITaskWorkspaceProvider {
+    return this;
+  }
+
+  asBranchIntegrationProvider(): IBranchIntegrationProvider {
+    return this;
+  }
+
+  canHandle(config: ProjectWorkspaceConfig): boolean {
+    // When an explicit workspace type is specified, only handle git_worktree
+    if (config.workspaceType != null) {
+      return config.workspaceType === 'git_worktree';
+    }
+    // No explicit type: git worktree manager handles projects with a repo URL
+    // or projects with no type at all (legacy behavior — init empty git repo)
+    return true;
+  }
+
+  // ── IWorkspaceManager: createRunWorkspaceAsync ─────────────────────
+  // Canonical interface method — delegates to the worktree implementation.
+
+  async createRunWorkspaceAsync(
+    projectId: string,
+    runId: string,
+    options?: CreateRunWorkspaceOptions,
+  ): Promise<WorkspaceInfo> {
+    return this.createRunWorktreeAsync(projectId, runId, options?.repoUrl, options?.taskBranch);
   }
 
   /**
@@ -112,7 +177,7 @@ export class WorkspaceManager {
       }
       // 404 = no ProjectGitHub record — fall through to repo-level lookup
     } catch (err) {
-      console.warn(`[WorkspaceManager] Project git-token lookup failed for ${projectId}:`, err);
+      console.warn(`[GitWorktreeWM] Project git-token lookup failed for ${projectId}:`, err);
     }
 
     // 2. Fall back to repo-level token (resolves installation from GitHub API by repo URL)
@@ -122,7 +187,7 @@ export class WorkspaceManager {
         const response = await authFetch(`${API_BASE_URL}/v1/github/repo-token?repo=${repoParam}`);
         if (response.ok) {
           const data = await response.json() as any;
-          console.log(`[WorkspaceManager] Resolved GitHub App token via repo-token for ${repoUrl} (installation: ${data.installation_id})`);
+          console.log(`[GitWorktreeWM] Resolved GitHub App token via repo-token for ${repoUrl} (installation: ${data.installation_id})`);
           return {
             token: data.token,
             expires_at: data.expires_at,
@@ -131,12 +196,12 @@ export class WorkspaceManager {
           };
         }
         if (response.status === 404) {
-          console.warn(`[WorkspaceManager] GitHub App not installed on ${repoUrl}`);
+          console.warn(`[GitWorktreeWM] GitHub App not installed on ${repoUrl}`);
         } else {
-          console.warn(`[WorkspaceManager] repo-token failed: ${response.status}`);
+          console.warn(`[GitWorktreeWM] repo-token failed: ${response.status}`);
         }
       } catch (err) {
-        console.warn(`[WorkspaceManager] repo-token lookup failed for ${repoUrl}:`, err);
+        console.warn(`[GitWorktreeWM] repo-token lookup failed for ${repoUrl}:`, err);
       }
     }
 
@@ -150,24 +215,24 @@ export class WorkspaceManager {
   ensureProject(projectId: string, repoUrl?: string): string {
     const projectPath = join(WORKSPACES_DIR, projectId);
     if (existsSync(join(projectPath, '.git'))) {
-      console.log(`[WorkspaceManager] Project ${projectId} already exists at ${projectPath}`);
+      console.log(`[GitWorktreeWM] Project ${projectId} already exists at ${projectPath}`);
       return projectPath;
     }
 
-    console.log(`[WorkspaceManager] Creating project ${projectId} at ${projectPath}`);
+    console.log(`[GitWorktreeWM] Creating project ${projectId} at ${projectPath}`);
     mkdirSync(projectPath, { recursive: true });
     
     if (repoUrl) {
-      console.log(`[WorkspaceManager] Cloning repository: ${repoUrl}`);
+      console.log(`[GitWorktreeWM] Cloning repository: ${repoUrl}`);
       try {
         const cloneUrl = this.addCredentials(repoUrl);
         execSync(`git clone "${cloneUrl}" "${projectPath}"`, { 
           stdio: 'pipe',
           encoding: 'utf8'
         });
-        console.log(`[WorkspaceManager] Successfully cloned ${repoUrl}`);
+        console.log(`[GitWorktreeWM] Successfully cloned ${repoUrl}`);
       } catch (err) {
-        console.error(`[WorkspaceManager] Clone failed:`, err);
+        console.error(`[GitWorktreeWM] Clone failed:`, err);
         // Cleanup failed clone attempt
         try {
           rmSync(projectPath, { recursive: true, force: true });
@@ -175,7 +240,7 @@ export class WorkspaceManager {
         throw new Error(`Failed to clone repository: ${repoUrl}`);
       }
     } else {
-      console.log(`[WorkspaceManager] Initializing empty git repository`);
+      console.log(`[GitWorktreeWM] Initializing empty git repository`);
       execSync('git init', { cwd: projectPath, stdio: 'pipe' });
       execSync('git commit --allow-empty -m "Initial commit"', {
         cwd: projectPath,
@@ -199,35 +264,35 @@ export class WorkspaceManager {
   async ensureProjectAsync(projectId: string, repoUrl?: string): Promise<string> {
     const projectPath = join(WORKSPACES_DIR, projectId);
     if (existsSync(join(projectPath, '.git'))) {
-      console.log(`[WorkspaceManager] Project ${projectId} already exists at ${projectPath}`);
+      console.log(`[GitWorktreeWM] Project ${projectId} already exists at ${projectPath}`);
       return projectPath;
     }
 
     // Look up repo URL from database if not provided
     if (!repoUrl && this.getProjectRepository) {
-      console.log(`[WorkspaceManager] Looking up repository for ${projectId}...`);
+      console.log(`[GitWorktreeWM] Looking up repository for ${projectId}...`);
       repoUrl = await Promise.resolve(this.getProjectRepository(projectId)) || undefined;
       if (repoUrl) {
-        console.log(`[WorkspaceManager] Found repository URL for ${projectId}: ${repoUrl}`);
+        console.log(`[GitWorktreeWM] Found repository URL for ${projectId}: ${repoUrl}`);
       } else {
-        console.log(`[WorkspaceManager] No repository URL found for ${projectId}`);
+        console.log(`[GitWorktreeWM] No repository URL found for ${projectId}`);
       }
     } else if (!repoUrl) {
-      console.log(`[WorkspaceManager] No repository lookup callback configured`);
+      console.log(`[GitWorktreeWM] No repository lookup callback configured`);
     }
 
-    console.log(`[WorkspaceManager] Creating project ${projectId} at ${projectPath}`);
+    console.log(`[GitWorktreeWM] Creating project ${projectId} at ${projectPath}`);
     mkdirSync(projectPath, { recursive: true });
     
     if (repoUrl) {
-      console.log(`[WorkspaceManager] Cloning repository: ${repoUrl}`);
+      console.log(`[GitWorktreeWM] Cloning repository: ${repoUrl}`);
       try {
         // Try to get authenticated URL from API (GitHub App)
         const gitToken = await this.fetchGitToken(projectId, repoUrl);
         let cloneUrl: string;
         
         if (gitToken) {
-          console.log(`[WorkspaceManager] Using GitHub App token for clone (installation: ${gitToken.installation_id})`);
+          console.log(`[GitWorktreeWM] Using GitHub App token for clone (installation: ${gitToken.installation_id})`);
           cloneUrl = gitToken.repo_url;
         } else {
           // Fall back to env-based credentials
@@ -236,7 +301,7 @@ export class WorkspaceManager {
           // Pre-flight: warn if no authentication is available at all
           if (cloneUrl === repoUrl && repoUrl.startsWith('https://')) {
             console.warn(
-              `[WorkspaceManager] No authentication available for ${repoUrl}. ` +
+              `[GitWorktreeWM] No authentication available for ${repoUrl}. ` +
               `Neither a GitHub App installation token nor GITHUB_TOKEN env var is configured. ` +
               `Clone will only succeed for public repositories.`
             );
@@ -251,9 +316,9 @@ export class WorkspaceManager {
             GIT_TERMINAL_PROMPT: '0',
           }
         });
-        console.log(`[WorkspaceManager] Successfully cloned ${repoUrl}`);
+        console.log(`[GitWorktreeWM] Successfully cloned ${repoUrl}`);
       } catch (err) {
-        console.error(`[WorkspaceManager] Clone failed:`, err);
+        console.error(`[GitWorktreeWM] Clone failed:`, err);
         // Cleanup failed clone attempt
         try {
           rmSync(projectPath, { recursive: true, force: true });
@@ -273,7 +338,7 @@ export class WorkspaceManager {
     } else {
       // No repository URL — initialise an empty git repo so worktrees can be created.
       // This allows projects that haven't linked a remote to still run tasks.
-      console.log(`[WorkspaceManager] No repository URL for project ${projectId} — initialising empty git repo at ${projectPath}`);
+      console.log(`[GitWorktreeWM] No repository URL for project ${projectId} — initialising empty git repo at ${projectPath}`);
       try {
         execSync('git init', { cwd: projectPath, stdio: 'pipe' });
         execSync('git commit --allow-empty -m "Initial commit"', {
@@ -287,7 +352,7 @@ export class WorkspaceManager {
             GIT_COMMITTER_EMAIL: 'djinnbot@local',
           },
         });
-        console.log(`[WorkspaceManager] Initialised empty project repo for ${projectId}`);
+        console.log(`[GitWorktreeWM] Initialised empty project repo for ${projectId}`);
       } catch (initErr) {
         // Cleanup on failure
         try { rmSync(projectPath, { recursive: true, force: true }); } catch {}
@@ -306,7 +371,7 @@ export class WorkspaceManager {
     const runPath = join(RUNS_DIR, runId);
     const branch = `run/${runId}`;
 
-    console.log(`[WorkspaceManager] createRunWorktree: projectId=${projectId}, runId=${runId}`);
+    console.log(`[GitWorktreeWM] createRunWorktree: projectId=${projectId}, runId=${runId}`);
 
     // Check if worktree already exists
     if (existsSync(runPath)) {
@@ -324,8 +389,8 @@ export class WorkspaceManager {
           }).trim();
           
           if (currentBranch === branch) {
-            console.log(`[WorkspaceManager] Worktree already exists at ${runPath}`);
-            return { projectPath, runPath, branch };
+            console.log(`[GitWorktreeWM] Worktree already exists at ${runPath}`);
+            return { projectPath, runPath, metadata: { branch } };
           }
         } catch {
           // Can't verify, continue to fail below
@@ -349,7 +414,7 @@ export class WorkspaceManager {
     }
 
     // Worktree doesn't exist - create it
-    console.log(`[WorkspaceManager] Creating worktree for run ${runId} from project ${projectId}`);
+    console.log(`[GitWorktreeWM] Creating worktree for run ${runId} from project ${projectId}`);
 
     // Pull latest if cloned repo
     if (repoUrl) {
@@ -376,7 +441,7 @@ export class WorkspaceManager {
     
     if (branchList) {
       // Branch exists but worktree doesn't - delete the orphan branch
-      console.log(`[WorkspaceManager] Deleting orphan branch ${branch}`);
+      console.log(`[GitWorktreeWM] Deleting orphan branch ${branch}`);
       execSync(`git branch -D "${branch}"`, { cwd: projectPath, stdio: 'pipe' });
     }
 
@@ -387,10 +452,10 @@ export class WorkspaceManager {
         stdio: 'pipe',
         encoding: 'utf8'
       });
-      console.log(`[WorkspaceManager] Created worktree at ${runPath} (branch: ${branch})`);
+      console.log(`[GitWorktreeWM] Created worktree at ${runPath} (branch: ${branch})`);
     } catch (err: any) {
       const stderr = err.stderr?.toString() || err.message || 'Unknown error';
-      console.error(`[WorkspaceManager] Failed to create worktree (sync):`);
+      console.error(`[GitWorktreeWM] Failed to create worktree (sync):`);
       console.error(`  - Project path: ${projectPath}`);
       console.error(`  - Run path: ${runPath}`);
       console.error(`  - Branch: ${branch}`);
@@ -398,7 +463,7 @@ export class WorkspaceManager {
       throw new Error(`Failed to create worktree for run ${runId}: ${stderr}`);
     }
 
-    return { projectPath, runPath, branch };
+    return { projectPath, runPath, metadata: { branch } };
   }
 
   /**
@@ -422,7 +487,7 @@ export class WorkspaceManager {
     const runPath = join(RUNS_DIR, runId);
     const branch = taskBranch ?? `run/${runId}`;
 
-    console.log(`[WorkspaceManager] createRunWorktreeAsync: projectId=${projectId}, runId=${runId}`);
+    console.log(`[GitWorktreeWM] createRunWorktreeAsync: projectId=${projectId}, runId=${runId}`);
 
     // Safety check: if this is a project-linked run with a task branch,
     // verify the project repo has a remote. Without a remote, work can't
@@ -456,8 +521,8 @@ export class WorkspaceManager {
           }).trim();
           
           if (currentBranch === branch) {
-            console.log(`[WorkspaceManager] Worktree already exists at ${runPath}`);
-            return { projectPath, runPath, branch };
+            console.log(`[GitWorktreeWM] Worktree already exists at ${runPath}`);
+            return { projectPath, runPath, metadata: { branch } };
           }
         } catch {
           // Can't verify, continue to fail below
@@ -481,7 +546,7 @@ export class WorkspaceManager {
     }
 
     // Worktree doesn't exist - create it
-    console.log(`[WorkspaceManager] Creating worktree for run ${runId} from project ${projectId}`);
+    console.log(`[GitWorktreeWM] Creating worktree for run ${runId} from project ${projectId}`);
 
     // Pull latest if cloned repo (with GitHub App auth if available)
     if (repoUrl) {
@@ -523,14 +588,14 @@ export class WorkspaceManager {
       if (isTaskBranch) {
         // Task-scoped branch already exists (from a previous run on this task).
         // Check it out in a new worktree so this run can continue where the last left off.
-        console.log(`[WorkspaceManager] Task branch ${branch} exists — creating worktree on existing branch`);
+        console.log(`[GitWorktreeWM] Task branch ${branch} exists — creating worktree on existing branch`);
         try {
           execSync(`git worktree add "${runPath}" "${branch}"`, {
             cwd: projectPath,
             stdio: 'pipe',
             encoding: 'utf8',
           });
-          console.log(`[WorkspaceManager] Created worktree at ${runPath} (existing task branch: ${branch})`);
+          console.log(`[GitWorktreeWM] Created worktree at ${runPath} (existing task branch: ${branch})`);
         } catch (err: any) {
           const stderr = err.stderr?.toString() || err.message || 'Unknown error';
           throw new Error(`Failed to create worktree for run ${runId} on task branch ${branch}: ${stderr}`);
@@ -538,13 +603,13 @@ export class WorkspaceManager {
       } else {
         // Ephemeral run branch exists but worktree doesn't — orphan from a crashed run.
         // Delete the stale branch and recreate.
-        console.log(`[WorkspaceManager] Deleting orphan run branch ${branch}`);
+        console.log(`[GitWorktreeWM] Deleting orphan run branch ${branch}`);
         execSync(`git branch -D "${branch}"`, { cwd: projectPath, stdio: 'pipe' });
         try {
           execSync(`git worktree add "${runPath}" -b "${branch}"`, { 
             cwd: projectPath, stdio: 'pipe', encoding: 'utf8',
           });
-          console.log(`[WorkspaceManager] Created worktree at ${runPath} (branch: ${branch})`);
+          console.log(`[GitWorktreeWM] Created worktree at ${runPath} (branch: ${branch})`);
         } catch (err: any) {
           const stderr = err.stderr?.toString() || err.message || 'Unknown error';
           throw new Error(`Failed to create worktree for run ${runId}: ${stderr}`);
@@ -558,14 +623,14 @@ export class WorkspaceManager {
           stdio: 'pipe',
           encoding: 'utf8'
         });
-        console.log(`[WorkspaceManager] Created worktree at ${runPath} (new branch: ${branch})`);
+        console.log(`[GitWorktreeWM] Created worktree at ${runPath} (new branch: ${branch})`);
       } catch (err: any) {
         const stderr = err.stderr?.toString() || err.message || 'Unknown error';
         throw new Error(`Failed to create worktree for run ${runId}: ${stderr}`);
       }
     }
 
-    return { projectPath, runPath, branch };
+    return { projectPath, runPath, metadata: { branch } };
   }
 
   /**
@@ -577,12 +642,12 @@ export class WorkspaceManager {
     
     // Already exists - return it
     if (existsSync(join(runPath, '.git'))) {
-      console.log(`[WorkspaceManager] Standalone workspace already exists: ${runPath}`);
+      console.log(`[GitWorktreeWM] Standalone workspace already exists: ${runPath}`);
       return runPath;
     }
 
-    console.log(`[WorkspaceManager] Creating standalone workspace for run ${runId} at ${runPath}`);
-    console.log(`[WorkspaceManager] RUNS_DIR=${RUNS_DIR}`);
+    console.log(`[GitWorktreeWM] Creating standalone workspace for run ${runId} at ${runPath}`);
+    console.log(`[GitWorktreeWM] RUNS_DIR=${RUNS_DIR}`);
     
     try {
       mkdirSync(runPath, { recursive: true });
@@ -598,11 +663,11 @@ export class WorkspaceManager {
           GIT_COMMITTER_EMAIL: 'djinnbot@local',
         },
       });
-      console.log(`[WorkspaceManager] Created standalone workspace: ${runPath}`);
+      console.log(`[GitWorktreeWM] Created standalone workspace: ${runPath}`);
       return runPath;
     } catch (err: any) {
       const errorMsg = err.message || String(err);
-      console.error(`[WorkspaceManager] Failed to create standalone workspace:`);
+      console.error(`[GitWorktreeWM] Failed to create standalone workspace:`);
       console.error(`  - Run path: ${runPath}`);
       console.error(`  - Error: ${errorMsg}`);
       throw new Error(`Failed to create standalone workspace for run ${runId}: ${errorMsg}`);
@@ -632,7 +697,7 @@ export class WorkspaceManager {
       });
       return execSync('git rev-parse HEAD', { cwd: runPath, encoding: 'utf8' }).trim();
     } catch (err) {
-      console.error(`[WorkspaceManager] Commit failed:`, (err as Error).message);
+      console.error(`[GitWorktreeWM] Commit failed:`, (err as Error).message);
       return null;
     }
   }
@@ -658,14 +723,10 @@ export class WorkspaceManager {
    * Returns a result object so callers can log/event on push failure without
    * crashing the run — a push failure is non-fatal (work is committed locally).
    */
-  async pushTaskBranch(runId: string, projectId?: string): Promise<{
+  async pushBranch(runId: string, projectId?: string): Promise<{
     success: boolean;
-    branch?: string;
-    commitHash?: string;
-    remoteUrl?: string;
     error?: string;
-    authError?: boolean;
-    noRemote?: boolean;
+    metadata?: Record<string, unknown>;
   }> {
     const runPath = join(RUNS_DIR, runId);
 
@@ -696,16 +757,14 @@ export class WorkspaceManager {
           stdio: ['pipe', 'pipe', 'pipe'],
         }).trim();
       } catch {
-        console.log(`[WorkspaceManager] pushTaskBranch: no remote origin for run ${runId} — skipping push`);
-        return { success: false, branch, commitHash, noRemote: true };
+        console.log(`[GitWorktreeWM] pushBranch: no remote origin for run ${runId} — skipping push`);
+        return { success: false, metadata: { branch, commitHash, noRemote: true } };
       }
 
       // Use GitHub App token when available (preferred), fall back to env GITHUB_TOKEN.
-      // fetchGitToken requires a projectId; if not provided, fall back to addCredentials.
       let authenticatedUrl: string;
       const gitToken = projectId ? await this.fetchGitToken(projectId, remoteUrl) : null;
       if (gitToken) {
-        // Build authenticated URL from the token's pre-built repo URL
         authenticatedUrl = gitToken.repo_url;
       } else {
         authenticatedUrl = this.addCredentials(remoteUrl);
@@ -730,8 +789,8 @@ export class WorkspaceManager {
           stdio: 'pipe',
         });
 
-        console.log(`[WorkspaceManager] Pushed branch ${branch} for run ${runId} (${commitHash.slice(0, 8)})`);
-        return { success: true, branch, commitHash, remoteUrl };
+        console.log(`[GitWorktreeWM] Pushed branch ${branch} for run ${runId} (${commitHash.slice(0, 8)})`);
+        return { success: true, metadata: { branch, commitHash, remoteUrl } };
 
       } catch (pushErr: any) {
         // Restore clean remote URL even on failure
@@ -740,22 +799,16 @@ export class WorkspaceManager {
         } catch {}
 
         const msg: string = pushErr.message || '';
-        if (
-          msg.includes('Authentication failed') ||
-          msg.includes('Permission denied') ||
-          msg.includes('invalid credentials') ||
-          msg.includes('could not read Username')
-        ) {
-          return { success: false, branch, commitHash, error: 'Authentication failed — check credentials', authError: true };
-        }
-        if (msg.includes('Connection refused') || msg.includes('Could not resolve host') || msg.includes('timed out')) {
-          return { success: false, branch, commitHash, error: 'Network error — check connection to remote' };
-        }
-        return { success: false, branch, commitHash, error: msg || 'Push failed' };
+        const error = msg.includes('Authentication failed') || msg.includes('Permission denied')
+          ? 'Authentication failed — check credentials'
+          : msg.includes('Connection refused') || msg.includes('Could not resolve host')
+          ? 'Network error — check connection to remote'
+          : msg || 'Push failed';
+        return { success: false, error, metadata: { branch, commitHash, authError: msg.includes('Authentication') } };
       }
 
     } catch (err: any) {
-      return { success: false, error: `pushTaskBranch failed: ${err.message}` };
+      return { success: false, error: `pushBranch failed: ${err.message}` };
     }
   }
 
@@ -770,35 +823,29 @@ export class WorkspaceManager {
   async finalizeRunWorkspace(
     runId: string,
     projectId?: string,
-  ): Promise<{
-    pushed: boolean;
-    branch?: string;
-    commitHash?: string;
-    pushError?: string;
-  }> {
+  ): Promise<FinalizeResult> {
     const runPath = join(RUNS_DIR, runId);
 
     if (!existsSync(runPath)) {
-      console.log(`[WorkspaceManager] finalizeRunWorkspace: no workspace at ${runPath}, nothing to do`);
-      return { pushed: false };
+      console.log(`[GitWorktreeWM] finalizeRunWorkspace: no workspace at ${runPath}, nothing to do`);
+      return { cleaned: true, summary: 'No workspace found' };
     }
 
     // 1. Push task branch to remote (with GitHub App token when available)
-    const pushResult = await this.pushTaskBranch(runId, projectId);
-    let pushed = pushResult.success;
-    let pushError: string | undefined;
+    const pushResult = await this.pushBranch(runId, projectId);
+    const pushed = pushResult.success;
+    const noRemote = pushResult.metadata?.noRemote as boolean | undefined;
 
-    if (!pushed && !pushResult.noRemote) {
-      console.warn(`[WorkspaceManager] Push failed for run ${runId}: ${pushResult.error}`);
-      pushError = pushResult.error;
+    if (!pushed && !noRemote) {
+      console.warn(`[GitWorktreeWM] Push failed for run ${runId}: ${pushResult.error}`);
     }
 
     // 2. Remove the worktree — but only if push succeeded or there's no remote.
     //    If push failed WITH a remote, preserve the worktree so work can be recovered.
-    const shouldPreserve = !pushed && !pushResult.noRemote && pushResult.error;
+    const shouldPreserve = !pushed && !noRemote && pushResult.error;
     if (shouldPreserve) {
       console.warn(
-        `[WorkspaceManager] Preserving worktree at ${runPath} — push failed: ${pushResult.error}. ` +
+        `[GitWorktreeWM] Preserving worktree at ${runPath} — push failed: ${pushResult.error}. ` +
         `Work is committed locally and can be retried.`
       );
     } else if (projectId) {
@@ -808,10 +855,16 @@ export class WorkspaceManager {
     }
 
     return {
-      pushed,
-      branch: pushResult.branch,
-      commitHash: pushResult.commitHash,
-      pushError,
+      cleaned: !shouldPreserve,
+      summary: pushed
+        ? `Pushed ${pushResult.metadata?.branch} (${String(pushResult.metadata?.commitHash).slice(0, 8)})`
+        : (shouldPreserve ? `Push failed, worktree preserved` : 'Cleaned up'),
+      error: pushResult.error,
+      metadata: {
+        pushed,
+        branch: pushResult.metadata?.branch,
+        commitHash: pushResult.metadata?.commitHash,
+      },
     };
   }
 
@@ -825,7 +878,7 @@ export class WorkspaceManager {
    * Includes: current branch, base branch, and the last N step-commit summaries.
    * Returns empty string if the path is not a git repo or git is unavailable.
    */
-  getWorkspaceGitContext(runId: string, maxCommits: number = 10): string {
+  getWorkspaceContext(runId: string, maxCommits: number = 10): string {
     const runPath = join(RUNS_DIR, runId);
     if (!existsSync(join(runPath, '.git'))) return '';
 
@@ -1025,6 +1078,26 @@ export class WorkspaceManager {
    * The project repo at WORKSPACES_DIR/{projectId} must already exist (ensured
    * by ensureProjectAsync before this is called).
    */
+  // ── ITaskWorkspaceProvider interface ────────────────────────────────────
+
+  async createTaskWorkspace(
+    agentId: string,
+    projectId: string,
+    taskId: string,
+    options?: Record<string, unknown>,
+  ): Promise<{ workspacePath: string; alreadyExists: boolean; metadata?: Record<string, unknown> }> {
+    const taskBranch = options?.taskBranch as string | undefined;
+    if (!taskBranch) throw new Error('Git worktree task workspaces require options.taskBranch');
+    const result = await this.createTaskWorktree(agentId, projectId, taskId, taskBranch);
+    return { workspacePath: result.worktreePath, alreadyExists: result.alreadyExists, metadata: { branch: result.branch } };
+  }
+
+  removeTaskWorkspace(agentId: string, projectId: string, taskId: string): void {
+    this.removeTaskWorktree(agentId, projectId, taskId);
+  }
+
+  // ── Git-specific task worktree implementation ────────────────────────
+
   async createTaskWorktree(
     agentId: string,
     projectId: string,
@@ -1061,15 +1134,15 @@ export class WorkspaceManager {
           if (existsSync(candidate)) {
             try {
               rmSync(candidate);
-              console.log(`[WorkspaceManager] Removed stale lock: ${candidate}`);
+              console.log(`[GitWorktreeWM] Removed stale lock: ${candidate}`);
             } catch {}
           }
         }
-        console.log(`[WorkspaceManager] Task worktree already exists for ${agentId}/${taskId}`);
+        console.log(`[GitWorktreeWM] Task worktree already exists for ${agentId}/${taskId}`);
         return { worktreePath, branch: taskBranch, alreadyExists: true };
       }
       // Corrupted — remove and recreate
-      console.warn(`[WorkspaceManager] Removing corrupted task worktree for ${agentId}/${taskId}`);
+      console.warn(`[GitWorktreeWM] Removing corrupted task worktree for ${agentId}/${taskId}`);
       try { rmSync(worktreePath, { recursive: true, force: true }); } catch {}
     }
 
@@ -1122,11 +1195,11 @@ export class WorkspaceManager {
         execSync(`git branch "${taskBranch}" "origin/${taskBranch}"`, { cwd: projectPath, stdio: 'pipe' });
       }
       execSync(`git worktree add "${worktreePath}" "${taskBranch}"`, { cwd: projectPath, stdio: 'pipe' });
-      console.log(`[WorkspaceManager] Created task worktree at ${worktreePath} (existing branch: ${taskBranch})`);
+      console.log(`[GitWorktreeWM] Created task worktree at ${worktreePath} (existing branch: ${taskBranch})`);
     } else {
       // Branch doesn't exist anywhere — create it from main
       execSync(`git worktree add "${worktreePath}" -b "${taskBranch}"`, { cwd: projectPath, stdio: 'pipe' });
-      console.log(`[WorkspaceManager] Created task worktree at ${worktreePath} (new branch: ${taskBranch})`);
+      console.log(`[GitWorktreeWM] Created task worktree at ${worktreePath} (new branch: ${taskBranch})`);
     }
 
     return { worktreePath, branch: taskBranch, alreadyExists: false };
@@ -1145,7 +1218,7 @@ export class WorkspaceManager {
     const projectPath = join(WORKSPACES_DIR, projectId);
 
     if (!existsSync(worktreePath)) {
-      console.log(`[WorkspaceManager] removeTaskWorktree: ${worktreePath} does not exist, nothing to do`);
+      console.log(`[GitWorktreeWM] removeTaskWorktree: ${worktreePath} does not exist, nothing to do`);
       return;
     }
 
@@ -1156,7 +1229,7 @@ export class WorkspaceManager {
     }
 
     try { execSync('git worktree prune', { cwd: projectPath, stdio: 'pipe' }); } catch {}
-    console.log(`[WorkspaceManager] Removed task worktree for ${agentId}/${taskId}`);
+    console.log(`[GitWorktreeWM] Removed task worktree for ${agentId}/${taskId}`);
   }
 
   /**
@@ -1172,16 +1245,15 @@ export class WorkspaceManager {
    *
    * Returns merge result with conflict details if any branch failed to merge.
    */
-  async mergeExecutorBranches(
+  async mergeBranches(
     projectId: string,
     targetBranch: string,
-    executorBranches: string[],
+    sourceBranches: string[],
   ): Promise<{
     success: boolean;
     merged: string[];
     conflicts: Array<{ branch: string; error: string }>;
-    pushed: boolean;
-    pushError?: string;
+    metadata?: Record<string, unknown>;
   }> {
     return this.withProjectLock(projectId, async () => {
       const projectPath = join(WORKSPACES_DIR, projectId);
@@ -1226,7 +1298,7 @@ export class WorkspaceManager {
         }
 
         // Sequentially merge each executor branch
-        for (const branch of executorBranches) {
+        for (const branch of sourceBranches) {
           try {
             // Ensure local branch exists
             const localExists = execSync(`git branch --list "${branch}"`, {
@@ -1254,13 +1326,13 @@ export class WorkspaceManager {
               },
             });
             merged.push(branch);
-            console.log(`[WorkspaceManager] Merged ${branch} into ${targetBranch}`);
+            console.log(`[GitWorktreeWM] Merged ${branch} into ${targetBranch}`);
           } catch (err: any) {
             // Abort the failed merge
             try { execSync('git merge --abort', { cwd: mergeWorkdir, stdio: 'pipe' }); } catch {}
             const errMsg = err.stderr?.toString() || err.message || 'Unknown merge error';
             conflicts.push({ branch, error: errMsg });
-            console.warn(`[WorkspaceManager] Merge conflict: ${branch} into ${targetBranch}: ${errMsg}`);
+            console.warn(`[GitWorktreeWM] Merge conflict: ${branch} into ${targetBranch}: ${errMsg}`);
           }
         }
 
@@ -1273,7 +1345,7 @@ export class WorkspaceManager {
           pushError = pushResult.error;
         }
 
-        return { success: conflicts.length === 0, merged, conflicts, pushed, pushError };
+        return { success: conflicts.length === 0, merged, conflicts, metadata: { pushed, pushError } };
       } finally {
         // Clean up merge worktree
         try {
@@ -1332,4 +1404,13 @@ export class WorkspaceManager {
   }
 
 }
+
+/**
+ * Backward-compatible alias.
+ * Existing code that imports `WorkspaceManager` continues to work without changes.
+ * New code should import `GitWorktreeWorkspaceManager` or `IWorkspaceManager`.
+ */
+export const WorkspaceManager = GitWorktreeWorkspaceManager;
+/** Type alias so `import type { WorkspaceManager }` still resolves. */
+export type WorkspaceManager = GitWorktreeWorkspaceManager;
 

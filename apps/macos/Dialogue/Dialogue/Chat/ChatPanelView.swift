@@ -5,8 +5,6 @@ import SwiftUI
 struct ChatPanelView: View {
     @ObservedObject var manager: ChatSessionManager
     @Binding var isExpanded: Bool
-    /// A message passed from the collapsed toolbar to be sent once the panel is ready.
-    @Binding var pendingMessage: String?
     @State private var inputText: String = ""
     @FocusState private var isInputFocused: Bool
     
@@ -180,6 +178,22 @@ struct ChatPanelView: View {
                             .id(message.id)
                     }
                     
+                    // Streaming indicator when generating but no assistant message exists yet.
+                    // This covers the gap between sending a message and the first token arriving.
+                    if session.isGenerating,
+                       !session.messages.contains(where: { ($0.role == .assistant && $0.isStreaming) || $0.role == .thinking }) {
+                        HStack(spacing: 8) {
+                            StreamingDotsView()
+                            Text("Waiting for response...")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                        }
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 8)
+                        .id("streaming-indicator")
+                    }
+                    
                     // Error message from manager
                     if let error = manager.errorMessage {
                         HStack(spacing: 8) {
@@ -291,13 +305,6 @@ struct ChatPanelView: View {
         .padding(.vertical, 10)
         .onAppear {
             isInputFocused = true
-            consumePendingMessage()
-        }
-        .onChange(of: manager.activeSession?.status) { _, newStatus in
-            // When session becomes ready/running, try to consume any pending message
-            if newStatus?.isActive == true {
-                consumePendingMessage()
-            }
         }
     }
     
@@ -309,27 +316,11 @@ struct ChatPanelView: View {
         sendText(text)
     }
     
-    /// Send a text message, auto-creating a session if needed.
+    /// Send a text message using the reliable queued-send path.
     private func sendText(_ text: String) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
-        
-        if manager.activeSession == nil {
-            manager.createNewSession()
-            // Wait briefly for session creation, then send
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                manager.sendMessage(trimmed)
-            }
-        } else {
-            manager.sendMessage(trimmed)
-        }
-    }
-    
-    /// Consume a pending message from the collapsed toolbar.
-    private func consumePendingMessage() {
-        guard let text = pendingMessage else { return }
-        pendingMessage = nil
-        sendText(text)
+        manager.sendMessageWhenReady(trimmed)
     }
     
     private func displayModelName(_ model: String) -> String {

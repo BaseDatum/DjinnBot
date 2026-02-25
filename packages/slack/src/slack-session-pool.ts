@@ -265,6 +265,65 @@ export class SlackSessionPool {
   }
 
   /**
+   * Update the model for an active session.
+   * Sends a changeModel command to the running container for seamless hot-swap
+   * that preserves full conversation context. Returns true if the session was
+   * found and the model update was sent.
+   */
+  async updateSessionModel(
+    agentId: string,
+    source: SlackConversationSource,
+    channelId: string,
+    model: string,
+    threadTs?: string,
+  ): Promise<boolean> {
+    const key = this.sessionKey(agentId, source, channelId, threadTs);
+    const entry = this.sessions.get(key);
+    if (!entry) return false;
+    if (!this.config.chatSessionManager.isSessionActive(entry.sessionId)) return false;
+
+    this.config.chatSessionManager.updateModel(entry.sessionId, model);
+    return true;
+  }
+
+  /**
+   * Update the model for a session identified by sessionId directly.
+   * Used by slash commands that know the sessionId from the streamer context.
+   */
+  async updateSessionModelById(sessionId: string, model: string): Promise<boolean> {
+    for (const entry of this.sessions.values()) {
+      if (entry.sessionId === sessionId) {
+        if (!this.config.chatSessionManager.isSessionActive(entry.sessionId)) return false;
+        this.config.chatSessionManager.updateModel(entry.sessionId, model);
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Get the current model for an active session.
+   * Returns the model string or undefined if no active session found.
+   */
+  getActiveSessionModel(agentId: string, source: SlackConversationSource, channelId: string, threadTs?: string): string | undefined {
+    const key = this.sessionKey(agentId, source, channelId, threadTs);
+    const entry = this.sessions.get(key);
+    if (!entry) return undefined;
+    // The model is tracked on the ChatSessionManager side — retrieve it
+    const session = this.config.chatSessionManager.getSession(entry.sessionId);
+    return session?.model ?? this.config.defaultModel;
+  }
+
+  /**
+   * Get session entry by channel and thread context.
+   * Returns the session entry or undefined if no active session.
+   */
+  getSessionEntry(agentId: string, source: SlackConversationSource, channelId: string, threadTs?: string): SlackSessionEntry | undefined {
+    const key = this.sessionKey(agentId, source, channelId, threadTs);
+    return this.sessions.get(key);
+  }
+
+  /**
    * Check if a session is currently alive and processing (container running).
    */
   isActive(agentId: string, source: SlackConversationSource, channelId: string, threadTs?: string): boolean {

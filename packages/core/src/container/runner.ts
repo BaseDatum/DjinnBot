@@ -23,6 +23,8 @@ export interface ContainerRunnerConfig {
   onMessageAgent?: (agentId: string, runId: string, stepId: string, to: string, message: string, priority: string, messageType: string) => Promise<string>;
   /** Called when an agent sends a Slack DM to the user via the slack_dm tool. */
   onSlackDm?: (agentId: string, runId: string, stepId: string, message: string, urgent: boolean) => Promise<string>;
+  /** Called on container lifecycle and status events (created, started, ready, destroyed, etc.). */
+  onContainerEvent?: (runId: string, event: { type: string; detail?: string; timestamp: number }) => void;
 }
 
 /**
@@ -268,6 +270,7 @@ export class ContainerRunner implements AgentRunner {
       };
 
       await this.containerManager.createContainer(containerConfig);
+      this.config.onContainerEvent?.(runId, { type: 'CONTAINER_CREATED', detail: `Image: ${runtimeImage}`, timestamp: Date.now() });
 
       // 2. Subscribe to events BEFORE starting container
       await this.eventReceiver.subscribeToRun(runId);
@@ -284,6 +287,11 @@ export class ContainerRunner implements AgentRunner {
         // Handle output streaming
         this.eventReceiver.onOutput((evtRunId, msg) => {
           if (evtRunId !== runId) return;
+
+          // Skip tool output (bash stdout/stderr) — it leaks into the agent
+          // output stream and gets rendered as markdown on the runs page.
+          // Tool output is already surfaced via toolEnd events with the full result.
+          if ((msg as any).source === 'tool') return;
           
           if (msg.type === 'stdout') {
             output += msg.data;
@@ -411,7 +419,9 @@ export class ContainerRunner implements AgentRunner {
 
       // 3. Start container and wait for ready
       console.log(`[ContainerRunner] Starting container for run ${runId}`);
+      this.config.onContainerEvent?.(runId, { type: 'CONTAINER_STARTING', timestamp: Date.now() });
       await this.containerManager.startContainer(runId);
+      this.config.onContainerEvent?.(runId, { type: 'CONTAINER_READY', timestamp: Date.now() });
       console.log(`[ContainerRunner] Container ready for run ${runId}`);
 
       // Check if aborted
@@ -479,9 +489,11 @@ export class ContainerRunner implements AgentRunner {
       });
 
       // Stop container
+      this.config.onContainerEvent?.(runId, { type: 'CONTAINER_STOPPING', timestamp: Date.now() });
       await this.containerManager.stopContainer(runId, true).catch(err => {
         console.error(`[ContainerRunner] Failed to stop container for run ${runId}:`, err);
       });
+      this.config.onContainerEvent?.(runId, { type: 'CONTAINER_DESTROYED', timestamp: Date.now() });
     }
   }
 

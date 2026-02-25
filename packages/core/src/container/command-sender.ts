@@ -9,6 +9,7 @@ import {
   type ShutdownCommand,
   type AbortCommand,
   type StructuredOutputCommand,
+  type ChangeModelCommand,
 } from '../redis-protocol/index.js';
 
 export class CommandSender {
@@ -26,6 +27,8 @@ export class CommandSender {
       tools?: string[];
       maxSteps?: number;
       attachments?: AttachmentMeta[];
+      /** Optional model override for this turn — hot-swaps seamlessly. */
+      model?: string;
     } = {}
   ): Promise<string> {
     const requestId = options.requestId ?? this.generateRequestId();
@@ -38,6 +41,7 @@ export class CommandSender {
       maxSteps: options.maxSteps ?? 999,
       timestamp: createTimestamp(),
       ...(options.attachments?.length ? { attachments: options.attachments } : {}),
+      ...(options.model ? { model: options.model } : {}),
     };
 
     const channel = channels.command(runId);
@@ -125,6 +129,38 @@ export class CommandSender {
     } catch (error) {
       console.error(`[CommandSender] Failed to send abort to ${runId}:`, error);
       throw new Error(`Failed to publish abort command to ${runId}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+
+    return requestId;
+  }
+
+  /**
+   * Send a model change command to a running container.
+   * The container hot-swaps the model seamlessly — full conversation context
+   * is preserved. The new model takes effect on the very next turn.
+   */
+  async sendChangeModel(
+    runId: string,
+    model: string,
+    options: { requestId?: string } = {}
+  ): Promise<string> {
+    const requestId = options.requestId ?? this.generateRequestId();
+
+    const cmd: ChangeModelCommand = {
+      type: 'changeModel',
+      requestId,
+      model,
+      timestamp: createTimestamp(),
+    };
+
+    const channel = channels.command(runId);
+
+    try {
+      await this.redis.publish(channel, JSON.stringify(cmd));
+      console.log(`[CommandSender] Sent changeModel to ${runId}: ${model}`);
+    } catch (error) {
+      console.error(`[CommandSender] Failed to send changeModel to ${runId}:`, error);
+      throw new Error(`Failed to publish changeModel command to ${runId}: ${error instanceof Error ? error.message : String(error)}`);
     }
 
     return requestId;

@@ -74,15 +74,25 @@ struct ChatMessageView: View {
     
     // MARK: - Thinking Indicator
     
+    /// Shows a collapsible thinking block with the actual reasoning content.
+    /// Falls back to a simple "thinking..." pulse when no content is available yet.
     private var thinkingIndicator: some View {
-        HStack(spacing: 8) {
-            ThinkingPulseView()
+        HStack(alignment: .top) {
+            if message.content.isEmpty {
+                // No thinking text yet — show pulse indicator
+                HStack(spacing: 8) {
+                    ThinkingPulseView()
+                    Text("Thinking...")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                }
+            } else {
+                // Show actual thinking content in a collapsible disclosure
+                ThinkingDisclosure(content: message.content)
+            }
             
-            Text("Dialogue is thinking...")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            
-            Spacer()
+            Spacer(minLength: 40)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 8)

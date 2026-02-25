@@ -1489,12 +1489,12 @@ export class ChatSessionManager {
     
     console.log(`[ChatSessionManager] Sending message to session ${sessionId}${attachments?.length ? ` with ${attachments.length} attachment(s)` : ''}`);
     
-    // Update model if changed
+    // Update model if changed — the new model is forwarded to the container
+    // via the agentStep command's `model` field, causing a seamless hot-swap
+    // that preserves the full conversation context.
     if (model && model !== session.model) {
+      console.log(`[ChatSessionManager] Model changed for ${sessionId}: ${session.model} → ${model}`);
       session.model = model;
-      // Note: Model change will take effect on next container restart
-      // For immediate model change, container would need to be restarted
-      console.warn(`[ChatSessionManager] Model updated to ${model}, but container still using previous model. Consider restarting session for immediate effect.`);
     }
     
     session.status = 'busy';
@@ -1524,9 +1524,13 @@ export class ChatSessionManager {
     // alive across turns, so it accumulates conversation history (including
     // tool calls and results) natively via pi-agent-core.  Sending the full
     // flat-text history here would break multi-turn context.
+    //
+    // The `model` field enables seamless mid-session model hot-swapping:
+    // the runner calls agent.setModel() which preserves full conversation
+    // context without recreating the Agent.
     await this.commandSender.sendAgentStep(sessionId, message, {
-      // model is set via AGENT_MODEL env var on container creation
       ...(attachments?.length ? { attachments } : {}),
+      ...(model ? { model } : {}),
     });
   }
 
@@ -1706,13 +1710,23 @@ export class ChatSessionManager {
 
   /**
    * Update model for an active session.
-   * Note: This only updates the tracking. Container restart required for actual model change.
+   * Sends a changeModel command to the running container so the runner
+   * hot-swaps the model seamlessly — full conversation context is preserved.
+   * The new model takes effect on the very next turn.
    */
   updateModel(sessionId: string, model: string): void {
     const session = this.activeSessions.get(sessionId);
     if (session) {
+      const previousModel = session.model;
       session.model = model;
-      console.log(`[ChatSessionManager] Updated model for ${sessionId}: ${model} (restart required for effect)`);
+
+      // Send changeModel command to the running container so the runner
+      // picks up the new model before the next agentStep arrives.
+      this.commandSender.sendChangeModel(sessionId, model).catch(err => {
+        console.warn(`[ChatSessionManager] Failed to send changeModel to container for ${sessionId}:`, err);
+      });
+
+      console.log(`[ChatSessionManager] Updated model for ${sessionId}: ${previousModel} → ${model} (hot-swap command sent)`);
     }
   }
 
@@ -1979,7 +1993,23 @@ export class ChatSessionManager {
     this.eventReceiver.onOutput((runId, msg) => {
       if (runId !== sessionId) return;
 
-      // Fire external output hook (e.g. SlackBridge streaming)
+      // Skip tool output (bash stdout/stderr) — it floods the chat.
+      // Tool output is already surfaced via toolEnd events with the full result.
+      // Real-time tool streaming is published as 'tool_output' for dashboards
+      // that want to show it separately.
+      if ((msg as any).source === 'tool') {
+        // Publish as a distinct event type so dashboards can optionally render
+        // real-time bash output in a dedicated panel (not the chat stream).
+        const escaped = JSON.stringify(msg.data);
+        this.publishRaw(
+          sessionId,
+          'tool_output',
+          `{"type":"tool_output","timestamp":${Date.now()},"data":{"content":${escaped},"stream":"${msg.type}"}}`,
+        );
+        return;
+      }
+
+      // Fire external output hook (e.g. SlackBridge streaming) — assistant text only
       if (msg.type === 'stdout' && msg.data) {
         this.outputHook?.(sessionId, msg.data);
       }

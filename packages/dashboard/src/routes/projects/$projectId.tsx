@@ -443,11 +443,13 @@ function ProjectBoardPage() {
                 currentVision={project.vision ?? null}
                 onUpdate={loadProject}
               />
-              <RepositorySettings
-                projectId={projectId}
-                currentRepoUrl={project.repository}
-                onUpdate={loadProject}
-              />
+              {(project.workspace_type === 'git_worktree' || project.repository || !project.workspace_type) && (
+                <RepositorySettings
+                  projectId={projectId}
+                  currentRepoUrl={project.repository}
+                  onUpdate={loadProject}
+                />
+              )}
               <KeyUserSettings
                 projectId={projectId}
                 currentKeyUserId={project.key_user_id ?? null}

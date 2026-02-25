@@ -14,7 +14,7 @@ from sqlalchemy.orm import selectinload
 
 from app.database import get_async_session
 from app.models.run import Run, Step, LoopState, Output
-from app.models.project import Task
+from app.models.project import Project, Task
 from app import dependencies
 from app.utils import validate_pipeline_exists, now_ms, gen_id
 
@@ -107,6 +107,18 @@ async def start_run(
 
     # Create run record using ORM
     now = now_ms()
+
+    # Look up project workspace_type so it propagates to the run
+    run_workspace_type: str | None = None
+    if req.project_id:
+        try:
+            proj_result = await session.execute(
+                select(Project.workspace_type).where(Project.id == req.project_id)
+            )
+            run_workspace_type = proj_result.scalar_one_or_none()
+        except Exception:
+            pass  # Non-fatal — engine falls back to inference
+
     run = Run(
         id=gen_id("run_"),
         pipeline_id=req.pipeline_id,
@@ -116,6 +128,7 @@ async def start_run(
         current_step_id=None,
         outputs="{}",
         human_context=req.context,
+        workspace_type=run_workspace_type,
         created_at=now,
         updated_at=now,
     )
@@ -232,9 +245,15 @@ async def get_run(run_id: str, session: AsyncSession = Depends(get_async_session
     if not run:
         raise HTTPException(status_code=404, detail=f"Run {run_id} not found")
 
-    # Check if workspace exists (helps dashboard show status)
+    # Check if workspace exists (helps dashboard show status).
+    # For persistent_directory runs, the workspace is the project directory.
     runs_dir = os.getenv("SHARED_RUNS_DIR", "/data/runs")
-    workspace_path = Path(runs_dir) / run_id
+    workspaces_dir = os.getenv("WORKSPACES_DIR", "/data/workspaces")
+    ws_type = getattr(run, "workspace_type", None)
+    if ws_type == "persistent_directory" and run.project_id:
+        workspace_path = Path(workspaces_dir) / run.project_id
+    else:
+        workspace_path = Path(runs_dir) / run_id
     workspace_exists = workspace_path.exists()
     workspace_has_git = (
         (workspace_path / ".git").exists() if workspace_exists else False
@@ -277,6 +296,7 @@ async def get_run(run_id: str, session: AsyncSession = Depends(get_async_session
         "completed_at": run.completed_at,
         "human_context": run.human_context,
         "task_branch": getattr(run, "task_branch", None),
+        "workspace_type": getattr(run, "workspace_type", None),
         "workspace_exists": workspace_exists,
         "workspace_has_git": workspace_has_git,
         "steps": [

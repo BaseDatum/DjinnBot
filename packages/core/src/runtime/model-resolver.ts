@@ -72,7 +72,7 @@ export function createOpenRouterModel(modelId: string): Model<'openai-completion
     api: 'openai-completions',
     provider: 'openrouter',
     baseUrl: 'https://openrouter.ai/api/v1',
-    reasoning: true,
+    reasoning: REASONING_MODEL_PATTERN.test(modelId),
     input: ['text', 'image'],
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     contextWindow: 1048576,

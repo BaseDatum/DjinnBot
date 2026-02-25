@@ -4,31 +4,18 @@ import { resolveTemplate, createLoopVariables, mergeVariables } from '../pipelin
 import type { PipelineConfig, StepConfig, StepResultAction } from '../types/pipeline.js';
 import type { PipelineEvent } from '../types/events.js';
 import type { PipelineRun, StepExecution, LoopState, LoopItem } from '../types/state.js';
+import type { IWorkspaceManager, WorkspaceType } from '../runtime/workspace-types.js';
+import type { WorkspaceManagerFactory } from '../runtime/workspace-manager-factory.js';
 
 export interface PipelineEngineConfig {
   eventBus: EventBus;
   store: EngineStore;
-  workspaceManager?: WorkspaceManager;
+  /** Default workspace manager (used when no factory or no workspace_type on run). */
+  workspaceManager?: IWorkspaceManager;
+  /** Factory for per-project workspace manager resolution. */
+  workspaceManagerFactory?: WorkspaceManagerFactory;
   onRunCompleted?: (runId: string, outputs: Record<string, string>) => Promise<void>;
   onRunFailed?: (runId: string, error: string) => Promise<void>;
-}
-
-// Forward declaration
-interface WorkspaceManager {
-  createRunWorktree(projectId: string, runId: string, repoUrl?: string): { projectPath: string; runPath: string; branch: string };
-  createRunWorktreeAsync(projectId: string, runId: string, repoUrl?: string, taskBranch?: string): Promise<{ projectPath: string; runPath: string; branch: string }>;
-  ensureRunWorkspace(runId: string): string;
-  getRunPath(runId: string): string | null;
-  /**
-   * Push the run's task branch to remote, then remove the worktree.
-   * No merge to main — that happens via PR review.
-   */
-  finalizeRunWorkspace(runId: string, projectId?: string): Promise<{
-    pushed: boolean;
-    branch?: string;
-    commitHash?: string;
-    pushError?: string;
-  }>;
 }
 
 // Minimal store interface the engine needs
@@ -52,7 +39,8 @@ export class PipelineEngine {
   private eventBus: EventBus;
   private store: EngineStore;
   private config: PipelineEngineConfig;
-  private workspaceManager?: WorkspaceManager;
+  private workspaceManager?: IWorkspaceManager;
+  private workspaceManagerFactory?: WorkspaceManagerFactory;
   private pipelines: Map<string, PipelineConfig> = new Map();
   private unsubscribers: Map<string, () => void> = new Map();
   private activeRuns: Set<string> = new Set();
@@ -62,7 +50,27 @@ export class PipelineEngine {
     this.eventBus = config.eventBus;
     this.store = config.store;
     this.workspaceManager = config.workspaceManager;
+    this.workspaceManagerFactory = config.workspaceManagerFactory;
     this.setupRedisErrorHandlers();
+  }
+
+  /**
+   * Resolve the workspace manager for a run.
+   * Uses the factory if available, falling back to the default workspace manager.
+   */
+  private resolveWorkspaceManager(workspaceType?: string, projectId?: string, repoUrl?: string): IWorkspaceManager | undefined {
+    if (this.workspaceManagerFactory && (workspaceType || projectId)) {
+      try {
+        return this.workspaceManagerFactory.resolve({
+          projectId: projectId || 'unknown',
+          repoUrl,
+          workspaceType: workspaceType as WorkspaceType | undefined,
+        });
+      } catch (err) {
+        console.warn(`[PipelineEngine] Failed to resolve workspace manager, falling back to default:`, err);
+      }
+    }
+    return this.workspaceManager;
   }
 
   // Register a pipeline config
@@ -115,7 +123,7 @@ export class PipelineEngine {
     this.store.createRun(run);
 
     // Setup workspace — must succeed before any steps are queued.
-    if (this.workspaceManager) {
+    if (this.workspaceManager || this.workspaceManagerFactory) {
       try {
         await this.setupRunWorkspace(runId, projectId, repoUrl, taskBranch);
       } catch (wsErr) {
@@ -153,36 +161,39 @@ export class PipelineEngine {
   /**
    * Setup workspace for a run — must succeed before any steps are queued.
    *
-   * For project runs with a repoUrl: creates a git worktree at RUNS_DIR/{runId}
-   * on the task's persistent branch (feat/{taskId}) or an ephemeral run/{runId}
-   * branch if no taskBranch is specified.
+   * Resolves the appropriate workspace manager for the run's project type
+   * (via the factory if available) and delegates workspace creation.
    *
-   * For project runs WITHOUT a repoUrl (non-git projects): skips workspace setup
-   * entirely. The agent will work without a git workspace.
-   *
-   * For standalone runs: initialises an independent empty git repo at RUNS_DIR/{runId}.
+   * For git_worktree projects: creates a git worktree at RUNS_DIR/{runId}.
+   * For simple projects: creates a plain directory at RUNS_DIR/{runId}.
+   * For standalone runs: initialises an independent workspace at RUNS_DIR/{runId}.
    *
    * Throws on failure so the caller can fail the run with a clear error rather than
    * silently letting agents start without a valid workspace.
    */
-  private async setupRunWorkspace(runId: string, projectId?: string, repoUrl?: string, taskBranch?: string): Promise<void> {
-    if (!this.workspaceManager) return;
+  private async setupRunWorkspace(runId: string, projectId?: string, repoUrl?: string, taskBranch?: string, workspaceType?: string): Promise<void> {
+    // Resolve the right workspace manager for this run
+    const wm = this.resolveWorkspaceManager(workspaceType, projectId, repoUrl);
+    if (!wm) return;
 
     if (projectId) {
-      // Skip workspace setup for non-git projects (no repoUrl)
-      if (!repoUrl) {
+      // For git worktree manager: skip if no repoUrl (legacy behavior — non-git projects
+      // with no explicit workspace type have no workspace). For other managers (e.g. simple),
+      // always create a workspace regardless of repoUrl.
+      if (wm.type === 'git_worktree' && !repoUrl && !workspaceType) {
         console.log(`[PipelineEngine] Skipping workspace setup for run ${runId} — no repository configured for project ${projectId}`);
         return;
       }
-      // Project-associated run with git — use async path so GitHub App tokens work.
-      const workspaceInfo = await this.workspaceManager.createRunWorktreeAsync(projectId, runId, repoUrl, taskBranch);
-      console.log(`[PipelineEngine] Created project worktree for run ${runId}:`);
+      const workspaceInfo = await wm.createRunWorkspaceAsync(projectId, runId, { repoUrl, taskBranch });
+      console.log(`[PipelineEngine] Created ${wm.type} workspace for run ${runId}:`);
       console.log(`  - Project: ${workspaceInfo.projectPath}`);
       console.log(`  - Run:     ${workspaceInfo.runPath}`);
-      console.log(`  - Branch:  ${workspaceInfo.branch}${taskBranch ? ' (task branch — shared across runs)' : ' (ephemeral run branch)'}`);
+      if (workspaceInfo.metadata?.branch) {
+        console.log(`  - Branch:  ${workspaceInfo.metadata.branch}${taskBranch ? ' (task branch — shared across runs)' : ''}`);
+      }
     } else {
-      // Standalone run — independent git repo
-      const runPath = this.workspaceManager.ensureRunWorkspace(runId);
+      // Standalone run — independent workspace
+      const runPath = wm.ensureRunWorkspace(runId);
       console.log(`[PipelineEngine] Created standalone workspace for run ${runId}: ${runPath}`);
     }
   }
@@ -220,7 +231,7 @@ export class PipelineEngine {
 
     // Ensure workspace exists — only creates if missing (idempotent).
     try {
-      await this.setupRunWorkspace(runId, run.projectId, repoUrl, run.taskBranch);
+      await this.setupRunWorkspace(runId, run.projectId, repoUrl, run.taskBranch, run.workspaceType);
     } catch (wsErr) {
       const wsError = `Workspace setup failed on resume: ${wsErr instanceof Error ? wsErr.message : String(wsErr)}`;
       console.error(`[PipelineEngine] ${wsError}`);
@@ -933,16 +944,17 @@ export class PipelineEngine {
       const run = await this.store.getRun(runId);
       try {
         const result = await this.workspaceManager.finalizeRunWorkspace(runId, run?.projectId);
-        if (result.pushed) {
-          console.log(`[PipelineEngine] Pushed branch ${result.branch} for run ${runId} (${result.commitHash?.slice(0, 8)})`);
-        } else if (result.pushError) {
+        if (result.summary) {
+          console.log(`[PipelineEngine] Finalized run ${runId}: ${result.summary}`);
+        }
+        if (result.error) {
           // Non-fatal — work is committed locally; push can be retried by the agent
-          console.warn(`[PipelineEngine] Push failed for run ${runId}: ${result.pushError}`);
+          console.warn(`[PipelineEngine] Finalize warning for run ${runId}: ${result.error}`);
           await this.eventBus.publish(runChannel(runId), {
             type: 'COMMIT_FAILED',
             runId,
             stepId: 'finalize',
-            error: `Push failed: ${result.pushError}`,
+            error: `Finalize: ${result.error}`,
             timestamp: Date.now(),
           });
         }

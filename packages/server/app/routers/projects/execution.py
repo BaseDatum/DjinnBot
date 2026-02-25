@@ -689,6 +689,7 @@ async def execute_task_with_agent(
         initiated_by_user_id=initiated_by,
         model_override=req.modelOverride,
         task_branch=task_branch,
+        workspace_type=project.workspace_type,
         created_at=now,
         updated_at=now,
     )

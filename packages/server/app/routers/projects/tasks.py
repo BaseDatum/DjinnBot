@@ -161,39 +161,64 @@ async def create_task(
         f"Creating task: project_id={project_id}, title={req.title}, priority={req.priority}"
     )
     now = now_ms()
-    await get_project_or_404(session, project_id)
+    project = await get_project_or_404(session, project_id)
 
-    # Determine column and initial status
+    # Determine column and initial status.
+    # Load all columns so we can derive the correct status from the column's
+    # task_statuses instead of hardcoding status names like "backlog"/"ready".
+    cols_result = await session.execute(
+        select(KanbanColumn)
+        .where(KanbanColumn.project_id == project_id)
+        .order_by(KanbanColumn.position)
+    )
+    all_cols = cols_result.scalars().all()
+    if not all_cols:
+        raise HTTPException(status_code=500, detail="Project has no columns")
+
+    # Load project status_semantics for semantic column resolution
+    semantics = project.status_semantics or {}
+    initial_statuses = set(semantics.get("initial", []))
+
+    def _col_statuses(col: KanbanColumn) -> list[str]:
+        return json.loads(col.task_statuses) if col.task_statuses else []
+
     if req.columnId:
         column_id = req.columnId
-        initial_status = "backlog"
+        # Derive status from the target column's statuses
+        target_col = next((c for c in all_cols if c.id == req.columnId), None)
+        col_sts = _col_statuses(target_col) if target_col else []
+        initial_status = col_sts[0] if col_sts else "backlog"
     else:
-        # Tasks with no dependencies go directly to Ready; others start in Backlog
-        cols_result = await session.execute(
-            select(KanbanColumn)
-            .where(KanbanColumn.project_id == project_id)
-            .order_by(KanbanColumn.position)
-        )
-        all_cols = cols_result.scalars().all()
-        if not all_cols:
-            raise HTTPException(status_code=500, detail="Project has no columns")
-
-        backlog_col = all_cols[0]
+        # Find the best column: prefer a "ready" column for tasks without deps,
+        # otherwise use the initial/first column.
+        first_col = all_cols[0]
         ready_col = None
-        for col in all_cols:
-            statuses = json.loads(col.task_statuses) if col.task_statuses else []
-            if "ready" in statuses:
-                ready_col = col
-                break
+        initial_col = None
 
-        # A newly created task with no explicit dependencies and no parent is immediately ready
+        for col in all_cols:
+            sts = _col_statuses(col)
+            if "ready" in sts and ready_col is None:
+                ready_col = col
+            # Find a column whose statuses overlap with semantic initial statuses
+            if (
+                initial_col is None
+                and initial_statuses
+                and any(s in initial_statuses for s in sts)
+            ):
+                initial_col = col
+
         has_deps = bool(req.parentTaskId)
         if not has_deps and ready_col:
             column_id = ready_col.id
-            initial_status = "ready"
+            initial_status = _col_statuses(ready_col)[0]
+        elif initial_col:
+            column_id = initial_col.id
+            initial_status = _col_statuses(initial_col)[0]
         else:
-            column_id = backlog_col.id
-            initial_status = "backlog"
+            # Ultimate fallback: first column, first status
+            column_id = first_col.id
+            col_sts = _col_statuses(first_col)
+            initial_status = col_sts[0] if col_sts else "backlog"
 
     # Get next position in column
     result = await session.execute(

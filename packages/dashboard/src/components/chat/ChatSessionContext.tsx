@@ -13,7 +13,7 @@ import {
   useRef,
   useState,
 } from 'react';
-import { fetchAgents, listChatSessions, endChatSession, startChatSession, restartChatSession, getChatSessionStatus, getChatSession, API_BASE, type AgentListItem } from '@/lib/api';
+import { fetchAgents, listChatSessions, endChatSession, startChatSession, restartChatSession, getChatSessionStatus, getChatSession, updateChatModel, API_BASE, type AgentListItem } from '@/lib/api';
 import { useSSE } from '@/hooks/useSSE';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -58,6 +58,12 @@ interface ChatSessionContextValue {
   setPaneStatus: (paneId: string, status: SessionStatus) => void;
   /** Restart a session whose container was reaped */
   restartPane: (paneId: string) => void;
+  /**
+   * Switch the model for a running session mid-conversation.
+   * Calls the backend API to hot-swap the model seamlessly —
+   * full conversation context is preserved.
+   */
+  updatePaneModel: (paneId: string, model: string) => void;
   /** Whether the floating widget is open */
   widgetOpen: boolean;
   setWidgetOpen: (open: boolean) => void;
@@ -521,6 +527,32 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
       });
   }, []);
 
+  /**
+   * Switch the model for a running session mid-conversation.
+   * Optimistically updates the pane UI, then calls the backend API
+   * which sends a changeModel command to the container for seamless hot-swap.
+   */
+  const updatePaneModel = useCallback((paneId: string, model: string) => {
+    const pane = panesRef.current.find(p => p.paneId === paneId);
+    if (!pane || !pane.sessionId) return;
+
+    const previousModel = pane.model;
+
+    // Optimistic update — show new model immediately
+    setPanes(prev =>
+      prev.map(p => (p.paneId === paneId ? { ...p, model } : p)),
+    );
+
+    // Call backend API to hot-swap the model in the running container
+    updateChatModel(pane.agentId, pane.sessionId, model).catch(err => {
+      console.error(`Failed to update model for session ${pane.sessionId}:`, err);
+      // Revert on failure
+      setPanes(prev =>
+        prev.map(p => (p.paneId === paneId ? { ...p, model: previousModel } : p)),
+      );
+    });
+  }, []);
+
   return (
     <ChatSessionContext.Provider
       value={{
@@ -533,6 +565,7 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
         setPaneSessionId,
         setPaneStatus,
         restartPane,
+        updatePaneModel,
         widgetOpen,
         setWidgetOpen,
         restored,

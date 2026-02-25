@@ -47,6 +47,8 @@ interface RunDetail {
   task?: string;
   context?: string;
   steps?: Step[];
+  workspace_type?: string | null;
+  workspace_has_git?: boolean;
 }
 
 /** A segment of agent output — either text, thinking, event, or tool_call */
@@ -397,7 +399,18 @@ function RunDetailPage() {
           setFileChangedEvents(prev => [...prev, { path: event.path, timestamp: event.timestamp }]);
           break;
         
-        // Container status events
+        // Container lifecycle events (published by engine via ContainerRunner)
+        case 'CONTAINER_CREATED':
+        case 'CONTAINER_STARTING':
+        case 'CONTAINER_READY':
+        case 'CONTAINER_STOPPING':
+        case 'CONTAINER_DESTROYED':
+          setContainerEvents(prev => [...prev, event as ContainerEvent]);
+          if (event.type === 'CONTAINER_READY') setContainerStatus('ready' as ContainerStatus);
+          if (event.type === 'CONTAINER_DESTROYED') setContainerStatus(null);
+          break;
+
+        // Container status events (from container's internal protocol)
         case 'ready':
         case 'busy':
         case 'idle':
@@ -589,8 +602,10 @@ function RunDetailPage() {
         </Card>
       )}
 
-      {/* Git History */}
-      <GitHistory runId={runId} />
+      {/* Git History — only shown for git workspace runs */}
+      {(run.workspace_type === 'git_worktree' || (!run.workspace_type && run.workspace_has_git)) && (
+        <GitHistory runId={runId} />
+      )}
 
       {/* Container Status */}
       {containerStatus && (

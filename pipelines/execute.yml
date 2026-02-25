@@ -36,11 +36,8 @@ steps:
       1. Understand what needs to be done
       2. Implement it — write code, create files, run commands
       3. Verify it works (run tests, check output)
-      4. Commit your changes with a clear message
+      4. If in a git workspace, commit your changes with a clear message
 
-      Write your outputs:
-      - IMPLEMENTATION_NOTES.md — What you did, decisions made
-      - FILES_CHANGED.txt — List of files created/modified
+      When done, write a brief summary of what you accomplished.
     outputs:
-      - implementation_notes
-      - files_changed
+      - summary

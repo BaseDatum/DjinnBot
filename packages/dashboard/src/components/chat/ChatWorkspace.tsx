@@ -26,6 +26,7 @@ import {
 } from 'lucide-react';
 import { AgentChat } from './AgentChat';
 import { useChatSessions, type ChatPane } from './ChatSessionContext';
+import { ModelSelector } from './ModelSelector';
 import { formatModelChip } from '@/lib/format';
 import { KeySourceBadge } from '@/components/ui/KeySourceBadge';
 import { SessionTokenStats } from '@/components/ui/SessionTokenStats';
@@ -44,6 +45,7 @@ export function ChatWorkspace({ initialAgentId: _initialAgentId }: ChatWorkspace
     showPane,
     hidePane,
     setPaneStatus,
+    updatePaneModel,
     restored,
   } = useChatSessions();
 
@@ -101,6 +103,7 @@ export function ChatWorkspace({ initialAgentId: _initialAgentId }: ChatWorkspace
                       onClose={() => closePane(pane.paneId)}
                       onHide={() => hidePane(pane.paneId)}
                       onSessionEnd={() => setPaneStatus(pane.paneId, 'idle')}
+                      onModelChange={(model) => updatePaneModel(pane.paneId, model)}
                     />
                   </Panel>
                 </Fragment>
@@ -229,9 +232,10 @@ interface ChatPaneWrapperProps {
   onClose: () => void;
   onHide: () => void;
   onSessionEnd: () => void;
+  onModelChange: (model: string) => void;
 }
 
-function ChatPaneWrapper({ pane, onClose, onHide, onSessionEnd }: ChatPaneWrapperProps) {
+function ChatPaneWrapper({ pane, onClose, onHide, onSessionEnd, onModelChange }: ChatPaneWrapperProps) {
   const statusDot =
     pane.sessionStatus === 'running' ? 'bg-green-500' :
       pane.sessionStatus === 'starting' ? 'bg-yellow-400 animate-pulse' :
@@ -245,7 +249,15 @@ function ChatPaneWrapper({ pane, onClose, onHide, onSessionEnd }: ChatPaneWrappe
           <span className={styles.paneEmoji}>{pane.agentEmoji || '🤖'}</span>
           <span className={styles.paneAgentName}>{pane.agentName}</span>
           <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${statusDot}`} />
-          <span className={styles.paneModelChip}>{formatModelChip(pane.model)}</span>
+          {pane.sessionStatus === 'running' ? (
+            <ModelSelector
+              value={pane.model}
+              onChange={onModelChange}
+              className="h-5 text-[10px] w-auto min-w-[100px] max-w-[160px]"
+            />
+          ) : (
+            <span className={styles.paneModelChip}>{formatModelChip(pane.model)}</span>
+          )}
           {pane.keyResolution && <KeySourceBadge keyResolution={pane.keyResolution} />}
           {pane.sessionId && <SessionTokenStats sessionId={pane.sessionId} />}
         </div>
