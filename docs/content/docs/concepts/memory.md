@@ -110,16 +110,88 @@ remember("fact", "Project: MyApp",
 
 Subsequent memories link back to the anchor, keeping the graph connected and navigable.
 
-## Memory Scoring
+## Adaptive Memory Scoring
 
-Not all memories are equally useful. DjinnBot's memory scoring system automatically weights memories by:
+Not all memories are equally useful. DjinnBot's adaptive scoring system learns which memories actually help agents accomplish tasks, and uses that signal to re-rank future `recall()` results. Scoring is driven entirely by **agent valuations** — explicit "useful / not useful" judgments from the `rate_memories` tool — not by step success or failure.
 
-- **Recency** — recently accessed memories rank higher
-- **Frequency** — frequently recalled memories are more important
-- **Relevance** — semantic similarity to the current context
-- **Importance** — explicitly tagged high-importance items
+### How It Works
 
-Memory scoring is configured through the dashboard (**Settings > Memory Scoring**) and affects how `recall()` ranks results. This means agents naturally prioritize recent, relevant knowledge without manual curation.
+Four database tables work together:
+
+| Table | Purpose |
+|-------|---------|
+| `memory_retrieval_log` | Raw append-only events. One row per memory surfaced during a `recall()` or `wake()` call. Used for analytics and access counting. |
+| `memory_valuations` | Agent-authored usefulness ratings. The **primary scoring signal**. Created when an agent calls `rate_memories` after consuming recalled memories. |
+| `memory_gaps` | Knowledge the agent needed but couldn't find. Aggregated in the dashboard to surface systemic knowledge holes. |
+| `memory_scores` | Materialized aggregates per `(agent_id, memory_id)`. Updated atomically on retrieval and valuation events. Queried at recall time. |
+
+### The Scoring Formula
+
+The adaptive score for each memory is a weighted blend of three components:
+
+```
+adaptive_score = usefulness * w_usefulness + recency * w_recency + frequency * w_frequency
+```
+
+**Usefulness** (default weight: 0.60) — the dominant signal:
+- Computed as `useful_count / valuation_count` from agent ratings
+- Memories with fewer than `min_valuations_for_signal` (default: 3) ratings use a neutral score of 0.5 — a single "not useful" can't tank a memory
+- **Rehabilitation decay**: old negative scores fade toward neutral (0.5) over `rehabilitation_half_life_days` (default: 90 days), preventing permanent punishment
+
+**Recency** (default weight: 0.25):
+- Exponential decay from `last_accessed` with a configurable half-life (default: 30 days)
+- Floored at 0.30 — even a memory untouched for years retains some recency signal
+
+**Frequency** (default weight: 0.15):
+- `log(access_count + 1)` normalized against a cap (default: 50 retrievals = max signal)
+
+A hard floor of 0.35 ensures no memory is ever completely suppressed.
+
+### Score Blending at Recall Time
+
+When `recall()` returns results, raw search scores (BM25 / vector similarity) are blended with adaptive scores:
+
+```
+blended = rawScore * (base_factor + boost_factor * adaptive_score)
+```
+
+With defaults (`base_factor=0.70`, `boost_factor=0.30`), a memory with a neutral adaptive score (0.5) leaves the raw score unchanged. Memories rated consistently useful get boosted; memories rated not-useful get slightly depressed but never zeroed out.
+
+### The `rate_memories` Tool
+
+Agents call this tool to submit valuations after consuming recalled memories:
+
+```javascript
+rate_memories({
+  ratings: [
+    { memoryId: "mem_abc123", useful: true },
+    { memoryId: "mem_def456", useful: false }
+  ],
+  gap: "How we handle rate limiting in the API",  // optional
+  gapQuery: "rate limiting middleware"              // optional
+})
+```
+
+The boolean `useful` field is intentionally simple — agents are reliable at binary "helped / didn't help" judgments. Numeric scales add calibration noise.
+
+### Configuration
+
+All scoring parameters are configurable through the dashboard (**Settings > Memory Scoring**) or the API (`/v1/memory-scoring/config`). Changes take effect immediately — no restart needed.
+
+| Parameter | Default | Description |
+|-----------|---------|------------|
+| `min_valuations_for_signal` | 3 | Minimum ratings before usefulness is trusted |
+| `recency_half_life_days` | 30 | Days until recency signal drops to half |
+| `rehabilitation_half_life_days` | 90 | Days until negative scores fade to neutral |
+| `adaptive_score_floor` | 0.35 | Hard minimum for any memory's adaptive score |
+| `frequency_log_cap` | 50 | Retrievals needed for max frequency signal |
+| `blend_usefulness_weight` | 0.60 | Weight of agent usefulness ratings |
+| `blend_recency_weight` | 0.25 | Weight of recency signal |
+| `blend_frequency_weight` | 0.15 | Weight of access frequency |
+| `blend_base_factor` | 0.70 | Baseline multiplier for raw search scores |
+| `blend_boost_factor` | 0.30 | How much adaptive scores can boost/penalize |
+
+Set `blend_boost_factor` to 0.0 to disable adaptive scoring entirely, or `adaptive_score_floor` to 0.5 to make all memories score equally.
 
 ## 3D Knowledge Graph Visualization
 

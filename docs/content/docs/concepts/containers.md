@@ -58,7 +58,7 @@ Each step gets a **fresh container** — there's no state leaking between steps.
 
 ## Volume Layout
 
-Agent containers mount the shared `djinnbot-data` volume at `/data`. The container's home directory (`/home/agent`) is symlinked to `/data/sandboxes/{agentId}/`, giving each agent a persistent home across sessions.
+Agent containers mount the shared JuiceFS filesystem at `/data`. The container's home directory (`/home/agent`) is symlinked to `/data/sandboxes/{agentId}/`, giving each agent a persistent home across sessions. See [Storage](/docs/concepts/storage) for details on the JuiceFS + RustFS layer.
 
 ```
 /home/agent/                          → /data/sandboxes/{agentId}/
@@ -68,8 +68,10 @@ Agent containers mount the shared `djinnbot-data` volume at `/data`. The contain
 ├── run-workspace/                    ← git worktree (pipeline sessions)
 ├── project-workspace/                ← full project repo (pipeline sessions)
 └── task-workspaces/
-    └── {taskId}/                     ← authenticated git workspace (pulse sessions)
+    └── {taskId}/                     ← persistent git worktree (pulse sessions)
 ```
+
+Which workspace paths are populated depends on the session type. See [Workspaces](/docs/concepts/workspaces) for the full comparison between pipeline and pulse workspace strategies.
 
 ## Security Model
 

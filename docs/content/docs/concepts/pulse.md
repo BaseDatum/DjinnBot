@@ -72,6 +72,63 @@ Agents can have **multiple named pulse routines** with independent schedules, mo
 
 Routines are managed via the dashboard (**Agents > Pulse Routines**) or the API (`/v1/pulse-routines`). Each routine can have its own model override, enabling cost-efficient scheduling — use a fast model for frequent lightweight checks and a powerful model for deep analysis.
 
+## Routine-to-Project Mapping
+
+Routines can be mapped to specific projects with per-project configuration overrides. This creates a **many-to-many relationship**: one agent can have multiple routines, and each routine can be mapped to multiple projects with different settings per project.
+
+### Three layers of configuration
+
+```mermaid
+graph LR
+    R1["Routine: Task Work"] --> M1["Mapping: Project A<br/>Columns: Backlog, Ready"]
+    R1 --> M2["Mapping: Project B<br/>Columns: Ready only"]
+    R2["Routine: PR Review"] --> M3["Mapping: Project A<br/>Tools: gh, read"]
+    R2 --> M4["Mapping: Project C<br/>Tools: gh, read, bash"]
+
+    style R1 fill:#8b5cf6,color:#fff
+    style R2 fill:#8b5cf6,color:#fff
+    style M1 fill:#3b82f6,color:#fff
+    style M2 fill:#3b82f6,color:#fff
+    style M3 fill:#3b82f6,color:#fff
+    style M4 fill:#3b82f6,color:#fff
+```
+
+1. **Pulse Routine** — the agent-level definition with default instructions, schedule, model, tools, and columns
+2. **Project-Agent-Routine Mapping** — the join table that maps a routine to a specific project, with optional overrides for columns and tools
+3. **Resolved Config** — the effective configuration after merging routine defaults with project-specific overrides
+
+### Override resolution
+
+When the engine fires a routine, it resolves the effective configuration for each project:
+
+| Setting | Priority |
+|---------|----------|
+| **Columns** | Mapping `columnIds` > routine `pulse_columns` > all project columns |
+| **Tools** | Mapping `toolOverrides` > routine `tools` > agent default tools |
+| **Models** | Routine `planningModel` / `executorModel` > agent config defaults |
+
+### Example: One agent, two behaviors
+
+Yukihiro (Senior SWE) has two routines mapped to two different projects:
+
+| Routine | Project | Columns | Model |
+|---------|---------|---------|-------|
+| Task Work | MyApp | Backlog, Ready | Kimi K2.5 (fast) |
+| Task Work | InternalTool | Ready only | Kimi K2.5 (fast) |
+| PR Review | MyApp | Review | Claude Opus (thorough) |
+
+Each combination runs on its own schedule with its own tools and model — all configured through the dashboard.
+
+### API
+
+Mappings are managed under each project:
+
+- `GET /v1/projects/{project_id}/agents/{agent_id}/routines` — list mappings
+- `POST /v1/projects/{project_id}/agents/{agent_id}/routines` — create mapping
+- `PUT /v1/projects/{project_id}/agents/{agent_id}/routines/{mapping_id}` — update
+- `DELETE /v1/projects/{project_id}/agents/{agent_id}/routines/{mapping_id}` — remove
+- `GET /v1/projects/{project_id}/agents/{agent_id}/routines/resolve` — resolve effective config
+
 ## Configuration
 
 Pulse is configured per-agent in `config.yml`:
@@ -116,19 +173,58 @@ coordination:
 
 These limits are critical for production deployments — they prevent runaway costs and ensure agents don't get stuck in infinite communication loops.
 
-### Two-Stage Planning-Executor Model
+### Plan + Execute Model
 
-For complex tasks, agents can use a two-stage approach:
+For complex tasks, agents use a two-stage delegation pattern where a planner agent writes a detailed brief, then spawns a separate executor in a fresh container with a clean context window.
 
-1. **Planning phase** — a lightweight model (e.g., `planning_model`) decomposes the task into steps
-2. **Execution phase** — a capable model (e.g., `executor_model`) executes each step
+#### How it works
 
-This reduces cost by using fast models for planning and powerful models only when needed for implementation. Configure per-agent:
+1. **Planner** runs first using the `planning_model` (typically a fast/cheap model). It reads the task, analyzes the codebase, and formulates a plan.
+
+2. **Planner calls `spawn_executor()`** — a tool that:
+   - Takes a `projectId`, `taskId`, and a complete `executionPrompt` written by the planner
+   - POSTs to `/v1/internal/spawn-executor`, which creates a fresh run and dispatches it to a new container
+   - Blocks and polls every 2 seconds until the executor completes, fails, or times out
+   - Returns structured results (commit hashes, files changed, deviations, blockers) back to the planner
+
+3. **Executor** runs in a separate container with:
+   - ONLY the execution prompt — no conversation history, no context pollution
+   - The task's git workspace pre-mounted
+   - The `executor_model` (typically a more capable model)
+   - A set of **deviation rules** that govern how it handles unexpected situations
+
+#### Deviation Rules
+
+Every executor session is injected with strict deviation rules:
+
+| Rule | Trigger | Action |
+|------|---------|--------|
+| **Rule 1: Auto-fix bugs** | Code doesn't work (errors, wrong output, type errors) | Fix inline, commit with `fix:` prefix |
+| **Rule 2: Add missing guards** | Missing error handling, validation, auth checks | Add the code, commit with `fix:` prefix |
+| **Rule 3: Fix blockers** | Missing dependency, broken import, build config error | Fix the blocker, commit with `chore:` prefix |
+| **Rule 4: STOP for architecture** | Needs new DB table, schema migration, library switch, breaking API change | Call `fail()` with a proposal — do NOT implement |
+
+Limits:
+- Max 3 auto-fix attempts per issue
+- Only fix issues caused by the executor's own changes
+- Out-of-scope work is noted but not done
+
+#### Configuration
 
 ```yaml
+# In agent config.yml
 planning_model: openrouter/x-ai/grok-4.1-fast
 executor_model: openrouter/anthropic/claude-sonnet-4
 ```
+
+Per-routine model overrides are also supported — see [Routine-to-Project Mapping](#routine-to-project-mapping) below.
+
+#### Why this matters
+
+The separation achieves three things:
+1. **Cost efficiency** — fast models handle planning, capable models only fire for implementation
+2. **Context hygiene** — the executor gets a clean context window with only the execution prompt, avoiding the "lost in conversation" problem
+3. **Structured handoff** — the planner writes a complete brief as if briefing a skilled engineer with zero prior context, forcing thorough task decomposition
 
 ## Project Tools
 

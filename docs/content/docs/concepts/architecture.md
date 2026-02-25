@@ -12,7 +12,7 @@ graph TB
     Dashboard["Dashboard<br/>(React + Vite)"] -->|SSE| API["API Server<br/>(FastAPI)"]
     CLI["CLI<br/>(Python)"] --> API
     API --> DB["PostgreSQL"]
-    API --> Redis["Redis<br/>(Streams + Pub/Sub)"]
+    API --> Redis["Redis<br/>(Streams + Pub/Sub<br/>+ JuiceFS Metadata)"]
     Engine["Pipeline Engine<br/>(State Machine)"] --> API
     Engine --> Redis
     Engine --> Agent1["Agent Container<br/>(Isolated)"]
@@ -24,6 +24,12 @@ graph TB
     Agent1 --> mcpo["mcpo Proxy<br/>(MCP Tools)"]
     Agent2 --> mcpo
     Engine --> Slack["Slack Bridge"]
+    JFS["JuiceFS FUSE Mount"] --> RustFS["RustFS<br/>(S3 Object Store)"]
+    JFS --> Redis
+    Engine --> JFS
+    Agent1 --> JFS
+    Agent2 --> JFS
+    API --> JFS
 
     style Dashboard fill:#3b82f6,color:#fff,stroke:#2563eb
     style CLI fill:#3b82f6,color:#fff,stroke:#2563eb
@@ -37,6 +43,8 @@ graph TB
     style Agent3 fill:#f59e0b,color:#000,stroke:#d97706
     style mcpo fill:#6366f1,color:#fff,stroke:#4f46e5
     style Slack fill:#4ade80,color:#000,stroke:#22c55e
+    style JFS fill:#14b8a6,color:#fff,stroke:#0d9488
+    style RustFS fill:#14b8a6,color:#fff,stroke:#0d9488
 ```
 
 ## Services
@@ -118,12 +126,23 @@ The swarm executor:
 5. Unlocks downstream tasks as dependencies are met
 6. Handles failures and retries per-task
 
-### Redis (Event Bus)
+### Storage Layer (JuiceFS + RustFS)
 
-Redis serves two roles:
+All workspace files, memory vaults, and agent sandboxes live on a shared POSIX filesystem backed by JuiceFS and RustFS. See [Storage](/docs/concepts/storage) for full details.
 
-1. **Streams** — reliable, ordered event delivery between the API server and engine. Events like `RUN_CREATED`, `STEP_QUEUED`, `STEP_COMPLETE` flow through Redis Streams.
-2. **Pub/Sub** — real-time communication between the engine and agent containers. The engine sends commands, agents publish output chunks and events.
+- **RustFS** — an S3-compatible object storage server that holds the actual file data
+- **JuiceFS** — a FUSE filesystem that presents the S3 data as a standard POSIX directory tree at `/data`
+- **Redis DB 2** — serves as JuiceFS's metadata engine (separate from the event bus on DB 0)
+
+The JuiceFS mount is shared across all containers via a Docker named volume. The engine, API server, and every dynamically spawned agent container see the same `/data` directory. This is how agents share workspaces, memory vaults, and sandboxes without direct container-to-container mounts.
+
+### Redis (Event Bus + Metadata)
+
+Redis serves three roles:
+
+1. **Streams** (DB 0) — reliable, ordered event delivery between the API server and engine. Events like `RUN_CREATED`, `STEP_QUEUED`, `STEP_COMPLETE` flow through Redis Streams.
+2. **Pub/Sub** (DB 0) — real-time communication between the engine and agent containers. The engine sends commands, agents publish output chunks and events.
+3. **JuiceFS metadata** (DB 2) — stores the filesystem metadata (directory tree, file attributes, chunk mappings) for the JuiceFS FUSE mount.
 
 ### PostgreSQL (State Store)
 
@@ -212,6 +231,8 @@ For parallel multi-task execution:
 | Memory | ClawVault + QMDR | TypeScript |
 | Event Bus | Redis Streams + Pub/Sub | — |
 | Database | PostgreSQL 16 | — |
+| Object Storage | RustFS (S3-compatible) | Rust |
+| Filesystem | JuiceFS FUSE mount (metadata in Redis DB 2) | Go |
 | MCP Proxy | mcpo | Python |
 | CLI | Click, Rich TUI | Python |
 | Build System | Turborepo | — |
