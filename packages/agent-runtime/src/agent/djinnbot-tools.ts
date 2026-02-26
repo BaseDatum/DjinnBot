@@ -19,6 +19,7 @@ import { createSpawnExecutorTools } from './djinnbot-tools/spawn-executor.js';
 import { createSwarmExecutorTools } from './djinnbot-tools/swarm-executor.js';
 import { createWorkLedgerTools } from './djinnbot-tools/work-ledger.js';
 import { createRunHistoryTools } from './djinnbot-tools/run-history.js';
+import { createFocusedAnalysisTools } from './djinnbot-tools/focused-analysis.js';
 import type { MemoryRetrievalTracker } from './djinnbot-tools/memory-scoring.js';
 
 export interface DjinnBotToolsConfig {
@@ -84,7 +85,7 @@ export function createDjinnBotTools(config: DjinnBotToolsConfig): AgentTool[] {
 
     ...createWorkLedgerTools({ redis, agentId, sessionId }),
 
-    ...createResearchTools(),
+    ...createResearchTools({ agentId }),
 
     ...createSkillsTools({ agentId, apiBaseUrl }),
 
@@ -107,6 +108,9 @@ export function createDjinnBotTools(config: DjinnBotToolsConfig): AgentTool[] {
 
     // Run history — execution memory for learning from past attempts
     ...createRunHistoryTools({ agentId, apiBaseUrl }),
+
+    // Focused analysis — lightweight analytical delegation to a sub-model
+    ...createFocusedAnalysisTools({ agentId }),
 
     // Onboarding tools — only for onboarding sessions (ONBOARDING_SESSION_ID is set)
     ...(isOnboardingSession ? createOnboardingTools({ agentId, apiBaseUrl }) : []),

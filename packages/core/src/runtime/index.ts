@@ -19,7 +19,14 @@ export { MockRunner } from './mock-runner.js';
 export { createDjinnBotTools } from './djinnbot-tools.js';
 export type { DjinnBotToolCallbacks } from './djinnbot-tools.js';
 
-export { performResearch } from './research.js';
+export { performResearch, performResearchWithMeta } from './research.js';
+export type { ResearchResult } from './research.js';
+
+export { focusedAnalysis } from './focused-analysis.js';
+export type { FocusedAnalysisOptions, FocusedAnalysisResult } from './focused-analysis.js';
+
+export { chatCompletion, resetOpenRouterClient } from './openrouter-client.js';
+export type { ChatCompletionOptions, ChatCompletionResult, ChatCompletionMessage } from './openrouter-client.js';
 
 export { createPulseTools } from './pulse-tools.js';
 

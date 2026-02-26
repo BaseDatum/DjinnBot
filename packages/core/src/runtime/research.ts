@@ -2,10 +2,11 @@
  * performResearch — shared Perplexity/OpenRouter research helper.
  *
  * Used by both PiMonoRunner (in-process) and agent-runtime containers.
- * Makes a direct HTTPS call to OpenRouter using the Perplexity sonar model
- * family and returns the synthesized answer with citations.
+ * Makes a call to OpenRouter using the Perplexity sonar model family
+ * and returns the synthesized answer with citations.
  */
-import https from 'node:https';
+
+import { chatCompletion, type ChatCompletionResult } from './openrouter-client.js';
 
 const FOCUS_PROMPTS: Record<string, string> = {
   finance:
@@ -22,78 +23,73 @@ const FOCUS_PROMPTS: Record<string, string> = {
     'You are a research analyst. Provide thorough, accurate, well-structured answers with cited sources.',
 };
 
+/**
+ * Structured result from a research call, including metadata for logging.
+ */
+export interface ResearchResult {
+  /** Formatted answer with citations appended. */
+  text: string;
+  /** Model that served the request. */
+  model: string;
+  /** Token usage when reported. */
+  usage?: {
+    promptTokens: number;
+    completionTokens: number;
+    totalTokens: number;
+  };
+  /** Wall-clock duration in milliseconds. */
+  durationMs: number;
+}
+
+/**
+ * Research a topic and return structured result with metadata.
+ * Use this when you need access to usage/duration for logging.
+ */
+export async function performResearchWithMeta(
+  query: string,
+  focus: string = 'general',
+  model: string = 'perplexity/sonar-pro',
+  signal?: AbortSignal,
+): Promise<ResearchResult> {
+  const systemPrompt = FOCUS_PROMPTS[focus] ?? FOCUS_PROMPTS.general;
+
+  const result = await chatCompletion({
+    model,
+    messages: [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: query },
+    ],
+    signal,
+  });
+
+  // Append citations if present (Perplexity models)
+  let text = result.content;
+  if (result.citations && result.citations.length > 0) {
+    text +=
+      '\n\n---\n**Sources:**\n' +
+      result.citations.map((c, i) => `[${i + 1}] ${c}`).join('\n');
+  }
+
+  return {
+    text,
+    model: result.model,
+    usage: result.usage,
+    durationMs: result.durationMs,
+  };
+}
+
+/**
+ * Research a topic via Perplexity on OpenRouter.
+ *
+ * Returns the synthesized answer as a plain string (backward-compatible).
+ * For structured metadata (usage, duration), use `performResearchWithMeta`.
+ */
 export async function performResearch(
   query: string,
   focus: string = 'general',
   model: string = 'perplexity/sonar-pro',
   signal?: AbortSignal,
 ): Promise<string> {
-  const apiKey = process.env.OPENROUTER_API_KEY;
-  if (!apiKey) {
-    return 'Error: OPENROUTER_API_KEY is not set. Cannot perform research.';
-  }
-
-  const systemPrompt = FOCUS_PROMPTS[focus] ?? FOCUS_PROMPTS.general;
-
-  const requestBody = JSON.stringify({
-    model,
-    messages: [
-      { role: 'system', content: systemPrompt },
-      { role: 'user', content: query },
-    ],
-  });
-
-  return new Promise<string>((resolve, reject) => {
-    const req = https.request(
-      {
-        hostname: 'openrouter.ai',
-        path: '/api/v1/chat/completions',
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${apiKey}`,
-          'HTTP-Referer': 'https://djinnbot.ai',
-          'X-Title': 'DjinnBot Research Tool',
-          'Content-Length': Buffer.byteLength(requestBody),
-        },
-      },
-      (res) => {
-        let data = '';
-        res.on('data', (chunk) => { data += chunk; });
-        res.on('end', () => {
-          try {
-            const parsed = JSON.parse(data);
-            if (parsed.error) {
-              resolve(`Research error: ${parsed.error.message || JSON.stringify(parsed.error)}`);
-              return;
-            }
-            const content = parsed.choices?.[0]?.message?.content;
-            if (!content) {
-              resolve(`Research returned no content. Raw response: ${data.slice(0, 500)}`);
-              return;
-            }
-            const citations: string[] = parsed.citations || [];
-            let output = content;
-            if (citations.length > 0) {
-              output +=
-                '\n\n---\n**Sources:**\n' +
-                citations.map((c: string, i: number) => `[${i + 1}] ${c}`).join('\n');
-            }
-            resolve(output);
-          } catch (e) {
-            resolve(`Failed to parse research response: ${e}`);
-          }
-        });
-        res.on('error', reject);
-      },
-    );
-
-    if (signal) {
-      signal.addEventListener('abort', () => req.destroy(), { once: true });
-    }
-
-    req.on('error', reject);
-    req.write(requestBody);
-    req.end();
-  });
+  const result = await performResearchWithMeta(query, focus, model, signal);
+  return result.text;
 }

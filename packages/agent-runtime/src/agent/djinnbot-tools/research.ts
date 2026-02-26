@@ -1,6 +1,7 @@
 import { Type, type Static } from '@sinclair/typebox';
 import type { AgentTool, AgentToolResult, AgentToolUpdateCallback } from '@mariozechner/pi-agent-core';
-import { performResearch } from '@djinnbot/core';
+import { performResearchWithMeta } from '@djinnbot/core';
+import { logToolLlmCall } from './log-tool-llm-call.js';
 
 // ── Schemas ────────────────────────────────────────────────────────────────
 
@@ -30,9 +31,15 @@ type ResearchParams = Static<typeof ResearchParamsSchema>;
 
 interface VoidDetails {}
 
+export interface ResearchToolsConfig {
+  agentId: string;
+}
+
 // ── Tool factories ─────────────────────────────────────────────────────────
 
-export function createResearchTools(): AgentTool[] {
+export function createResearchTools(config: ResearchToolsConfig): AgentTool[] {
+  const { agentId } = config;
+
   return [
     {
       name: 'research',
@@ -46,13 +53,23 @@ export function createResearchTools(): AgentTool[] {
         _onUpdate?: AgentToolUpdateCallback<VoidDetails>
       ): Promise<AgentToolResult<VoidDetails>> => {
         const p = params as ResearchParams;
-        const result = await performResearch(
+        const result = await performResearchWithMeta(
           p.query,
           p.focus || 'general',
           p.model || 'perplexity/sonar-pro',
           signal,
         );
-        return { content: [{ type: 'text', text: result }], details: {} };
+
+        // Log the LLM call (fire-and-forget)
+        logToolLlmCall({
+          agentId,
+          model: result.model,
+          source: 'research',
+          usage: result.usage,
+          durationMs: result.durationMs,
+        });
+
+        return { content: [{ type: 'text', text: result.text }], details: {} };
       },
     },
   ];

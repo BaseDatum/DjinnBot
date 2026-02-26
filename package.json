@@ -23,6 +23,7 @@
     "node": ">=20.0.0"
   },
   "dependencies": {
+    "@openrouter/sdk": "^0.9.11",
     "clawvault": "2.4.6"
   }
 }
