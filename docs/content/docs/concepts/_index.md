@@ -13,6 +13,7 @@ Understand how DjinnBot works under the hood. These concepts form the foundation
   {{< card link="skills" title="Skills" subtitle="On-demand instruction sets agents load when they need them." icon="academic-cap" >}}
   {{< card link="mcp-tools" title="MCP Tools" subtitle="External tool servers converted to native agent tools via mcpo." icon="puzzle" >}}
   {{< card link="pulse" title="Pulse Mode" subtitle="Autonomous agent wake-up cycles with named routines and coordination." icon="clock" >}}
+  {{< card link="event-driven-wakes" title="Event-Driven Wakes" subtitle="Agents proactively wake each other with layered guardrails against loops and runaway execution." icon="lightning-bolt" >}}
   {{< card link="containers" title="Agent Containers" subtitle="Isolated Docker environments with full engineering toolboxes." icon="shield-check" >}}
   {{< card link="storage" title="Storage Layer" subtitle="JuiceFS + RustFS distributed filesystem shared across all containers." icon="chip" >}}
   {{< card link="workspaces" title="Workspaces" subtitle="Git worktree isolation, persistent directories, and pipeline vs pulse strategies." icon="folder-open" >}}
