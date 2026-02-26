@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=400">
+  <title>DjinnBot Cookie Bridge</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+      width: 380px;
+      background: #0a0a0a;
+      color: #e5e5e5;
+      font-size: 13px;
+    }
+
+    .header {
+      padding: 16px;
+      border-bottom: 1px solid #262626;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .header h1 { font-size: 15px; font-weight: 600; }
+    .header .subtitle { font-size: 11px; color: #737373; margin-top: 2px; }
+
+    .section {
+      padding: 16px;
+      border-bottom: 1px solid #262626;
+    }
+    .section:last-child { border-bottom: none; }
+
+    label {
+      display: block;
+      font-size: 11px;
+      font-weight: 500;
+      color: #a3a3a3;
+      margin-bottom: 4px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    input, select {
+      width: 100%;
+      padding: 8px 10px;
+      background: #171717;
+      border: 1px solid #262626;
+      border-radius: 6px;
+      color: #e5e5e5;
+      font-size: 13px;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+    input:focus, select:focus { border-color: #525252; }
+    input::placeholder { color: #525252; }
+
+    .field { margin-bottom: 12px; }
+    .field:last-child { margin-bottom: 0; }
+
+    .row { display: flex; gap: 8px; }
+    .row > * { flex: 1; }
+
+    .btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      width: 100%;
+      padding: 9px 12px;
+      border: none;
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .btn-primary {
+      background: #e5e5e5;
+      color: #0a0a0a;
+    }
+    .btn-primary:hover { background: #d4d4d4; }
+    .btn-primary:disabled {
+      background: #404040;
+      color: #737373;
+      cursor: not-allowed;
+    }
+    .btn-secondary {
+      background: #262626;
+      color: #e5e5e5;
+    }
+    .btn-secondary:hover { background: #333; }
+
+    .status {
+      margin-top: 12px;
+      padding: 8px 10px;
+      border-radius: 6px;
+      font-size: 12px;
+      display: none;
+    }
+    .status.success { display: block; background: #052e16; color: #4ade80; border: 1px solid #166534; }
+    .status.error { display: block; background: #310413; color: #f87171; border: 1px solid #7f1d1d; }
+    .status.info { display: block; background: #172554; color: #60a5fa; border: 1px solid #1e3a5f; }
+
+    .saved-indicator {
+      font-size: 11px;
+      color: #4ade80;
+      display: none;
+    }
+    .saved-indicator.visible { display: inline; }
+
+    .cookie-preview {
+      margin-top: 8px;
+      max-height: 100px;
+      overflow-y: auto;
+      background: #171717;
+      border: 1px solid #262626;
+      border-radius: 6px;
+      padding: 8px;
+      font-family: 'SF Mono', 'Fira Code', monospace;
+      font-size: 11px;
+      color: #a3a3a3;
+      white-space: pre;
+      display: none;
+    }
+
+    .quick-domains {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+      margin-top: 6px;
+    }
+    .quick-domain {
+      padding: 3px 8px;
+      background: #262626;
+      border: 1px solid #333;
+      border-radius: 4px;
+      font-size: 11px;
+      color: #a3a3a3;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .quick-domain:hover { background: #333; color: #e5e5e5; }
+
+    .spinner {
+      width: 14px;
+      height: 14px;
+      border: 2px solid #525252;
+      border-top-color: #e5e5e5;
+      border-radius: 50%;
+      animation: spin 0.6s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div>
+      <h1>DjinnBot Cookie Bridge</h1>
+      <div class="subtitle">Export browser cookies for agent browsing</div>
+    </div>
+  </div>
+
+  <!-- Connection settings -->
+  <div class="section">
+    <div class="field">
+      <label>DjinnBot API URL <span class="saved-indicator" id="saved">saved</span></label>
+      <input type="text" id="apiUrl" placeholder="http://localhost:8000" />
+    </div>
+    <div class="field">
+      <label>API Key / Token (optional)</label>
+      <input type="password" id="token" placeholder="Bearer token for authentication" />
+    </div>
+  </div>
+
+  <!-- Cookie extraction -->
+  <div class="section">
+    <div class="field">
+      <label>Domain</label>
+      <input type="text" id="domain" placeholder="linkedin.com" />
+      <div class="quick-domains">
+        <span class="quick-domain" data-domain="linkedin.com">LinkedIn</span>
+        <span class="quick-domain" data-domain="github.com">GitHub</span>
+        <span class="quick-domain" data-domain="google.com">Google</span>
+        <span class="quick-domain" data-domain="twitter.com">Twitter</span>
+        <span class="quick-domain" data-domain="amazon.com">Amazon</span>
+      </div>
+    </div>
+    <div class="field">
+      <label>Cookie Set Name</label>
+      <input type="text" id="name" placeholder="e.g., LinkedIn, GitHub" />
+    </div>
+
+    <div class="row" style="margin-top: 12px;">
+      <button class="btn btn-primary" id="extractAndUpload">
+        Send to DjinnBot
+      </button>
+      <button class="btn btn-secondary" id="extractOnly" style="flex: 0 0 auto; width: auto; padding: 9px 14px;" title="Preview cookies">
+        Preview
+      </button>
+    </div>
+
+    <div class="status" id="status"></div>
+    <div class="cookie-preview" id="preview"></div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

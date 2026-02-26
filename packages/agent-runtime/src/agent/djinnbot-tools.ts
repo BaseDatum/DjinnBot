@@ -18,6 +18,7 @@ import { createSlackTools } from './djinnbot-tools/slack.js';
 import { createSpawnExecutorTools } from './djinnbot-tools/spawn-executor.js';
 import { createSwarmExecutorTools } from './djinnbot-tools/swarm-executor.js';
 import { createWorkLedgerTools } from './djinnbot-tools/work-ledger.js';
+import { createRunHistoryTools } from './djinnbot-tools/run-history.js';
 import type { MemoryRetrievalTracker } from './djinnbot-tools/memory-scoring.js';
 
 export interface DjinnBotToolsConfig {
@@ -103,6 +104,9 @@ export function createDjinnBotTools(config: DjinnBotToolsConfig): AgentTool[] {
 
     // Swarm executor — parallel multi-task execution with dependency DAG
     ...createSwarmExecutorTools({ publisher, requestIdRef, agentId, apiBaseUrl }),
+
+    // Run history — execution memory for learning from past attempts
+    ...createRunHistoryTools({ agentId, apiBaseUrl }),
 
     // Onboarding tools — only for onboarding sessions (ONBOARDING_SESSION_ID is set)
     ...(isOnboardingSession ? createOnboardingTools({ agentId, apiBaseUrl }) : []),
