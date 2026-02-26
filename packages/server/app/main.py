@@ -44,6 +44,7 @@ from app.routers import channels
 from app.routers import secrets
 from app.routers import mcp
 from app.routers import agent_tools
+from app.routers import browser_cookies
 from app.routers import attachments
 from app.routers import auth as auth_router
 from app.routers import users as users_router
@@ -718,6 +719,9 @@ app.include_router(channels.router, prefix="/v1/agents", tags=["channels"])
 app.include_router(agent_tools.router, prefix="/v1/agents", tags=["agent-tools"])
 app.include_router(secrets.router, prefix="/v1/secrets", tags=["secrets"])
 app.include_router(mcp.router, prefix="/v1/mcp", tags=["mcp"])
+app.include_router(
+    browser_cookies.router, prefix="/v1/browser", tags=["browser-cookies"]
+)
 app.include_router(users_router.router, prefix="/v1/users", tags=["users"])
 app.include_router(admin_router.router, prefix="/v1/admin", tags=["admin"])
 app.include_router(llm_calls.router, prefix="/v1", tags=["llm-calls"])

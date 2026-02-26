@@ -246,6 +246,7 @@ export class ContainerManager {
         `${dataPath}/sandboxes/${agentId}`,
         `${dataPath}/vaults/${agentId}`,
         `${dataPath}/${runRelative}`,
+        `${dataPath}/cookies/${agentId}`,
         ...(projectRelative ? [`${dataPath}/${projectRelative}`] : []),
       ];
       for (const dir of dirsToEnsure) {
@@ -258,6 +259,10 @@ export class ContainerManager {
         [`/sandboxes/${agentId}`, '/home/agent', false],
         [`/vaults/${agentId}`, '/home/agent/clawvault', false],
         [`/${runRelative}`, '/home/agent/run-workspace', false],
+        // Browser cookies — read-only mount so agents can import cookie files
+        // uploaded by users via the dashboard/CLI. Files appear as Netscape-format
+        // .txt files that camofox_import_cookies reads and injects into the browser.
+        [`/cookies/${agentId}`, '/home/agent/cookies', true],
       ];
       if (projectRelative) {
         jfsMounts.push([`/${projectRelative}`, '/home/agent/project-workspace', false]);
@@ -397,6 +402,25 @@ export class ContainerManager {
               `git config --global credential.helper /usr/local/bin/djinnbot-git-credential && `
             );
           })() +
+          // ── Start Camofox browser server (background) ──────────────────────
+          // Generates a per-container API key for cookie import auth.
+          // The server listens on 127.0.0.1:9377 — only accessible within this container.
+          `export CAMOFOX_API_KEY=$(openssl rand -hex 16) && ` +
+          `echo "[boot] Starting camofox server (port 9377)..." && ` +
+          `CAMOFOX_PORT=9377 ` +
+          `CAMOFOX_COOKIES_DIR=/home/agent/cookies ` +
+          `MAX_SESSIONS=5 ` +
+          `MAX_TABS_PER_SESSION=5 ` +
+          `BROWSER_IDLE_TIMEOUT_MS=0 ` +
+          `node --max-old-space-size=128 /opt/camofox/node_modules/@askjo/camofox-browser/server.js &` +
+          `CAMOFOX_PID=$! && ` +
+          // Brief health check — wait up to 15s for camofox to be ready
+          `for i in $(seq 1 30); do ` +
+          `  if curl -sf http://127.0.0.1:9377/health > /dev/null 2>&1; then ` +
+          `    echo "[boot] Camofox server ready"; break; ` +
+          `  fi; ` +
+          `  sleep 0.5; ` +
+          `done && ` +
           // Start the agent runtime
           `exec node /app/packages/agent-runtime/dist/entrypoint.js`
         ],
