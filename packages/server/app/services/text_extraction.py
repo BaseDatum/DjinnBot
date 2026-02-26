@@ -6,7 +6,8 @@ as context alongside the user message.  For images, no text extraction is needed
 
 Supported formats:
 - Plain text / code files: read as-is
-- PDF: basic text extraction via pypdf (if available), fallback to marker text
+- PDF: structured extraction via opendataloader-pdf (markdown + JSON with
+  bounding boxes, tables, reading order) — falls back to pypdf
 - CSV: first N rows converted to markdown table
 - JSON: pretty-printed, truncated
 
@@ -16,6 +17,8 @@ Token estimation uses a rough chars/4 heuristic.
 import json
 import csv
 import io
+import os
+import tempfile
 from typing import Optional, Tuple
 
 from app.logging_config import get_logger
@@ -140,7 +143,99 @@ def _extract_csv(data: bytes) -> Tuple[str, int]:
 
 
 def _extract_pdf(data: bytes, filename: str) -> Tuple[str, int]:
-    """Extract text from a PDF.  Uses pypdf if available."""
+    """Extract text from a PDF using opendataloader-pdf.
+
+    Produces structured markdown with correct reading order, table preservation,
+    and header/footer filtering.  Falls back to pypdf if opendataloader is
+    unavailable (missing Java runtime).
+    """
+    try:
+        result = extract_pdf_structured(data, filename)
+        text = result["markdown"]
+        if not text or not text.strip():
+            return (
+                f"[PDF '{filename}' contains no extractable text]",
+                20,
+            )
+        if len(text) > MAX_EXTRACTED_CHARS:
+            page_count = result.get("page_count", "?")
+            text = (
+                text[:MAX_EXTRACTED_CHARS]
+                + f"\n\n... [truncated, {page_count} pages total]"
+            )
+        return text, estimate_tokens(text)
+
+    except Exception as e:
+        logger.warning(f"OpenDataLoader PDF extraction failed for {filename}: {e}")
+        # Fall back to pypdf
+        return _extract_pdf_fallback(data, filename)
+
+
+def extract_pdf_structured(data: bytes, filename: str) -> dict:
+    """Run opendataloader-pdf and return both markdown and structured JSON.
+
+    Returns dict with keys:
+      - markdown: str  (clean markdown text)
+      - json_data: dict | None  (structured JSON with bounding boxes, types)
+      - page_count: int
+      - title: str | None
+      - author: str | None
+
+    Raises on failure (caller should handle).
+    """
+    import opendataloader_pdf
+
+    with tempfile.TemporaryDirectory(prefix="djinnbot_pdf_") as tmpdir:
+        # Write PDF to temp file
+        input_path = os.path.join(tmpdir, filename)
+        output_dir = os.path.join(tmpdir, "output")
+        os.makedirs(output_dir, exist_ok=True)
+
+        with open(input_path, "wb") as f:
+            f.write(data)
+
+        # Run opendataloader — produces markdown + json files
+        opendataloader_pdf.convert(
+            input_path=input_path,
+            output_dir=output_dir,
+            format="markdown,json",
+            image_output="off",  # Don't extract images for now
+            quiet=True,
+        )
+
+        # Read outputs
+        base_name = os.path.splitext(filename)[0]
+        md_path = os.path.join(output_dir, f"{base_name}.md")
+        json_path = os.path.join(output_dir, f"{base_name}.json")
+
+        markdown_text = ""
+        json_data = None
+        page_count = 0
+        title = None
+        author = None
+
+        if os.path.isfile(md_path):
+            with open(md_path, "r", encoding="utf-8") as f:
+                markdown_text = f.read()
+
+        if os.path.isfile(json_path):
+            with open(json_path, "r", encoding="utf-8") as f:
+                json_data = json.load(f)
+                page_count = json_data.get("number of pages", 0)
+                title = json_data.get("title")
+                author = json_data.get("author")
+
+        return {
+            "markdown": markdown_text,
+            "json_data": json_data,
+            "page_count": page_count,
+            "title": title,
+            "author": author,
+        }
+
+
+def _extract_pdf_fallback(data: bytes, filename: str) -> Tuple[str, int]:
+    """Fallback PDF extraction using pypdf when opendataloader is unavailable."""
     try:
         import pypdf  # type: ignore
 
@@ -167,18 +262,12 @@ def _extract_pdf(data: bytes, filename: str) -> Tuple[str, int]:
 
     except ImportError:
         return (
-            f"[PDF '{filename}' — {len(data)} bytes, {_estimate_pdf_pages(data)} pages. Install pypdf for text extraction.]",
+            f"[PDF '{filename}' — {len(data)} bytes. Install opendataloader-pdf or pypdf for text extraction.]",
             30,
         )
     except Exception as e:
-        logger.warning(f"PDF extraction failed for {filename}: {e}")
+        logger.warning(f"Fallback PDF extraction also failed for {filename}: {e}")
         return (
             f"[PDF '{filename}' — {len(data)} bytes. Text extraction failed: {e}]",
             20,
         )
-
-
-def _estimate_pdf_pages(data: bytes) -> int:
-    """Rough page count estimate from PDF byte size."""
-    # Average PDF page is ~50KB, very rough
-    return max(1, len(data) // 50_000)

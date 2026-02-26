@@ -29,6 +29,14 @@ export interface ContextAssemblerConfig {
   }>>;
   // NEW: Mark inbox messages as read after they've been included in context
   markMessagesRead?: (agentId: string, lastMessageId: string) => Promise<void>;
+  // NEW: Get document inventory for lightweight context injection
+  getDocumentInventory?: () => Promise<Array<{
+    attachmentId: string;
+    filename: string;
+    title: string | null;
+    pageCount: number | null;
+    chunkCount: number | null;
+  }>>;
 }
 
 export class ContextAssembler {
@@ -212,6 +220,28 @@ export class ContextAssembler {
     if (gitContext && gitContext.trim()) {
       sections.push(gitContext);
       sections.push('');
+    }
+
+    // Document inventory (lightweight — just filenames + page counts)
+    if (this.config.getDocumentInventory) {
+      try {
+        const docs = await this.config.getDocumentInventory();
+        if (docs.length > 0) {
+          sections.push('## Available Documents');
+          sections.push('Use the `read_document` tool to access specific sections. Use `recall` with scope="shared" to search across all document knowledge.');
+          sections.push('');
+          for (const doc of docs) {
+            const title = doc.title || doc.filename;
+            const pages = doc.pageCount ? `${doc.pageCount} pages` : 'unknown pages';
+            const chunks = doc.chunkCount ? `, ${doc.chunkCount} sections` : '';
+            sections.push(`- **${title}** (${pages}${chunks}) — ID: ${doc.attachmentId}`);
+          }
+          sections.push('');
+        }
+      } catch (err) {
+        // Document inventory is best-effort, don't fail the step
+        console.error('[ContextAssembler] Failed to load document inventory:', err);
+      }
     }
 
     // Task section

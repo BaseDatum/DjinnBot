@@ -26,6 +26,8 @@ dependencies = [
     "python-multipart>=0.0.22",
     # Code knowledge graph (KuzuDB for querying the indexed graph)
     "kuzu>=0.11.0",
+    # PDF extraction (structured markdown/JSON via OpenDataLoader)
+    "opendataloader-pdf>=0.1.0",
 ]
 
 [project.optional-dependencies]

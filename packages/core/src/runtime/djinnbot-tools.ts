@@ -304,6 +304,32 @@ type CodeGraphImpactParams = Static<typeof CodeGraphImpactParamsSchema>;
 const CodeGraphChangesParamsSchema = Type.Object({});
 type CodeGraphChangesParams = Static<typeof CodeGraphChangesParamsSchema>;
 
+// read_document tool — lazy PDF content retrieval
+const ReadDocumentParamsSchema = Type.Object({
+  mode: Type.Union([
+    Type.Literal('list'),      // List all available documents (lightweight inventory)
+    Type.Literal('toc'),       // Get table of contents for a document
+    Type.Literal('section'),   // Read a specific section by heading or page
+    Type.Literal('search'),    // Search within a document
+  ], { description: 'How to access the document. Start with "list" to see available docs, then "toc" to understand structure, then "section" or "search" to get specific content.' }),
+  document_id: Type.Optional(Type.String({
+    description: 'Attachment ID (att_xxx) of the document. Required for toc/section/search modes.',
+  })),
+  heading: Type.Optional(Type.String({
+    description: 'Section heading to read (for section mode). Case-insensitive partial match.',
+  })),
+  page: Type.Optional(Type.Number({
+    description: 'Page number to read (for section mode, 1-indexed).',
+  })),
+  chunk_index: Type.Optional(Type.Number({
+    description: 'Direct chunk index (for section mode). Visible in toc output.',
+  })),
+  query: Type.Optional(Type.String({
+    description: 'Search query (for search mode). Searches within the document chunks.',
+  })),
+});
+type ReadDocumentParams = Static<typeof ReadDocumentParamsSchema>;
+
 // onboarding_handoff tool
 const OnboardingHandoffParamsSchema = Type.Object({
   next_agent: Type.Union([
@@ -356,6 +382,8 @@ export interface DjinnBotToolCallbacks {
   onCodeGraphImpact?: (target: string, direction: string, maxDepth?: number, minConfidence?: number) => Promise<string>;
   /** Code knowledge graph: map uncommitted changes to affected symbols/processes. */
   onCodeGraphChanges?: () => Promise<string>;
+  /** Read document: lazy PDF content retrieval (list, toc, section, search). */
+  onReadDocument?: (mode: string, documentId?: string, heading?: string, page?: number, chunkIndex?: number, query?: string) => Promise<string>;
   /**
    * Onboarding handoff — signals to the orchestrator that this agent is done
    * and the next agent should take over. Only available in onboarding sessions.
@@ -814,6 +842,40 @@ export function createDjinnBotTools(
           };
         }
         const result = await callbacks.onCodeGraphChanges();
+        return {
+          content: [{ type: 'text', text: result }],
+          details: {},
+        };
+      },
+    },
+    // read_document tool — lazy PDF content retrieval
+    {
+      name: 'read_document',
+      description:
+        'Access uploaded PDF documents efficiently. Instead of having the full document in context, use this to: (1) "list" all available documents, (2) "toc" to see a document\'s table of contents, (3) "section" to read a specific section by heading or page number, (4) "search" to find content within a document. Start with "list" mode to see what\'s available.',
+      label: 'read_document',
+      parameters: ReadDocumentParamsSchema,
+      execute: async (
+        toolCallId: string,
+        params: unknown,
+        signal?: AbortSignal,
+        onUpdate?: AgentToolUpdateCallback<VoidDetails>
+      ): Promise<AgentToolResult<VoidDetails>> => {
+        const typedParams = params as ReadDocumentParams;
+        if (!callbacks.onReadDocument) {
+          return {
+            content: [{ type: 'text', text: 'Document reading not available.' }],
+            details: {},
+          };
+        }
+        const result = await callbacks.onReadDocument(
+          typedParams.mode,
+          typedParams.document_id,
+          typedParams.heading,
+          typedParams.page,
+          typedParams.chunk_index,
+          typedParams.query,
+        );
         return {
           content: [{ type: 'text', text: result }],
           details: {},
