@@ -96,9 +96,10 @@ async def plan_project(
 
     # Create a planning run
     run_id = str(uuid.uuid4())
+    # task_description contains only the project description.
+    # Additional context is passed separately via human_context → {{additional_context}}
+    # to avoid duplication in the prompt template.
     task_desc = f"Plan project: {project.name}\n\n{project.description or ''}"
-    if req.context:
-        task_desc += f"\n\nAdditional context:\n{req.context}"
 
     # Store project metadata in human_context so the planning pipeline can use template variables
     human_context = json.dumps(
@@ -106,6 +107,8 @@ async def plan_project(
             "project_id": project_id,
             "project_name": project.name,
             "project_description": project.description or "",
+            "project_vision": project.vision or "",
+            "repository": project.repository or "",
             "planning_run": True,  # Flag to identify this as a planning run
             "pipeline_id": req.pipelineId,  # Used by completion handler to choose import strategy
             "additional_context": req.context,
