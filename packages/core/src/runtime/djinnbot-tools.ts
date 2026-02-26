@@ -254,6 +254,56 @@ interface TextContent {
   text: string;
 }
 
+// ── Code Knowledge Graph Tools ────────────────────────────────────────────
+
+const CodeGraphQueryParamsSchema = Type.Object({
+  query: Type.String({
+    description: 'Natural language or keyword search query (e.g., "authentication middleware", "database connection")',
+  }),
+  task_context: Type.Optional(Type.String({
+    description: 'What you are working on (helps ranking)',
+  })),
+  limit: Type.Optional(Type.Number({
+    default: 10,
+    description: 'Max results to return',
+  })),
+});
+type CodeGraphQueryParams = Static<typeof CodeGraphQueryParamsSchema>;
+
+const CodeGraphContextParamsSchema = Type.Object({
+  symbol_name: Type.String({
+    description: 'Symbol name (e.g., "validateUser", "AuthService")',
+  }),
+  file_path: Type.Optional(Type.String({
+    description: 'File path to disambiguate common names',
+  })),
+});
+type CodeGraphContextParams = Static<typeof CodeGraphContextParamsSchema>;
+
+const CodeGraphImpactParamsSchema = Type.Object({
+  target: Type.String({
+    description: 'Name of function, class, or file to analyze',
+  }),
+  direction: Type.Union([
+    Type.Literal('upstream'),
+    Type.Literal('downstream'),
+  ], {
+    description: 'upstream = what depends on this, downstream = what this depends on',
+  }),
+  max_depth: Type.Optional(Type.Number({
+    default: 3,
+    description: 'Max relationship depth (1-5)',
+  })),
+  min_confidence: Type.Optional(Type.Number({
+    default: 0.7,
+    description: 'Minimum confidence 0-1',
+  })),
+});
+type CodeGraphImpactParams = Static<typeof CodeGraphImpactParamsSchema>;
+
+const CodeGraphChangesParamsSchema = Type.Object({});
+type CodeGraphChangesParams = Static<typeof CodeGraphChangesParamsSchema>;
+
 // onboarding_handoff tool
 const OnboardingHandoffParamsSchema = Type.Object({
   next_agent: Type.Union([
@@ -298,6 +348,14 @@ export interface DjinnBotToolCallbacks {
   onSlackDm?: (message: string, urgent: boolean) => Promise<string>;
   /** Research via Perplexity/OpenRouter. Returns the synthesized answer string. */
   onResearch?: (query: string, focus: string, model: string) => Promise<string>;
+  /** Code knowledge graph: hybrid search across project codebase. */
+  onCodeGraphQuery?: (query: string, taskContext?: string, limit?: number) => Promise<string>;
+  /** Code knowledge graph: 360-degree symbol context. */
+  onCodeGraphContext?: (symbolName: string, filePath?: string) => Promise<string>;
+  /** Code knowledge graph: blast radius analysis. */
+  onCodeGraphImpact?: (target: string, direction: string, maxDepth?: number, minConfidence?: number) => Promise<string>;
+  /** Code knowledge graph: map uncommitted changes to affected symbols/processes. */
+  onCodeGraphChanges?: () => Promise<string>;
   /**
    * Onboarding handoff — signals to the orchestrator that this agent is done
    * and the next agent should take over. Only available in onboarding sessions.
@@ -636,6 +694,126 @@ export function createDjinnBotTools(
           (typedParams.focus ?? 'general') as string,
           (typedParams.model ?? 'perplexity/sonar-pro') as string,
         );
+        return {
+          content: [{ type: 'text', text: result }],
+          details: {},
+        };
+      },
+    },
+    // ── Code Knowledge Graph Tools ──────────────────────────────────────
+    // code_graph_query — hybrid search across the project's knowledge graph
+    {
+      name: 'code_graph_query',
+      description:
+        'Search the project codebase knowledge graph. Returns functions, classes, and execution flows matching your query. Use this to understand how code works together before making changes. Only available for projects with a git workspace.',
+      label: 'code_graph_query',
+      parameters: CodeGraphQueryParamsSchema,
+      execute: async (
+        toolCallId: string,
+        params: unknown,
+        signal?: AbortSignal,
+        onUpdate?: AgentToolUpdateCallback<VoidDetails>
+      ): Promise<AgentToolResult<VoidDetails>> => {
+        const typedParams = params as CodeGraphQueryParams;
+        if (!callbacks.onCodeGraphQuery) {
+          return {
+            content: [{ type: 'text', text: 'Code knowledge graph not available for this project.' }],
+            details: {},
+          };
+        }
+        const result = await callbacks.onCodeGraphQuery(
+          typedParams.query,
+          typedParams.task_context,
+          typedParams.limit ?? 10,
+        );
+        return {
+          content: [{ type: 'text', text: result }],
+          details: {},
+        };
+      },
+    },
+    // code_graph_context — 360-degree view of a code symbol
+    {
+      name: 'code_graph_context',
+      description:
+        'Get complete context for a code symbol: who calls it, what it calls, which execution flows it participates in, and which functional cluster it belongs to. Use after code_graph_query to deeply understand a specific symbol.',
+      label: 'code_graph_context',
+      parameters: CodeGraphContextParamsSchema,
+      execute: async (
+        toolCallId: string,
+        params: unknown,
+        signal?: AbortSignal,
+        onUpdate?: AgentToolUpdateCallback<VoidDetails>
+      ): Promise<AgentToolResult<VoidDetails>> => {
+        const typedParams = params as CodeGraphContextParams;
+        if (!callbacks.onCodeGraphContext) {
+          return {
+            content: [{ type: 'text', text: 'Code knowledge graph not available for this project.' }],
+            details: {},
+          };
+        }
+        const result = await callbacks.onCodeGraphContext(
+          typedParams.symbol_name,
+          typedParams.file_path,
+        );
+        return {
+          content: [{ type: 'text', text: result }],
+          details: {},
+        };
+      },
+    },
+    // code_graph_impact — blast radius analysis
+    {
+      name: 'code_graph_impact',
+      description:
+        'Analyze what would break if you change a code symbol. Returns affected symbols grouped by depth (d=1: WILL BREAK, d=2: LIKELY AFFECTED) plus affected execution flows. Use BEFORE making changes to understand risk.',
+      label: 'code_graph_impact',
+      parameters: CodeGraphImpactParamsSchema,
+      execute: async (
+        toolCallId: string,
+        params: unknown,
+        signal?: AbortSignal,
+        onUpdate?: AgentToolUpdateCallback<VoidDetails>
+      ): Promise<AgentToolResult<VoidDetails>> => {
+        const typedParams = params as CodeGraphImpactParams;
+        if (!callbacks.onCodeGraphImpact) {
+          return {
+            content: [{ type: 'text', text: 'Code knowledge graph not available for this project.' }],
+            details: {},
+          };
+        }
+        const result = await callbacks.onCodeGraphImpact(
+          typedParams.target,
+          typedParams.direction,
+          typedParams.max_depth ?? 3,
+          typedParams.min_confidence ?? 0.7,
+        );
+        return {
+          content: [{ type: 'text', text: result }],
+          details: {},
+        };
+      },
+    },
+    // code_graph_changes — map git changes to affected symbols
+    {
+      name: 'code_graph_changes',
+      description:
+        'Map your current uncommitted git changes to affected code symbols and execution flows. Use as a pre-commit safety check to understand what your changes affect.',
+      label: 'code_graph_changes',
+      parameters: CodeGraphChangesParamsSchema,
+      execute: async (
+        toolCallId: string,
+        params: unknown,
+        signal?: AbortSignal,
+        onUpdate?: AgentToolUpdateCallback<VoidDetails>
+      ): Promise<AgentToolResult<VoidDetails>> => {
+        if (!callbacks.onCodeGraphChanges) {
+          return {
+            content: [{ type: 'text', text: 'Code knowledge graph not available for this project.' }],
+            details: {},
+          };
+        }
+        const result = await callbacks.onCodeGraphChanges();
         return {
           content: [{ type: 'text', text: result }],
           details: {},

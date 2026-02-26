@@ -31,6 +31,7 @@ import { VisionSettings } from '@/components/projects/VisionSettings';
 import { ProjectActivityFeed, type ActivityEntry } from '@/components/projects/ProjectActivityFeed';
 import { ProjectSettingsPanel } from '@/components/projects/ProjectSettingsPanel';
 import { ProjectSwarmHistory } from '@/components/projects/ProjectSwarmHistory';
+import { CodeKnowledgeGraph } from '@/components/projects/CodeKnowledgeGraph';
 import { DependencyGraph } from '@/components/DependencyGraph';
 import { GanttChart } from '@/components/GanttChart';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
@@ -48,9 +49,9 @@ import {
   API_BASE,
 } from '@/lib/api';
 
-type ViewType = 'board' | 'graph' | 'timeline' | 'team' | 'settings';
+type ViewType = 'board' | 'graph' | 'timeline' | 'team' | 'code' | 'settings';
 
-const VALID_VIEWS: ViewType[] = ['board', 'graph', 'timeline', 'team', 'settings'];
+const VALID_VIEWS: ViewType[] = ['board', 'graph', 'timeline', 'team', 'code', 'settings'];
 
 export const Route = createFileRoute('/projects/$projectId')({
   validateSearch: (search: Record<string, unknown>) => ({
@@ -431,6 +432,12 @@ function ProjectBoardPage() {
             <div className="max-w-2xl mx-auto">
               <TeamPanel projectId={projectId} />
             </div>
+          </div>
+        )}
+
+        {view === 'code' && (project.workspace_type === 'git_worktree' || project.repository) && (
+          <div className="flex-1 overflow-auto">
+            <CodeKnowledgeGraph projectId={projectId} />
           </div>
         )}
 

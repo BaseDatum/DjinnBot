@@ -2871,3 +2871,58 @@ export async function fetchProjectSwarms(
   const res = await authFetch(`${API_BASE}/projects/${projectId}/swarms`);
   return handleResponse(res, 'Failed to fetch project swarms');
 }
+
+// ── Code Knowledge Graph ────────────────────────────────────────────────────
+
+export async function fetchCodeGraphStatus(projectId: string): Promise<any> {
+  const res = await authFetch(`${API_BASE}/projects/${projectId}/knowledge-graph/status`);
+  return handleResponse(res, 'Failed to fetch knowledge graph status');
+}
+
+export async function triggerCodeGraphIndex(
+  projectId: string,
+  force = false,
+): Promise<{ job_id: string; status: string }> {
+  const res = await authFetch(`${API_BASE}/projects/${projectId}/knowledge-graph/index`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ force }),
+  });
+  return handleResponse(res, 'Failed to start knowledge graph indexing');
+}
+
+export async function pollCodeGraphIndexProgress(
+  projectId: string,
+  jobId: string,
+): Promise<any> {
+  const res = await authFetch(`${API_BASE}/projects/${projectId}/knowledge-graph/index/${jobId}`);
+  return handleResponse(res, 'Failed to poll index progress');
+}
+
+export async function fetchCodeGraphData(projectId: string): Promise<any> {
+  const res = await authFetch(`${API_BASE}/projects/${projectId}/knowledge-graph/graph-data`);
+  return handleResponse(res, 'Failed to fetch graph data');
+}
+
+export async function fetchCodeGraphCommunities(projectId: string): Promise<any> {
+  const res = await authFetch(`${API_BASE}/projects/${projectId}/knowledge-graph/communities`);
+  return handleResponse(res, 'Failed to fetch communities');
+}
+
+export async function fetchCodeGraphProcesses(projectId: string): Promise<any> {
+  const res = await authFetch(`${API_BASE}/projects/${projectId}/knowledge-graph/processes`);
+  return handleResponse(res, 'Failed to fetch processes');
+}
+
+export async function fetchCodeGraphSearch(
+  projectId: string,
+  query: string,
+  limit = 20,
+): Promise<any> {
+  const res = await authFetch(`${API_BASE}/projects/${projectId}/knowledge-graph/query`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ query, limit }),
+  });
+  return handleResponse(res, 'Failed to search knowledge graph');
+}

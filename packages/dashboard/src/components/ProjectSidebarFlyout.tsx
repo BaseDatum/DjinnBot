@@ -16,7 +16,7 @@ import {
 import { startChatSession, fetchProject, fetchAgents } from '@/lib/api';
 import { useChatSessions } from '@/components/chat/ChatSessionContext';
 
-type ViewType = 'board' | 'graph' | 'timeline' | 'team' | 'settings';
+type ViewType = 'board' | 'graph' | 'timeline' | 'team' | 'code' | 'settings';
 
 /** Build a system prompt supplement from the project's onboarding context. */
 function buildProjectSupplement(project: any): string {
@@ -73,6 +73,7 @@ const VIEWS: { id: ViewType; label: string; icon: React.ElementType }[] = [
   { id: 'graph',    label: 'Deps',     icon: Activity },
   { id: 'timeline', label: 'Timeline', icon: Calendar },
   { id: 'team',     label: 'Team',     icon: Users },
+  { id: 'code',     label: 'Code',     icon: Brain },
   { id: 'settings', label: 'Settings', icon: Settings },
 ];
 
