@@ -8,7 +8,7 @@
  * Designed to fit inline in pane headers, session rows, etc.
  */
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { API_BASE } from '@/lib/api';
 import { authFetch } from '@/lib/auth';
 import { useSSE } from '@/hooks/useSSE';
@@ -33,9 +33,10 @@ interface SessionTokenStatsProps {
 }
 
 function fmt(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
-  return String(n);
+  const v = Math.max(0, n);
+  if (v >= 1_000_000) return `${(v / 1_000_000).toFixed(1)}M`;
+  if (v >= 1_000) return `${(v / 1_000).toFixed(1)}K`;
+  return String(v);
 }
 
 function fmtCost(cost: number): string {
@@ -59,6 +60,17 @@ const EMPTY: TokenSummary = {
 
 export function SessionTokenStats({ sessionId, runId, compact = true, className }: SessionTokenStatsProps) {
   const [stats, setStats] = useState<TokenSummary>(EMPTY);
+
+  // Gate SSE processing: don't accumulate until REST has loaded the baseline,
+  // and deduplicate by call ID to prevent double-counting on reconnection.
+  const restLoaded = useRef(false);
+  const seenCallIds = useRef(new Set<string>());
+
+  // Reset refs when session/run changes
+  useEffect(() => {
+    restLoaded.current = false;
+    seenCallIds.current = new Set();
+  }, [sessionId, runId]);
 
   // Fetch initial summary from REST API
   useEffect(() => {
@@ -87,15 +99,30 @@ export function SessionTokenStats({ sessionId, runId, compact = true, className 
             hasApproximateCosts: anyApprox,
           });
         }
+        restLoaded.current = true;
       })
-      .catch(() => {});
+      .catch(() => {
+        // Even on error, allow SSE to proceed so live calls still show up
+        restLoaded.current = true;
+      });
   }, [sessionId, runId]);
 
-  // Real-time SSE updates
+  // Real-time SSE updates — only process after REST baseline is loaded,
+  // and skip any call IDs we've already counted.
   const handleSSE = useCallback((event: any) => {
     if (event?.type !== 'llm_call') return;
     if (sessionId && event.session_id !== sessionId) return;
     if (runId && event.run_id !== runId) return;
+
+    // Don't accumulate until REST has established the baseline totals
+    if (!restLoaded.current) return;
+
+    // Deduplicate by call ID (handles SSE reconnections / replays)
+    const callId = event.id;
+    if (callId) {
+      if (seenCallIds.current.has(callId)) return;
+      seenCallIds.current.add(callId);
+    }
 
     setStats(prev => ({
       callCount: prev.callCount + 1,

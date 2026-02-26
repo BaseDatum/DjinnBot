@@ -214,7 +214,7 @@ export const agentMessageEventSchema = baseMessageSchema.extend({
   requestId: z.string(),
   to: z.string(),
   message: z.string(),
-  priority: z.enum(["normal", "high", "urgent"]).default("normal"),
+  priority: z.enum(["low", "normal", "high", "urgent"]).default("normal"),
   messageType: z.enum(["info", "review_request", "help_request", "unblock"]).default("info"),
 });
 
@@ -229,6 +229,18 @@ export const slackDmEventSchema = baseMessageSchema.extend({
 
 export type SlackDmEvent = z.infer<typeof slackDmEventSchema>;
 
+// Wake event — dedicated event for wake_agent tool (Container → Engine).
+// Unlike agentMessage (which goes to inbox), this directly triggers a wake session.
+export const wakeAgentEventSchema = baseMessageSchema.extend({
+  type: z.literal("wakeAgent"),
+  requestId: z.string(),
+  to: z.string(),
+  message: z.string(),
+  reason: z.enum(["user_request", "blocker", "critical_finding"]),
+});
+
+export type WakeAgentEvent = z.infer<typeof wakeAgentEventSchema>;
+
 export const eventMessageSchema = z.discriminatedUnion("type", [
   stepStartEventSchema,
   stepEndEventSchema,
@@ -239,6 +251,7 @@ export const eventMessageSchema = z.discriminatedUnion("type", [
   messageEventSchema,
   agentMessageEventSchema,
   slackDmEventSchema,
+  wakeAgentEventSchema,
 ]);
 
 export type EventMessage =
@@ -250,7 +263,8 @@ export type EventMessage =
   | ThinkingEvent
   | MessageEvent
   | AgentMessageEvent
-  | SlackDmEvent;
+  | SlackDmEvent
+  | WakeAgentEvent;
 
 // ============================================================================
 // Status Messages (Container → Engine)

@@ -23,6 +23,8 @@ export interface ContainerRunnerConfig {
   onMessageAgent?: (agentId: string, runId: string, stepId: string, to: string, message: string, priority: string, messageType: string) => Promise<string>;
   /** Called when an agent sends a Slack DM to the user via the slack_dm tool. */
   onSlackDm?: (agentId: string, runId: string, stepId: string, message: string, urgent: boolean) => Promise<string>;
+  /** Called when an agent uses wake_agent to immediately wake another agent. */
+  onWakeAgent?: (agentId: string, runId: string, stepId: string, to: string, message: string, reason: string) => Promise<void>;
   /** Called on container lifecycle and status events (created, started, ready, destroyed, etc.). */
   onContainerEvent?: (runId: string, event: { type: string; detail?: string; timestamp: number }) => void;
 }
@@ -134,6 +136,26 @@ export class ContainerRunner implements AgentRunner {
   }
 
   /**
+   * Fetch boolean feature flags from global settings.
+   * Non-fatal: returns safe defaults on failure.
+   */
+  private async fetchGlobalFlags(): Promise<{ ptcEnabled: boolean }> {
+    const apiBaseUrl = this.config.apiBaseUrl
+      || process.env.DJINNBOT_API_URL
+      || 'http://api:8000';
+    try {
+      const res = await authFetch(`${apiBaseUrl}/v1/settings/`);
+      if (res.ok) {
+        const data = await res.json() as { ptcEnabled?: boolean };
+        return { ptcEnabled: data.ptcEnabled ?? false };
+      }
+    } catch (err) {
+      console.warn('[ContainerRunner] Failed to fetch global flags:', err);
+    }
+    return { ptcEnabled: false };
+  }
+
+  /**
    * Extract the base URL for the model from the collected provider env vars.
    * Returns undefined if the model isn't a custom provider or if no base URL
    * is configured — in which case enrichNetworkError is a no-op.
@@ -201,9 +223,10 @@ export class ContainerRunner implements AgentRunner {
       // Fetch all provider API keys (DB + env vars) and the current
       // runtime image (may have been changed via dashboard since engine start).
       // When userId is set, keys are resolved per-user (strict mode).
-      const [fetchedProviderEnvVars, runtimeImage] = await Promise.all([
+      const [fetchedProviderEnvVars, runtimeImage, globalFlags] = await Promise.all([
         this.fetchProviderEnvVars(userId),
         this.fetchRuntimeImage(),
+        this.fetchGlobalFlags(),
       ]);
       providerEnvVars = fetchedProviderEnvVars;
 
@@ -271,6 +294,9 @@ export class ContainerRunner implements AgentRunner {
             const ks = this._lastKeySources[provider];
             return ks ? { KEY_SOURCE: ks.source, KEY_MASKED: ks.masked_key } : {} as Record<string, string>;
           })(),
+          // Programmatic Tool Calling — when enabled, agent writes Python to call
+          // tools via exec_code, reducing context usage by 30-40%+.
+          ...(globalFlags.ptcEnabled ? { PTC_ENABLED: 'true' } : {}),
         },
       };
 
@@ -375,11 +401,14 @@ export class ContainerRunner implements AgentRunner {
 
             case 'agentMessage':
               // Route inter-agent messages to the inbox so they're not lost
+              console.log(`[ContainerRunner] Received agentMessage from ${agentId}: to=${msg.to}, priority=${msg.priority}, messageType=${msg.messageType}, message="${msg.message.slice(0, 80)}"`);
               if (this.config.onMessageAgent) {
                 this.config.onMessageAgent(
                   agentId, runId, stepId,
                   msg.to, msg.message, msg.priority, msg.messageType
                 ).catch(err => console.error(`[ContainerRunner] Failed to route agentMessage:`, err));
+              } else {
+                console.warn(`[ContainerRunner] No onMessageAgent handler configured — agentMessage from ${agentId} to ${msg.to} will be dropped`);
               }
               break;
 
@@ -389,6 +418,18 @@ export class ContainerRunner implements AgentRunner {
                   agentId, runId, stepId,
                   msg.message, msg.urgent
                 ).catch(err => console.error(`[ContainerRunner] Failed to route slackDm:`, err));
+              }
+              break;
+
+            case 'wakeAgent':
+              console.log(`[ContainerRunner] Received wakeAgent from ${agentId}: to=${msg.to}, reason=${msg.reason}, message="${msg.message.slice(0, 80)}"`);
+              if (this.config.onWakeAgent) {
+                this.config.onWakeAgent(
+                  agentId, runId, stepId,
+                  msg.to, msg.message, msg.reason
+                ).catch(err => console.error(`[ContainerRunner] Failed to route wakeAgent:`, err));
+              } else {
+                console.warn(`[ContainerRunner] No onWakeAgent handler configured — wake from ${agentId} to ${msg.to} will be dropped`);
               }
               break;
           }

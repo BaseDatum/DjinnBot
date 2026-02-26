@@ -366,8 +366,11 @@ export function SessionDetail({ sessionId }: SessionDetailProps) {
     );
   }
 
-  // Consolidate events for display
-  const allEvents: SessionEvent[] = session.events || [];
+  // Sort events by timestamp for stable ordering (mirroring the chat's approach),
+  // then consolidate consecutive tokens into single blocks for display.
+  const allEvents: SessionEvent[] = [...(session.events || [])].sort(
+    (a, b) => a.timestamp - b.timestamp,
+  );
   const consolidatedEvents = consolidateEvents(allEvents);
   const lastEventType = consolidatedEvents.length > 0
     ? consolidatedEvents[consolidatedEvents.length - 1].event_type

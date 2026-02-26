@@ -33,6 +33,7 @@ DEFAULT_SETTINGS: Dict[str, str] = {
     "pulseEnabled": "true",
     "userSlackId": "",
     "agentRuntimeImage": "",
+    "ptcEnabled": "false",
 }
 
 # ─── Models known to support extended thinking/reasoning ─────────────────────
@@ -495,6 +496,7 @@ class GlobalSettings(BaseModel):
     pulseEnabled: bool = True
     userSlackId: str = ""
     agentRuntimeImage: str = ""
+    ptcEnabled: bool = False
 
 
 class ExtraFieldSpec(BaseModel):
@@ -697,6 +699,7 @@ async def get_settings(
         pulseEnabled=_get("pulseEnabled").lower() == "true",
         userSlackId=_get("userSlackId"),
         agentRuntimeImage=_get("agentRuntimeImage"),
+        ptcEnabled=_get("ptcEnabled").lower() == "true",
     )
 
 
@@ -717,6 +720,7 @@ async def update_settings(
         "pulseEnabled": str(settings.pulseEnabled).lower(),
         "userSlackId": settings.userSlackId,
         "agentRuntimeImage": settings.agentRuntimeImage,
+        "ptcEnabled": str(settings.ptcEnabled).lower(),
     }
     for key, value in updates.items():
         row = await session.get(GlobalSetting, key)

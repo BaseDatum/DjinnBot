@@ -29,6 +29,7 @@ import type { IWorkspaceManager } from './runtime/workspace-types.js';
 import { AgentLifecycleManager } from './runtime/agent-lifecycle.js';
 import { AgentInbox } from './events/agent-inbox.js';
 import { AgentPulse } from './runtime/agent-pulse.js';
+import { AgentWake } from './runtime/agent-wake.js';
 import { StandaloneSessionRunner } from './runtime/standalone-session.js';
 import type { StandaloneSessionOptions, StandaloneSessionResult } from './runtime/standalone-session.js';
 import { Redis } from 'ioredis';
@@ -68,6 +69,7 @@ export class DjinnBot {
   private lifecycleTracker?: AgentLifecycleTracker;
   private agentInbox: AgentInbox;
   private agentPulse?: AgentPulse;
+  private agentWake?: AgentWake;
   private sessionRunner?: StandaloneSessionRunner;
   private taskRunTracker: TaskRunTracker | null = null;
   private redis?: Redis;
@@ -75,6 +77,111 @@ export class DjinnBot {
 
   private workspaceManager: IWorkspaceManager;
   private workspaceManagerFactory: WorkspaceManagerFactory;
+
+  /**
+   * Route an inter-agent message through the inbox system.
+   * Delivers to the target agent's inbox — they'll see it on their next pulse.
+   * Does NOT trigger a wake. Use wake_agent tool / wakeAgent event for that.
+   */
+  async routeAgentMessage(
+    fromAgentId: string,
+    to: string,
+    message: string,
+    priority: string,
+    messageType: string,
+  ): Promise<string> {
+    console.log(`[DjinnBot] routeAgentMessage: from=${fromAgentId}, to=${to}, priority=${priority}, messageType=${messageType}`);
+    const msgId = await this.agentInbox.send({
+      from: fromAgentId,
+      to,
+      message,
+      priority: priority as any,
+      type: messageType as any,
+      timestamp: Date.now(),
+    });
+    console.log(`[DjinnBot] Agent message delivered to ${to}'s inbox: "${message.slice(0, 80)}" (${msgId})`);
+
+    return msgId;
+  }
+
+  /**
+   * Start a session for a target agent in response to a wake.
+   *
+   * This is the single code path for ALL wake-triggered sessions:
+   * - wake_agent tool (via wakeAgent event → onWakeAgent callback)
+   * - AgentWake Redis subscriber (djinnbot:agent:*:wake)
+   *
+   * Enforces guardrails (cooldown, daily cap, per-pair limit) via AgentWake,
+   * loads the target agent's persona, and runs a standalone session.
+   * The session is persisted to DB by StandaloneSessionRunner, so it
+   * appears in the sessions tab and activity tab.
+   */
+  async runWakeSession(
+    targetAgentId: string,
+    fromAgentId: string,
+    message: string,
+  ): Promise<void> {
+    if (!this.sessionRunner) {
+      console.warn(`[DjinnBot] Cannot wake ${targetAgentId}: session runner not initialized`);
+      return;
+    }
+
+    // Check if agent exists in registry
+    const agent = this.agentRegistry.get(targetAgentId);
+    if (!agent) {
+      console.warn(`[DjinnBot] Cannot wake ${targetAgentId}: not found in agent registry`);
+      return;
+    }
+
+    // ── Guardrails ──────────────────────────────────────────────────────
+    // All wakes go through guardrails (cooldown, daily cap, per-pair limit).
+    if (this.agentWake) {
+      const result = await this.agentWake.checkWakeGuardrails(targetAgentId, fromAgentId);
+      if (!result.allowed) {
+        console.log(`[DjinnBot] Wake suppressed for ${targetAgentId}: ${result.reason}`);
+        return;
+      }
+      console.log(`[DjinnBot] Wake guardrails passed for ${targetAgentId} (from: ${fromAgentId})`);
+    } else {
+      console.warn(`[DjinnBot] Wake guardrails not enforced for ${targetAgentId} — AgentWake not initialized`);
+    }
+
+    console.log(`[DjinnBot] Starting wake session for ${targetAgentId} (from: ${fromAgentId}, message: "${message.slice(0, 80)}")`);
+
+    try {
+      // Load the target agent's persona
+      const persona = await this.personaLoader.loadPersonaForSession(targetAgentId, {
+        sessionType: 'wake',
+      });
+
+      // Build user prompt with the wake context
+      const userPrompt =
+        `You are being woken by agent "${fromAgentId}" with the following message:\n\n` +
+        `${message}\n\n` +
+        `Respond to this message. Check your inbox for any additional context ` +
+        `with the recall or context_query tools if needed.`;
+
+      // Resolve model: agent config → fallback
+      const model = agent.config?.model || 'openrouter/minimax/minimax-m2.5';
+      const executorModel = agent.config?.executorModel || model;
+      const timeout = agent.config?.pulseContainerTimeoutMs ?? 120000;
+
+      const result = await this.sessionRunner.runSession({
+        agentId: targetAgentId,
+        systemPrompt: persona.systemPrompt,
+        userPrompt,
+        model,
+        maxTurns: 999,
+        timeout,
+        source: 'wake',
+        executorModel,
+      });
+
+      console.log(`[DjinnBot] Wake session for ${targetAgentId} completed: success=${result.success}`);
+    } catch (err) {
+      console.error(`[DjinnBot] Wake session failed for ${targetAgentId}:`, err);
+    }
+  }
 
   constructor(private config: DjinnBotConfig) {
     // Initialize store (SQLite or API-based)
@@ -338,23 +445,13 @@ export class DjinnBot {
             }).catch(err => console.error('[DjinnBot] Failed to persist tool_end event:', err));
           }
         },
-        onMessageAgent: async (agentId, runId, stepId, to, message, priority, messageType) => {
-          const msgId = await this.agentInbox.send({
-            from: agentId,
-            to,
-            message,
-            priority: priority as any,
-            type: messageType as any,
-            timestamp: Date.now(),
-          });
-          console.log(`[DjinnBot] Container agent ${agentId} → ${to}: "${message.slice(0, 80)}" (${msgId})`);
-
-          // If urgent priority, publish a wake notification so AgentPulse can trigger immediately
-          if (priority === 'urgent' || priority === 'high') {
-            await this.agentInbox.publishWake(to, agentId, priority, messageType, msgId);
-          }
-
-          return msgId;
+        onMessageAgent: async (agentId, _runId, _stepId, to, message, priority, messageType) => {
+          console.log(`[DjinnBot] onMessageAgent callback: ${agentId} → ${to} (priority: ${priority}, type: ${messageType})`);
+          return this.routeAgentMessage(agentId, to, message, priority, messageType);
+        },
+        onWakeAgent: async (agentId, _runId, _stepId, to, message, reason) => {
+          console.log(`[DjinnBot] onWakeAgent callback: ${agentId} → ${to} (reason: ${reason})`);
+          await this.runWakeSession(to, agentId, message);
         },
         onSlackDm: async (agentId, runId, stepId, message, urgent) => {
           if (!this.slackBridge) {
@@ -537,23 +634,8 @@ export class DjinnBot {
           timestamp: Date.now(),
         }).catch(err => console.error('[DjinnBot] Failed to publish AGENT_STATE:', err));
       },
-      onMessageAgent: async (agentId, runId, stepId, to, message, priority, type) => {
-        const msgId = await this.agentInbox.send({
-          from: agentId,
-          to,
-          message,
-          priority: priority as any,
-          type: type as any,
-          timestamp: Date.now(),
-        });
-        console.log(`[DjinnBot] Agent ${agentId} → ${to}: "${message.slice(0, 80)}" (${msgId})`);
-
-        // If urgent/high priority, publish wake notification
-        if (priority === 'urgent' || priority === 'high') {
-          await this.agentInbox.publishWake(to, agentId, priority, type, msgId);
-        }
-
-        return msgId;
+      onMessageAgent: async (agentId, _runId, _stepId, to, message, priority, type) => {
+        return this.routeAgentMessage(agentId, to, message, priority, type);
       },
       onSlackDm: async (agentId, runId, stepId, message, urgent) => {
         if (!this.slackBridge) {
@@ -667,13 +749,26 @@ export class DjinnBot {
     await this.agentInbox.connect();
     console.log('[DjinnBot] Agent inbox connected');
 
-    // Phase 9: Start pulse system with advanced scheduling
+    // Phase 9a: Start wake system (independent of pulse)
+    this.agentWake = new AgentWake(
+      {
+        redisUrl: this.config.redisUrl,
+        agentIds: this.agentRegistry.getIds(),
+      },
+      {
+        onWakeAgent: (targetAgentId, fromAgentId, message) =>
+          this.runWakeSession(targetAgentId, fromAgentId, message),
+      },
+    );
+    await this.agentWake.start();
+    console.log('[DjinnBot] Agent wake system started');
+
+    // Phase 9b: Start pulse system with advanced scheduling
     this.agentPulse = new AgentPulse(
       {
         intervalMs: 30 * 60 * 1000, // 30 minutes (default fallback)
         timeoutMs: 60 * 1000,       // 60 seconds per agent
         agentIds: this.agentRegistry.getIds(),
-        redisUrl: this.config.redisUrl,    // Enable wake-on-message
       },
       {
         getAgentState: (agentId) => this.lifecycleManager.getState(agentId),
@@ -1322,7 +1417,7 @@ Start now.`;
         model: string;
         workspacePath?: string;
         vaultPath?: string;
-        source?: 'slack_dm' | 'slack_channel' | 'api' | 'pulse';
+        source?: 'slack_dm' | 'slack_channel' | 'api' | 'pulse' | 'wake';
         sourceId?: string;
       }) => {
         if (!this.sessionRunner) {
@@ -1486,6 +1581,7 @@ Start now.`;
   // Shutdown
   async shutdown(): Promise<void> {
     this.agentPulse?.stop();
+    await this.agentWake?.stop();
     await this.slackBridge?.shutdown();
     await this.executor.shutdown();
     await this.engine.shutdown();

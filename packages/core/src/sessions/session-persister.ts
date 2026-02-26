@@ -4,7 +4,7 @@ import { authFetch } from '../api/auth-fetch.js';
 export interface SessionData {
   id: string; // runId
   agentId: string;
-  source: 'slack_dm' | 'slack_channel' | 'api' | 'pulse' | 'pipeline';
+  source: 'slack_dm' | 'slack_channel' | 'api' | 'pulse' | 'pipeline' | 'wake';
   sourceId?: string; // thread_ts, channel_id, or stepId for pipelines
   userPrompt: string;
   model: string;

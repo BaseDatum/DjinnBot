@@ -25,6 +25,7 @@ async function main(): Promise<void> {
   // The personal vault is a real JuiceFS FUSE mount point — no symlinks.
   // The shared vault is accessed via the DjinnBot API (not mounted locally).
   console.log(`[AgentRuntime] Vault path: ${config.clawvaultPath}, API: ${config.apiBaseUrl}`);
+  console.log(`[AgentRuntime] PTC: ${config.ptc.enabled ? 'ENABLED' : 'disabled'} (PTC_ENABLED=${process.env.PTC_ENABLED ?? 'unset'})`);
   const runner = new ContainerAgentRunner({
     publisher,
     redis,
@@ -35,6 +36,7 @@ async function main(): Promise<void> {
     model: process.env.AGENT_MODEL,
     agentsDir: process.env.AGENTS_DIR,
     thinkingLevel: process.env.AGENT_THINKING_LEVEL,
+    ptcEnabled: config.ptc.enabled,
   });
 
   // Seed conversation history if provided (chat session resume).
@@ -282,6 +284,16 @@ async function main(): Promise<void> {
     await publisher.publishStatus({ type: 'exiting', runId: config.runId });
     await broadcastSubscriber.quit().catch(() => {});
     process.exit(0);
+  });
+
+  // Prevent unhandled rejections and uncaught exceptions from killing the
+  // container. PTC tool calls go through an IPC HTTP server where async
+  // errors can surface as unhandled rejections. Log them and keep running.
+  process.on('unhandledRejection', (reason) => {
+    console.error('[AgentRuntime] Unhandled rejection (keeping alive):', reason);
+  });
+  process.on('uncaughtException', (err) => {
+    console.error('[AgentRuntime] Uncaught exception (keeping alive):', err);
   });
 }
 

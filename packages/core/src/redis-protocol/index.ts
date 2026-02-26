@@ -61,6 +61,9 @@ export type { AgentMessageEvent } from "./types.js";
 export { slackDmEventSchema } from "./types.js";
 export type { SlackDmEvent } from "./types.js";
 
+export { wakeAgentEventSchema } from "./types.js";
+export type { WakeAgentEvent } from "./types.js";
+
 export { eventMessageSchema } from "./types.js";
 export type { EventMessage } from "./types.js";
 

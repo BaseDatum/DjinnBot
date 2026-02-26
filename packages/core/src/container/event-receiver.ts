@@ -78,7 +78,11 @@ export class EventReceiver extends EventEmitter {
           this.emit('status', runId, msg);
         }
       } catch (err) {
-        this.emit('error', runId, err as Error);
+        // Log parse failures instead of emitting 'error'.
+        // Emitting 'error' with no listener crashes the Node process.
+        // Parse errors are non-fatal — the event is simply skipped.
+        const eventType = (() => { try { return JSON.parse(message)?.type; } catch { return 'unknown'; } })();
+        console.warn(`[EventReceiver] Failed to parse event for run ${runId} (type=${eventType}):`, (err as Error).message ?? err);
       }
     });
 

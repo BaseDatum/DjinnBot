@@ -195,6 +195,7 @@ function AdminPage() {
     pulseEnabled: boolean;
     userSlackId: string;
     agentRuntimeImage: string;
+    ptcEnabled: boolean;
   }
   const [globalSettings, setGlobalSettings] = useState<GlobalSettings | null>(null);
   const [globalSettingsEdited, setGlobalSettingsEdited] = useState(false);
@@ -1505,6 +1506,73 @@ function AdminPage() {
                   {runtimeSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Save'}
                 </Button>
               </div>
+            </div>
+
+            {/* Programmatic Tool Calling */}
+            <div className="border rounded-lg p-4 space-y-3 mt-6">
+              <div className="flex items-center justify-between">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <Cpu className="h-4 w-4 text-muted-foreground" />
+                    <Label className="font-medium">Programmatic Tool Calling (PTC)</Label>
+                    <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${
+                      globalSettings?.ptcEnabled
+                        ? 'bg-green-500/15 text-green-400'
+                        : 'bg-zinc-500/15 text-zinc-500'
+                    }`}>
+                      {globalSettings?.ptcEnabled ? 'ON' : 'OFF'}
+                    </span>
+                  </div>
+                  <p className="text-xs text-muted-foreground max-w-lg">
+                    When enabled, agents write Python code to call tools instead of using JSON tool calls.
+                    Reduces context usage by 30-40% by keeping intermediate tool results out of the LLM's
+                    context window. Tool schemas are replaced with compact function signatures.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={globalSettings?.ptcEnabled ?? false}
+                  onClick={async () => {
+                    if (!globalSettings) return;
+                    const newValue = !globalSettings.ptcEnabled;
+                    const updated = { ...globalSettings, ptcEnabled: newValue };
+                    setGlobalSettings(updated);
+                    setGlobalSettingsEdited(true);
+                    try {
+                      const res = await authFetch(`${API_BASE}/settings/`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(updated),
+                      });
+                      if (!res.ok) throw new Error('Failed to save');
+                      toast.success(newValue ? 'PTC enabled — takes effect on next session' : 'PTC disabled');
+                    } catch {
+                      setGlobalSettings(globalSettings);
+                      toast.error('Failed to update PTC setting');
+                    }
+                  }}
+                  className={`relative inline-flex h-7 w-12 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ${
+                    globalSettings?.ptcEnabled ? 'bg-green-500' : 'bg-zinc-600'
+                  }`}
+                >
+                  <span
+                    className={`pointer-events-none block h-6 w-6 rounded-full bg-background shadow-lg ring-0 transition-transform ${
+                      globalSettings?.ptcEnabled ? 'translate-x-5' : 'translate-x-0'
+                    }`}
+                  />
+                </button>
+              </div>
+              {globalSettings?.ptcEnabled && (
+                <div className="flex items-start gap-2 p-3 bg-blue-950/20 border border-blue-900/30 rounded-md mt-3">
+                  <Info className="h-4 w-4 text-blue-400 flex-shrink-0 mt-0.5" />
+                  <p className="text-xs text-blue-200">
+                    PTC starts an IPC bridge in each agent container. The agent writes Python code
+                    that calls tool functions via <code className="bg-blue-900/30 px-1 rounded">exec_code</code>, filtering
+                    results before they enter context. Requires Python 3 in the runtime image.
+                  </p>
+                </div>
+              )}
             </div>
           </div>
         )}

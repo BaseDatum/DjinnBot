@@ -1,7 +1,7 @@
 import { Type, type Static } from '@sinclair/typebox';
 import type { AgentTool, AgentToolResult, AgentToolUpdateCallback } from '@mariozechner/pi-agent-core';
 import type { RedisPublisher } from '../../redis/publisher.js';
-import { exec } from 'node:child_process';
+import { exec, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { join } from 'node:path';
 import { existsSync } from 'node:fs';
@@ -165,10 +165,27 @@ export function createMemoryTools(config: MemoryToolsConfig): AgentTool[] {
           content: p.content,
           frontmatter: extraFm,
           overwrite: true,
-          qmdUpdate: false,
+          // Update the qmd index synchronously (fast file scan) so the new
+          // memory is discoverable immediately.  Embedding is done in the
+          // background below to avoid blocking the tool call.
+          qmdUpdate: true,
           qmdEmbed: false,
         });
         console.log(`[remember] ${agentId}: personal vault write OK → ${memoryId}`);
+
+        // Generate vector embeddings in the background so semantic recall
+        // works for the newly stored memory.  This is non-blocking — the
+        // agent can continue working while embeddings are computed.
+        const collection = `djinnbot-${agentId}`;
+        const embedProc = spawn('qmd', ['embed', '-c', collection], {
+          stdio: 'ignore',
+          env: { ...process.env, PATH: `/root/.bun/bin:/usr/local/bin:${process.env.PATH}` },
+          detached: true,
+        });
+        embedProc.unref();
+        embedProc.on('error', (err) => {
+          console.warn(`[remember] ${agentId}: background qmd embed failed:`, err.message);
+        });
 
         if (p.shared) {
           console.log(`[remember] ${agentId}: shared=true → writing to shared vault via API`);

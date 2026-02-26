@@ -1,4 +1,3 @@
-import { Redis, type Redis as RedisType } from 'ioredis';
 import { PulseScheduler } from './pulse-scheduler.js';
 import { 
   PulseScheduleConfig, 
@@ -9,34 +8,10 @@ import {
   ResolvedRoutineConfig,
 } from './pulse-types.js';
 
-// ── Wake guardrail configuration ────────────────────────────────────────────
-
-export interface WakeGuardrailConfig {
-  /** Minimum seconds between wakes per agent (default 300 = 5 min) */
-  cooldownSeconds: number;
-  /** Max wake-triggered pulses per agent per day (default 12) */
-  maxWakesPerDay: number;
-  /** Max daily session minutes per agent (default 120) */
-  maxDailySessionMinutes: number;
-  /** Max wakes from a single source agent to a target per day (default 5) */
-  maxWakesPerPairPerDay: number;
-}
-
-export const DEFAULT_WAKE_GUARDRAILS: WakeGuardrailConfig = {
-  cooldownSeconds: 300,
-  maxWakesPerDay: 12,
-  maxDailySessionMinutes: 120,
-  maxWakesPerPairPerDay: 5,
-};
-
 export interface PulseConfig {
   intervalMs: number;   // Default: 30 * 60 * 1000 (30 min) - used as fallback
   timeoutMs: number;    // Default: 60 * 1000 (60 sec per agent)
   agentIds: string[];   // Agents to pulse
-  /** Redis URL for wake subscription (required for wake-on-message) */
-  redisUrl?: string;
-  /** Wake guardrail overrides (per-agent overrides loaded from config) */
-  wakeGuardrails?: Partial<WakeGuardrailConfig>;
 }
 
 export interface PulseDependencies {
@@ -86,6 +61,7 @@ export interface PulseDependencies {
    * Called after a routine pulse completes to update stats (last_run_at, total_runs).
    */
   onRoutinePulseComplete?: (routineId: string) => void;
+
 }
 
 export interface PulseContext {
@@ -163,18 +139,10 @@ export class AgentPulse {
   private activeRoutineSessions = new Map<string, Set<string>>();
   private running = false;
 
-  // ── Wake system state ──────────────────────────────────────────────────
-  private wakeSubscriber: RedisType | null = null;
-  private wakeRedis: RedisType | null = null;
-  private wakeGuardrails: WakeGuardrailConfig;
-  /** Last wake timestamp per agent (in-memory, reset on restart) */
-  private lastWakeTime = new Map<string, number>();
-
   constructor(config: PulseConfig, deps: PulseDependencies) {
     this.config = config;
     this.deps = deps;
     this.scheduler = new PulseScheduler();
-    this.wakeGuardrails = { ...DEFAULT_WAKE_GUARDRAILS, ...config.wakeGuardrails };
   }
 
   /**
@@ -191,151 +159,8 @@ export class AgentPulse {
     
     this.running = true;
     this.scheduleNextPulse();
-
-    // Start wake-on-message listener
-    if (this.config.redisUrl) {
-      await this.startWakeListener();
-    }
     
     console.log(`[AgentPulse] Pulse system started`);
-  }
-
-  // ── Wake-on-message system ─────────────────────────────────────────────
-
-  /**
-   * Subscribe to wake notifications for all agents.
-   * Uses Redis PSUBSCRIBE on djinnbot:agent:*:wake pattern.
-   */
-  private async startWakeListener(): Promise<void> {
-    if (!this.config.redisUrl) return;
-
-    this.wakeSubscriber = new Redis(this.config.redisUrl, {
-      maxRetriesPerRequest: null,
-    });
-    this.wakeRedis = new Redis(this.config.redisUrl, {
-      maxRetriesPerRequest: 3,
-    });
-
-    this.wakeSubscriber.on('error', (err) => {
-      console.error('[AgentPulse] Wake subscriber error:', err.message);
-    });
-
-    this.wakeSubscriber.on('pmessage', async (_pattern: string, channel: string, message: string) => {
-      // Channel format: djinnbot:agent:{agentId}:wake
-      const match = channel.match(/^djinnbot:agent:(.+):wake$/);
-      if (!match) return;
-
-      const targetAgentId = match[1];
-      if (!this.config.agentIds.includes(targetAgentId)) return;
-
-      try {
-        const data = JSON.parse(message);
-        await this.handleWakeNotification(targetAgentId, data);
-      } catch (err) {
-        console.error(`[AgentPulse] Failed to handle wake for ${targetAgentId}:`, err);
-      }
-    });
-
-    await this.wakeSubscriber.psubscribe('djinnbot:agent:*:wake');
-    console.log('[AgentPulse] Wake listener started (pattern: djinnbot:agent:*:wake)');
-  }
-
-  /**
-   * Handle an incoming wake notification with guardrails.
-   */
-  private async handleWakeNotification(
-    agentId: string,
-    data: { from?: string; priority?: string; messageType?: string; messageId?: string }
-  ): Promise<void> {
-    const now = Date.now();
-    const from = data.from || 'unknown';
-
-    // Guardrail 1: Cooldown period
-    const lastWake = this.lastWakeTime.get(agentId) || 0;
-    const cooldownMs = this.wakeGuardrails.cooldownSeconds * 1000;
-    if (now - lastWake < cooldownMs) {
-      const remainingSec = Math.ceil((cooldownMs - (now - lastWake)) / 1000);
-      console.log(`[AgentPulse] Wake suppressed for ${agentId}: cooldown (${remainingSec}s remaining)`);
-      return;
-    }
-
-    // Guardrail 2: Daily wake cap (Redis counter)
-    if (this.wakeRedis) {
-      const dayKey = `djinnbot:agent:${agentId}:wakes:${new Date().toISOString().slice(0, 10)}`;
-      const dailyCount = await this.wakeRedis.incr(dayKey);
-      // Set expiry on first increment (48h to handle timezone edge cases)
-      if (dailyCount === 1) {
-        await this.wakeRedis.expire(dayKey, 172800);
-      }
-      if (dailyCount > this.wakeGuardrails.maxWakesPerDay) {
-        console.warn(`[AgentPulse] Wake suppressed for ${agentId}: daily limit (${this.wakeGuardrails.maxWakesPerDay}) reached`);
-        await this.wakeRedis.decr(dayKey); // Roll back the increment
-        return;
-      }
-
-      // Guardrail 3: Per-pair daily limit (prevent A→B wake loops)
-      const pairKey = `djinnbot:agent:${agentId}:wakes_from:${from}:${new Date().toISOString().slice(0, 10)}`;
-      const pairCount = await this.wakeRedis.incr(pairKey);
-      if (pairCount === 1) {
-        await this.wakeRedis.expire(pairKey, 172800);
-      }
-      if (pairCount > this.wakeGuardrails.maxWakesPerPairPerDay) {
-        console.warn(`[AgentPulse] Wake suppressed for ${agentId}: pair limit from ${from} (${this.wakeGuardrails.maxWakesPerPairPerDay}/day) reached`);
-        await this.wakeRedis.decr(pairKey);
-        await this.wakeRedis.decr(dayKey); // Roll back the daily count too
-        return;
-      }
-    }
-
-    // Guardrail 4: Agent must be idle (not already running)
-    const state = this.deps.getAgentState(agentId);
-    if (state !== 'idle') {
-      console.log(`[AgentPulse] Wake for ${agentId} deferred: agent is ${state} (message stays in inbox)`);
-      return;
-    }
-
-    // All guardrails passed — trigger the pulse
-    this.lastWakeTime.set(agentId, now);
-    console.log(`[AgentPulse] Waking ${agentId} (triggered by ${from}, priority: ${data.priority || 'unknown'})`);
-
-    // Trigger as a manual pulse so it uses the default pulse path
-    this.triggerPulse(agentId).catch(err => {
-      console.error(`[AgentPulse] Failed to trigger wake pulse for ${agentId}:`, err);
-    });
-  }
-
-  /**
-   * Get current wake guardrail stats for an agent (for dashboard display).
-   */
-  async getWakeStats(agentId: string): Promise<{
-    wakesToday: number;
-    maxWakesPerDay: number;
-    cooldownSeconds: number;
-    lastWakeTime: number | null;
-    maxDailySessionMinutes: number;
-  }> {
-    let wakesToday = 0;
-    if (this.wakeRedis) {
-      const dayKey = `djinnbot:agent:${agentId}:wakes:${new Date().toISOString().slice(0, 10)}`;
-      const count = await this.wakeRedis.get(dayKey);
-      wakesToday = count ? parseInt(count, 10) : 0;
-    }
-
-    return {
-      wakesToday,
-      maxWakesPerDay: this.wakeGuardrails.maxWakesPerDay,
-      cooldownSeconds: this.wakeGuardrails.cooldownSeconds,
-      lastWakeTime: this.lastWakeTime.get(agentId) || null,
-      maxDailySessionMinutes: this.wakeGuardrails.maxDailySessionMinutes,
-    };
-  }
-
-  /**
-   * Update wake guardrails at runtime (from admin dashboard).
-   */
-  updateWakeGuardrails(overrides: Partial<WakeGuardrailConfig>): void {
-    Object.assign(this.wakeGuardrails, overrides);
-    console.log('[AgentPulse] Wake guardrails updated:', this.wakeGuardrails);
   }
 
   /**
@@ -471,17 +296,6 @@ export class AgentPulse {
     if (this.nextPulseTimeout) {
       clearTimeout(this.nextPulseTimeout);
       this.nextPulseTimeout = null;
-    }
-
-    // Clean up wake subscriber
-    if (this.wakeSubscriber) {
-      await this.wakeSubscriber.punsubscribe('djinnbot:agent:*:wake').catch(() => {});
-      await this.wakeSubscriber.quit().catch(() => {});
-      this.wakeSubscriber = null;
-    }
-    if (this.wakeRedis) {
-      await this.wakeRedis.quit().catch(() => {});
-      this.wakeRedis = null;
     }
 
     console.log('[AgentPulse] Pulse system stopped');

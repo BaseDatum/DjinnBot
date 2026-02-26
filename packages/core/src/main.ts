@@ -1395,6 +1395,30 @@ async function main(): Promise<void> {
         lifecycleTracker: chatLifecycleTracker,
       });
       
+      // Wire inter-agent messaging and Slack DM hooks so chat sessions can
+      // route messages the same way pipeline runs do.
+      chatSessionManager.registerHooks({
+        onAgentMessage: (agentId, _sessionId, to, message, priority, messageType) => {
+          console.log(`[Engine] Chat agentMessage hook: ${agentId} → ${to} (priority: ${priority}, type: ${messageType}, session: ${_sessionId})`);
+          djinnBot!.routeAgentMessage(agentId, to, message, priority, messageType)
+            .catch((err: unknown) => console.error('[Engine] Failed to route chat agentMessage:', err));
+        },
+        onSlackDm: (agentId, _sessionId, message, urgent) => {
+          if (!djinnBot!.slackBridge) {
+            console.warn('[Engine] Chat agent tried to send Slack DM but bridge not started');
+            return;
+          }
+          djinnBot!.slackBridge.sendDmToUser(agentId, message, urgent)
+            .then(() => console.log(`[Engine] Chat agent ${agentId} sent Slack DM: "${message.slice(0, 80)}"`))
+            .catch((err: unknown) => console.error('[Engine] Failed to send Slack DM from chat:', err));
+        },
+        onWakeAgent: (agentId, _sessionId, to, message, reason) => {
+          console.log(`[Engine] Chat wakeAgent hook: ${agentId} → ${to} (reason: ${reason}, session: ${_sessionId})`);
+          djinnBot!.runWakeSession(to, agentId, message)
+            .catch((err: unknown) => console.error('[Engine] Failed to run wake session from chat:', err));
+        },
+      });
+
       chatListener = new ChatListener({
         redis: redisClient,
         sessionManager: chatSessionManager,

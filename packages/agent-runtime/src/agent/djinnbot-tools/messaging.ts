@@ -2,7 +2,7 @@ import { Type, type Static } from '@sinclair/typebox';
 import type { AgentTool, AgentToolResult, AgentToolUpdateCallback } from '@mariozechner/pi-agent-core';
 import type { RedisPublisher } from '../../redis/publisher.js';
 import type { RequestIdRef } from '../runner.js';
-import type { AgentMessageEvent, SlackDmEvent } from '@djinnbot/core';
+import type { AgentMessageEvent, SlackDmEvent, WakeAgentEvent } from '@djinnbot/core';
 import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
@@ -12,6 +12,7 @@ const MessageAgentParamsSchema = Type.Object({
   to: Type.String({ description: 'Agent ID' }),
   message: Type.String({ description: 'Message content' }),
   priority: Type.Optional(Type.Union([
+    Type.Literal('low'),
     Type.Literal('normal'),
     Type.Literal('high'),
     Type.Literal('urgent'),
@@ -104,11 +105,11 @@ export function createMessagingTools(config: MessagingToolsConfig): AgentTool[] 
       },
     },
 
-    // === wake_agent — Immediate wake with message (triggers pulse NOW) ===
+    // === wake_agent — Immediately wake another agent ===
     {
       name: 'wake_agent',
       description:
-        'Immediately wake another agent by triggering a pulse session with your message. ' +
+        'Immediately wake another agent and start a session with your message. ' +
         'This is EXPENSIVE — it spins up a container and runs an LLM session. ' +
         'Only use when: (1) a user explicitly requested something be done now, ' +
         '(2) you are blocked and need the other agent to unblock you immediately, or ' +
@@ -139,8 +140,20 @@ export function createMessagingTools(config: MessagingToolsConfig): AgentTool[] 
 
         wakeCount++;
 
-        // Send as urgent agentMessage — the engine-side handler publishes a wake notification
-        const event: Omit<AgentMessageEvent, 'timestamp'> = {
+        // Emit dedicated wakeAgent event — engine handles this directly
+        // as a wake trigger (no priority routing, no inbox dependency).
+        const wakeEvent: Omit<WakeAgentEvent, 'timestamp'> = {
+          type: 'wakeAgent',
+          requestId: requestIdRef.current,
+          to: p.to,
+          message: p.message,
+          reason: p.reason,
+        };
+        await publisher.publishEvent(wakeEvent as any);
+
+        // Also send to inbox so the message is persisted and visible
+        // even if the wake is suppressed by guardrails.
+        const inboxEvent: Omit<AgentMessageEvent, 'timestamp'> = {
           type: 'agentMessage',
           requestId: requestIdRef.current,
           to: p.to,
@@ -148,13 +161,15 @@ export function createMessagingTools(config: MessagingToolsConfig): AgentTool[] 
           priority: 'urgent',
           messageType: p.reason === 'blocker' ? 'unblock' : p.reason === 'user_request' ? 'help_request' : 'info',
         };
-        await publisher.publishEvent(event as any);
+        await publisher.publishEvent(inboxEvent as any);
+
         return {
           content: [{
             type: 'text',
             text:
               `Wake signal sent to ${p.to} (reason: ${p.reason}). ` +
-              `They will be woken immediately if not already active and within their wake budget. ` +
+              `They will be woken immediately if within their wake budget. ` +
+              `Message also sent to their inbox. ` +
               `(${MAX_WAKES_PER_SESSION - wakeCount} wake calls remaining this session)`,
           }],
           details: {},

@@ -12,6 +12,54 @@ import { buildAttachmentBlocks, type AttachmentMeta } from './attachments.js';
 import { authFetch } from '../api/auth-fetch.js';
 import { MemoryRetrievalTracker } from './djinnbot-tools/memory-scoring.js';
 import { computeOpenRouterCost } from './openrouter-pricing.js';
+import { initPtc, type PtcInstance } from './ptc/index.js';
+
+// ── PTC system prompt supplement ──────────────────────────────────────────
+// Appended to the agent's system prompt when Programmatic Tool Calling is enabled.
+// Tells the model about exec_code and when to prefer it over direct tool calls.
+
+const PTC_SYSTEM_PROMPT_SUPPLEMENT = `
+
+## Programmatic Tool Calling (exec_code)
+
+You have access to an \`exec_code\` tool that runs Python code with tool functions.
+Use \`exec_code\` whenever you need to:
+- Read or edit multiple files (loop instead of N separate calls)
+- Search and filter results (recall/research then process in code)
+- Perform any workflow with 3+ tool calls where intermediate data can be filtered
+- Set up credentials then use them (get_secret → use token in subsequent calls)
+- Create multiple tasks, subtasks, or dependencies in a batch
+
+**How it works:** Tool functions are plain synchronous Python functions (no async/await).
+Call them directly: \`result = read(path="src/main.ts")\`.
+Tool results go to your code, NOT your context window. Only \`print()\` output enters
+your context. This dramatically reduces context usage.
+
+**Important rules:**
+- All tool functions are **synchronous** — call them directly, no \`await\`, no \`asyncio\`.
+- \`print()\` is the ONLY way to return data to your context. Slice large output: \`print(result[:500])\`
+- Always use try/except: \`except Exception as e: print(f"Error: {e}")\`
+- Some params are renamed to avoid Python reserved words: \`type\` → \`type_\`, \`class\` → \`class_\`, \`from\` → \`from_\`
+- Bash results: check for errors by inspecting the returned string.
+- Workspace is \`/home/agent/run-workspace\` (also available as \`/home/agent/project-workspace\` for project repos). Files persist across exec_code calls within a session.
+
+**When NOT to use exec_code:** For lifecycle tools (\`complete\`, \`fail\`, \`onboarding_handoff\`) —
+call these directly as normal tool calls. They control the agent loop and must not be called from code.
+
+**Example:**
+\`\`\`python
+# Read multiple files, only print relevant ones
+try:
+    files = ["src/main.ts", "src/config.ts", "src/utils.ts"]
+    for f in files:
+        content = read(path=f)
+        if "TODO" in content:
+            print(f"## {f}")
+            print(content[:500])
+except Exception as e:
+    print(f"Error: {e}")
+\`\`\`
+`;
 
 export interface StepResult {
   output?: string;
@@ -42,6 +90,9 @@ export interface ContainerAgentRunnerOptions {
   agentsDir?: string;
   /** Extended thinking level. When set (and not 'off'), the Agent requests reasoning tokens. */
   thinkingLevel?: string;
+  /** Enable Programmatic Tool Calling (PTC). When true, most tools are callable
+   *  only via the exec_code tool, reducing context usage by 30-40%+. */
+  ptcEnabled?: boolean;
 }
 
 let initialized = false;
@@ -117,6 +168,9 @@ export class ContainerAgentRunner {
   private disabledToolsDirty = true; // Start dirty so first turn fetches
   private unsubscribeAgent: (() => void) | null = null;
 
+  // ── Programmatic Tool Calling (PTC) ────────────────────────────────────
+  private ptcInstance: PtcInstance | null = null;
+
   // ── Per-step mutable state read by the persistent subscription ──────────
   private rawOutput = '';
   private turnCount = 0;
@@ -169,6 +223,11 @@ export class ContainerAgentRunner {
     this.mcpToolsDirty = true;
     this.disabledTools = new Set();
     this.disabledToolsDirty = true;
+    // PTC cleanup
+    if (this.ptcInstance) {
+      this.ptcInstance.close().catch(err => console.warn('[AgentRunner] PTC cleanup error:', err));
+      this.ptcInstance = null;
+    }
     console.log(`[AgentRunner] Session reset — conversation history cleared`);
   }
 
@@ -351,6 +410,10 @@ export class ContainerAgentRunner {
   /**
    * Refresh MCP tools only when the cache is dirty (grant changed).
    * Returns the full tools array (static tools filtered by overrides + MCP).
+   *
+   * When PTC is enabled, this returns only direct tools + exec_code.
+   * PTC-eligible tools are callable only via exec_code (their schemas are
+   * not sent to the LLM, reducing context usage by 30-40%+).
    */
   private async getTools(): Promise<AgentTool[]> {
     if (!this.tools) {
@@ -380,7 +443,26 @@ export class ContainerAgentRunner {
       ? this.tools.filter(t => !this.disabledTools.has(t.name))
       : this.tools;
 
-    return [...activeTools, ...this.mcpTools];
+    const allTools = [...activeTools, ...this.mcpTools];
+
+    // ── PTC path: split tools into direct + exec_code ─────────────────────
+    if (this.options.ptcEnabled) {
+      if (!this.ptcInstance) {
+        // First time: initialize PTC (starts IPC server, generates exec_code tool)
+        this.ptcInstance = await initPtc({
+          tools: allTools,
+          publisher: this.options.publisher,
+          requestIdRef: this.requestIdRef,
+        });
+        return this.ptcInstance.agentTools;
+      }
+
+      // Subsequent turns: refresh PTC with current tools (handles MCP changes)
+      return this.ptcInstance.refresh(allTools);
+    }
+
+    // ── Non-PTC path: return all tools with full schemas ──────────────────
+    return allTools;
   }
 
   // ── Persistent event subscription ───────────────────────────────────────
@@ -996,10 +1078,17 @@ export class ContainerAgentRunner {
       // Get tools (static tools are cached; MCP tools refresh only when dirty)
       const tools = await this.getTools();
 
+      // When PTC is active, append guidance to the system prompt so the model
+      // knows to prefer exec_code for multi-step workflows.
+      let effectiveSystemPrompt = systemPrompt;
+      if (this.options.ptcEnabled) {
+        effectiveSystemPrompt += PTC_SYSTEM_PROMPT_SUPPLEMENT;
+      }
+
       // Reuse the persistent Agent across turns so conversation history
       // (including tool calls and results) accumulates naturally.
       // Create a new Agent only on the very first turn or if systemPrompt changes.
-      if (!this.persistentAgent || this.persistentSystemPrompt !== systemPrompt) {
+      if (!this.persistentAgent || this.persistentSystemPrompt !== effectiveSystemPrompt) {
         console.log(`[AgentRunner] Creating persistent agent (model: ${model.id})`);
 
         const isCustomProvider = (model.api as string) === CUSTOM_PROVIDER_API;
@@ -1019,7 +1108,7 @@ export class ContainerAgentRunner {
         const thinkingLevel = this.options.thinkingLevel;
         this.persistentAgent = new Agent({
           initialState: {
-            systemPrompt,
+            systemPrompt: effectiveSystemPrompt,
             model,
             tools,
             messages: [],
@@ -1029,7 +1118,7 @@ export class ContainerAgentRunner {
             getApiKey: async () => customApiKey,
           } : {}),
         });
-        this.persistentSystemPrompt = systemPrompt;
+        this.persistentSystemPrompt = effectiveSystemPrompt;
       } else {
         // Only push new/changed tools to the agent (MCP tools may have refreshed)
         this.persistentAgent.setTools(tools);

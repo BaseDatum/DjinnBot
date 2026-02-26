@@ -971,24 +971,38 @@ export class ChatSessionManager {
 
   /** Called for each streaming text chunk from the container. */
   private outputHook?: (sessionId: string, chunk: string) => void;
-  /** Called when a tool call starts inside the container. */
+
   private toolStartHook?: (sessionId: string, toolName: string, args: Record<string, unknown>) => void;
-  /** Called when a tool call completes inside the container. */
+
   private toolEndHook?: (sessionId: string, toolName: string, result: string, isError: boolean, durationMs: number) => void;
-  /** Called when the agent finishes its response (stepEnd). */
+
   private stepEndHook?: (sessionId: string, success: boolean) => void;
 
-  /** Register hooks for external consumers (e.g. SlackBridge streaming). */
+  private agentMessageHook?: (agentId: string, sessionId: string, to: string, message: string, priority: string, messageType: string) => void;
+
+  private slackDmHook?: (agentId: string, sessionId: string, message: string, urgent: boolean) => void;
+
+  private wakeAgentHook?: (agentId: string, sessionId: string, to: string, message: string, reason: string) => void;
+
   registerHooks(hooks: {
     onOutput?: (sessionId: string, chunk: string) => void;
     onToolStart?: (sessionId: string, toolName: string, args: Record<string, unknown>) => void;
     onToolEnd?: (sessionId: string, toolName: string, result: string, isError: boolean, durationMs: number) => void;
     onStepEnd?: (sessionId: string, success: boolean) => void;
+    onAgentMessage?: (agentId: string, sessionId: string, to: string, message: string, priority: string, messageType: string) => void;
+    onSlackDm?: (agentId: string, sessionId: string, message: string, urgent: boolean) => void;
+    onWakeAgent?: (agentId: string, sessionId: string, to: string, message: string, reason: string) => void;
   }): void {
-    this.outputHook = hooks.onOutput;
-    this.toolStartHook = hooks.onToolStart;
-    this.toolEndHook = hooks.onToolEnd;
-    this.stepEndHook = hooks.onStepEnd;
+    // Merge — only overwrite hooks that are provided. This allows multiple
+    // callers (engine for messaging hooks, SlackBridge for streaming hooks)
+    // to register their hooks without clobbering each other.
+    if (hooks.onOutput !== undefined) this.outputHook = hooks.onOutput;
+    if (hooks.onToolStart !== undefined) this.toolStartHook = hooks.onToolStart;
+    if (hooks.onToolEnd !== undefined) this.toolEndHook = hooks.onToolEnd;
+    if (hooks.onStepEnd !== undefined) this.stepEndHook = hooks.onStepEnd;
+    if (hooks.onAgentMessage !== undefined) this.agentMessageHook = hooks.onAgentMessage;
+    if (hooks.onSlackDm !== undefined) this.slackDmHook = hooks.onSlackDm;
+    if (hooks.onWakeAgent !== undefined) this.wakeAgentHook = hooks.onWakeAgent;
   }
 
   constructor(config: ChatSessionManagerConfig) {
@@ -1109,6 +1123,23 @@ export class ChatSessionManager {
       console.warn('[ChatSessionManager] Failed to fetch runtime image from settings:', err);
     }
     return this.containerImage;
+  }
+
+  /**
+   * Fetch boolean feature flags from global settings.
+   * Non-fatal: returns safe defaults on failure.
+   */
+  private async fetchGlobalFlags(): Promise<{ ptcEnabled: boolean }> {
+    try {
+      const res = await authFetch(`${this.apiBaseUrl}/v1/settings/`);
+      if (res.ok) {
+        const data = await res.json() as { ptcEnabled?: boolean };
+        return { ptcEnabled: data.ptcEnabled ?? false };
+      }
+    } catch (err) {
+      console.warn('[ChatSessionManager] Failed to fetch global flags:', err);
+    }
+    return { ptcEnabled: false };
   }
 
   /**
@@ -1240,9 +1271,10 @@ export class ChatSessionManager {
       // Fetch all provider API keys from settings (DB + env vars)
       // and the current runtime image (may have been changed via dashboard).
       // When userId is provided, keys are resolved per-user (strict mode).
-      const [providerEnvVars, runtimeImage] = await Promise.all([
+      const [providerEnvVars, runtimeImage, globalFlags] = await Promise.all([
         this.fetchProviderEnvVars(userId),
         this.fetchRuntimeImage(),
+        this.fetchGlobalFlags(),
       ]);
 
       // Record key resolution metadata on the chat session (non-blocking).
@@ -1305,6 +1337,9 @@ export class ChatSessionManager {
           // These are only set if the engine has mcpo configured.
           ...(process.env.MCPO_BASE_URL ? { MCPO_BASE_URL: process.env.MCPO_BASE_URL } : {}),
           ...(process.env.MCPO_API_KEY ? { MCPO_API_KEY: process.env.MCPO_API_KEY } : {}),
+          // Programmatic Tool Calling — when enabled, agent writes Python to call
+          // tools via exec_code, reducing context usage by 30-40%+.
+          ...(globalFlags.ptcEnabled ? { PTC_ENABLED: 'true' } : {}),
         },
       };
       
@@ -2058,16 +2093,57 @@ export class ChatSessionManager {
       }
       
       if (msg.type === 'toolEnd' && activeSession) {
-        const lastTool = activeSession.accumulatedToolCalls[activeSession.accumulatedToolCalls.length - 1];
-        if (lastTool) {
-          lastTool.result = msg.result;
-          lastTool.isError = !msg.success;
-          lastTool.durationMs = msg.durationMs;
+        // Find the matching tool call: last entry with the same toolName that
+        // hasn't received a result yet. The previous "always update last element"
+        // approach broke when PTC sub-tools were interleaved — exec_code's
+        // toolEnd would update the last sub-tool instead of exec_code itself,
+        // leaving exec_code permanently "in progress" in the persisted data.
+        let matchedTool: typeof activeSession.accumulatedToolCalls[number] | undefined;
+        for (let i = activeSession.accumulatedToolCalls.length - 1; i >= 0; i--) {
+          const t = activeSession.accumulatedToolCalls[i];
+          if (t.toolName === msg.toolName && t.result === undefined) {
+            matchedTool = t;
+            break;
+          }
+        }
+        if (matchedTool) {
+          matchedTool.result = msg.result;
+          matchedTool.isError = !msg.success;
+          matchedTool.durationMs = msg.durationMs;
         }
         // Fire external hook
         this.toolEndHook?.(sessionId, msg.toolName, String(msg.result ?? ''), !msg.success, msg.durationMs ?? 0);
       }
       
+      // Route inter-agent messages and Slack DMs via hooks.
+      // Without these, messages from chat sessions are silently dropped.
+      if (msg.type === 'agentMessage') {
+        const agentId = activeSession?.agentId ?? sessionId.split('_')[1] ?? 'unknown';
+        console.log(`[ChatSessionManager] Received agentMessage from ${agentId} (session ${sessionId}): to=${msg.to}, priority=${msg.priority}, messageType=${msg.messageType}, message="${msg.message.slice(0, 80)}"`);
+        if (this.agentMessageHook) {
+          this.agentMessageHook(agentId, sessionId, msg.to, msg.message, msg.priority, msg.messageType);
+        } else {
+          console.warn(`[ChatSessionManager] No agentMessage hook registered — message from ${agentId} to ${msg.to} will be dropped`);
+        }
+      }
+      if (msg.type === 'slackDm') {
+        const agentId = activeSession?.agentId ?? sessionId.split('_')[1] ?? 'unknown';
+        if (this.slackDmHook) {
+          this.slackDmHook(agentId, sessionId, msg.message, msg.urgent);
+        } else {
+          console.warn(`[ChatSessionManager] No slackDm hook registered — DM from ${agentId} will be dropped`);
+        }
+      }
+      if (msg.type === 'wakeAgent') {
+        const agentId = activeSession?.agentId ?? sessionId.split('_')[1] ?? 'unknown';
+        console.log(`[ChatSessionManager] Received wakeAgent from ${agentId} (session ${sessionId}): to=${msg.to}, reason=${msg.reason}, message="${msg.message.slice(0, 80)}"`);
+        if (this.wakeAgentHook) {
+          this.wakeAgentHook(agentId, sessionId, msg.to, msg.message, msg.reason);
+        } else {
+          console.warn(`[ChatSessionManager] No wakeAgent hook registered — wake from ${agentId} to ${msg.to} will be dropped`);
+        }
+      }
+
       // Normalize event type names (camelCase -> snake_case for frontend)
       const typeMap: Record<string, string> = {
         'toolStart': 'tool_start',

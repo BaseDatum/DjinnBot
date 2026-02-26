@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { ChevronDown, ChevronRight, Terminal, FileEdit, Search, Globe, CheckCircle, XCircle, Loader2, type LucideIcon } from 'lucide-react';
+import { ChevronDown, ChevronRight, Terminal, FileEdit, Search, Globe, CheckCircle, XCircle, Loader2, Code2, type LucideIcon } from 'lucide-react';
+import { MarkdownRenderer } from '@/components/MarkdownRenderer';
 
 interface ToolCallCardProps {
   toolName: string;
@@ -17,6 +18,7 @@ const TOOL_ICONS: Record<string, LucideIcon> = {
   read: FileEdit,
   web_search: Globe,
   search: Search,
+  exec_code: Code2,
 };
 
 function formatToolArgs(toolName: string, args?: string): { summary: string } {
@@ -28,6 +30,11 @@ function formatToolArgs(toolName: string, args?: string): { summary: string } {
       case 'write': return { summary: parsed.path ?? parsed.file_path ?? '' };
       case 'read': return { summary: parsed.path ?? parsed.file_path ?? '' };
       case 'edit': return { summary: parsed.path ?? parsed.file_path ?? '' };
+      case 'exec_code': {
+        const code = parsed.code ?? '';
+        const firstLine = code.split('\n')[0].slice(0, 60);
+        return { summary: firstLine + (code.includes('\n') ? ' …' : '') };
+      }
       default: return { summary: Object.values(parsed).join(' ').slice(0, 80) };
     }
   } catch {
@@ -40,8 +47,23 @@ function formatJson(s: string): string {
   catch { return s; }
 }
 
+/**
+ * For exec_code tool calls, extract the `code` value and wrap it in a
+ * Python fenced code block for syntax-highlighted rendering.
+ */
+function formatExecCodeArgs(args: string): string {
+  try {
+    const parsed = JSON.parse(args);
+    const code = parsed.code;
+    if (typeof code === 'string') {
+      return '```python\n' + code + '\n```';
+    }
+  } catch { /* fall through */ }
+  return '```json\n' + formatJson(args) + '\n```';
+}
+
 export function ToolCallCard({ toolName, args, result, isError, durationMs, status }: ToolCallCardProps) {
-  const [expandedArgs, setExpandedArgs] = useState(false);
+  const [expandedArgs, setExpandedArgs] = useState(toolName === 'exec_code');
   const [expandedResult, setExpandedResult] = useState(false);
   
   const Icon = TOOL_ICONS[toolName] ?? Terminal;
@@ -87,9 +109,12 @@ export function ToolCallCard({ toolName, args, result, isError, durationMs, stat
         </button>
       )}
       {expandedArgs && args && (
-        <pre className="px-3 py-2 text-xs text-zinc-400 font-mono whitespace-pre-wrap break-words border-t border-zinc-800/50 max-h-48 overflow-y-auto">
-          {formatJson(args)}
-        </pre>
+        <div className="px-3 py-2 border-t border-zinc-800/50 max-h-64 overflow-y-auto">
+          <MarkdownRenderer
+            content={toolName === 'exec_code' ? formatExecCodeArgs(args) : '```json\n' + formatJson(args) + '\n```'}
+            className="text-xs"
+          />
+        </div>
       )}
       
       {result && (
@@ -102,11 +127,17 @@ export function ToolCallCard({ toolName, args, result, isError, durationMs, stat
         </button>
       )}
       {expandedResult && result && (
-        <pre className={`px-3 py-2 text-xs font-mono whitespace-pre-wrap break-words border-t border-zinc-800/50 max-h-64 overflow-y-auto ${
-          isError ? 'text-red-300' : 'text-zinc-400'
-        }`}>
-          {formatJson(result)}
-        </pre>
+        toolName === 'exec_code' ? (
+          <div className="px-3 py-2 border-t border-zinc-800/50 max-h-64 overflow-y-auto">
+            <MarkdownRenderer content={'```json\n' + formatJson(result) + '\n```'} className="text-xs" />
+          </div>
+        ) : (
+          <pre className={`px-3 py-2 text-xs font-mono whitespace-pre-wrap break-words border-t border-zinc-800/50 max-h-64 overflow-y-auto ${
+            isError ? 'text-red-300' : 'text-zinc-400'
+          }`}>
+            {formatJson(result)}
+          </pre>
+        )
       )}
     </div>
   );

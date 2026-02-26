@@ -14,7 +14,7 @@ export interface StandaloneSessionOptions {
   vaultPath?: string;
   maxTurns?: number;
   timeout?: number;
-  source?: 'slack_dm' | 'slack_channel' | 'api' | 'pulse';
+  source?: 'slack_dm' | 'slack_channel' | 'api' | 'pulse' | 'wake';
   sourceId?: string;
   /** Kanban column names this agent is allowed to work from (passed to pulse tools). */
   pulseColumns?: string[];

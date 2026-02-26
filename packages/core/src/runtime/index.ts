@@ -51,6 +51,10 @@ export type { DetectedInstall } from './install-detector.js';
 export { AgentPulse } from './agent-pulse.js';
 export type { PulseConfig, PulseDependencies, PulseResult, PulseContext, PulseSessionResult } from './agent-pulse.js';
 
+export { AgentWake } from './agent-wake.js';
+export type { AgentWakeConfig, AgentWakeDeps, WakeGuardrailConfig } from './agent-wake.js';
+export { DEFAULT_WAKE_GUARDRAILS } from './agent-wake.js';
+
 export { PulseScheduler } from './pulse-scheduler.js';
 export type { AgentScheduleEntry } from './pulse-scheduler.js';
 
