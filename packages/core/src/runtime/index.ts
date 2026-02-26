@@ -1,6 +1,7 @@
 export { AgentExecutor, parseOutputKeyValues } from './agent-executor.js';
 
 export { parseModelString, inferModelForProvider, createOpenRouterModel, enrichNetworkError, CUSTOM_PROVIDER_API } from './model-resolver.js';
+export type { ResolvedModel } from './model-resolver.js';
 export type {
   AgentExecutorConfig,
   AgentRunner,

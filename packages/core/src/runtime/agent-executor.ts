@@ -74,6 +74,8 @@ export interface RunAgentOptions {
   projectId?: string;        // Project ID for git worktree support in sandbox
   /** Kanban column names this agent is allowed to work from (for pulse sessions). */
   pulseColumns?: string[];
+  /** Task work types this routine handles (for pulse sessions). */
+  taskWorkTypes?: string[];
   /** Executor model for spawn_executor — passed to container as EXECUTOR_MODEL env var. */
   executorModel?: string;
   /** Thinking level to pass to the Agent ('off'|'minimal'|'low'|'medium'|'high'|'xhigh') */

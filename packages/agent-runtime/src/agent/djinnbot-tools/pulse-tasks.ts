@@ -11,6 +11,13 @@ const CreateTaskParamsSchema = Type.Object({
   priority: Type.Optional(Type.String({ description: 'Priority: P0 (critical), P1 (high), P2 (normal, default), P3 (low)' })),
   tags: Type.Optional(Type.Array(Type.String(), { description: 'Tags for categorization (e.g. ["backend", "auth"])' })),
   estimatedHours: Type.Optional(Type.Number({ description: 'Estimated hours to complete' })),
+  workType: Type.Optional(Type.String({
+    description: 'Task work type that determines which SDLC stages apply. ' +
+      'Values: feature (full SDLC), bugfix (implement→test), test (implement→test, no deploy), ' +
+      'refactor (implement→review→test), docs (implement only), infrastructure (implement→review→deploy), ' +
+      'design (spec→design→ux), custom (all stages optional). ' +
+      'If not set, auto-inferred from title/tags.',
+  })),
 });
 type CreateTaskParams = Static<typeof CreateTaskParamsSchema>;
 
@@ -22,6 +29,10 @@ const CreateSubtaskParamsSchema = Type.Object({
   priority: Type.Optional(Type.String({ description: 'Priority: P0 (critical), P1 (high), P2 (normal, default), P3 (low)' })),
   tags: Type.Optional(Type.Array(Type.String(), { description: 'Tags for categorization (e.g. ["backend", "auth"])' })),
   estimatedHours: Type.Optional(Type.Number({ description: 'Estimated hours to complete (subtasks should be 1-4 hours)' })),
+  workType: Type.Optional(Type.String({
+    description: 'Task work type: feature, bugfix, test, refactor, docs, infrastructure, design, custom. ' +
+      'Determines which SDLC stages apply. Auto-inferred if not set.',
+  })),
 });
 type CreateSubtaskParams = Static<typeof CreateSubtaskParamsSchema>;
 
@@ -91,6 +102,7 @@ export function createPulseTasksTools(config: PulseTasksToolsConfig): AgentTool[
           };
           if (p.tags) body.tags = p.tags;
           if (p.estimatedHours !== undefined) body.estimatedHours = p.estimatedHours;
+          if (p.workType) body.workType = p.workType;
 
           const response = await authFetch(url, {
             method: 'POST',
@@ -109,6 +121,7 @@ export function createPulseTasksTools(config: PulseTasksToolsConfig): AgentTool[
                 `**Task ID**: ${data.id}`,
                 `**Title**: ${data.title}`,
                 `**Status**: ${data.status}`,
+                `**Work Type**: ${data.work_type || 'unclassified'}`,
                 `**Column**: ${data.column_id}`, ``,
                 `You can now:`,
                 `- \`claim_task(projectId, "${data.id}")\` to start working on it`,
@@ -149,6 +162,7 @@ export function createPulseTasksTools(config: PulseTasksToolsConfig): AgentTool[
           };
           if (p.tags) body.tags = p.tags;
           if (p.estimatedHours !== undefined) body.estimatedHours = p.estimatedHours;
+          if (p.workType) body.workType = p.workType;
 
           const response = await authFetch(url, {
             method: 'POST',
@@ -457,7 +471,10 @@ export function createPulseTasksTools(config: PulseTasksToolsConfig): AgentTool[
       description:
         'Move a task to a new kanban status (e.g. in_progress → review, review → done). ' +
         'Also cascades dependency unblocking when status is "done". ' +
-        'Valid statuses: backlog, planning, ready, in_progress, review, blocked, done, failed.',
+        'Valid statuses: backlog, planning, ready, in_progress, review, blocked, done, failed. ' +
+        'IMPORTANT: If the project has a workflow policy, transitions to skipped stages will be ' +
+        'rejected. Call get_task_workflow first to see which stages are valid for this task type. ' +
+        'The response includes next_valid_stages and completed_stages to guide your decisions.',
       label: 'transition_task',
       parameters: TransitionTaskParamsSchema,
       execute: async (
@@ -483,6 +500,81 @@ export function createPulseTasksTools(config: PulseTasksToolsConfig): AgentTool[
           };
         } catch (err) {
           return { content: [{ type: 'text', text: `Error transitioning task: ${err instanceof Error ? err.message : String(err)}` }], details: {} };
+        }
+      },
+    },
+
+    {
+      name: 'get_task_workflow',
+      description:
+        'Get the required workflow stages for a task based on its work type and the project\'s workflow policy. ' +
+        'Returns which stages are required/optional/skipped, what stages have been completed, ' +
+        'the current stage, and the next valid transition targets. ' +
+        'ALWAYS call this before deciding where to transition a task — it tells you exactly ' +
+        'which stages to skip and where the task should go next.',
+      label: 'get_task_workflow',
+      parameters: Type.Object({
+        projectId: Type.String({ description: 'Project ID' }),
+        taskId: Type.String({ description: 'Task ID' }),
+      }),
+      execute: async (
+        _toolCallId: string,
+        params: unknown,
+        signal?: AbortSignal,
+      ): Promise<AgentToolResult<VoidDetails>> => {
+        const { projectId, taskId } = params as { projectId: string; taskId: string };
+        const apiBase = getApiBase();
+        try {
+          const url = `${apiBase}/v1/projects/${projectId}/tasks/${taskId}/workflow`;
+          const response = await authFetch(url, { signal });
+          const data = (await response.json()) as any;
+          if (!response.ok) throw new Error(data.detail || `${response.status} ${response.statusText}`);
+
+          if (!data.has_policy) {
+            return {
+              content: [{
+                type: 'text',
+                text: [
+                  `**Task**: ${taskId}`,
+                  `**Work Type**: ${data.work_type || 'unclassified'}`,
+                  `**Current Stage**: ${data.current_stage || 'unknown'}`,
+                  `**Current Status**: ${data.current_status}`,
+                  ``,
+                  `No workflow policy configured — all transitions are allowed.`,
+                  `Use your judgment based on the task type.`,
+                ].join('\n'),
+              }],
+              details: {},
+            };
+          }
+
+          const lines = [
+            `**Task**: ${taskId}`,
+            `**Work Type**: ${data.work_type}`,
+            `**Current Stage**: ${data.current_stage || 'none'}`,
+            `**Current Status**: ${data.current_status}`,
+            ``,
+            `**Required stages**: ${data.required_stages.join(', ') || 'none'}`,
+            `**Optional stages**: ${data.optional_stages.join(', ') || 'none'}`,
+            `**Skipped stages**: ${data.skipped_stages.join(', ') || 'none'}`,
+            `**Completed stages**: ${data.completed_stages.join(', ') || 'none'}`,
+            ``,
+            `**Next required stage**: ${data.next_required_stage || 'none (all required stages done)'}`,
+            `**Valid next stages**: ${data.next_valid_stages.join(', ') || 'done'}`,
+          ];
+
+          if (data.next_required_stage) {
+            lines.push(``, `Transition to **${data.next_required_stage}** next (required).`);
+          } else if (data.next_valid_stages.includes('done')) {
+            lines.push(``, `All required stages complete. You can transition to **done**.`);
+          }
+
+          return {
+            content: [{ type: 'text', text: lines.join('\n') }],
+            details: {},
+          };
+        } catch (err) {
+          return { content: [{ type: 'text', text: `Error getting task workflow: ${err instanceof Error ? err.message : String(err)}` }], details: {} };
         }
       },
     },

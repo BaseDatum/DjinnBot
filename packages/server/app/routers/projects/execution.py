@@ -1270,6 +1270,46 @@ async def transition_task(
 
     old_status = task.status
 
+    # ── Workflow policy enforcement ────────────────────────────────────────
+    # If the project has a workflow policy and the task has a work_type,
+    # validate that this transition is allowed (not to a skipped stage).
+    from app.models import WorkflowPolicy
+    from app.routers.workflow_policies import (
+        get_stage_for_status,
+        resolve_task_workflow,
+    )
+
+    policy_result = await session.execute(
+        select(WorkflowPolicy).where(WorkflowPolicy.project_id == project_id)
+    )
+    workflow_policy = policy_result.scalar_one_or_none()
+
+    target_stage = get_stage_for_status(req.status)
+    completed_stages = (
+        json.loads(task.completed_stages) if task.completed_stages else []
+    )
+
+    if workflow_policy and task.work_type and target_stage:
+        rules = workflow_policy.stage_rules.get(task.work_type, [])
+        target_rule = next((r for r in rules if r.get("stage") == target_stage), None)
+
+        # Block transitions to skipped stages
+        if target_rule and target_rule.get("disposition") == "skip":
+            # Compute valid next stages for the error message
+            workflow = resolve_task_workflow(
+                work_type=task.work_type,
+                completed_stages=completed_stages,
+                current_status=task.status,
+                stage_rules=workflow_policy.stage_rules,
+            )
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Stage '{target_stage}' is skipped for {task.work_type} tasks. "
+                    f"Valid next stages: {workflow['next_valid_stages']}"
+                ),
+            )
+
     # Find the target column
     col_result = await session.execute(
         select(KanbanColumn)
@@ -1296,6 +1336,12 @@ async def transition_task(
 
     if req.status == "done":
         task.completed_at = now
+
+    # Track completed stages: when leaving a stage, record it as completed
+    old_stage = get_stage_for_status(old_status)
+    if old_stage and old_stage not in completed_stages:
+        completed_stages.append(old_stage)
+        task.completed_stages = json.dumps(completed_stages)
 
     # Store note in metadata if provided
     if req.note:
@@ -1344,15 +1390,35 @@ async def transition_task(
     # agent so work flows through the pipeline without waiting for scheduled
     # pulses.  This is the heartbeat of the autonomous loop.
     #
-    # NOTE: These triggers are software-dev-specific. For custom templates,
-    # transition triggers should be configurable per-project. For now, they
-    # only fire if the status name matches a known software-dev status.
-    TRANSITION_TRIGGERS: dict[str, list[str]] = {
+    # Uses the workflow policy's agent_role mapping when available, falling
+    # back to legacy hardcoded triggers for backward compatibility.
+    LEGACY_TRANSITION_TRIGGERS: dict[str, list[str]] = {
         "planned": ["shigeo"],  # Architecture done → Shigeo does UX
         "test": ["chieko"],  # Finn approved → Chieko runs QA
         "failed": ["yukihiro"],  # QA failed → Yukihiro fixes bugs
     }
-    triggered_agents = TRANSITION_TRIGGERS.get(req.status, [])
+
+    # Role → agent ID mapping (configurable per-project in the future)
+    ROLE_TO_AGENT: dict[str, str] = {
+        "po": "eric",
+        "sa": "finn",
+        "ux": "shigeo",
+        "swe": "yukihiro",
+        "qa": "chieko",
+        "sre": "stas",
+    }
+
+    triggered_agents: list[str] = []
+    if workflow_policy and task.work_type and target_stage:
+        # Use workflow policy to find agent for the target stage
+        rules = workflow_policy.stage_rules.get(task.work_type, [])
+        target_rule = next((r for r in rules if r.get("stage") == target_stage), None)
+        if target_rule and target_rule.get("agent_role"):
+            agent = ROLE_TO_AGENT.get(target_rule["agent_role"])
+            if agent:
+                triggered_agents = [agent]
+    if not triggered_agents:
+        triggered_agents = LEGACY_TRANSITION_TRIGGERS.get(req.status, [])
     for agent_id in triggered_agents:
         await _publish_event(
             "PULSE_TRIGGERED",
@@ -1376,10 +1442,24 @@ async def transition_task(
             },
         )
 
+    # Compute next valid stages for the response
+    next_valid_stages = None
+    if workflow_policy and task.work_type:
+        workflow = resolve_task_workflow(
+            work_type=task.work_type,
+            completed_stages=completed_stages,
+            current_status=req.status,
+            stage_rules=workflow_policy.stage_rules,
+        )
+        next_valid_stages = workflow.get("next_valid_stages")
+
     return {
         "status": "transitioned",
         "task_id": task_id,
         "from_status": old_status,
         "to_status": req.status,
         "column_id": target_col.id,
+        "work_type": task.work_type,
+        "completed_stages": completed_stages,
+        "next_valid_stages": next_valid_stages,
     }

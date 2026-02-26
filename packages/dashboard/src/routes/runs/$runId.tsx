@@ -49,6 +49,9 @@ interface RunDetail {
   steps?: Step[];
   workspace_type?: string | null;
   workspace_has_git?: boolean;
+  initiated_by_user_id?: string | null;
+  model_override?: string | null;
+  key_resolution?: Record<string, unknown> | null;
 }
 
 /** A segment of agent output — either text, thinking, event, or tool_call */
@@ -336,7 +339,7 @@ function RunDetailPage() {
 
   // Connect to SSE for live updates
   const { status: sseStatus } = useSSE<any>({
-    url: `${API_BASE}/events/stream/${runId}`,
+    url: `${API_BASE}/events/stream/${runId}?since=${encodeURIComponent('$')}`,
     enabled: run?.status === 'running' && historyLoaded,
     onMessage: (event) => {
       switch (event.type) {

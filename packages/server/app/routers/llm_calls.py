@@ -42,6 +42,7 @@ class RecordLlmCallRequest(BaseModel):
     cost_input: Optional[float] = None
     cost_output: Optional[float] = None
     cost_total: Optional[float] = None
+    cost_approximate: bool = False
     duration_ms: Optional[int] = None
     tool_call_count: int = 0
     has_thinking: bool = False
@@ -67,6 +68,7 @@ class LlmCallResponse(BaseModel):
     cost_input: Optional[float] = None
     cost_output: Optional[float] = None
     cost_total: Optional[float] = None
+    cost_approximate: bool = False
     duration_ms: Optional[int] = None
     tool_call_count: int
     has_thinking: bool
@@ -109,6 +111,7 @@ async def record_llm_call(
         cost_input=body.cost_input,
         cost_output=body.cost_output,
         cost_total=body.cost_total,
+        cost_approximate=body.cost_approximate,
         duration_ms=body.duration_ms,
         tool_call_count=body.tool_call_count,
         has_thinking=body.has_thinking,
@@ -144,6 +147,7 @@ async def record_llm_call(
                     "cost_input": call.cost_input,
                     "cost_output": call.cost_output,
                     "cost_total": call.cost_total,
+                    "cost_approximate": call.cost_approximate,
                     "duration_ms": call.duration_ms,
                     "tool_call_count": call.tool_call_count,
                     "has_thinking": call.has_thinking,
@@ -181,6 +185,7 @@ def _row_to_response(row: LlmCallLog) -> LlmCallResponse:
         cost_input=row.cost_input,
         cost_output=row.cost_output,
         cost_total=row.cost_total,
+        cost_approximate=row.cost_approximate,
         duration_ms=row.duration_ms,
         tool_call_count=row.tool_call_count,
         has_thinking=row.has_thinking,

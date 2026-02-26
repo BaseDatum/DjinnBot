@@ -70,6 +70,8 @@ __all__ = [
     "get_valid_statuses_for_project",
     "get_project_semantics",
     "get_semantic_statuses",
+    # Work type constants
+    "VALID_WORK_TYPES",
 ]
 
 router = APIRouter()
@@ -123,6 +125,18 @@ class UpdateProjectRequest(BaseModel):
         return normalize_git_url(v)
 
 
+VALID_WORK_TYPES = {
+    "feature",
+    "bugfix",
+    "test",
+    "refactor",
+    "docs",
+    "infrastructure",
+    "design",
+    "custom",
+}
+
+
 class CreateTaskRequest(BaseModel):
     title: str
     description: str = ""
@@ -134,6 +148,18 @@ class CreateTaskRequest(BaseModel):
     estimatedHours: Optional[float] = None
     columnId: Optional[str] = None  # if not provided, use first column (backlog)
     metadata: dict = {}
+    # Task work type: feature, bugfix, test, refactor, docs, infrastructure, design, custom
+    # If not provided, auto-inferred from title/tags.
+    workType: Optional[str] = None
+
+    @field_validator("workType")
+    @classmethod
+    def validate_work_type(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None and v not in VALID_WORK_TYPES:
+            raise ValueError(
+                f"Invalid workType '{v}'. Must be one of: {sorted(VALID_WORK_TYPES)}"
+            )
+        return v
 
 
 class UpdateTaskRequest(BaseModel):
@@ -373,6 +399,10 @@ def _serialize_task(task: Task) -> dict:
         "column_id": task.column_id,
         "column_position": task.column_position,
         "metadata": json.loads(task.task_metadata) if task.task_metadata else {},
+        "work_type": task.work_type,
+        "completed_stages": json.loads(task.completed_stages)
+        if task.completed_stages
+        else [],
         "spec_review_status": task.spec_review_status,
         "quality_review_status": task.quality_review_status,
         "spec_review_notes": task.spec_review_notes,

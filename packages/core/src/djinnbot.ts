@@ -999,6 +999,7 @@ export class DjinnBot {
         timeout,
         source: 'pulse',
         pulseColumns,
+        taskWorkTypes: context.routineTaskWorkTypes,
         executorModel,
       });
 
@@ -1087,6 +1088,8 @@ export class DjinnBot {
         timeoutMs: r.timeoutMs,
         maxConcurrent: r.maxConcurrent ?? 1,
         pulseColumns: r.pulseColumns,
+        stageAffinity: r.stageAffinity,
+        taskWorkTypes: r.taskWorkTypes,
         sortOrder: r.sortOrder ?? 0,
         color: r.color,
         lastRunAt: r.lastRunAt,

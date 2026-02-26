@@ -64,6 +64,19 @@ class PulseRoutine(Base, PrefixedIdMixin, TimestampMixin):
     planning_model: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
     executor_model: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
 
+    # --- task routing (Phase 4: Pulse + Swarm integration) ---
+    # JSON array of SDLC stage names this routine handles.
+    # e.g. ["implement", "review"] for Yukihiro's task work routine.
+    # When set, get_ready_tasks filters to tasks in matching stages.
+    # null = no stage filtering (legacy behavior).
+    stage_affinity: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+
+    # JSON array of work types this routine handles.
+    # e.g. ["feature", "bugfix", "refactor"] for an implementation routine.
+    # When set, get_ready_tasks filters to tasks with matching work_type.
+    # null = no work type filtering (legacy behavior).
+    task_work_types: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+
     # --- ordering ---
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 

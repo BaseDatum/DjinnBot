@@ -21,6 +21,7 @@ interface TokenSummary {
   totalCacheWriteTokens: number;
   totalTokens: number;
   totalCost: number;
+  hasApproximateCosts: boolean;
 }
 
 interface SessionTokenStatsProps {
@@ -53,6 +54,7 @@ const EMPTY: TokenSummary = {
   totalCacheWriteTokens: 0,
   totalTokens: 0,
   totalCost: 0,
+  hasApproximateCosts: false,
 };
 
 export function SessionTokenStats({ sessionId, runId, compact = true, className }: SessionTokenStatsProps) {
@@ -70,6 +72,10 @@ export function SessionTokenStats({ sessionId, runId, compact = true, className 
       .then(res => res.ok ? res.json() : null)
       .then(data => {
         if (data?.summary) {
+          // Check if any calls in this batch have approximate costs
+          const anyApprox = (data.calls ?? []).some(
+            (c: any) => c.cost_approximate && c.cost_total != null && c.cost_total > 0
+          );
           setStats({
             callCount: data.summary.callCount ?? 0,
             totalInputTokens: data.summary.totalInputTokens ?? 0,
@@ -78,6 +84,7 @@ export function SessionTokenStats({ sessionId, runId, compact = true, className 
             totalCacheWriteTokens: data.summary.totalCacheWriteTokens ?? 0,
             totalTokens: data.summary.totalTokens ?? 0,
             totalCost: data.summary.totalCost ?? 0,
+            hasApproximateCosts: anyApprox,
           });
         }
       })
@@ -98,6 +105,7 @@ export function SessionTokenStats({ sessionId, runId, compact = true, className 
       totalCacheWriteTokens: prev.totalCacheWriteTokens + (event.cache_write_tokens ?? 0),
       totalTokens: prev.totalTokens + (event.total_tokens ?? 0),
       totalCost: +(prev.totalCost + (event.cost_total ?? 0)).toFixed(6),
+      hasApproximateCosts: prev.hasApproximateCosts || !!(event.cost_approximate && event.cost_total > 0),
     }));
   }, [sessionId, runId]);
 
@@ -110,16 +118,18 @@ export function SessionTokenStats({ sessionId, runId, compact = true, className 
   if (stats.callCount === 0) return null;
 
   const costStr = fmtCost(stats.totalCost);
+  const approxPrefix = stats.hasApproximateCosts ? '~' : '';
+  const approxTitle = stats.hasApproximateCosts ? ' (includes approximate costs)' : '';
 
   if (compact) {
     return (
       <span
         className={`inline-flex items-center gap-1.5 text-[10px] text-muted-foreground font-mono whitespace-nowrap ${className ?? ''}`}
-        title={`${stats.callCount} calls · In: ${stats.totalInputTokens.toLocaleString()} · Out: ${stats.totalOutputTokens.toLocaleString()} · Cache R: ${stats.totalCacheReadTokens.toLocaleString()} W: ${stats.totalCacheWriteTokens.toLocaleString()}${costStr ? ` · ${costStr}` : ''}`}
+        title={`${stats.callCount} calls · In: ${stats.totalInputTokens.toLocaleString()} · Out: ${stats.totalOutputTokens.toLocaleString()} · Cache R: ${stats.totalCacheReadTokens.toLocaleString()} W: ${stats.totalCacheWriteTokens.toLocaleString()}${costStr ? ` · ${approxPrefix}${costStr}${approxTitle}` : ''}`}
       >
         <span className="opacity-60">↑</span>{fmt(stats.totalInputTokens)}
         <span className="opacity-60">↓</span>{fmt(stats.totalOutputTokens)}
-        {costStr && <span className="text-amber-600 dark:text-amber-400">{costStr}</span>}
+        {costStr && <span className="text-amber-600 dark:text-amber-400">{approxPrefix}{costStr}</span>}
       </span>
     );
   }
@@ -135,7 +145,7 @@ export function SessionTokenStats({ sessionId, runId, compact = true, className 
       {(stats.totalCacheReadTokens > 0 || stats.totalCacheWriteTokens > 0) && (
         <span className="opacity-70">⚡R:{fmt(stats.totalCacheReadTokens)} W:{fmt(stats.totalCacheWriteTokens)}</span>
       )}
-      {costStr && <span className="text-amber-600 dark:text-amber-400">{costStr}</span>}
+      {costStr && <span className="text-amber-600 dark:text-amber-400" title={approxTitle || undefined}>{approxPrefix}{costStr}</span>}
     </span>
   );
 }

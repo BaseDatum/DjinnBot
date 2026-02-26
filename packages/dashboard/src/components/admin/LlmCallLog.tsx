@@ -41,6 +41,7 @@ interface LlmCall {
   cost_input: number | null;
   cost_output: number | null;
   cost_total: number | null;
+  cost_approximate: boolean;
   duration_ms: number | null;
   tool_call_count: number;
   has_thinking: boolean;
@@ -90,11 +91,12 @@ function formatTokens(n: number): string {
   return String(n);
 }
 
-function formatCost(cost: number | null): string {
+function formatCost(cost: number | null, approximate?: boolean): string {
   if (cost == null || cost === 0) return '-';
-  if (cost < 0.001) return `$${cost.toFixed(6)}`;
-  if (cost < 0.01) return `$${cost.toFixed(4)}`;
-  return `$${cost.toFixed(3)}`;
+  const prefix = approximate ? '~' : '';
+  if (cost < 0.001) return `${prefix}$${cost.toFixed(6)}`;
+  if (cost < 0.01) return `${prefix}$${cost.toFixed(4)}`;
+  return `${prefix}$${cost.toFixed(3)}`;
 }
 
 function formatDuration(ms: number | null): string {
@@ -164,6 +166,7 @@ export function LlmCallLog({ sessionId, runId, agentId, admin = false, maxHeight
       cost_input: event.cost_input,
       cost_output: event.cost_output,
       cost_total: event.cost_total,
+      cost_approximate: event.cost_approximate ?? false,
       duration_ms: event.duration_ms,
       tool_call_count: event.tool_call_count ?? 0,
       has_thinking: event.has_thinking ?? false,
@@ -243,6 +246,7 @@ export function LlmCallLog({ sessionId, runId, agentId, admin = false, maxHeight
   }
 
   const { calls, summary } = data;
+  const hasApproximateCosts = calls.some(c => c.cost_approximate && c.cost_total != null && c.cost_total > 0);
 
   return (
     <div className="space-y-3">
@@ -265,9 +269,12 @@ export function LlmCallLog({ sessionId, runId, agentId, admin = false, maxHeight
             </span>
           )}
           {summary.totalCost > 0 && (
-            <span className="flex items-center gap-1" title={`Input: ${formatCost(summary.totalCostInput)} / Output: ${formatCost(summary.totalCostOutput)}`}>
+            <span
+              className="flex items-center gap-1"
+              title={`Input: ${formatCost(summary.totalCostInput)} / Output: ${formatCost(summary.totalCostOutput)}${hasApproximateCosts ? ' (includes approximate costs)' : ''}`}
+            >
               <Coins className="h-3 w-3" />
-              {formatCost(summary.totalCost)}
+              {hasApproximateCosts ? '~' : ''}{formatCost(summary.totalCost)}
             </span>
           )}
           {summary.avgDurationMs > 0 && (
@@ -332,7 +339,7 @@ export function LlmCallLog({ sessionId, runId, agentId, admin = false, maxHeight
                           </span>
                         : '-'}
                     </td>
-                    <td className="px-3 py-1.5 text-right font-mono">{formatCost(call.cost_total)}</td>
+                    <td className="px-3 py-1.5 text-right font-mono" title={call.cost_approximate ? 'Approximate cost (based on similar model pricing)' : undefined}>{formatCost(call.cost_total, call.cost_approximate)}</td>
                     <td className="px-3 py-1.5 text-right font-mono">{formatDuration(call.duration_ms)}</td>
                     <td className="px-3 py-1.5 text-center">
                       <span className="inline-flex items-center gap-1">
@@ -358,8 +365,11 @@ export function LlmCallLog({ sessionId, runId, agentId, admin = false, maxHeight
                           <div><span className="text-muted-foreground">Output tokens:</span> {call.output_tokens.toLocaleString()}</div>
                           <div><span className="text-muted-foreground">Cache read:</span> {call.cache_read_tokens.toLocaleString()}</div>
                           <div><span className="text-muted-foreground">Cache write:</span> {call.cache_write_tokens.toLocaleString()}</div>
-                          <div><span className="text-muted-foreground">Input cost:</span> {formatCost(call.cost_input)}</div>
-                          <div><span className="text-muted-foreground">Output cost:</span> {formatCost(call.cost_output)}</div>
+                          <div><span className="text-muted-foreground">Input cost:</span> {formatCost(call.cost_input, call.cost_approximate)}</div>
+                          <div><span className="text-muted-foreground">Output cost:</span> {formatCost(call.cost_output, call.cost_approximate)}</div>
+                          {call.cost_approximate && call.cost_total != null && call.cost_total > 0 && (
+                            <div className="text-amber-500 dark:text-amber-400 col-span-2">Approximate cost (inferred from similar model pricing)</div>
+                          )}
                           <div><span className="text-muted-foreground">Stop reason:</span> {call.stop_reason || '-'}</div>
                           {call.key_masked && (
                             <div><span className="text-muted-foreground">Key:</span> <span className="font-mono">{call.key_masked}</span></div>

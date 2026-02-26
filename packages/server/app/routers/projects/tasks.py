@@ -28,6 +28,7 @@ from ._common import (
     MoveTaskRequest,
     CreateColumnRequest,
     UpdateColumnRequest,
+    VALID_WORK_TYPES,
 )
 
 # Import helper from execution module (avoids circular import)
@@ -35,6 +36,165 @@ from .execution import _recompute_task_readiness
 
 logger = get_logger(__name__)
 router = APIRouter()
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# WORK TYPE AUTO-INFERENCE
+# ══════════════════════════════════════════════════════════════════════════
+
+
+def infer_work_type(
+    title: str, tags: list[str], description: str = ""
+) -> Optional[str]:
+    """Auto-infer task work type from title, tags, and description.
+
+    Returns None if no confident match — agents or users can classify later.
+    Uses simple keyword heuristics as a fallback when no explicit type is set.
+    """
+    title_lower = title.lower()
+    tags_lower = {t.lower() for t in tags}
+    desc_lower = description.lower()[:500]  # Only check first 500 chars
+
+    # Tag-based inference (highest confidence)
+    tag_mapping = {
+        "bugfix": "bugfix",
+        "bug": "bugfix",
+        "fix": "bugfix",
+        "hotfix": "bugfix",
+        "test": "test",
+        "testing": "test",
+        "qa": "test",
+        "e2e": "test",
+        "integration-test": "test",
+        "unit-test": "test",
+        "refactor": "refactor",
+        "refactoring": "refactor",
+        "cleanup": "refactor",
+        "docs": "docs",
+        "documentation": "docs",
+        "readme": "docs",
+        "infra": "infrastructure",
+        "infrastructure": "infrastructure",
+        "devops": "infrastructure",
+        "ci": "infrastructure",
+        "cd": "infrastructure",
+        "deploy": "infrastructure",
+        "deployment": "infrastructure",
+        "design": "design",
+        "ux": "design",
+        "ui": "design",
+        "wireframe": "design",
+        "feature": "feature",
+    }
+    for tag in tags_lower:
+        if tag in tag_mapping:
+            return tag_mapping[tag]
+
+    # Title-based inference (medium confidence)
+    bugfix_patterns = [
+        "fix ",
+        "fix:",
+        "bugfix",
+        "bug:",
+        "hotfix",
+        "patch ",
+        "resolve ",
+        "repair ",
+        "crash ",
+        "error in",
+        "broken ",
+    ]
+    if any(p in title_lower for p in bugfix_patterns):
+        return "bugfix"
+
+    test_patterns = [
+        "add test",
+        "write test",
+        "integration test",
+        "unit test",
+        "e2e test",
+        "test coverage",
+        "test for ",
+        "tests for ",
+        "add spec",
+        "test:",
+        "testing ",
+    ]
+    if any(p in title_lower for p in test_patterns):
+        return "test"
+
+    refactor_patterns = [
+        "refactor",
+        "cleanup",
+        "clean up",
+        "reorganize",
+        "simplify",
+        "extract ",
+        "rename ",
+        "move ",
+    ]
+    if any(p in title_lower for p in refactor_patterns):
+        return "refactor"
+
+    doc_patterns = [
+        "document",
+        "docs:",
+        "readme",
+        "update docs",
+        "add documentation",
+        "api docs",
+        "jsdoc",
+        "docstring",
+    ]
+    if any(p in title_lower for p in doc_patterns):
+        return "docs"
+
+    infra_patterns = [
+        "deploy",
+        "ci/cd",
+        "pipeline",
+        "docker",
+        "kubernetes",
+        "terraform",
+        "ansible",
+        "monitoring",
+        "alerting",
+        "infrastructure",
+        "devops",
+        "nginx",
+        "ssl",
+    ]
+    if any(p in title_lower for p in infra_patterns):
+        return "infrastructure"
+
+    design_patterns = [
+        "design ",
+        "ux ",
+        "ui ",
+        "wireframe",
+        "mockup",
+        "user flow",
+        "prototype",
+        "design system",
+    ]
+    if any(p in title_lower for p in design_patterns):
+        return "design"
+
+    feature_patterns = [
+        "implement ",
+        "add ",
+        "create ",
+        "build ",
+        "develop ",
+        "new ",
+        "feature:",
+        "feat:",
+    ]
+    if any(p in title_lower for p in feature_patterns):
+        return "feature"
+
+    # No confident match — return None (unclassified)
+    return None
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -237,6 +397,9 @@ async def create_task(
         )
         pipeline_id = wf_result.scalar_one_or_none()
 
+    # Resolve work type: explicit > auto-inferred > None
+    work_type = req.workType or infer_work_type(req.title, req.tags, req.description)
+
     task = Task(
         id=gen_id("task_"),
         project_id=project_id,
@@ -253,6 +416,8 @@ async def create_task(
         column_id=column_id,
         column_position=position,
         task_metadata=json.dumps(req.metadata),
+        work_type=work_type,
+        completed_stages=json.dumps([]),
         created_at=now,
         updated_at=now,
     )
@@ -268,6 +433,7 @@ async def create_task(
         "title": task.title,
         "status": initial_status,
         "column_id": column_id,
+        "work_type": work_type,
     }
 
 
@@ -548,6 +714,11 @@ async def get_ready_tasks(
         None,
         description="Comma-separated task statuses to include (default: backlog,planning,ready)",
     ),
+    work_types: Optional[str] = Query(
+        None,
+        description="Comma-separated work types to include (e.g. feature,bugfix,test). "
+        "When set, only tasks with matching work_type are returned.",
+    ),
     session: AsyncSession = Depends(get_async_session),
 ):
     """Get tasks that are ready to execute (all blocking dependencies met).
@@ -597,11 +768,24 @@ async def get_ready_tasks(
     )
     container_parent_ids = {row[0] for row in subtask_parents_result.all()}
 
+    # Parse work_types filter
+    work_type_filter: list[str] | None = None
+    if work_types:
+        _requested_types = {s.strip() for s in work_types.split(",") if s.strip()}
+        work_type_filter = list(_requested_types & VALID_WORK_TYPES) or None
+
     # Build base query — include specified status tasks
     query = select(Task).where(
         Task.project_id == project_id,
         Task.status.in_(status_filter),
     )
+
+    # Filter by work type if specified
+    if work_type_filter:
+        # Include tasks with matching work_type OR null work_type (unclassified)
+        query = query.where(
+            or_(Task.work_type.in_(work_type_filter), Task.work_type.is_(None))
+        )
 
     # Exclude container parents — they have subtasks and are never directly picked up
     if container_parent_ids:
@@ -684,6 +868,10 @@ async def get_ready_tasks(
                     "assigned_agent": task.assigned_agent,
                     "tags": json.loads(task.tags) if task.tags else [],
                     "estimated_hours": task.estimated_hours,
+                    "work_type": task.work_type,
+                    "completed_stages": json.loads(task.completed_stages)
+                    if task.completed_stages
+                    else [],
                     "blocking_tasks": downstream,
                 }
             )
@@ -745,6 +933,10 @@ async def get_ready_tasks(
                     "assigned_agent": task.assigned_agent,
                     "tags": json.loads(task.tags) if task.tags else [],
                     "estimated_hours": task.estimated_hours,
+                    "work_type": task.work_type,
+                    "completed_stages": json.loads(task.completed_stages)
+                    if task.completed_stages
+                    else [],
                     "blocking_tasks": downstream,
                 }
             )

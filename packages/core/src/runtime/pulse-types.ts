@@ -137,6 +137,22 @@ export interface PulseRoutine {
    */
   tools?: string[];
 
+  /**
+   * SDLC stage affinity — which stages this routine handles.
+   * E.g. ["implement", "review"] for Yukihiro's task work routine.
+   * When set, get_ready_tasks filters to tasks in matching stages.
+   * null/undefined = no stage filtering (all stages).
+   */
+  stageAffinity?: string[];
+
+  /**
+   * Task work type filter — which work types this routine handles.
+   * E.g. ["feature", "bugfix", "refactor"] for an implementation routine.
+   * When set, get_ready_tasks filters to tasks with matching work_type.
+   * null/undefined = no work type filtering (all types).
+   */
+  taskWorkTypes?: string[];
+
   /** Per-routine model overrides (null = inherit from agent config) */
   planningModel?: string;
   executorModel?: string;

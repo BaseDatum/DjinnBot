@@ -250,6 +250,8 @@ export class ContainerRunner implements AgentRunner {
           ...providerEnvVars,
           // Pass pulse columns so the agent-runtime can scope get_ready_tasks correctly.
           PULSE_COLUMNS: (pulseColumns ?? []).join(','),
+          // Pass task work types so the agent-runtime can filter by work type.
+          PULSE_WORK_TYPES: (options.taskWorkTypes ?? []).join(','),
           DJINNBOT_API_URL: process.env.DJINNBOT_API_URL || 'http://api:8000',
           // Per-agent API key for authenticating to the DjinnBot API
           ...(getAgentApiKey(agentId) ? { AGENT_API_KEY: getAgentApiKey(agentId)! } : {}),

@@ -71,6 +71,9 @@ class LlmCallLog(Base):
     cost_input: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     cost_output: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     cost_total: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    # True when cost was computed from sibling pricing or OpenRouter live API
+    # rather than exact registry data.  Dashboard should show "~" indicator.
+    cost_approximate: Mapped[bool] = mapped_column(default=False, nullable=False)
 
     # ── Performance ─────────────────────────────────────────────────────────
     duration_ms: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)

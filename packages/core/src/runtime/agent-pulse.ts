@@ -113,6 +113,16 @@ export interface PulseContext {
    */
   routineTools?: string[];
   /**
+   * Per-routine stage affinity — which SDLC stages this routine handles.
+   * Passed through to pulse tools for filtering.
+   */
+  routineStageAffinity?: string[];
+  /**
+   * Per-routine task work type filter — which work types this routine handles.
+   * Passed through to pulse tools for filtering.
+   */
+  routineTaskWorkTypes?: string[];
+  /**
    * Resolved project-specific routine configs. When a routine is mapped
    * to specific projects (via ProjectAgentRoutine), this contains the
    * resolved config per project so the session runner knows which
@@ -734,6 +744,8 @@ export class AgentPulse {
               context.routinePlanningModel = routine.planningModel;
               context.routineExecutorModel = routine.executorModel;
               context.routineTools = routine.tools;
+              context.routineStageAffinity = routine.stageAffinity;
+              context.routineTaskWorkTypes = routine.taskWorkTypes;
             }
           } catch {
             // Non-fatal: the session runner can still fall back to defaults

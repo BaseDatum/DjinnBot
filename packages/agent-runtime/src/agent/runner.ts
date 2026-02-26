@@ -7,9 +7,11 @@ import { createDjinnBotTools } from './djinnbot-tools.js';
 import { createContainerTools } from './tools.js';
 import { createMcpTools } from './mcp-tools.js';
 import { parseModelString, CUSTOM_PROVIDER_API } from '@djinnbot/core';
+import type { ResolvedModel } from '@djinnbot/core';
 import { buildAttachmentBlocks, type AttachmentMeta } from './attachments.js';
 import { authFetch } from '../api/auth-fetch.js';
 import { MemoryRetrievalTracker } from './djinnbot-tools/memory-scoring.js';
+import { computeOpenRouterCost } from './openrouter-pricing.js';
 
 export interface StepResult {
   output?: string;
@@ -488,10 +490,14 @@ export class ContainerAgentRunner {
    * Log a completed LLM API call to the backend.
    * Called on every message_end event for assistant messages.
    * Fire-and-forget — does not block the agent loop.
+   *
+   * For OpenRouter calls where pi-ai's calculateCost returned 0 (model not
+   * in registry or registry has zero rates), we attempt to compute cost from
+   * OpenRouter's live pricing API and flag the result as approximate.
    */
   private logLlmCall(message: AssistantMessage): void {
     const apiBaseUrl = process.env.DJINNBOT_API_URL || 'http://api:8000';
-    const model = this.getModel();
+    const model = this.getModel() as ResolvedModel;
     const usage = message.usage || { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, total: 0 } };
     const cost = usage.cost || { input: 0, output: 0, total: 0 };
     const durationMs = this.turnStartTime ? Date.now() - this.turnStartTime : undefined;
@@ -506,37 +512,76 @@ export class ContainerAgentRunner {
     // User attribution for per-user daily usage tracking / share limit enforcement
     const userId = process.env.DJINNBOT_USER_ID || undefined;
 
-    const payload = {
-      session_id: sessionId,
-      run_id: runId,
-      agent_id: this.options.agentId,
-      request_id: this.requestIdRef.current || undefined,
-      user_id: userId,
-      provider: String(model.provider),
-      model: model.id,
-      key_source: keySource,
-      key_masked: keyMasked,
-      input_tokens: usage.input || 0,
-      output_tokens: usage.output || 0,
-      cache_read_tokens: usage.cacheRead || 0,
-      cache_write_tokens: usage.cacheWrite || 0,
-      total_tokens: usage.totalTokens || 0,
-      cost_input: cost.input || undefined,
-      cost_output: cost.output || undefined,
-      cost_total: cost.total || undefined,
-      duration_ms: durationMs,
-      tool_call_count: this.turnToolCallCount,
-      has_thinking: this.turnHasThinking,
-      stop_reason: message.stopReason ? String(message.stopReason) : undefined,
+    // If model was inferred with sibling cost rates, flag as approximate
+    const isApproximateFromModel = !!(model as any).costApproximate;
+
+    const sendPayload = (
+      finalCost: { input: number; output: number; total: number },
+      costApproximate: boolean,
+    ) => {
+      const payload = {
+        session_id: sessionId,
+        run_id: runId,
+        agent_id: this.options.agentId,
+        request_id: this.requestIdRef.current || undefined,
+        user_id: userId,
+        provider: String(model.provider),
+        model: model.id,
+        key_source: keySource,
+        key_masked: keyMasked,
+        input_tokens: usage.input || 0,
+        output_tokens: usage.output || 0,
+        cache_read_tokens: usage.cacheRead || 0,
+        cache_write_tokens: usage.cacheWrite || 0,
+        total_tokens: usage.totalTokens || 0,
+        cost_input: finalCost.input || undefined,
+        cost_output: finalCost.output || undefined,
+        cost_total: finalCost.total || undefined,
+        cost_approximate: costApproximate || undefined,
+        duration_ms: durationMs,
+        tool_call_count: this.turnToolCallCount,
+        has_thinking: this.turnHasThinking,
+        stop_reason: message.stopReason ? String(message.stopReason) : undefined,
+      };
+
+      authFetch(`${apiBaseUrl}/v1/internal/llm-calls`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      }).catch(err => {
+        console.warn('[AgentRunner] Failed to log LLM call:', err);
+      });
     };
 
-    authFetch(`${apiBaseUrl}/v1/internal/llm-calls`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    }).catch(err => {
-      console.warn('[AgentRunner] Failed to log LLM call:', err);
-    });
+    // If pi-ai already computed a non-zero cost, use it directly
+    if (cost.total > 0) {
+      sendPayload(cost, isApproximateFromModel);
+      return;
+    }
+
+    // For OpenRouter calls with 0 cost: try fetching real pricing from
+    // OpenRouter's API and compute cost from actual token counts.
+    const providerStr = String(model.provider);
+    if (providerStr === 'openrouter' && (usage.input > 0 || usage.output > 0)) {
+      computeOpenRouterCost(model.id, usage.input || 0, usage.output || 0, usage.cacheRead || 0)
+        .then(enrichedCost => {
+          if (enrichedCost) {
+            console.info(
+              `[AgentRunner] Enriched OpenRouter cost for ${model.id}: $${enrichedCost.total.toFixed(6)} (from live pricing)`
+            );
+            sendPayload(enrichedCost, true); // always approximate from live API
+          } else {
+            sendPayload(cost, isApproximateFromModel);
+          }
+        })
+        .catch(() => {
+          sendPayload(cost, isApproximateFromModel);
+        });
+      return;
+    }
+
+    // All other providers: send what we have
+    sendPayload(cost, isApproximateFromModel);
   }
 
   /**

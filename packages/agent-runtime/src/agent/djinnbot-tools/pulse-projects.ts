@@ -35,6 +35,11 @@ export interface PulseProjectsToolsConfig {
    * Defaults to PULSE_COLUMNS env var (comma-separated), then ['Backlog','Ready'].
    */
   pulseColumns?: string[];
+  /**
+   * Task work types this routine handles (from PulseRoutine.taskWorkTypes).
+   * When set, get_ready_tasks filters to tasks with matching work_type.
+   */
+  taskWorkTypes?: string[];
 }
 
 // ── Tool factories ─────────────────────────────────────────────────────────
@@ -116,7 +121,14 @@ export function createPulseProjectsTools(config: PulseProjectsToolsConfig): Agen
 
         try {
           const limit = p.limit || 5;
-          const url = `${apiBase}/v1/projects/${p.projectId}/ready-tasks?agent_id=${encodeURIComponent(agentId)}&limit=${limit}&statuses=${encodeURIComponent(statuses)}`;
+          let url = `${apiBase}/v1/projects/${p.projectId}/ready-tasks?agent_id=${encodeURIComponent(agentId)}&limit=${limit}&statuses=${encodeURIComponent(statuses)}`;
+
+          // Add work_types filter if configured on the routine
+          const workTypes = config.taskWorkTypes
+            || (process.env.PULSE_WORK_TYPES ? process.env.PULSE_WORK_TYPES.split(',').map((t: string) => t.trim()).filter(Boolean) : null);
+          if (workTypes && workTypes.length > 0) {
+            url += `&work_types=${encodeURIComponent(workTypes.join(','))}`
+          }
           const response = await authFetch(url, { signal });
           if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
           const raw = (await response.json()) as any;

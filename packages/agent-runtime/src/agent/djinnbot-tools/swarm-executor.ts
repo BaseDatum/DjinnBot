@@ -61,6 +61,13 @@ const EXECUTOR_DEVIATION_RULES = `
 You are an executor agent. Follow the task prompt precisely. These rules govern
 how you handle unexpected situations during implementation.
 
+### Rule 0: Respect workflow policy
+**Context:** Each task has a work_type (feature, bugfix, test, refactor, docs, infrastructure, design, custom)
+that determines which SDLC stages apply. If the task's work_type is provided in your prompt,
+only perform work relevant to the stages that are required or optional for that type.
+For example, a "test" task does NOT need UX design, deployment, or spec writing.
+Transition the task to its next valid stage when done — use get_task_workflow to check.
+
 ### Rule 1: Auto-fix bugs
 **Trigger:** Code doesn't work as intended (errors, wrong output, type errors, null pointer exceptions)
 **Action:** Fix inline. Add or update tests if applicable. Commit with prefix "fix:".

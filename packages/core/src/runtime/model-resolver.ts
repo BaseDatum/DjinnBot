@@ -21,6 +21,19 @@ import type { Model, Api } from '@mariozechner/pi-ai';
 import { PROVIDER_ENV_MAP, isProviderConfigured } from '../constants.js';
 
 /**
+ * Extended Model type that tracks whether cost data is approximate.
+ *
+ * When a model is inferred from a sibling rather than found in the static
+ * registry, cost rates are copied from the closest match and may not be
+ * exact.  Downstream consumers (runner, dashboard) use this flag to show
+ * an "approximate" indicator.
+ */
+export interface ResolvedModel<T extends Api = Api> extends Model<T> {
+  /** True when cost rates are inherited from a sibling model, not exact. */
+  costApproximate?: boolean;
+}
+
+/**
  * Providers whose modern models are known to support vision (image input).
  *
  * pi-ai's static registry may lag behind and list some models with
@@ -94,7 +107,7 @@ export function createOpenRouterModel(modelId: string): Model<'openai-completion
  * to force `maxTokensField: "max_tokens"` for any model inferred under opencode or
  * served from opencode.ai.
  */
-export function inferModelForProvider(provider: string, modelId: string): Model<Api> | null {
+export function inferModelForProvider(provider: string, modelId: string): ResolvedModel<Api> | null {
   const known = getModels(provider as any);
   if (known.length === 0) return null;
 
@@ -169,18 +182,28 @@ export function inferModelForProvider(provider: string, modelId: string): Model<
 
   // Copy additional properties from the sibling when available so the inferred
   // model inherits capabilities like reasoning, input modalities, context
-  // window size, and max tokens from the closest known model.
-  const siblingProps = sibling && longestPrefix >= MIN_PREFIX ? {
-    reasoning: sibling.reasoning ?? false,
-    input: sibling.input ?? ['text'] as any,
-    contextWindow: sibling.contextWindow ?? 128000,
-    maxTokens: sibling.maxTokens ?? 32768,
+  // window size, max tokens, and cost rates from the closest known model.
+  const hasSibling = !!(sibling && longestPrefix >= MIN_PREFIX);
+  const siblingProps = hasSibling ? {
+    reasoning: sibling!.reasoning ?? false,
+    input: sibling!.input ?? ['text'] as any,
+    contextWindow: sibling!.contextWindow ?? 128000,
+    maxTokens: sibling!.maxTokens ?? 32768,
   } : {
     reasoning: false,
     input: ['text'] as any,
     contextWindow: 128000,
     maxTokens: 32768,
   };
+
+  // Inherit cost rates from the sibling when available.  These are approximate
+  // since the sibling may have different pricing, but far better than zeros.
+  const hasSiblingCost = hasSibling &&
+    sibling!.cost &&
+    (sibling!.cost.input > 0 || sibling!.cost.output > 0);
+  const costRates = hasSiblingCost
+    ? { ...sibling!.cost }
+    : { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
 
   // Ensure vision support for providers whose recent models accept images.
   // pi-ai's static registry may list older model entries with input:["text"]
@@ -207,6 +230,13 @@ export function inferModelForProvider(provider: string, modelId: string): Model<
   const needsMaxTokensOverride =
     provider === 'opencode' || bestBaseUrl.includes('opencode.ai');
 
+  if (hasSiblingCost) {
+    console.info(
+      `[ModelResolver] Inherited approximate cost rates from sibling "${sibling!.id}" ` +
+      `for "${provider}/${modelId}": input=${costRates.input}, output=${costRates.output}.`
+    );
+  }
+
   return {
     id: modelId,
     name: modelId,
@@ -214,11 +244,12 @@ export function inferModelForProvider(provider: string, modelId: string): Model<
     provider: provider as any,
     baseUrl: bestBaseUrl,
     ...siblingProps,
-    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    cost: costRates,
+    costApproximate: hasSiblingCost ? true : undefined,
     ...(needsMaxTokensOverride
       ? { compat: { maxTokensField: 'max_tokens' as const } }
       : {}),
-  } as Model<Api>;
+  } as ResolvedModel<Api>;
 }
 
 /**
@@ -361,7 +392,7 @@ export function createCustomProviderModel(
  * credentials configured — a clear user-facing error is better than a silent
  * auth failure deep in the HTTP call.
  */
-export function parseModelString(modelString: string): Model<Api> {
+export function parseModelString(modelString: string): ResolvedModel<Api> {
   const parts = modelString.split('/');
 
   if (parts.length < 2) {
@@ -372,8 +403,18 @@ export function parseModelString(modelString: string): Model<Api> {
   const provider = parts[0];
   const modelId = parts.slice(1).join('/');
 
-  // openrouter prefix: strip it, send remaining id to OpenRouter
+  // openrouter prefix: check pi-ai registry first (has real cost data),
+  // then fall back to zero-cost passthrough for unregistered models.
   if (provider === 'openrouter') {
+    const registered = getModel('openrouter' as any, modelId as any);
+    if (registered !== undefined) {
+      return registered;
+    }
+    // Not in registry — try sibling-based inference (inherits cost rates)
+    const inferred = inferModelForProvider('openrouter', modelId);
+    if (inferred !== null) {
+      return inferred;
+    }
     return createOpenRouterModel(modelId);
   }
 

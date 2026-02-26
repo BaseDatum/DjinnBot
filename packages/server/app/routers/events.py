@@ -12,11 +12,21 @@ router = APIRouter()
 
 
 @router.get("/stream/{run_id}")
-async def stream_run_events(run_id: str):
+async def stream_run_events(
+    run_id: str,
+    since: str = Query(
+        "0",
+        description=(
+            "Redis Stream ID to start reading from (exclusive). "
+            "Pass '$' to only receive new events (e.g. after hydrating "
+            "history from /runs/{run_id}/logs). Defaults to '0' (replay all)."
+        ),
+    ),
+):
     """SSE endpoint — streams pipeline events for a specific run.
 
     Connect via EventSource:
-        const es = new EventSource('/api/events/stream/run_123');
+        const es = new EventSource('/api/events/stream/run_123?since=$');
         es.onmessage = (e) => console.log(JSON.parse(e.data));
     """
     if not dependencies.redis_client:
@@ -25,7 +35,7 @@ async def stream_run_events(run_id: str):
     stream_key = f"djinnbot:events:run:{run_id}"
 
     async def event_generator():
-        last_id = "0"  # Start from beginning
+        last_id = since  # '$' = only new events, '0' = replay all
 
         while True:
             try:

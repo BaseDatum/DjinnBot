@@ -151,6 +151,14 @@ class Task(Base, TimestampWithCompletedMixin):
     task_metadata: Mapped[str] = mapped_column(
         "metadata", Text, nullable=False, default="{}"
     )  # JSON object
+    # Work type classification — determines which SDLC stages apply.
+    # Values: feature, bugfix, test, refactor, docs, infrastructure, design, custom
+    # NULL = unclassified (legacy), treated as 'custom' by workflow policy.
+    work_type: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    # Completed stages tracker — JSON array of stage names this task has been through.
+    # e.g. ["spec", "design", "implement"]. Used by workflow policy enforcement.
+    completed_stages: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
     # Two-stage review tracking (spec compliance + code quality)
     spec_review_status: Mapped[Optional[str]] = mapped_column(
         String(32), nullable=True

@@ -59,6 +59,7 @@ from app.routers import swarm_executor as swarm_executor_router
 from app.routers import ingest as ingest_router
 from app.routers import memory_scores as memory_scores_router
 from app.routers import project_templates as project_templates_router
+from app.routers import workflow_policies as workflow_policies_router
 
 
 async def _handle_task_run_event(run_id: str, event_type: str):
@@ -736,6 +737,10 @@ app.include_router(
     project_templates_router.router,
     prefix="/v1/project-templates",
     tags=["project-templates"],
+)
+app.include_router(
+    workflow_policies_router.router,
+    tags=["workflow-policies"],
 )
 
 

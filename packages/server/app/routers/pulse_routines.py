@@ -83,6 +83,10 @@ class CreatePulseRoutineRequest(BaseModel):
     # Per-routine tool selection. When null → inherit agent defaults.
     # When set → only these tools are available during this routine.
     tools: Optional[List[str]] = None
+    # Stage affinity: which SDLC stages this routine handles (e.g. ["implement", "review"])
+    stageAffinity: Optional[List[str]] = None
+    # Task work types: which work types this routine handles (e.g. ["feature", "bugfix"])
+    taskWorkTypes: Optional[List[str]] = None
 
 
 class UpdatePulseRoutineRequest(BaseModel):
@@ -101,6 +105,8 @@ class UpdatePulseRoutineRequest(BaseModel):
     planningModel: Optional[str] = None
     executorModel: Optional[str] = None
     tools: Optional[List[str]] = None
+    stageAffinity: Optional[List[str]] = None
+    taskWorkTypes: Optional[List[str]] = None
 
 
 class ReorderRequest(BaseModel):
@@ -156,6 +162,8 @@ def _model_to_response(r: PulseRoutine) -> dict:
         "planningModel": r.planning_model,
         "executorModel": r.executor_model,
         "tools": r.tools,
+        "stageAffinity": r.stage_affinity,
+        "taskWorkTypes": r.task_work_types,
         "sortOrder": r.sort_order,
         "lastRunAt": r.last_run_at,
         "totalRuns": r.total_runs,
@@ -270,6 +278,8 @@ async def create_pulse_routine(
         planning_model=req.planningModel,
         executor_model=req.executorModel,
         tools=req.tools,
+        stage_affinity=req.stageAffinity,
+        task_work_types=req.taskWorkTypes,
         sort_order=next_order,
         color=color,
         created_at=ts,
@@ -375,6 +385,14 @@ async def update_pulse_routine(
         )  # empty string → null
     if req.tools is not None:
         update_fields["tools"] = req.tools if req.tools else None  # empty list → null
+    if req.stageAffinity is not None:
+        update_fields["stage_affinity"] = (
+            req.stageAffinity if req.stageAffinity else None
+        )
+    if req.taskWorkTypes is not None:
+        update_fields["task_work_types"] = (
+            req.taskWorkTypes if req.taskWorkTypes else None
+        )
 
     if update_fields:
         update_fields["updated_at"] = now_ms()
