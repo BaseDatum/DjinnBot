@@ -37,8 +37,11 @@ FROM python:3.13-slim AS runtime
 ARG BUILD_VERSION=dev
 ENV DJINNBOT_BUILD_VERSION=${BUILD_VERSION}
 
-# Install curl for healthcheck and git for repository operations
-RUN apt-get update && apt-get install -y --no-install-recommends curl git && rm -rf /var/lib/apt/lists/*
+# Install curl for healthcheck, git for repository operations,
+# and JRE for opendataloader-pdf (Java-based PDF extraction engine)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl git default-jre-headless \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 

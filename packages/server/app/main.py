@@ -46,6 +46,7 @@ from app.routers import mcp
 from app.routers import agent_tools
 from app.routers import browser_cookies
 from app.routers import attachments
+from app.routers import documents
 from app.routers import auth as auth_router
 from app.routers import users as users_router
 from app.routers import admin as admin_router
@@ -712,6 +713,7 @@ app.include_router(sessions.router, prefix="/v1", tags=["sessions"])
 app.include_router(chat.router, prefix="/v1", tags=["chat"])
 app.include_router(chat_sessions.router, prefix="/v1", tags=["chat-sessions"])
 app.include_router(attachments.router, prefix="/v1", tags=["attachments"])
+app.include_router(documents.router, prefix="/v1", tags=["documents"])
 app.include_router(pulses.router, prefix="/v1/pulses", tags=["pulses"])
 app.include_router(pulse_routines.router, prefix="/v1", tags=["pulse-routines"])
 app.include_router(onboarding.router, prefix="/v1/onboarding", tags=["onboarding"])

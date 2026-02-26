@@ -161,6 +161,22 @@ class ChatAttachment(Base):
     # Estimated token count of the attachment content (for context budget)
     estimated_tokens: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
 
+    # ── PDF-specific fields (OpenDataLoader integration) ──────────────────
+    # Structured JSON data from opendataloader-pdf (bounding boxes, types, etc.)
+    structured_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # PDF metadata
+    pdf_title: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
+    pdf_author: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
+    pdf_page_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    # Vault ingest status: null (not a PDF), pending, ingested, failed
+    vault_ingest_status: Mapped[Optional[str]] = mapped_column(
+        String(32), nullable=True
+    )
+    # Slug used for the vault directory (documents/{slug}/)
+    vault_doc_slug: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    # Number of chunks created in the vault
+    vault_chunk_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+
     created_at: Mapped[int] = mapped_column(BigInteger, nullable=False)
 
     # Relationships

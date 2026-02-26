@@ -3,6 +3,10 @@
 Provides file upload for chat sessions and retrieval for both the dashboard
 UI (thumbnails, download) and the agent-runtime containers (fetching file
 content for LLM context injection).
+
+PDF uploads are processed with OpenDataLoader for structured extraction,
+chunked by document structure, and ingested into the shared ClawVault
+so all agents can recall document knowledge via semantic search.
 """
 
 import json
@@ -14,6 +18,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_async_session, AsyncSessionLocal
+from app import dependencies
 from app.models.chat import (
     ChatSession,
     ChatAttachment,
@@ -22,7 +27,9 @@ from app.models.chat import (
     MAX_ATTACHMENT_SIZE,
 )
 from app.services import file_storage
-from app.services.text_extraction import extract_text
+from app.services.text_extraction import extract_text, extract_pdf_structured
+from app.services.pdf_chunker import chunk_pdf, extract_toc
+from app.services.pdf_vault_ingest import ingest_pdf_to_shared_vault_async
 from app.logging_config import get_logger
 from app.utils import gen_id, now_ms
 
@@ -117,9 +124,31 @@ async def upload_attachment(
     is_image = mime in ALLOWED_IMAGE_TYPES
     extracted_text: Optional[str] = None
     estimated_tokens: int = 0
+    structured_json: Optional[str] = None
+    pdf_title: Optional[str] = None
+    pdf_author: Optional[str] = None
+    pdf_page_count: Optional[int] = None
+    vault_ingest_status: Optional[str] = None
 
     if not is_image:
         extracted_text, estimated_tokens = extract_text(data, mime, file.filename)
+
+        # For PDFs: also extract structured JSON for chunking + vault ingest
+        if mime == "application/pdf":
+            vault_ingest_status = "pending"
+            try:
+                pdf_result = extract_pdf_structured(data, file.filename)
+                if pdf_result.get("json_data"):
+                    structured_json = json.dumps(pdf_result["json_data"])
+                pdf_title = pdf_result.get("title")
+                pdf_author = pdf_result.get("author")
+                pdf_page_count = pdf_result.get("page_count")
+            except Exception as e:
+                logger.warning(
+                    f"Structured PDF extraction failed for {file.filename}: {e}"
+                )
+                # Text extraction already succeeded via extract_text — proceed without structure
+                vault_ingest_status = "failed"
     else:
         estimated_tokens = 1600  # flat image token estimate
 
@@ -134,6 +163,11 @@ async def upload_attachment(
         processing_status="ready",
         extracted_text=extracted_text,
         estimated_tokens=estimated_tokens,
+        structured_json=structured_json,
+        pdf_title=pdf_title,
+        pdf_author=pdf_author,
+        pdf_page_count=pdf_page_count,
+        vault_ingest_status=vault_ingest_status,
         created_at=now,
     )
     db.add(attachment)
@@ -143,6 +177,20 @@ async def upload_attachment(
     logger.info(
         f"upload_attachment: {att_id} ({file.filename}, {mime}, {len(data)} bytes, ~{estimated_tokens} tokens)"
     )
+
+    # Trigger async vault ingest for PDFs with structured data
+    if mime == "application/pdf" and structured_json:
+        background_tasks.add_task(
+            _ingest_pdf_to_vault,
+            att_id,
+            structured_json,
+            extracted_text or "",
+            file.filename,
+            pdf_page_count or 0,
+            pdf_title,
+            pdf_author,
+        )
+
     return _to_response(attachment)
 
 
@@ -268,8 +316,28 @@ async def upload_bytes_internal(
     is_image = mime_type in ALLOWED_IMAGE_TYPES
     extracted_text = None
     estimated_tokens = 1600 if is_image else 0
+    structured_json_str: Optional[str] = None
+    pdf_title: Optional[str] = None
+    pdf_author: Optional[str] = None
+    pdf_page_count: Optional[int] = None
+    vault_ingest_status: Optional[str] = None
+
     if not is_image:
         extracted_text, estimated_tokens = extract_text(data, mime_type, filename)
+
+        # For PDFs: extract structured JSON for vault ingest
+        if mime_type == "application/pdf":
+            vault_ingest_status = "pending"
+            try:
+                pdf_result = extract_pdf_structured(data, filename)
+                if pdf_result.get("json_data"):
+                    structured_json_str = json.dumps(pdf_result["json_data"])
+                pdf_title = pdf_result.get("title")
+                pdf_author = pdf_result.get("author")
+                pdf_page_count = pdf_result.get("page_count")
+            except Exception as e:
+                logger.warning(f"Structured PDF extraction failed for {filename}: {e}")
+                vault_ingest_status = "failed"
 
     now = now_ms()
     attachment = ChatAttachment(
@@ -282,10 +350,31 @@ async def upload_bytes_internal(
         processing_status="ready",
         extracted_text=extracted_text,
         estimated_tokens=estimated_tokens,
+        structured_json=structured_json_str,
+        pdf_title=pdf_title,
+        pdf_author=pdf_author,
+        pdf_page_count=pdf_page_count,
+        vault_ingest_status=vault_ingest_status,
         created_at=now,
     )
     db.add(attachment)
     await db.commit()
+
+    # Trigger vault ingest for PDFs (fire-and-forget)
+    if mime_type == "application/pdf" and structured_json_str:
+        import asyncio
+
+        asyncio.create_task(
+            _ingest_pdf_to_vault(
+                att_id,
+                structured_json_str,
+                extracted_text or "",
+                filename,
+                pdf_page_count or 0,
+                pdf_title,
+                pdf_author,
+            )
+        )
 
     return {
         "id": att_id,
@@ -325,3 +414,71 @@ def _guess_mime(filename: str) -> str:
 
     ext = os.path.splitext(filename)[1].lower()
     return _EXTENSION_MIME_MAP.get(ext, "application/octet-stream")
+
+
+# ── PDF Vault Ingest ──────────────────────────────────────────────────────────
+
+
+async def _ingest_pdf_to_vault(
+    attachment_id: str,
+    structured_json_str: str,
+    markdown_text: str,
+    filename: str,
+    page_count: int,
+    title: Optional[str],
+    author: Optional[str],
+) -> None:
+    """Background task: chunk a PDF and ingest into the shared vault.
+
+    Updates the ChatAttachment record with vault ingest metadata on completion.
+    """
+    try:
+        json_data = json.loads(structured_json_str)
+
+        # Chunk the document
+        chunks = chunk_pdf(json_data, markdown_text, attachment_id, filename)
+        toc = extract_toc(json_data)
+
+        # Write to shared vault
+        result = await ingest_pdf_to_shared_vault_async(
+            chunks=chunks,
+            toc=toc,
+            document_id=attachment_id,
+            filename=filename,
+            page_count=page_count,
+            title=title,
+            author=author,
+            redis_client=dependencies.redis_client,
+        )
+
+        # Update the attachment record
+        async with AsyncSessionLocal() as db:
+            att_result = await db.execute(
+                select(ChatAttachment).where(ChatAttachment.id == attachment_id)
+            )
+            att = att_result.scalar_one_or_none()
+            if att:
+                att.vault_ingest_status = "ingested"
+                att.vault_doc_slug = result["doc_slug"]
+                att.vault_chunk_count = len(chunks)
+                await db.commit()
+
+        logger.info(
+            f"PDF vault ingest complete: {filename} → {result['files_written']} files, "
+            f"{len(chunks)} chunks in shared/documents/{result['doc_slug']}/"
+        )
+
+    except Exception as e:
+        logger.error(f"PDF vault ingest failed for {attachment_id} ({filename}): {e}")
+        # Mark as failed
+        try:
+            async with AsyncSessionLocal() as db:
+                att_result = await db.execute(
+                    select(ChatAttachment).where(ChatAttachment.id == attachment_id)
+                )
+                att = att_result.scalar_one_or_none()
+                if att:
+                    att.vault_ingest_status = "failed"
+                    await db.commit()
+        except Exception:
+            pass  # Best-effort status update
