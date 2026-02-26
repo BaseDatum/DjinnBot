@@ -1,7 +1,8 @@
-# Build stage - pinned to linux/amd64 because the output is just static files
-# (HTML/CSS/JS) and native npm binaries (esbuild, rollup) crash under QEMU
-# arm64 emulation on amd64 CI runners. The nginx runtime stage is multi-arch.
-FROM --platform=linux/amd64 node:20-alpine AS builder
+# Build stage - uses the CI runner's native arch ($BUILDPLATFORM) so native npm
+# binaries (esbuild, rollup) don't need QEMU emulation. The output is just
+# static files (HTML/CSS/JS), so the nginx runtime stage can be any platform.
+ARG BUILDPLATFORM
+FROM --platform=$BUILDPLATFORM node:20-alpine AS builder
 
 WORKDIR /build
 
