@@ -6,6 +6,7 @@ import type { RedisPublisher } from '../redis/publisher.js';
 import { createDjinnBotTools } from './djinnbot-tools.js';
 import { createContainerTools } from './tools.js';
 import { createMcpTools } from './mcp-tools.js';
+import { createCamofoxTools } from '../tools/camofox.js';
 import { parseModelString, CUSTOM_PROVIDER_API } from '@djinnbot/core';
 import type { ResolvedModel } from '@djinnbot/core';
 import { buildAttachmentBlocks, type AttachmentMeta } from './attachments.js';
@@ -17,6 +18,26 @@ import { initPtc, type PtcInstance } from './ptc/index.js';
 // ── PTC system prompt supplement ──────────────────────────────────────────
 // Appended to the agent's system prompt when Programmatic Tool Calling is enabled.
 // Tells the model about exec_code and when to prefer it over direct tool calls.
+
+const CAMOFOX_SYSTEM_PROMPT_SUPPLEMENT = `
+
+## Web Browsing (Camofox)
+
+You have a built-in anti-detection web browser (Camofox) for browsing the real web.
+Use the camofox_* tools for any web browsing — researching, reading documentation,
+checking websites, filling forms, authenticated browsing, etc.
+
+**Playwright/Chromium is for automated testing only.** For all other browsing, use Camofox —
+it bypasses bot detection on Google, Cloudflare, Amazon, LinkedIn, and most sites.
+
+**Workflow:** camofox_create_tab → camofox_snapshot (read page with element refs) → camofox_click/camofox_type (interact)
+
+**Search macros:** Use camofox_navigate with macro param — @google_search, @youtube_search,
+@amazon_search, @reddit_search, @wikipedia_search, @twitter_search, @linkedin_search, and more.
+
+**Authenticated browsing:** If cookie files are available in /home/agent/cookies/, use
+camofox_import_cookies to load them before browsing authenticated sites.
+`;
 
 const PTC_SYSTEM_PROMPT_SUPPLEMENT = `
 
@@ -343,6 +364,13 @@ export class ContainerAgentRunner {
       requestIdRef: this.requestIdRef,
     });
     tools.push(...containerTools);
+
+    // Camofox browser tools (anti-detection web browsing)
+    // Only available when CAMOFOX_URL is set (i.e., camofox server is running in the container)
+    if (process.env.CAMOFOX_URL) {
+      const camofoxTools = createCamofoxTools({ agentId: this.options.agentId });
+      tools.push(...camofoxTools);
+    }
 
     // DjinnBot tools (complete, fail, recall, remember, project/task tools, skills, etc.)
     const djinnBotTools = createDjinnBotTools({
@@ -1078,9 +1106,13 @@ export class ContainerAgentRunner {
       // Get tools (static tools are cached; MCP tools refresh only when dirty)
       const tools = await this.getTools();
 
-      // When PTC is active, append guidance to the system prompt so the model
-      // knows to prefer exec_code for multi-step workflows.
+      // Append guidance supplements to the system prompt
       let effectiveSystemPrompt = systemPrompt;
+      // Camofox browsing guidance — when the anti-detection browser is available
+      if (process.env.CAMOFOX_URL) {
+        effectiveSystemPrompt += CAMOFOX_SYSTEM_PROMPT_SUPPLEMENT;
+      }
+      // PTC guidance — when exec_code is available for multi-step workflows
       if (this.options.ptcEnabled) {
         effectiveSystemPrompt += PTC_SYSTEM_PROMPT_SUPPLEMENT;
       }

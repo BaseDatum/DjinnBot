@@ -19,6 +19,7 @@ import {
   ChevronUp,
   ShieldCheck,
   Activity,
+  Cookie,
 } from 'lucide-react';
 import { fetchAgents, fetchStatus } from '@/lib/api';
 import { useAuth } from '@/hooks/useAuth';
@@ -41,6 +42,7 @@ const navItems = [
   { to: '/memory', label: 'Memory', icon: Brain },
   { to: '/runs', label: 'Runs', icon: Play },
   { to: '/usage', label: 'Usage', icon: Activity },
+  { to: '/browser-cookies', label: 'Cookies', icon: Cookie },
   { to: '/settings', label: 'Settings', icon: Settings },
 ];
 

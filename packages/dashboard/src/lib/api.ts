@@ -2871,3 +2871,72 @@ export async function fetchProjectSwarms(
   const res = await authFetch(`${API_BASE}/projects/${projectId}/swarms`);
   return handleResponse(res, 'Failed to fetch project swarms');
 }
+
+// ── Browser Cookies ───────────────────────────────────────────────────────
+
+export interface BrowserCookieSetItem {
+  id: string;
+  user_id: string;
+  name: string;
+  domain: string;
+  filename: string;
+  cookie_count: number;
+  expires_at: number | null;
+  created_at: number;
+  updated_at: number;
+  grants?: Array<{ agent_id: string; granted_by: string; granted_at: number }>;
+}
+
+export interface BrowserCookieGrantItem {
+  id: number;
+  agent_id: string;
+  cookie_set_id: string;
+  cookie_set_name: string | null;
+  cookie_set_domain: string | null;
+  granted_by: string;
+  granted_at: number;
+}
+
+export async function fetchBrowserCookieSets(): Promise<BrowserCookieSetItem[]> {
+  const res = await authFetch(`${API_BASE}/browser/cookies`);
+  return handleResponse(res, 'Failed to fetch browser cookies');
+}
+
+export async function uploadBrowserCookieSet(name: string, file: File): Promise<BrowserCookieSetItem> {
+  const formData = new FormData();
+  formData.append('name', name);
+  formData.append('cookie_file', file);
+  formData.append('user_id', 'system');
+  const res = await authFetch(`${API_BASE}/browser/cookies`, {
+    method: 'POST',
+    body: formData,
+    // Don't set Content-Type — browser sets it with boundary for FormData
+  });
+  return handleResponse(res, 'Failed to upload cookie set');
+}
+
+export async function deleteBrowserCookieSet(cookieSetId: string): Promise<void> {
+  const res = await authFetch(`${API_BASE}/browser/cookies/${cookieSetId}`, {
+    method: 'DELETE',
+  });
+  return handleResponse(res, 'Failed to delete cookie set');
+}
+
+export async function fetchAgentCookieGrants(agentId: string): Promise<BrowserCookieGrantItem[]> {
+  const res = await authFetch(`${API_BASE}/browser/cookies/agents/${agentId}`);
+  return handleResponse(res, 'Failed to fetch agent cookie grants');
+}
+
+export async function grantCookiesToAgent(agentId: string, cookieSetId: string): Promise<void> {
+  const res = await authFetch(`${API_BASE}/browser/cookies/agents/${agentId}/${cookieSetId}/grant`, {
+    method: 'POST',
+  });
+  return handleResponse(res, 'Failed to grant cookies');
+}
+
+export async function revokeCookiesFromAgent(agentId: string, cookieSetId: string): Promise<void> {
+  const res = await authFetch(`${API_BASE}/browser/cookies/agents/${agentId}/${cookieSetId}`, {
+    method: 'DELETE',
+  });
+  return handleResponse(res, 'Failed to revoke cookies');
+}

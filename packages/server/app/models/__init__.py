@@ -58,6 +58,7 @@ from app.models.settings import ModelProvider, GlobalSetting, AgentChannelCreden
 from app.models.skill import Skill, AgentSkill
 from app.models.secret import Secret, AgentSecretGrant
 from app.models.mcp import McpServer, AgentMcpTool
+from app.models.browser_cookie import BrowserCookieSet, AgentCookieGrant
 from app.models.auth import User, UserRecoveryCode, OIDCProvider, APIKey, UserSession
 from app.models.user_provider import (
     UserModelProvider,
@@ -129,6 +130,9 @@ __all__ = [
     "AgentSecretGrant",
     "McpServer",
     "AgentMcpTool",
+    # Browser cookie models
+    "BrowserCookieSet",
+    "AgentCookieGrant",
     # Auth models
     "User",
     "UserRecoveryCode",
