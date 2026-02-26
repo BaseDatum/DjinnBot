@@ -2961,7 +2961,6 @@ export async function uploadBrowserCookieSet(name: string, file: File): Promise<
   const formData = new FormData();
   formData.append('name', name);
   formData.append('cookie_file', file);
-  formData.append('user_id', 'system');
   const res = await authFetch(`${API_BASE}/browser/cookies`, {
     method: 'POST',
     body: formData,

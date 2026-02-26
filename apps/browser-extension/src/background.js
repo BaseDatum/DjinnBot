@@ -54,7 +54,6 @@ function toNetscapeFormat(cookies) {
 async function uploadToDjinnBot(apiUrl, token, name, cookieText) {
   const formData = new FormData();
   formData.append('name', name);
-  formData.append('user_id', 'system');
   formData.append('cookie_file', new Blob([cookieText], { type: 'text/plain' }), `${name}.txt`);
 
   const headers = {};

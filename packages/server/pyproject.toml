@@ -24,6 +24,9 @@ dependencies = [
     "bcrypt>=4.1.0",
     "pyotp>=2.9.0",
     "python-multipart>=0.0.22",
+    # Code knowledge graph
+    "kuzu>=0.11.0",
+    "tree-sitter-language-pack>=0.13.0",
 ]
 
 [project.optional-dependencies]

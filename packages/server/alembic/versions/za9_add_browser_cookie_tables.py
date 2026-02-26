@@ -25,12 +25,7 @@ def upgrade() -> None:
     op.create_table(
         "browser_cookie_sets",
         sa.Column("id", sa.String(64), primary_key=True),
-        sa.Column(
-            "user_id",
-            sa.String(64),
-            sa.ForeignKey("users.id", ondelete="CASCADE"),
-            nullable=False,
-        ),
+        sa.Column("user_id", sa.String(64), nullable=False),
         sa.Column("name", sa.String(256), nullable=False),
         sa.Column("domain", sa.String(512), nullable=False),
         sa.Column("filename", sa.String(256), nullable=False),

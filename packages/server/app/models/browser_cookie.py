@@ -36,10 +36,9 @@ class BrowserCookieSet(Base):
     )
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    # User who uploaded the cookies
-    user_id: Mapped[str] = mapped_column(
-        String(64), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
-    )
+    # User who uploaded the cookies (no FK — works with auth disabled where
+    # user_id is "anonymous" and not present in the users table)
+    user_id: Mapped[str] = mapped_column(String(64), nullable=False)
     # Human-readable name (e.g., "LinkedIn", "GitHub")
     name: Mapped[str] = mapped_column(String(256), nullable=False)
     # Primary domain (e.g., ".linkedin.com")

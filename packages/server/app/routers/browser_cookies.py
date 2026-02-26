@@ -34,6 +34,7 @@ from app.models.browser_cookie import BrowserCookieSet, AgentCookieGrant
 from app.utils import now_ms
 from app import dependencies
 from app.logging_config import get_logger
+from app.auth.dependencies import get_current_user, AuthUser
 
 logger = get_logger(__name__)
 
@@ -162,7 +163,7 @@ async def list_cookie_sets(
 async def upload_cookie_set(
     name: str = Form(...),
     cookie_file: UploadFile = File(...),
-    user_id: str = Form(default="system"),
+    user: AuthUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session),
 ):
     """Upload a Netscape-format cookie file."""
@@ -186,7 +187,7 @@ async def upload_cookie_set(
     ts = now_ms()
     cookie_set = BrowserCookieSet(
         id=cookie_id,
-        user_id=user_id,
+        user_id=user.id,
         name=name,
         domain=domain,
         filename=filename,
@@ -210,7 +211,7 @@ async def upload_cookie_set(
 
     return CookieSetResponse(
         id=cookie_id,
-        user_id=user_id,
+        user_id=user.id,
         name=name,
         domain=domain,
         filename=filename,
