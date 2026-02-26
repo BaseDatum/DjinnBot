@@ -14,6 +14,44 @@ import { PROVIDER_ENV_MAP } from '../constants.js';
 import { parseModelString, enrichNetworkError } from './model-resolver.js';
 import { StructuredOutputRunner } from './structured-output-runner.js';
 
+/**
+ * Call a code knowledge graph API endpoint and return a formatted string
+ * for the agent to consume.
+ */
+async function callCodeGraphApi(
+  apiBaseUrl: string,
+  projectId: string,
+  endpoint: string,
+  opts: { method: 'GET' | 'POST'; body?: Record<string, unknown> },
+): Promise<string> {
+  const url = `${apiBaseUrl}/v1/projects/${projectId}/knowledge-graph/${endpoint}`;
+  try {
+    const fetchOpts: RequestInit = {
+      method: opts.method,
+      headers: {
+        ...authFetch.length ? {} : {}, // appease linter
+        'Content-Type': 'application/json',
+        ...(process.env.ENGINE_INTERNAL_TOKEN
+          ? { Authorization: `Bearer ${process.env.ENGINE_INTERNAL_TOKEN}` }
+          : {}),
+      },
+    };
+    if (opts.body) {
+      fetchOpts.body = JSON.stringify(opts.body);
+    }
+    const res = await fetch(url, fetchOpts);
+    if (!res.ok) {
+      const text = await res.text();
+      return `Code graph API error (${res.status}): ${text.slice(0, 500)}`;
+    }
+    const data = await res.json();
+    // Format as readable string for the agent
+    return JSON.stringify(data, null, 2);
+  } catch (err: any) {
+    return `Code graph unavailable: ${err?.message || 'unknown error'}`;
+  }
+}
+
 export interface PiMonoRunnerConfig {
   /**
    * Base URL of the Python API server (e.g. "http://api:8000").
@@ -298,6 +336,41 @@ export class PiMonoRunner implements AgentRunner {
       onOnboardingHandoff: this.config.onOnboardingHandoff
         ? async (nextAgent, summary, context) => {
             return await this.config.onOnboardingHandoff!(options.agentId, options.runId, options.stepId, nextAgent, summary, context);
+          }
+        : undefined,
+      // ── Code Knowledge Graph callbacks ────────────────────────────────
+      // These call the server API directly. Only available when the run
+      // has a projectId (i.e. the agent is working on a project with a
+      // git workspace that has been indexed).
+      onCodeGraphQuery: options.projectId
+        ? async (query, taskContext, limit) => {
+            return await callCodeGraphApi(apiBaseUrl, options.projectId!, 'query', {
+              method: 'POST',
+              body: { query, task_context: taskContext, limit: limit ?? 10 },
+            });
+          }
+        : undefined,
+      onCodeGraphContext: options.projectId
+        ? async (symbolName, filePath) => {
+            const params = filePath ? `?file_path=${encodeURIComponent(filePath)}` : '';
+            return await callCodeGraphApi(apiBaseUrl, options.projectId!, `context/${encodeURIComponent(symbolName)}${params}`, {
+              method: 'GET',
+            });
+          }
+        : undefined,
+      onCodeGraphImpact: options.projectId
+        ? async (target, direction, maxDepth, minConfidence) => {
+            return await callCodeGraphApi(apiBaseUrl, options.projectId!, 'impact', {
+              method: 'POST',
+              body: { target, direction, max_depth: maxDepth ?? 3, min_confidence: minConfidence ?? 0.7 },
+            });
+          }
+        : undefined,
+      onCodeGraphChanges: options.projectId
+        ? async () => {
+            return await callCodeGraphApi(apiBaseUrl, options.projectId!, 'changes', {
+              method: 'GET',
+            });
           }
         : undefined,
     };

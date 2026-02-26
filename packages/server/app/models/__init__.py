@@ -77,6 +77,7 @@ from app.models.memory_score import (
     MemoryGap,
     MemoryScore,
 )
+from app.models.code_graph import CodeGraphIndex
 
 __all__ = [
     # Pydantic models (backward compatibility)
@@ -159,4 +160,6 @@ __all__ = [
     "MemoryValuation",
     "MemoryGap",
     "MemoryScore",
+    # Code knowledge graph
+    "CodeGraphIndex",
 ]

@@ -25,6 +25,7 @@ from .agents import router as agents_router
 from .git_integration import router as git_integration_router
 from .agent_routines import router as agent_routines_router
 from .swarm import router as swarm_router
+from .knowledge_graph import router as knowledge_graph_router
 
 # Re-export commonly used items for backward compatibility
 from ._common import (
@@ -54,6 +55,7 @@ router.include_router(agents_router)
 router.include_router(git_integration_router)
 router.include_router(agent_routines_router)
 router.include_router(swarm_router)
+router.include_router(knowledge_graph_router)
 
 __all__ = [
     "router",
