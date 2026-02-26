@@ -666,6 +666,65 @@ async function handleSystemUpdate(targetVersion: string): Promise<void> {
 }
 
 /**
+ * Run the @djinnbot/code-graph indexing pipeline for a project.
+ *
+ * The pipeline scans the project workspace, parses ASTs with Tree-sitter,
+ * resolves imports/calls/heritage, detects communities and execution flows,
+ * and persists the graph to KuzuDB.
+ *
+ * Results and progress are published to Redis keys that the API server polls.
+ */
+async function handleCodeGraphIndex(projectId: string, jobId?: string): Promise<void> {
+  const workspacesDir = process.env.WORKSPACES_DIR || '/data/workspaces';
+  const repoPath = `${workspacesDir}/${projectId}`;
+  const dbPath = `${workspacesDir}/${projectId}/.code-graph`;
+
+  const resultKey = `djinnbot:code-graph:result:${projectId}`;
+  const progressKey = `djinnbot:code-graph:progress:${projectId}`;
+
+  try {
+    // Dynamic import of the code-graph package
+    const { runPipeline } = await import('@djinnbot/code-graph');
+
+    const result = await runPipeline(repoPath, dbPath, (progress) => {
+      // Publish progress to Redis so the API can poll it
+      if (opsRedis) {
+        opsRedis.setex(progressKey, 120, JSON.stringify({
+          phase: progress.phase,
+          percent: progress.percent,
+          message: progress.message,
+        })).catch(() => {});
+      }
+    });
+
+    // Publish success result
+    if (opsRedis) {
+      await opsRedis.setex(resultKey, 600, JSON.stringify({
+        nodeCount: result.nodeCount,
+        relationshipCount: result.relationshipCount,
+        communityCount: result.communityCount,
+        processCount: result.processCount,
+      }));
+      await opsRedis.del(progressKey);
+    }
+
+    console.log(
+      `[Engine] Code graph indexed for ${projectId}: ` +
+      `${result.nodeCount} nodes, ${result.relationshipCount} edges, ` +
+      `${result.communityCount} communities, ${result.processCount} processes`
+    );
+  } catch (err: any) {
+    console.error(`[Engine] Code graph indexing error for ${projectId}:`, err);
+    if (opsRedis) {
+      await opsRedis.setex(resultKey, 600, JSON.stringify({
+        error: err?.message || String(err),
+      }));
+      await opsRedis.del(progressKey);
+    }
+  }
+}
+
+/**
  * Handle a global event
  */
 async function handleGlobalEvent(event: { type: string; agentId?: string; [key: string]: any }): Promise<void> {
@@ -755,6 +814,17 @@ async function handleGlobalEvent(event: { type: string; agentId?: string; [key: 
       console.log(`[Engine] System update requested → ${targetVersion}`);
       handleSystemUpdate(targetVersion).catch((err) =>
         console.error('[Engine] System update failed:', err)
+      );
+      break;
+    }
+
+    // ── Code Knowledge Graph indexing ──────────────────────────────────────
+    case 'CODE_GRAPH_INDEX_REQUESTED': {
+      const { projectId, jobId } = event;
+      if (!projectId) break;
+      console.log(`[Engine] Code graph index requested for project ${projectId} (job ${jobId})`);
+      handleCodeGraphIndex(projectId, jobId).catch((err) =>
+        console.error(`[Engine] Code graph indexing failed for ${projectId}:`, err)
       );
       break;
     }

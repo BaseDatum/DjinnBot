@@ -31,6 +31,7 @@ from app.database import get_async_session, AsyncSessionLocal
 from app.models.code_graph import CodeGraphIndex
 from app.utils import now_ms, gen_id
 from app.logging_config import get_logger
+from app import dependencies
 
 from ._common import get_project_or_404
 
@@ -118,115 +119,113 @@ async def _get_or_create_index(
     return index
 
 
+REDIS_RESULT_KEY = "djinnbot:code-graph:result:{project_id}"
+REDIS_RESULT_TTL = 600  # 10 minutes
+
+
 async def _run_indexing(project_id: str, job_id: str, force: bool = False):
-    """Background task that runs the code-graph indexing pipeline.
+    """Background task: publish indexing request to Redis, poll for engine result.
 
-    Invokes the TypeScript pipeline via a subprocess (npx or node).
-    Updates the DB record when done.
+    The engine (Node.js) listens for CODE_GRAPH_INDEX_REQUESTED on the global
+    event stream, runs the @djinnbot/code-graph pipeline, and writes the result
+    to a Redis key. This function polls that key and updates the DB.
     """
-    workspace = _workspace_path(project_id)
-    db_path = _db_path(project_id)
-
     _index_jobs[job_id] = {
         "status": "running",
         "phase": "starting",
         "percent": 0,
-        "message": "Starting indexer...",
+        "message": "Requesting indexing from engine...",
     }
 
     try:
-        # Run the indexer as a Node.js subprocess
-        # The pipeline script reads from stdin and writes progress to stderr
-        indexer_script = os.path.join(
-            os.path.dirname(
-                os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
-            ),
-            "code-graph",
-            "dist",
-            "cli.js",
-        )
+        # Publish event for the engine to pick up
+        if not dependencies.redis_client:
+            raise RuntimeError("Redis not available")
 
-        # If the compiled script doesn't exist, try npx
-        if not os.path.exists(indexer_script):
-            # Fallback: use the pipeline directly via node
-            indexer_script = os.path.join(
-                os.path.dirname(
-                    os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
-                ),
-                "code-graph",
-                "dist",
-                "index.js",
-            )
+        event = {
+            "type": "CODE_GRAPH_INDEX_REQUESTED",
+            "projectId": project_id,
+            "jobId": job_id,
+            "force": force,
+            "timestamp": now_ms(),
+        }
+        await dependencies.redis_client.xadd(
+            "djinnbot:events:global", {"data": json.dumps(event)}
+        )
 
         _index_jobs[job_id]["phase"] = "indexing"
         _index_jobs[job_id]["percent"] = 5
+        _index_jobs[job_id]["message"] = "Engine is indexing..."
 
-        # For now, we'll invoke the pipeline and track progress
-        # In production this would be a proper subprocess with progress streaming
-        process = await asyncio.create_subprocess_exec(
-            "node",
-            "--experimental-specifier-resolution=node",
-            "-e",
-            f"""
-            import('{indexer_script.replace(os.sep, "/")}').then(async (mod) => {{
-                const {{ runPipeline }} = mod;
-                const result = await runPipeline(
-                    '{str(workspace).replace(os.sep, "/")}',
-                    '{db_path.replace(os.sep, "/")}',
-                    (progress) => {{
-                        process.stderr.write(JSON.stringify(progress) + '\\n');
-                    }}
-                );
-                process.stdout.write(JSON.stringify({{
-                    nodeCount: result.nodeCount,
-                    relationshipCount: result.relationshipCount,
-                    communityCount: result.communityCount,
-                    processCount: result.processCount,
-                }}));
-            }}).catch(err => {{
-                process.stderr.write('ERROR: ' + err.message);
-                process.exit(1);
-            }});
-            """,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
+        # Poll for the result from the engine
+        result_key = REDIS_RESULT_KEY.format(project_id=project_id)
+        max_wait = 300  # 5 minutes max
+        poll_interval = 2  # seconds
+        waited = 0
+
+        while waited < max_wait:
+            await asyncio.sleep(poll_interval)
+            waited += poll_interval
+
+            raw = await dependencies.redis_client.get(result_key)
+            if raw is None:
+                # Check for progress updates
+                progress_key = f"djinnbot:code-graph:progress:{project_id}"
+                progress_raw = await dependencies.redis_client.get(progress_key)
+                if progress_raw:
+                    try:
+                        progress = json.loads(progress_raw)
+                        _index_jobs[job_id]["phase"] = progress.get("phase", "indexing")
+                        _index_jobs[job_id]["percent"] = progress.get("percent", 5)
+                        _index_jobs[job_id]["message"] = progress.get(
+                            "message", "Indexing..."
+                        )
+                    except Exception:
+                        pass
+                continue
+
+            # Got result
+            result = json.loads(raw)
+            await dependencies.redis_client.delete(result_key)
+
+            if result.get("error"):
+                raise RuntimeError(result["error"])
+
+            # Update DB with success
+            workspace = _workspace_path(project_id)
+            async with AsyncSessionLocal() as session:
+                db_result = await session.execute(
+                    select(CodeGraphIndex).where(
+                        CodeGraphIndex.project_id == project_id
+                    )
+                )
+                index = db_result.scalar_one_or_none()
+                if index:
+                    now = now_ms()
+                    index.status = "ready"
+                    index.last_indexed_at = now
+                    index.last_commit_hash = _get_current_commit(workspace)
+                    index.node_count = result.get("nodeCount", 0)
+                    index.relationship_count = result.get("relationshipCount", 0)
+                    index.community_count = result.get("communityCount", 0)
+                    index.process_count = result.get("processCount", 0)
+                    index.error = None
+                    index.updated_at = now
+                    await session.commit()
+
+            _index_jobs[job_id] = {
+                "status": "completed",
+                "phase": "complete",
+                "percent": 100,
+                "message": "Indexing complete",
+                "result": result,
+            }
+            return
+
+        # Timed out
+        raise RuntimeError(
+            "Indexing timed out after 5 minutes — engine may not be running"
         )
-
-        stdout_data, stderr_data = await process.communicate()
-
-        if process.returncode != 0:
-            error_msg = stderr_data.decode() if stderr_data else "Unknown error"
-            raise RuntimeError(f"Indexer failed: {error_msg}")
-
-        # Parse result
-        result = json.loads(stdout_data.decode())
-
-        # Update DB
-        async with AsyncSessionLocal() as session:
-            db_result = await session.execute(
-                select(CodeGraphIndex).where(CodeGraphIndex.project_id == project_id)
-            )
-            index = db_result.scalar_one_or_none()
-            if index:
-                now = now_ms()
-                index.status = "ready"
-                index.last_indexed_at = now
-                index.last_commit_hash = _get_current_commit(workspace)
-                index.node_count = result.get("nodeCount", 0)
-                index.relationship_count = result.get("relationshipCount", 0)
-                index.community_count = result.get("communityCount", 0)
-                index.process_count = result.get("processCount", 0)
-                index.error = None
-                index.updated_at = now
-                await session.commit()
-
-        _index_jobs[job_id] = {
-            "status": "completed",
-            "phase": "complete",
-            "percent": 100,
-            "message": "Indexing complete",
-            "result": result,
-        }
 
     except Exception as err:
         logger.error(f"Knowledge graph indexing failed for {project_id}: {err}")

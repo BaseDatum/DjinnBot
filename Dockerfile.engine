@@ -16,6 +16,7 @@ WORKDIR /build
 COPY package.json package-lock.json tsconfig.base.json ./
 COPY packages/core/package.json ./packages/core/
 COPY packages/slack/package.json ./packages/slack/
+COPY packages/code-graph/package.json ./packages/code-graph/
 
 # Install all deps (workspace resolution needs root context)
 RUN npm install --include=dev
@@ -26,11 +27,13 @@ RUN npm install -g bun
 # Copy source
 COPY packages/core ./packages/core
 COPY packages/slack ./packages/slack
+COPY packages/code-graph ./packages/code-graph
 
-# Build TypeScript (clean dist first, then core, then slack)
-RUN rm -rf packages/core/dist packages/slack/dist
+# Build TypeScript (clean dist first, then core, then slack, then code-graph)
+RUN rm -rf packages/core/dist packages/slack/dist packages/code-graph/dist
 RUN npm run build -w @djinnbot/core
 RUN npm run build -w @djinnbot/slack
+RUN npm run build -w @djinnbot/code-graph
 
 # Stage 3: Production Runtime
 FROM debian:bookworm-slim
@@ -222,6 +225,7 @@ ENV PATH="/root/.cargo/bin:${PATH}"
 COPY package.json package-lock.json ./
 COPY packages/core/package.json ./packages/core/
 COPY packages/slack/package.json ./packages/slack/
+COPY packages/code-graph/package.json ./packages/code-graph/
 
 # Install production deps only
 RUN npm install --omit=dev
@@ -268,6 +272,7 @@ RUN ln -sf /app/node_modules/.bin/clawvault /usr/local/bin/clawvault
 # Copy built code from ts-builder
 COPY --from=ts-builder /build/packages/core/dist ./packages/core/dist
 COPY --from=ts-builder /build/packages/slack/dist ./packages/slack/dist
+COPY --from=ts-builder /build/packages/code-graph/dist ./packages/code-graph/dist
 
 # Create directories for runtime data
 RUN mkdir -p /data /data/vaults /pipelines /agents
