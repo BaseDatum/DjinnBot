@@ -88,7 +88,16 @@ async def _handle_task_run_event(run_id: str, event_type: str):
 
 
 async def _handle_planning_run_complete(run_id: str):
-    """Handle completed planning runs — auto-import tasks."""
+    """Handle completed planning runs — auto-import tasks and reflow statuses.
+
+    Supports two pipeline types:
+    - Structured output pipelines (planning): bulk-imports tasks from JSON outputs.
+    - Agentic pipelines (planning-agentic): tasks already created via tool calls,
+      only needs post-planning status reflow.
+
+    After import/completion, runs reflow_task_statuses_after_planning to move
+    blocked tasks to backlog (tasks are created before deps are wired).
+    """
     from app.database import AsyncSessionLocal
     from app.models.run import Output
 
@@ -108,7 +117,42 @@ async def _handle_planning_run_complete(run_id: str):
                 return
 
             project_id = context.get("project_id")
+            if not project_id:
+                logger.warning(f"Planning run {run_id}: no project_id in context")
+                return
 
+            pipeline_id = context.get("pipeline_id", "planning")
+
+            # ── Agentic pipeline: tasks already created via tool calls ──
+            # Only need to run post-planning reflow to fix statuses.
+            if pipeline_id == "planning-agentic":
+                from app.routers.projects.planning import (
+                    reflow_task_statuses_after_planning,
+                )
+
+                reflow_result = await reflow_task_statuses_after_planning(
+                    project_id, session
+                )
+                logger.info(
+                    f"Planning run {run_id} (agentic): reflow moved "
+                    f"{reflow_result.get('moved', 0)} tasks to backlog"
+                )
+
+                # Publish completion event
+                if dependencies.redis_client:
+                    event = {
+                        "type": "PROJECT_PLANNING_COMPLETED",
+                        "projectId": project_id,
+                        "runId": run_id,
+                        "pipeline": "planning-agentic",
+                        "timestamp": int(datetime.now(timezone.utc).timestamp() * 1000),
+                    }
+                    await dependencies.redis_client.xadd(
+                        "djinnbot:events:global", {"data": json.dumps(event)}
+                    )
+                return
+
+            # ── Structured output pipeline: bulk-import from JSON outputs ──
             # Read outputs from the Output table (written per-key by the engine via
             # setOutput). The run.outputs column may still be "{}" due to a race: the
             # RUN_COMPLETE event is published immediately after updateRun() is called,
@@ -129,8 +173,8 @@ async def _handle_planning_run_complete(run_id: str):
                 "task_breakdown_json"
             )
 
-            if not tasks_json or not project_id:
-                logger.warning(f"Planning run {run_id}: no tasks output or project_id")
+            if not tasks_json:
+                logger.warning(f"Planning run {run_id}: no tasks output")
                 return
 
             parsed = (
@@ -184,6 +228,13 @@ async def _handle_planning_run_complete(run_id: str):
                     )
 
             await session.commit()
+
+            # Run post-planning reflow for structured pipelines too
+            from app.routers.projects.planning import (
+                reflow_task_statuses_after_planning,
+            )
+
+            await reflow_task_statuses_after_planning(project_id, session)
 
             # Publish event after successful commit
             if dependencies.redis_client:

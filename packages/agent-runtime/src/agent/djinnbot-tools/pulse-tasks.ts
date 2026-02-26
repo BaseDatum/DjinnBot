@@ -14,6 +14,25 @@ const CreateTaskParamsSchema = Type.Object({
 });
 type CreateTaskParams = Static<typeof CreateTaskParamsSchema>;
 
+const CreateSubtaskParamsSchema = Type.Object({
+  projectId: Type.String({ description: 'Project ID to create the subtask in' }),
+  parentTaskId: Type.String({ description: 'Task ID of the parent task this subtask belongs to' }),
+  title: Type.String({ description: 'Subtask title (concise, action-oriented)' }),
+  description: Type.Optional(Type.String({ description: 'Detailed subtask description (markdown). Include acceptance criteria, scope boundary, and verification steps.' })),
+  priority: Type.Optional(Type.String({ description: 'Priority: P0 (critical), P1 (high), P2 (normal, default), P3 (low)' })),
+  tags: Type.Optional(Type.Array(Type.String(), { description: 'Tags for categorization (e.g. ["backend", "auth"])' })),
+  estimatedHours: Type.Optional(Type.Number({ description: 'Estimated hours to complete (subtasks should be 1-4 hours)' })),
+});
+type CreateSubtaskParams = Static<typeof CreateSubtaskParamsSchema>;
+
+const AddDependencyParamsSchema = Type.Object({
+  projectId: Type.String({ description: 'Project ID containing both tasks' }),
+  taskId: Type.String({ description: 'The task that DEPENDS ON another (the blocked task)' }),
+  dependsOnTaskId: Type.String({ description: 'The task that must complete FIRST (the blocker)' }),
+  type: Type.Optional(Type.String({ description: '"blocks" (default) = hard dependency, "informs" = soft/informational' })),
+});
+type AddDependencyParams = Static<typeof AddDependencyParamsSchema>;
+
 const ExecuteTaskParamsSchema = Type.Object({
   projectId: Type.String({ description: 'Project ID containing the task' }),
   taskId: Type.String({ description: 'Task ID to execute' }),
@@ -101,6 +120,105 @@ export function createPulseTasksTools(config: PulseTasksToolsConfig): AgentTool[
           };
         } catch (err) {
           return { content: [{ type: 'text', text: `Error creating task: ${err instanceof Error ? err.message : String(err)}` }], details: {} };
+        }
+      },
+    },
+
+    {
+      name: 'create_subtask',
+      description:
+        'Create a subtask under an existing parent task. Subtasks represent bite-sized work ' +
+        '(1-4 hours) that collectively implement the parent task. Returns the subtask ID ' +
+        'so you can add dependencies between subtasks using add_dependency.',
+      label: 'create_subtask',
+      parameters: CreateSubtaskParamsSchema,
+      execute: async (
+        _toolCallId: string,
+        params: unknown,
+        signal?: AbortSignal,
+      ): Promise<AgentToolResult<VoidDetails>> => {
+        const p = params as CreateSubtaskParams;
+        const apiBase = getApiBase();
+        try {
+          const url = `${apiBase}/v1/projects/${p.projectId}/tasks`;
+          const body: Record<string, unknown> = {
+            title: p.title,
+            description: p.description ?? '',
+            priority: p.priority ?? 'P2',
+            parentTaskId: p.parentTaskId,
+          };
+          if (p.tags) body.tags = p.tags;
+          if (p.estimatedHours !== undefined) body.estimatedHours = p.estimatedHours;
+
+          const response = await authFetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+            signal,
+          });
+          const data = (await response.json()) as any;
+          if (!response.ok) throw new Error(data.detail || `${response.status} ${response.statusText}`);
+
+          return {
+            content: [{
+              type: 'text',
+              text: [
+                `Subtask created.`,
+                `**Subtask ID**: ${data.id}`,
+                `**Parent**: ${p.parentTaskId}`,
+                `**Title**: ${data.title}`,
+                `**Status**: ${data.status}`,
+              ].join('\n'),
+            }],
+            details: {},
+          };
+        } catch (err) {
+          return { content: [{ type: 'text', text: `Error creating subtask: ${err instanceof Error ? err.message : String(err)}` }], details: {} };
+        }
+      },
+    },
+
+    {
+      name: 'add_dependency',
+      description:
+        'Add a dependency between two tasks: the "dependsOnTaskId" task must complete ' +
+        'before "taskId" can start. Works for both tasks and subtasks. ' +
+        'Validates that no circular dependencies are created. ' +
+        'Use this after creating tasks to wire up the dependency graph.',
+      label: 'add_dependency',
+      parameters: AddDependencyParamsSchema,
+      execute: async (
+        _toolCallId: string,
+        params: unknown,
+        signal?: AbortSignal,
+      ): Promise<AgentToolResult<VoidDetails>> => {
+        const p = params as AddDependencyParams;
+        const apiBase = getApiBase();
+        try {
+          const url = `${apiBase}/v1/projects/${p.projectId}/tasks/${p.taskId}/dependencies`;
+          const body = {
+            fromTaskId: p.dependsOnTaskId,
+            type: p.type ?? 'blocks',
+          };
+
+          const response = await authFetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+            signal,
+          });
+          const data = (await response.json()) as any;
+          if (!response.ok) throw new Error(data.detail || `${response.status} ${response.statusText}`);
+
+          return {
+            content: [{
+              type: 'text',
+              text: `Dependency added: ${p.dependsOnTaskId} → ${p.taskId} (${body.type})`,
+            }],
+            details: {},
+          };
+        } catch (err) {
+          return { content: [{ type: 'text', text: `Error adding dependency: ${err instanceof Error ? err.message : String(err)}` }], details: {} };
         }
       },
     },

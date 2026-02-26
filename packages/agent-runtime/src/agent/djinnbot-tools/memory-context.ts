@@ -1,7 +1,9 @@
 import { Type, type Static } from '@sinclair/typebox';
 import type { AgentTool, AgentToolResult, AgentToolUpdateCallback } from '@mariozechner/pi-agent-core';
 // @ts-ignore — clawvault is an ESM package declared in package.json; types resolve at build time
-import { buildContext, type ContextResult } from 'clawvault';
+import { buildContext, createVault, type ContextResult } from 'clawvault';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { SharedVaultClient } from './shared-vault-api.js';
 
 // ── Schemas ────────────────────────────────────────────────────────────────
@@ -62,8 +64,26 @@ export interface MemoryContextToolsConfig {
 // ── Tool factory ───────────────────────────────────────────────────────────
 
 export function createMemoryContextTools(config: MemoryContextToolsConfig): AgentTool[] {
-  const { vaultPath, apiBaseUrl } = config;
+  const { agentId, vaultPath, apiBaseUrl } = config;
   const sharedVaultApi = new SharedVaultClient(apiBaseUrl);
+
+  // Track whether we've ensured the vault exists (one-time check per session).
+  let vaultEnsured = false;
+  const ensureVaultExists = async (): Promise<void> => {
+    if (vaultEnsured) return;
+    const configPath = join(vaultPath, '.clawvault.json');
+    if (!existsSync(configPath)) {
+      console.log(`[context_query] Auto-creating ClawVault at ${vaultPath} (missing .clawvault.json)`);
+      await createVault(vaultPath, {
+        name: agentId,
+        qmdCollection: `djinnbot-${agentId}`,
+      }, {
+        skipBases: true,
+        skipTasks: true,
+      });
+    }
+    vaultEnsured = true;
+  };
 
   return [
     {
@@ -102,6 +122,11 @@ export function createMemoryContextTools(config: MemoryContextToolsConfig): Agen
         // ── Personal vault context (local ClawVault on JuiceFS mount) ──────
         if (scope === 'personal' || scope === 'all') {
           try {
+            // Ensure vault is initialized before calling buildContext.
+            // With JuiceFS, the mount directory may exist but .clawvault.json
+            // may not have been created yet by the engine.
+            await ensureVaultExists();
+
             const result: ContextResult = await buildContext(p.task, {
               vaultPath,
               limit,

@@ -496,6 +496,124 @@ async def _recompute_task_readiness(
         await _publish_event(event_type, data)
 
 
+async def _recompute_parent_status(
+    session: AsyncSession, project_id: str, subtask_id: str
+):
+    """Derive parent task status from its subtasks when a subtask status changes.
+
+    Rules:
+    - ALL subtasks done → parent → done
+    - ANY subtask in_progress/review/test → parent → in_progress
+    - ANY subtask failed, none in_progress → parent → failed
+    - Otherwise parent stays as-is (backlog/planning/planned/ready)
+
+    Only fires when the changed task is a subtask (has parent_task_id).
+    """
+    now = now_ms()
+
+    # Get the subtask to find its parent
+    result = await session.execute(select(Task).where(Task.id == subtask_id))
+    subtask = result.scalar_one_or_none()
+    if not subtask or not subtask.parent_task_id:
+        return
+
+    parent_id = subtask.parent_task_id
+
+    # Get all sibling subtasks (including this one)
+    siblings_result = await session.execute(
+        select(Task.status).where(
+            Task.project_id == project_id,
+            Task.parent_task_id == parent_id,
+        )
+    )
+    sibling_statuses = [row[0] for row in siblings_result.all()]
+
+    if not sibling_statuses:
+        return
+
+    # Resolve semantic status sets
+    semantics = await get_project_semantics(session, project_id)
+    terminal_done = get_semantic_statuses(semantics, "terminal_done")
+    terminal_fail = get_semantic_statuses(semantics, "terminal_fail")
+    active_statuses = {"in_progress", "review", "test"}
+
+    # Determine derived parent status
+    all_done = all(s in terminal_done for s in sibling_statuses)
+    any_active = any(s in active_statuses for s in sibling_statuses)
+    any_failed = any(s in terminal_fail for s in sibling_statuses)
+
+    if all_done:
+        new_parent_status = "done"
+    elif any_active:
+        new_parent_status = "in_progress"
+    elif any_failed and not any_active:
+        new_parent_status = "failed"
+    else:
+        # Subtasks are still in backlog/planning/ready — don't change parent
+        return
+
+    # Get current parent
+    parent_result = await session.execute(select(Task).where(Task.id == parent_id))
+    parent = parent_result.scalar_one_or_none()
+    if not parent:
+        return
+
+    # Skip if parent is already in the derived status
+    if parent.status == new_parent_status:
+        return
+
+    old_status = parent.status
+
+    # Find the target column for the new status
+    col_result = await session.execute(
+        select(KanbanColumn)
+        .where(KanbanColumn.project_id == project_id)
+        .order_by(KanbanColumn.position)
+    )
+    target_col = None
+    for col in col_result.scalars().all():
+        statuses = json.loads(col.task_statuses) if col.task_statuses else []
+        if new_parent_status in statuses:
+            target_col = col
+            break
+
+    if not target_col:
+        logger.warning(
+            f"No column found for derived parent status '{new_parent_status}' "
+            f"in project {project_id}"
+        )
+        return
+
+    parent.status = new_parent_status
+    parent.column_id = target_col.id
+    parent.updated_at = now
+    if new_parent_status == "done":
+        parent.completed_at = now
+
+    await session.commit()
+
+    logger.info(
+        f"Parent task {parent_id} status derived: {old_status} → {new_parent_status} "
+        f"(subtask {subtask_id} changed)"
+    )
+    await _publish_event(
+        "TASK_STATUS_CHANGED",
+        {
+            "projectId": project_id,
+            "taskId": parent_id,
+            "fromStatus": old_status,
+            "toStatus": new_parent_status,
+            "reason": "derived_from_subtasks",
+        },
+    )
+
+    # If parent reached done, cascade readiness for tasks depending on the parent
+    if new_parent_status in terminal_done:
+        await _recompute_task_readiness(
+            session, project_id, parent_id, new_parent_status
+        )
+
+
 # ══════════════════════════════════════════════════════════════════════════
 # EXECUTION ENDPOINTS
 # ══════════════════════════════════════════════════════════════════════════
@@ -1203,6 +1321,12 @@ async def transition_task(
     terminal_fail = get_semantic_statuses(semantics, "terminal_fail")
     if req.status in terminal_done or req.status in terminal_fail:
         await _recompute_task_readiness(session, project_id, task_id, req.status)
+
+    # Derive parent task status when a subtask changes.
+    # This makes parent tasks with subtasks into "container" tasks whose status
+    # is automatically computed: all_done→done, any_active→in_progress, any_failed→failed.
+    if task.parent_task_id:
+        await _recompute_parent_status(session, project_id, task_id)
 
     await _publish_event(
         "TASK_STATUS_CHANGED",

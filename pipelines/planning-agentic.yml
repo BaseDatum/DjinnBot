@@ -1,0 +1,120 @@
+# Agentic Planning Pipeline — Planner agent decomposes project using tools
+#
+# Unlike the structured output planning pipeline, this pipeline uses a single
+# agent with full tool access to incrementally create tasks, subtasks, and
+# dependency edges via API calls. This approach:
+#
+# 1. Eliminates output token limits (tasks created via tool calls, not JSON blobs)
+# 2. Enables perfect dependency resolution (real task IDs, not title matching)
+# 3. Survives large contexts (92k+ char project docs in a single context window)
+# 4. Provides incremental progress (tasks exist in DB as they're created)
+# 5. Uses the API's cycle detection on each add_dependency call
+#
+# The planner gets the full project vision + description and works through it
+# systematically, calling create_task, create_subtask, and add_dependency.
+
+id: planning-agentic
+name: Agentic Project Planning
+version: 1.1.0
+description: Single-agent planning with tool-based task creation and dependency wiring
+
+defaults:
+  model: openrouter/anthropic/claude-opus-4-6
+  timeout: 2400
+  maxTurns: 300
+
+agents:
+  - id: finn
+    name: Finn (Solutions Architect)
+    persona: agents/finn
+    model: openrouter/anthropic/claude-opus-4-6
+
+steps:
+  - id: PLAN
+    agent: finn
+    input: |
+      You are the Product Owner. Decompose this project into tasks, subtasks, and a
+      dependency graph using the tools available to you.
+
+      ## Project: {{project_name}}
+
+      {{task_description}}
+
+      {% if project_vision %}
+      ## Project Vision
+      {{project_vision}}
+      {% endif %}
+
+      {% if additional_context %}
+      ## Additional Context
+      {{additional_context}}
+      {% endif %}
+
+      ## Tools
+
+      The project ID for ALL tool calls is: **{{project_id}}**
+
+      - **create_task** → returns a task ID. SAVE IT.
+      - **create_subtask** → returns a subtask ID. SAVE IT.
+      - **add_dependency(projectId, taskId, dependsOnTaskId)** → wires: dependsOnTaskId
+        must complete BEFORE taskId can start. API rejects cycles automatically.
+
+      ## INSTRUCTIONS
+
+      You must work through these steps IN ORDER. After each step, IMMEDIATELY proceed
+      to the next step. Do NOT write a summary or call complete() until step 4 is done.
+
+      ### Step 1 — Create all top-level tasks (5-20 tasks)
+
+      Read the project description, then create tasks with create_task. For each:
+      - Action-oriented title (verb + noun)
+      - Detailed description with: what to build, acceptance criteria (Given/When/Then),
+        scope boundary (NOT in scope), verification steps, technical notes (files, APIs)
+      - Priority: P0=foundation, P1=core, P2=enhancement, P3=nice-to-have
+      - Tags, estimated hours (include testing time; max 16h per task)
+
+      After creating each task, write down its ID and title. You NEED this list for Step 2.
+
+      ### Step 2 — Wire ALL dependencies between tasks
+
+      THIS STEP IS MANDATORY. Go through your task list and call add_dependency for
+      every ordering constraint. Ask for EACH task: "what must be done before this?"
+
+      Patterns:
+      - Setup/scaffolding → feature tasks (setup blocks features)
+      - Data model → storage layer → operations that use storage
+      - Core features → features that build on them
+      - ALL feature tasks → integration/E2E test task
+      - ALL feature tasks → documentation task
+      - P0 tasks have NO or MINIMAL dependencies (they are foundations)
+
+      Direction: add_dependency(projectId, taskId=BLOCKED_TASK, dependsOnTaskId=BLOCKER)
+
+      **Expect N to 2N edges for N tasks. If you made 8 tasks, make 8-16 add_dependency
+      calls. A project with zero dependencies is WRONG.**
+
+      After wiring all dependencies, list what you created, then IMMEDIATELY continue
+      to Step 3. Do NOT call complete().
+
+      ### Step 3 — Create subtasks for every task
+
+      For EACH top-level task, create 2-5 subtasks with create_subtask (1-4 hours each).
+      Subtask descriptions follow the same rules as tasks (acceptance criteria, scope
+      boundary, verification steps). Include a final verify/test subtask per parent.
+
+      After creating subtasks for a parent, write down their IDs. You need them for Step 4.
+
+      ### Step 4 — Wire ALL subtask dependencies
+
+      THIS STEP IS MANDATORY.
+
+      **Within each parent:** wire subtasks in sequence. The verify subtask depends on
+      ALL other subtasks in that parent.
+
+      **Across parents:** if subtask in Parent B needs Parent A done first, depend on
+      Parent A's verify subtask.
+
+      After wiring all subtask dependencies, you are done. Call complete() with a summary:
+      total tasks, subtasks, dependency edges, critical path, estimated hours, risks.
+    outputs:
+      - summary

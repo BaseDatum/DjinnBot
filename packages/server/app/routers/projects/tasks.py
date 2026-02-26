@@ -588,11 +588,24 @@ async def get_ready_tasks(
     else:
         status_filter = ["backlog", "planning", "ready"]
 
+    # ── Identify container parents (tasks that have subtasks) ──
+    # These are never directly executed — their status is derived from children.
+    subtask_parents_result = await session.execute(
+        select(Task.parent_task_id)
+        .where(Task.project_id == project_id, Task.parent_task_id.isnot(None))
+        .distinct()
+    )
+    container_parent_ids = {row[0] for row in subtask_parents_result.all()}
+
     # Build base query — include specified status tasks
     query = select(Task).where(
         Task.project_id == project_id,
         Task.status.in_(status_filter),
     )
+
+    # Exclude container parents — they have subtasks and are never directly picked up
+    if container_parent_ids:
+        query = query.where(Task.id.notin_(container_parent_ids))
 
     # Filter by agent assignment: tasks assigned to this agent OR unassigned
     if agent_id:
@@ -678,7 +691,8 @@ async def get_ready_tasks(
                 break
             continue
 
-        # For backlog/planning/blocked tasks, check all blocking dependencies are done
+        # For backlog/planning/blocked tasks, check all blocking dependencies are done.
+        # This includes the task's own deps AND (for subtasks) the parent's deps.
         dep_result = await session.execute(
             select(Task.status)
             .join(DependencyEdge, DependencyEdge.from_task_id == Task.id)
@@ -688,7 +702,26 @@ async def get_ready_tasks(
         )
         deps = dep_result.all()
 
-        if not deps or all(status == "done" for (status,) in deps):
+        # For subtasks: also check that the parent task's blocking deps are all done.
+        # This implements implicit cross-level dependency inheritance — subtasks can't
+        # start until the parent's upstream blockers are satisfied.
+        parent_deps_met = True
+        if task.parent_task_id:
+            parent_dep_result = await session.execute(
+                select(Task.status)
+                .join(DependencyEdge, DependencyEdge.from_task_id == Task.id)
+                .where(
+                    DependencyEdge.to_task_id == task.parent_task_id,
+                    DependencyEdge.type == "blocks",
+                )
+            )
+            parent_deps = parent_dep_result.all()
+            if parent_deps and not all(status == "done" for (status,) in parent_deps):
+                parent_deps_met = False
+
+        if parent_deps_met and (
+            not deps or all(status == "done" for (status,) in deps)
+        ):
             # Fetch downstream tasks this one blocks
             downstream_result = await session.execute(
                 select(Task.id, Task.title, Task.status)

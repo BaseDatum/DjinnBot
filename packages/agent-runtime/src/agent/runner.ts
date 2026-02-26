@@ -1000,8 +1000,11 @@ export class ContainerAgentRunner {
 
       console.log(`[AgentRunner] Running step ${requestId}. Model: ${model.id}, Tools: ${tools.length}`);
 
-      // Set up timeout — onboarding sessions do deep repo exploration, need more time
-      const timeoutMs = process.env.ONBOARDING_SESSION_ID ? 600_000 : 180_000;
+      // Set up timeout — use pipeline-configured timeout if available, else defaults.
+      // STEP_TIMEOUT_MS is injected by the engine's container runner from the pipeline config.
+      const timeoutMs = process.env.STEP_TIMEOUT_MS
+        ? parseInt(process.env.STEP_TIMEOUT_MS, 10)
+        : process.env.ONBOARDING_SESSION_ID ? 600_000 : 180_000;
       const timeoutId = setTimeout(() => {
         console.warn(`[AgentRunner] Timeout reached, aborting`);
         agent.abort();

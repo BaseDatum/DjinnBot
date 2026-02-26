@@ -256,6 +256,9 @@ export class ContainerRunner implements AgentRunner {
           // MCP / mcpo: agent-runtime calls createMcpTools() on each turn using these.
           ...(process.env.MCPO_BASE_URL ? { MCPO_BASE_URL: process.env.MCPO_BASE_URL } : {}),
           ...(process.env.MCPO_API_KEY ? { MCPO_API_KEY: process.env.MCPO_API_KEY } : {}),
+          // Pipeline step timeout — passed to agent-runtime so it can use it
+          // instead of its hardcoded 180s default. Value is in milliseconds.
+          STEP_TIMEOUT_MS: String(timeout),
           // LLM call logging context — used by the runtime to tag each API call
           RUN_ID: runId,
           // User attribution — agent-runtime includes this in LLM call logs

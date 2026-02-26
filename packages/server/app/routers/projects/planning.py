@@ -2,6 +2,7 @@
 
 import json
 import uuid
+from difflib import SequenceMatcher
 from typing import Optional
 from fastapi import APIRouter, HTTPException, Depends
 from sqlalchemy import select, func
@@ -25,9 +26,44 @@ logger = get_logger(__name__)
 router = APIRouter()
 
 
+def _fuzzy_resolve_dep(
+    dep_title: str, known_titles: dict[str, str], threshold: float = 0.6
+) -> Optional[str]:
+    """Try to fuzzy-match a dependency title against known task titles.
+
+    Returns the matched title if found above threshold, else None.
+    """
+    best_match = None
+    best_score = 0.0
+    dep_lower = dep_title.lower().strip()
+    for title in known_titles:
+        score = SequenceMatcher(None, dep_lower, title.lower().strip()).ratio()
+        if score > best_score:
+            best_score = score
+            best_match = title
+    if best_score >= threshold and best_match:
+        return best_match
+    return None
+
+
 # ══════════════════════════════════════════════════════════════════════════
 # AI PLANNING PIPELINE
 # ══════════════════════════════════════════════════════════════════════════
+
+
+@router.post("/{project_id}/reflow-planning")
+async def reflow_planning(
+    project_id: str,
+    session: AsyncSession = Depends(get_async_session),
+):
+    """Reflow task statuses after planning — moves blocked tasks to backlog.
+
+    Can be called manually or is triggered automatically when a planning
+    pipeline completes.
+    """
+    await get_project_or_404(session, project_id)
+    result = await reflow_task_statuses_after_planning(project_id, session)
+    return result
 
 
 @router.post("/{project_id}/plan")
@@ -71,6 +107,7 @@ async def plan_project(
             "project_name": project.name,
             "project_description": project.description or "",
             "planning_run": True,  # Flag to identify this as a planning run
+            "pipeline_id": req.pipelineId,  # Used by completion handler to choose import strategy
             "additional_context": req.context,
         }
     )
@@ -364,17 +401,31 @@ async def bulk_import_tasks(
         )
 
     # Validate dependency graph before inserting anything
+    # Resilient: unknown deps are fuzzy-matched or dropped with a warning
     edges_to_create = []
+    skipped_deps = []
     for td in task_data:
         for dep_title in td["dependencies"]:
+            resolved_title = dep_title
             if dep_title not in title_to_id:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Task '{td['title']}' depends on unknown task '{dep_title}'",
-                )
+                # Try fuzzy matching
+                fuzzy_match = _fuzzy_resolve_dep(dep_title, title_to_id)
+                if fuzzy_match:
+                    logger.warning(
+                        f"Fuzzy-matched dependency '{dep_title}' -> '{fuzzy_match}' "
+                        f"for task '{td['title']}'"
+                    )
+                    resolved_title = fuzzy_match
+                else:
+                    logger.warning(
+                        f"Dropping unknown dependency '{dep_title}' "
+                        f"for task '{td['title']}' (no fuzzy match found)"
+                    )
+                    skipped_deps.append({"task": td["title"], "unknown_dep": dep_title})
+                    continue
             edges_to_create.append(
                 {
-                    "from": title_to_id[dep_title],
+                    "from": title_to_id[resolved_title],
                     "to": td["id"],
                     "type": "blocks",
                 }
@@ -458,6 +509,7 @@ async def bulk_import_tasks(
         "status": "imported",
         "tasks_created": len(task_data),
         "dependencies_created": len(edges_to_create),
+        "skipped_dependencies": skipped_deps,
         "task_ids": {td["title"]: td["id"] for td in task_data},
         "title_to_id": title_to_id,  # Return mapping for subtask import
     }
@@ -555,10 +607,25 @@ async def bulk_import_subtasks(
     # Flush subtasks to DB before inserting edges so FK constraints are satisfied
     await session.flush()
 
-    # Insert dependency edges among subtasks
+    # Insert dependency edges among subtasks (with fuzzy fallback)
+    edges_created = 0
     for td in subtask_data:
         for dep_title in td["dependencies"]:
             dep_id = title_to_id.get(dep_title)
+            if not dep_id:
+                # Try fuzzy matching against subtask titles
+                fuzzy_match = _fuzzy_resolve_dep(dep_title, title_to_id)
+                if fuzzy_match:
+                    logger.warning(
+                        f"Subtask fuzzy-matched dependency '{dep_title}' -> '{fuzzy_match}' "
+                        f"for subtask '{td['title']}'"
+                    )
+                    dep_id = title_to_id[fuzzy_match]
+                else:
+                    logger.warning(
+                        f"Dropping unknown subtask dependency '{dep_title}' "
+                        f"for subtask '{td['title']}'"
+                    )
             if dep_id:
                 edge = DependencyEdge(
                     id=gen_id("dep_"),
@@ -568,6 +635,173 @@ async def bulk_import_subtasks(
                     type="blocks",
                 )
                 session.add(edge)
+                edges_created += 1
 
     await session.commit()
-    return {"subtasks_created": len(subtask_data)}
+    return {"subtasks_created": len(subtask_data), "edges_created": edges_created}
+
+
+async def reflow_task_statuses_after_planning(
+    project_id: str, session: AsyncSession
+) -> dict:
+    """Reflow task statuses after planning completes.
+
+    During planning, tasks are created before dependencies are wired, so they
+    end up in 'ready' status even if they have unresolved blocking dependencies.
+    This function moves blocked tasks to 'backlog' (the initial column) so only
+    truly unblocked tasks remain in 'ready'.
+
+    Additionally, parent tasks that have subtasks are moved to 'backlog' since
+    they are container tasks whose status is derived from their children.
+
+    Called automatically when a planning pipeline run completes.
+    """
+    now = now_ms()
+    moved = 0
+
+    # Get initial/backlog column for this project
+    col_result = await session.execute(
+        select(KanbanColumn)
+        .where(KanbanColumn.project_id == project_id)
+        .order_by(KanbanColumn.position)
+    )
+    all_cols = col_result.scalars().all()
+    if not all_cols:
+        return {"moved": 0, "error": "no columns"}
+
+    # Find backlog column (first column or one with 'backlog' status)
+    backlog_col = all_cols[0]
+    for col in all_cols:
+        statuses = json.loads(col.task_statuses) if col.task_statuses else []
+        if "backlog" in statuses:
+            backlog_col = col
+            break
+
+    backlog_status = "backlog"
+
+    # Identify container parents (tasks that have subtasks)
+    subtask_parents_result = await session.execute(
+        select(Task.parent_task_id)
+        .where(Task.project_id == project_id, Task.parent_task_id.isnot(None))
+        .distinct()
+    )
+    container_parent_ids = {row[0] for row in subtask_parents_result.all()}
+
+    # Get all tasks in the project that are in non-terminal statuses
+    tasks_result = await session.execute(
+        select(Task).where(
+            Task.project_id == project_id,
+            Task.status.notin_(["done", "failed"]),
+        )
+    )
+    tasks = tasks_result.scalars().all()
+
+    for task in tasks:
+        should_move_to_backlog = False
+
+        # Container parents always go to backlog (derived status)
+        if task.id in container_parent_ids:
+            should_move_to_backlog = True
+        else:
+            # Check if this task has any unresolved blocking dependencies
+            dep_result = await session.execute(
+                select(Task.status)
+                .join(DependencyEdge, DependencyEdge.from_task_id == Task.id)
+                .where(
+                    DependencyEdge.to_task_id == task.id,
+                    DependencyEdge.type == "blocks",
+                )
+            )
+            deps = dep_result.all()
+            if deps and not all(status == "done" for (status,) in deps):
+                should_move_to_backlog = True
+
+            # For subtasks: also check parent's deps
+            if not should_move_to_backlog and task.parent_task_id:
+                parent_dep_result = await session.execute(
+                    select(Task.status)
+                    .join(DependencyEdge, DependencyEdge.from_task_id == Task.id)
+                    .where(
+                        DependencyEdge.to_task_id == task.parent_task_id,
+                        DependencyEdge.type == "blocks",
+                    )
+                )
+                parent_deps = parent_dep_result.all()
+                if parent_deps and not all(
+                    status == "done" for (status,) in parent_deps
+                ):
+                    should_move_to_backlog = True
+
+        if should_move_to_backlog and task.status != backlog_status:
+            task.status = backlog_status
+            task.column_id = backlog_col.id
+            task.updated_at = now
+            moved += 1
+
+    # ── Second pass: promote unblocked leaf tasks to "ready" ──
+    # Tasks that have no unresolved deps (and are not container parents) should
+    # be in "ready" so agents can pick them up.
+    ready_col = None
+    for col in all_cols:
+        statuses = json.loads(col.task_statuses) if col.task_statuses else []
+        if "ready" in statuses:
+            ready_col = col
+            break
+
+    promoted = 0
+    if ready_col:
+        # Re-fetch tasks since we just modified them
+        tasks_result2 = await session.execute(
+            select(Task).where(
+                Task.project_id == project_id,
+                Task.status == backlog_status,
+            )
+        )
+        backlog_tasks = tasks_result2.scalars().all()
+
+        for task in backlog_tasks:
+            # Skip container parents — their status is derived
+            if task.id in container_parent_ids:
+                continue
+
+            # Check own deps
+            dep_result = await session.execute(
+                select(Task.status)
+                .join(DependencyEdge, DependencyEdge.from_task_id == Task.id)
+                .where(
+                    DependencyEdge.to_task_id == task.id,
+                    DependencyEdge.type == "blocks",
+                )
+            )
+            deps = dep_result.all()
+            if deps and not all(status == "done" for (status,) in deps):
+                continue
+
+            # Check parent deps (for subtasks)
+            if task.parent_task_id:
+                parent_dep_result = await session.execute(
+                    select(Task.status)
+                    .join(DependencyEdge, DependencyEdge.from_task_id == Task.id)
+                    .where(
+                        DependencyEdge.to_task_id == task.parent_task_id,
+                        DependencyEdge.type == "blocks",
+                    )
+                )
+                parent_deps = parent_dep_result.all()
+                if parent_deps and not all(
+                    status == "done" for (status,) in parent_deps
+                ):
+                    continue
+
+            # This task is unblocked — promote to ready
+            task.status = "ready"
+            task.column_id = ready_col.id
+            task.updated_at = now
+            promoted += 1
+
+    await session.commit()
+    logger.info(
+        f"Post-planning reflow for project {project_id}: "
+        f"{moved} → backlog, {promoted} → ready"
+    )
+    return {"moved": moved, "promoted": promoted}

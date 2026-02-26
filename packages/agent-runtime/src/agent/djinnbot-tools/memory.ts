@@ -4,9 +4,10 @@ import type { RedisPublisher } from '../../redis/publisher.js';
 import { exec } from 'node:child_process';
 import { promisify } from 'node:util';
 import { join } from 'node:path';
+import { existsSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 // @ts-ignore — clawvault is an ESM package declared in package.json; types resolve at build time
-import { ClawVault } from 'clawvault';
+import { ClawVault, createVault } from 'clawvault';
 import { MemoryRetrievalTracker } from './memory-scoring.js';
 import { SharedVaultClient } from './shared-vault-api.js';
 
@@ -108,8 +109,23 @@ export function createMemoryTools(config: MemoryToolsConfig): AgentTool[] {
 
   const getPersonalVault = async (): Promise<InstanceType<typeof ClawVault>> => {
     if (!personalVault) {
-      personalVault = new ClawVault(vaultPath);
-      await personalVault.load();
+      const configPath = join(vaultPath, '.clawvault.json');
+      if (existsSync(configPath)) {
+        personalVault = new ClawVault(vaultPath);
+        await personalVault.load();
+      } else {
+        // Vault directory exists (JuiceFS mount) but was never initialized.
+        // This happens when the engine pre-creates the JuiceFS subdir but
+        // AgentMemoryManager hasn't run initialize() for this agent yet.
+        console.log(`[memory] Auto-creating ClawVault at ${vaultPath} (missing .clawvault.json)`);
+        personalVault = await createVault(vaultPath, {
+          name: agentId,
+          qmdCollection: `djinnbot-${agentId}`,
+        }, {
+          skipBases: true,
+          skipTasks: true,
+        });
+      }
     }
     return personalVault;
   };

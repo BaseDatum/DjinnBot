@@ -37,6 +37,7 @@ import {
   Info,
   AlertCircle,
   Activity,
+  Zap,
 } from 'lucide-react';
 import {
   Dialog,
@@ -65,11 +66,12 @@ export const Route = createFileRoute('/admin')({
   component: AdminPage,
 });
 
-type AdminTab = 'users' | 'providers' | 'sharing' | 'memory' | 'memory-scoring' | 'models' | 'approvals' | 'runtime' | 'secrets' | 'waitlist' | 'email' | 'logs' | 'notifications' | 'usage';
+type AdminTab = 'users' | 'providers' | 'sharing' | 'memory' | 'memory-scoring' | 'models' | 'approvals' | 'runtime' | 'secrets' | 'waitlist' | 'email' | 'logs' | 'notifications' | 'usage' | 'pulse';
 
 const NAV_ITEMS: NestedSidebarItem[] = [
   { key: 'notifications', label: 'Notifications', icon: Bell },
   { key: 'usage', label: 'API Usage', icon: Activity },
+  { key: 'pulse', label: 'Pulse System', icon: Zap },
   { key: 'users', label: 'Users', icon: Users },
   { key: 'waitlist', label: 'Waitlist', icon: ClipboardList },
   { key: 'email', label: 'Email Settings', icon: Mail },
@@ -113,7 +115,7 @@ interface AdminNotification {
 }
 
 const VALID_TABS = new Set<AdminTab>([
-  'notifications', 'usage', 'users', 'providers', 'sharing', 'memory',
+  'notifications', 'usage', 'pulse', 'users', 'providers', 'sharing', 'memory',
   'memory-scoring', 'models', 'approvals', 'runtime', 'secrets', 'waitlist',
   'email', 'logs',
 ]);
@@ -270,9 +272,9 @@ function AdminPage() {
     }
   }, [activeTab]);
 
-  // Load global settings (used by runtime, default models tabs)
+  // Load global settings (used by runtime, default models, pulse tabs)
   useEffect(() => {
-    if (activeTab === 'runtime' || activeTab === 'models') {
+    if (activeTab === 'runtime' || activeTab === 'models' || activeTab === 'pulse') {
       authFetch(`${API_BASE}/settings/`)
         .then((res) => res.json())
         .then((data: any) => {
@@ -612,6 +614,133 @@ function AdminPage() {
 
         {/* ── API Usage ── */}
         {activeTab === 'usage' && <ApiUsagePanel />}
+
+        {/* ── Pulse System Kill Switch ── */}
+        {activeTab === 'pulse' && (
+          <div className="max-w-5xl mx-auto space-y-6">
+            <div>
+              <h2 className="text-lg font-semibold flex items-center gap-2">
+                <Zap className="h-5 w-5" />
+                Pulse System
+              </h2>
+              <p className="text-sm text-muted-foreground mt-1">
+                Master control for the autonomous pulse system across all agents.
+              </p>
+            </div>
+
+            {/* Kill Switch Card */}
+            <div className={`border-2 rounded-lg p-6 transition-colors ${
+              globalSettings?.pulseEnabled
+                ? 'border-green-500/30 bg-green-500/5'
+                : 'border-red-500/30 bg-red-500/5'
+            }`}>
+              <div className="flex items-center justify-between">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-3">
+                    <h3 className="text-lg font-semibold">Master Pulse Kill Switch</h3>
+                    <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${
+                      globalSettings?.pulseEnabled
+                        ? 'bg-green-500/15 text-green-600'
+                        : 'bg-red-500/15 text-red-600'
+                    }`}>
+                      {globalSettings?.pulseEnabled ? 'ACTIVE' : 'KILLED'}
+                    </span>
+                  </div>
+                  <p className="text-sm text-muted-foreground max-w-lg">
+                    {globalSettings?.pulseEnabled
+                      ? 'The pulse system is running. All agents with pulse routines will execute on their configured schedules.'
+                      : 'The pulse system is disabled. No agents will pulse, regardless of their individual settings. Wake-on-message is also suppressed.'}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={globalSettings?.pulseEnabled ?? false}
+                  onClick={async () => {
+                    if (!globalSettings) return;
+                    const newValue = !globalSettings.pulseEnabled;
+                    const updated = { ...globalSettings, pulseEnabled: newValue };
+                    setGlobalSettings(updated);
+                    setGlobalSettingsEdited(true);
+                    try {
+                      const res = await authFetch(`${API_BASE}/settings/`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(updated),
+                      });
+                      if (!res.ok) throw new Error('Failed to save');
+                      toast.success(newValue ? 'Pulse system enabled' : 'Pulse system disabled');
+                    } catch {
+                      // Revert on failure
+                      setGlobalSettings(globalSettings);
+                      toast.error('Failed to update pulse setting');
+                    }
+                  }}
+                  className={`relative inline-flex h-8 w-14 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ${
+                    globalSettings?.pulseEnabled ? 'bg-green-500' : 'bg-red-500'
+                  }`}
+                >
+                  <span
+                    className={`pointer-events-none block h-7 w-7 rounded-full bg-background shadow-lg ring-0 transition-transform ${
+                      globalSettings?.pulseEnabled ? 'translate-x-6' : 'translate-x-0'
+                    }`}
+                  />
+                </button>
+              </div>
+            </div>
+
+            {/* Pulse Interval */}
+            {globalSettings && (
+              <div className="border rounded-lg p-4 space-y-3">
+                <div className="flex items-center gap-2">
+                  <Clock className="h-4 w-4 text-muted-foreground" />
+                  <Label className="font-medium">Default Pulse Interval</Label>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Fallback interval (in minutes) for agents without explicit routine schedules.
+                  Individual routines can override this with their own interval.
+                </p>
+                <div className="flex items-center gap-3 max-w-xs">
+                  <Input
+                    type="number"
+                    min={1}
+                    max={1440}
+                    value={globalSettings.pulseIntervalMinutes}
+                    onChange={(e) => {
+                      const val = parseInt(e.target.value, 10);
+                      if (!isNaN(val) && val > 0) {
+                        handleGlobalSettingsChange({ ...globalSettings, pulseIntervalMinutes: val });
+                      }
+                    }}
+                    className="w-24"
+                  />
+                  <span className="text-sm text-muted-foreground">minutes</span>
+                  {settingsSaveState === 'saving' && (
+                    <span className="text-xs text-muted-foreground animate-pulse">Saving...</span>
+                  )}
+                  {settingsSaveState === 'saved' && (
+                    <span className="text-xs text-green-500">Saved</span>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Info */}
+            <div className="flex items-start gap-3 rounded-lg border border-blue-500/20 bg-blue-500/5 p-4">
+              <Info className="h-5 w-5 text-blue-400 mt-0.5 shrink-0" />
+              <div className="text-sm text-muted-foreground space-y-1">
+                <p>
+                  The kill switch overrides all per-agent <code className="text-xs bg-muted px-1 rounded">pulse_enabled</code> settings
+                  and routine schedules. When disabled, no scheduled pulses fire and wake-on-message notifications are suppressed.
+                </p>
+                <p>
+                  Individual agent pulse settings and routines can still be configured while the system is disabled --
+                  they will resume automatically when you re-enable the master switch.
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* ── Users ── */}
         {activeTab === 'users' && (
