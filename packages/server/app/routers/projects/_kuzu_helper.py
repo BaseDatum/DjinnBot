@@ -77,14 +77,23 @@ async def _query(db_path: str, cypher: str) -> list[dict]:
 
 
 async def query_graph_data(db_path: str) -> dict:
-    """Get graph data for visualization."""
+    """Get full graph data for visualization.
+
+    Returns all nodes (including File/Folder hierarchy), all edge types,
+    communities, and processes. Node counts are capped per type to prevent
+    overwhelming the frontend on huge repos.
+    """
     nodes = []
     edges = []
     communities = []
     processes = []
 
-    # Get code symbols (non-File, non-Folder)
-    for label in [
+    # All node labels in the schema — includes hierarchy + code + extended types
+    ALL_LABELS = [
+        # Hierarchy
+        "File",
+        "Folder",
+        # Core code symbols
         "Function",
         "Class",
         "Method",
@@ -95,13 +104,46 @@ async def query_graph_data(db_path: str) -> dict:
         "Impl",
         "Constructor",
         "CodeElement",
-    ]:
+        "Namespace",
+        "TypeAlias",
+        # Extended types (C#, PHP, C/C++)
+        "Variable",
+        "Decorator",
+        "Import",
+        "Type",
+        "Macro",
+        "Typedef",
+        "Union",
+        "Const",
+        "Static",
+        "Property",
+        "Record",
+        "Delegate",
+        "Annotation",
+        "Template",
+        "Module",
+        "Package",
+    ]
+
+    # Cap per-type to keep total manageable (~5k nodes max)
+    LIMIT_PER_TYPE = {
+        "File": 2000,
+        "Folder": 500,
+        "Function": 1000,
+        "Class": 500,
+        "Method": 1000,
+    }
+    DEFAULT_LIMIT = 300
+
+    for label in ALL_LABELS:
+        limit = LIMIT_PER_TYPE.get(label, DEFAULT_LIMIT)
         try:
             rows = await _query(
                 db_path,
                 f"MATCH (n:`{label}`) RETURN n.id AS id, n.name AS name, "
                 f"n.filePath AS filePath, n.startLine AS startLine, "
-                f"'{label}' AS label LIMIT 500",
+                f"n.language AS language, "
+                f"'{label}' AS label LIMIT {limit}",
             )
             for r in rows:
                 nodes.append(
@@ -110,6 +152,7 @@ async def query_graph_data(db_path: str) -> dict:
                         "name": r["name"],
                         "filePath": r.get("filePath", ""),
                         "startLine": r.get("startLine"),
+                        "language": r.get("language", ""),
                         "label": label,
                     }
                 )
@@ -154,14 +197,28 @@ async def query_graph_data(db_path: str) -> dict:
     except Exception:
         pass
 
-    # Get edges (CALLS, IMPORTS, EXTENDS, IMPLEMENTS — limited for UI perf)
+    # Get ALL edge types (including CONTAINS, DEFINES for hierarchy visualization)
+    ALL_EDGE_TYPES = [
+        "CONTAINS",
+        "DEFINES",
+        "CALLS",
+        "IMPORTS",
+        "EXTENDS",
+        "IMPLEMENTS",
+        "MEMBER_OF",
+        "STEP_IN_PROCESS",
+        "USES",
+        "OVERRIDES",
+        "DECORATES",
+    ]
     try:
+        type_list = ", ".join(f"'{t}'" for t in ALL_EDGE_TYPES)
         rows = await _query(
             db_path,
-            "MATCH (a)-[r:CodeRelation]->(b) "
-            "WHERE r.type IN ['CALLS', 'IMPORTS', 'EXTENDS', 'IMPLEMENTS'] "
-            "RETURN a.id AS sourceId, b.id AS targetId, r.type AS type, "
-            "r.confidence AS confidence LIMIT 2000",
+            f"MATCH (a)-[r:CodeRelation]->(b) "
+            f"WHERE r.type IN [{type_list}] "
+            f"RETURN a.id AS sourceId, b.id AS targetId, r.type AS type, "
+            f"r.confidence AS confidence, r.step AS step LIMIT 10000",
         )
         edges = [
             {
@@ -169,6 +226,7 @@ async def query_graph_data(db_path: str) -> dict:
                 "targetId": r["targetId"],
                 "type": r["type"],
                 "confidence": r.get("confidence", 1.0),
+                "step": r.get("step"),
             }
             for r in rows
         ]

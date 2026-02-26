@@ -193,6 +193,12 @@ function extractFromAST(
       case 'cpp':
         extractC(node, parentName);
         break;
+      case 'csharp':
+        extractCSharp(node, parentName);
+        break;
+      case 'php':
+        extractPHP(node, parentName);
+        break;
     }
   }
 
@@ -925,6 +931,438 @@ function extractFromAST(
           callerFile: filePath,
           callerName: enclosing || '<module>',
           calleeName: funcNode.text,
+          line: node.startPosition.row + 1,
+        });
+      }
+    }
+
+    for (const child of node.namedChildren) {
+      walkNode(child, parentName);
+    }
+  }
+
+  // ── C# ──────────────────────────────────────────────────────────────
+
+  function extractCSharp(node: any, parentName: string | null) {
+    const type = node.type;
+
+    if (type === 'class_declaration') {
+      const nameNode = node.childForFieldName('name');
+      if (nameNode) {
+        const isPublic = node.children.some((c: any) => c.text === 'public');
+        symbols.push({
+          name: nameNode.text,
+          label: 'Class',
+          filePath,
+          startLine: node.startPosition.row + 1,
+          endLine: node.endPosition.row + 1,
+          isExported: isPublic,
+          language,
+          content: node.text.slice(0, 500),
+        });
+
+        // Heritage: base list
+        const baseList = node.children.find((c: any) => c.type === 'base_list');
+        if (baseList) {
+          for (const base of baseList.namedChildren) {
+            if (base.type === 'simple_base_type') {
+              const baseName = base.namedChildren[0]?.text;
+              if (baseName) {
+                heritage.push({
+                  filePath,
+                  childName: nameNode.text,
+                  parentName: baseName,
+                  type: 'extends',
+                });
+              }
+            }
+          }
+        }
+
+        // Recurse into body
+        const body = node.childForFieldName('body') ?? node.children.find((c: any) => c.type === 'declaration_list');
+        if (body) {
+          for (const child of body.namedChildren) {
+            extractCSharp(child, nameNode.text);
+          }
+          return;
+        }
+      }
+    }
+
+    if (type === 'interface_declaration') {
+      const nameNode = node.childForFieldName('name');
+      if (nameNode) {
+        symbols.push({
+          name: nameNode.text,
+          label: 'Interface',
+          filePath,
+          startLine: node.startPosition.row + 1,
+          endLine: node.endPosition.row + 1,
+          isExported: node.children.some((c: any) => c.text === 'public'),
+          language,
+        });
+      }
+    }
+
+    if (type === 'struct_declaration') {
+      const nameNode = node.childForFieldName('name');
+      if (nameNode) {
+        symbols.push({
+          name: nameNode.text,
+          label: 'Struct',
+          filePath,
+          startLine: node.startPosition.row + 1,
+          endLine: node.endPosition.row + 1,
+          isExported: node.children.some((c: any) => c.text === 'public'),
+          language,
+        });
+      }
+    }
+
+    if (type === 'enum_declaration') {
+      const nameNode = node.childForFieldName('name');
+      if (nameNode) {
+        symbols.push({
+          name: nameNode.text,
+          label: 'Enum',
+          filePath,
+          startLine: node.startPosition.row + 1,
+          endLine: node.endPosition.row + 1,
+          isExported: node.children.some((c: any) => c.text === 'public'),
+          language,
+        });
+      }
+    }
+
+    if (type === 'record_declaration') {
+      const nameNode = node.childForFieldName('name');
+      if (nameNode) {
+        symbols.push({
+          name: nameNode.text,
+          label: 'Record',
+          filePath,
+          startLine: node.startPosition.row + 1,
+          endLine: node.endPosition.row + 1,
+          isExported: node.children.some((c: any) => c.text === 'public'),
+          language,
+        });
+      }
+    }
+
+    if (type === 'delegate_declaration') {
+      const nameNode = node.childForFieldName('name');
+      if (nameNode) {
+        symbols.push({
+          name: nameNode.text,
+          label: 'Delegate',
+          filePath,
+          startLine: node.startPosition.row + 1,
+          endLine: node.endPosition.row + 1,
+          isExported: node.children.some((c: any) => c.text === 'public'),
+          language,
+        });
+      }
+    }
+
+    if (type === 'namespace_declaration') {
+      const nameNode = node.childForFieldName('name');
+      if (nameNode) {
+        symbols.push({
+          name: nameNode.text,
+          label: 'Namespace',
+          filePath,
+          startLine: node.startPosition.row + 1,
+          endLine: node.endPosition.row + 1,
+          isExported: true,
+          language,
+        });
+        // Recurse into namespace body
+        const body = node.childForFieldName('body') ?? node.children.find((c: any) => c.type === 'declaration_list');
+        if (body) {
+          for (const child of body.namedChildren) {
+            extractCSharp(child, nameNode.text);
+          }
+          return;
+        }
+      }
+    }
+
+    if (type === 'method_declaration') {
+      const nameNode = node.childForFieldName('name');
+      if (nameNode && parentName) {
+        symbols.push({
+          name: `${parentName}.${nameNode.text}`,
+          label: 'Method',
+          filePath,
+          startLine: node.startPosition.row + 1,
+          endLine: node.endPosition.row + 1,
+          isExported: node.children.some((c: any) => c.text === 'public'),
+          language,
+          content: node.text.slice(0, 500),
+        });
+      }
+    }
+
+    if (type === 'constructor_declaration') {
+      const nameNode = node.childForFieldName('name');
+      if (nameNode) {
+        symbols.push({
+          name: `${parentName || nameNode.text}.constructor`,
+          label: 'Constructor',
+          filePath,
+          startLine: node.startPosition.row + 1,
+          endLine: node.endPosition.row + 1,
+          isExported: true,
+          language,
+        });
+      }
+    }
+
+    if (type === 'property_declaration') {
+      const nameNode = node.childForFieldName('name');
+      if (nameNode && parentName) {
+        symbols.push({
+          name: `${parentName}.${nameNode.text}`,
+          label: 'Property',
+          filePath,
+          startLine: node.startPosition.row + 1,
+          endLine: node.endPosition.row + 1,
+          isExported: node.children.some((c: any) => c.text === 'public'),
+          language,
+        });
+      }
+    }
+
+    // Using directives
+    if (type === 'using_directive') {
+      const nameNode = node.namedChildren.find((c: any) => c.type === 'qualified_name' || c.type === 'identifier');
+      if (nameNode) {
+        imports.push({
+          filePath,
+          importedName: nameNode.text,
+          importedFrom: nameNode.text,
+          isDefault: false,
+          isNamespace: true,
+        });
+      }
+    }
+
+    // Invocations
+    if (type === 'invocation_expression') {
+      const funcNode = node.childForFieldName('function');
+      if (funcNode) {
+        const calleeName = funcNode.type === 'member_access_expression'
+          ? funcNode.childForFieldName('name')?.text || funcNode.text
+          : funcNode.text;
+        const enclosing = findEnclosingFunction(node);
+        calls.push({
+          callerFile: filePath,
+          callerName: enclosing || '<module>',
+          calleeName,
+          line: node.startPosition.row + 1,
+        });
+      }
+    }
+
+    for (const child of node.namedChildren) {
+      walkNode(child, parentName);
+    }
+  }
+
+  // ── PHP ─────────────────────────────────────────────────────────────
+
+  function extractPHP(node: any, parentName: string | null) {
+    const type = node.type;
+
+    if (type === 'class_declaration') {
+      const nameNode = node.childForFieldName('name');
+      if (nameNode) {
+        symbols.push({
+          name: nameNode.text,
+          label: 'Class',
+          filePath,
+          startLine: node.startPosition.row + 1,
+          endLine: node.endPosition.row + 1,
+          isExported: true,
+          language,
+          content: node.text.slice(0, 500),
+        });
+
+        // Heritage: base_clause (extends)
+        const baseClause = node.children.find((c: any) => c.type === 'base_clause');
+        if (baseClause) {
+          for (const child of baseClause.namedChildren) {
+            if (child.type === 'name' || child.type === 'qualified_name') {
+              heritage.push({
+                filePath,
+                childName: nameNode.text,
+                parentName: child.text,
+                type: 'extends',
+              });
+            }
+          }
+        }
+
+        // Heritage: class_interface_clause (implements)
+        const implClause = node.children.find((c: any) => c.type === 'class_interface_clause');
+        if (implClause) {
+          for (const child of implClause.namedChildren) {
+            if (child.type === 'name' || child.type === 'qualified_name') {
+              heritage.push({
+                filePath,
+                childName: nameNode.text,
+                parentName: child.text,
+                type: 'implements',
+              });
+            }
+          }
+        }
+
+        // Recurse into body
+        const body = node.childForFieldName('body') ?? node.children.find((c: any) => c.type === 'declaration_list');
+        if (body) {
+          for (const child of body.namedChildren) {
+            extractPHP(child, nameNode.text);
+          }
+          return;
+        }
+      }
+    }
+
+    if (type === 'interface_declaration') {
+      const nameNode = node.childForFieldName('name');
+      if (nameNode) {
+        symbols.push({
+          name: nameNode.text,
+          label: 'Interface',
+          filePath,
+          startLine: node.startPosition.row + 1,
+          endLine: node.endPosition.row + 1,
+          isExported: true,
+          language,
+        });
+      }
+    }
+
+    if (type === 'trait_declaration') {
+      const nameNode = node.childForFieldName('name');
+      if (nameNode) {
+        symbols.push({
+          name: nameNode.text,
+          label: 'Trait',
+          filePath,
+          startLine: node.startPosition.row + 1,
+          endLine: node.endPosition.row + 1,
+          isExported: true,
+          language,
+        });
+      }
+    }
+
+    if (type === 'enum_declaration') {
+      const nameNode = node.childForFieldName('name');
+      if (nameNode) {
+        symbols.push({
+          name: nameNode.text,
+          label: 'Enum',
+          filePath,
+          startLine: node.startPosition.row + 1,
+          endLine: node.endPosition.row + 1,
+          isExported: true,
+          language,
+        });
+      }
+    }
+
+    if (type === 'namespace_definition') {
+      const nameNode = node.childForFieldName('name');
+      if (nameNode) {
+        symbols.push({
+          name: nameNode.text,
+          label: 'Namespace',
+          filePath,
+          startLine: node.startPosition.row + 1,
+          endLine: node.endPosition.row + 1,
+          isExported: true,
+          language,
+        });
+      }
+    }
+
+    if (type === 'function_definition') {
+      const nameNode = node.childForFieldName('name');
+      if (nameNode) {
+        symbols.push({
+          name: parentName ? `${parentName}.${nameNode.text}` : nameNode.text,
+          label: 'Function',
+          filePath,
+          startLine: node.startPosition.row + 1,
+          endLine: node.endPosition.row + 1,
+          isExported: true,
+          language,
+          content: node.text.slice(0, 500),
+        });
+      }
+    }
+
+    if (type === 'method_declaration') {
+      const nameNode = node.childForFieldName('name');
+      if (nameNode && parentName) {
+        symbols.push({
+          name: `${parentName}.${nameNode.text}`,
+          label: 'Method',
+          filePath,
+          startLine: node.startPosition.row + 1,
+          endLine: node.endPosition.row + 1,
+          isExported: node.children.some((c: any) => c.text === 'public'),
+          language,
+          content: node.text.slice(0, 500),
+        });
+      }
+    }
+
+    // Use statements (imports)
+    if (type === 'namespace_use_declaration') {
+      for (const clause of node.namedChildren) {
+        if (clause.type === 'namespace_use_clause') {
+          const nameNode = clause.namedChildren.find((c: any) => c.type === 'qualified_name');
+          if (nameNode) {
+            imports.push({
+              filePath,
+              importedName: nameNode.text.split('\\').pop() || nameNode.text,
+              importedFrom: nameNode.text,
+              isDefault: false,
+              isNamespace: false,
+            });
+          }
+        }
+      }
+    }
+
+    // Function calls
+    if (type === 'function_call_expression') {
+      const funcNode = node.childForFieldName('function');
+      if (funcNode) {
+        const enclosing = findEnclosingFunction(node);
+        calls.push({
+          callerFile: filePath,
+          callerName: enclosing || '<module>',
+          calleeName: funcNode.text,
+          line: node.startPosition.row + 1,
+        });
+      }
+    }
+
+    // Method calls
+    if (type === 'member_call_expression' || type === 'nullsafe_member_call_expression' || type === 'scoped_call_expression') {
+      const nameNode = node.childForFieldName('name');
+      if (nameNode) {
+        const enclosing = findEnclosingFunction(node);
+        calls.push({
+          callerFile: filePath,
+          callerName: enclosing || '<module>',
+          calleeName: nameNode.text,
           line: node.startPosition.row + 1,
         });
       }
