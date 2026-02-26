@@ -11,7 +11,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { API_BASE } from '@/lib/api';
 import { authFetch } from '@/lib/auth';
-import { useSSE } from '@/hooks/useSSE';
+import { useLlmCalls } from '@/hooks/useLlmCalls';
 
 interface TokenSummary {
   callCount: number;
@@ -136,10 +136,7 @@ export function SessionTokenStats({ sessionId, runId, compact = true, className 
     }));
   }, [sessionId, runId]);
 
-  useSSE({
-    url: `${API_BASE}/events/llm-calls`,
-    onMessage: handleSSE,
-  });
+  useLlmCalls(handleSSE);
 
   // Don't render if no data yet
   if (stats.callCount === 0) return null;

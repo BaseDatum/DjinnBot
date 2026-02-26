@@ -21,7 +21,7 @@ import {
 } from 'lucide-react';
 import { API_BASE } from '@/lib/api';
 import { authFetch } from '@/lib/auth';
-import { useSSE } from '@/hooks/useSSE';
+import { useLlmCalls } from '@/hooks/useLlmCalls';
 
 interface LlmCall {
   id: string;
@@ -223,11 +223,7 @@ export function LlmCallLog({ sessionId, runId, agentId, admin = false, maxHeight
     });
   }, [sessionId, runId, agentId]);
 
-  useSSE({
-    url: `${API_BASE}/events/llm-calls`,
-    onMessage: handleSSE,
-    enabled: live,
-  });
+  useLlmCalls(handleSSE, live);
 
   if (loading) {
     return (

@@ -2,6 +2,7 @@ import { createRootRoute, Outlet, useRouterState, useNavigate } from '@tanstack/
 import { Toaster } from 'sonner';
 import { Sidebar } from '@/components/layout/Sidebar';
 import { ChatSessionProvider } from '@/components/chat/ChatSessionContext';
+import { LlmCallsProvider } from '@/hooks/useLlmCalls';
 import { FloatingChatWidget } from '@/components/chat/FloatingChatWidget';
 import { ChatMobilePill } from '@/components/chat/ChatSidebarFlyout';
 import { SkeletonTheme } from '@/components/ui/skeleton';
@@ -88,6 +89,7 @@ function AuthenticatedLayout() {
 
   return (
     <ChatSessionProvider>
+      <LlmCallsProvider>
       <SkeletonTheme
         baseColor="hsl(var(--muted))"
         highlightColor="hsl(var(--muted-foreground) / 0.15)"
@@ -105,6 +107,7 @@ function AuthenticatedLayout() {
       {/* Mobile chat session pill — only on /chat, bottom-left, mirrors NestedSidebar pattern */}
       {isChatPage && <ChatMobilePill />}
       </SkeletonTheme>
+      </LlmCallsProvider>
     </ChatSessionProvider>
   );
 }
