@@ -684,9 +684,9 @@ async function handleCodeGraphIndex(projectId: string, jobId?: string): Promise<
 
   try {
     // Dynamic import of the code-graph package
-    const { runPipeline } = await import('@djinnbot/code-graph');
+    const { runPipeline } = await import('@djinnbot/code-graph') as any;
 
-    const result = await runPipeline(repoPath, dbPath, (progress) => {
+    const result = await runPipeline(repoPath, dbPath, (progress: any) => {
       // Publish progress to Redis so the API can poll it
       if (opsRedis) {
         opsRedis.setex(progressKey, 120, JSON.stringify({

@@ -29,11 +29,11 @@ COPY packages/core ./packages/core
 COPY packages/slack ./packages/slack
 COPY packages/code-graph ./packages/code-graph
 
-# Build TypeScript (clean dist first, then core, then slack, then code-graph)
+# Build TypeScript (clean dist first; code-graph before core since core depends on it)
 RUN rm -rf packages/core/dist packages/slack/dist packages/code-graph/dist
+RUN npm run build -w @djinnbot/code-graph
 RUN npm run build -w @djinnbot/core
 RUN npm run build -w @djinnbot/slack
-RUN npm run build -w @djinnbot/code-graph
 
 # Stage 3: Production Runtime
 FROM debian:bookworm-slim
