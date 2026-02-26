@@ -44,6 +44,8 @@ const StepConfigSchema = z.object({
   maxRetries: z.number().optional(),
   timeoutSeconds: z.number().optional(),
   maxTurns: z.number().optional(),
+  maxOutputTokens: z.number().optional(),
+  temperature: z.number().optional(),
   outputSchema: OutputSchemaConfigSchema,
   outputMethod: z.enum(['response_format', 'tool_use']).optional(),
 });
@@ -68,6 +70,8 @@ const PipelineConfigSchema = z.object({
     timeout: z.number().optional(),
     timeoutSeconds: z.number().optional(),
     maxTurns: z.number().optional(),
+    maxOutputTokens: z.number().optional(),
+    temperature: z.number().optional(),
   }).default({}).transform(d => ({
     ...d,
     timeoutSeconds: d.timeoutSeconds ?? d.timeout,

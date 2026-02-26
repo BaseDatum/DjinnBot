@@ -16,6 +16,11 @@ export interface PipelineEngineConfig {
   workspaceManagerFactory?: WorkspaceManagerFactory;
   onRunCompleted?: (runId: string, outputs: Record<string, string>) => Promise<void>;
   onRunFailed?: (runId: string, error: string) => Promise<void>;
+  /**
+   * Re-read a pipeline definition from disk and update the in-memory cache.
+   * Called at the start of every run so YAML edits take effect without restart.
+   */
+  reloadPipeline?: (pipelineId: string) => PipelineConfig | null;
 }
 
 // Minimal store interface the engine needs
@@ -79,6 +84,25 @@ export class PipelineEngine {
     console.log(`[PipelineEngine] Registered pipeline: ${config.id} (${config.name})`);
   }
 
+  /**
+   * Re-read a pipeline from disk (if reloadPipeline callback is configured)
+   * and update the in-memory cache. Returns the fresh config or the cached one.
+   */
+  private refreshPipeline(pipelineId: string): PipelineConfig | undefined {
+    if (this.config.reloadPipeline) {
+      try {
+        const fresh = this.config.reloadPipeline(pipelineId);
+        if (fresh) {
+          this.pipelines.set(fresh.id, fresh);
+          console.log(`[PipelineEngine] Hot-reloaded pipeline: ${fresh.id}`);
+        }
+      } catch (err) {
+        console.warn(`[PipelineEngine] Failed to hot-reload pipeline ${pipelineId}, using cached:`, err);
+      }
+    }
+    return this.pipelines.get(pipelineId);
+  }
+
   // Start a new pipeline run
    async startRun(
     pipelineId: string, 
@@ -90,7 +114,7 @@ export class PipelineEngine {
     /** DjinnBot user whose API keys are used for this run (per-user key resolution). */
     userId?: string,
   ): Promise<string> {
-    const pipeline = this.pipelines.get(pipelineId);
+    const pipeline = this.refreshPipeline(pipelineId);
     if (!pipeline) {
       throw new Error(`Pipeline not found: ${pipelineId}`);
     }
@@ -218,7 +242,7 @@ export class PipelineEngine {
 
     this.activeRuns.add(runId);
 
-    const pipeline = this.pipelines.get(run.pipelineId);
+    const pipeline = this.refreshPipeline(run.pipelineId);
     if (!pipeline) {
       throw new Error(`Pipeline not found: ${run.pipelineId}`);
     }

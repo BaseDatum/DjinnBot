@@ -440,6 +440,8 @@ export class ContainerRunner implements AgentRunner {
           systemPrompt,
           outputSchema: options.outputSchema,
           outputMethod: options.outputMethod,
+          maxOutputTokens: options.maxOutputTokens,
+          temperature: options.temperature,
           model,
         });
       } else {

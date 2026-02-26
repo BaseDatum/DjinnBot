@@ -8,6 +8,10 @@
 import { authFetch } from '../api/auth-fetch.js';
 import { PROVIDER_ENV_MAP } from '../constants.js';
 
+/** Default max output tokens. Large enough for validation/rewrite steps that need
+ *  to reproduce large structured data (e.g. 50K+ char task breakdowns). */
+const DEFAULT_MAX_OUTPUT_TOKENS = 32768;
+
 export interface StructuredOutputConfig {
   onStreamChunk?: (runId: string, stepId: string, chunk: string) => void;
   /**
@@ -31,6 +35,8 @@ export interface StructuredOutputOptions {
   outputMethod?: 'response_format' | 'tool_use';
   timeout?: number;
   temperature?: number;
+  /** Max output tokens for the structured output call. Defaults to DEFAULT_MAX_OUTPUT_TOKENS. */
+  maxOutputTokens?: number;
   /** DjinnBot user ID for per-user provider key resolution. */
   userId?: string;
 }
@@ -40,6 +46,10 @@ export interface StructuredOutputResult {
   data: Record<string, unknown> | null;
   rawJson: string;
   error?: string;
+  /** The model that actually served the request (from the API response). */
+  modelUsed?: string;
+  /** The finish reason from the API response (e.g. 'stop', 'length', 'tool_calls'). */
+  finishReason?: string;
 }
 
 /**
@@ -85,6 +95,42 @@ function resolveModel(modelString: string): { baseUrl: string; modelId: string; 
     modelId,
     apiKey: process.env[config.envKey] || '',
   };
+}
+
+/**
+ * Validate that a structured output is non-trivially populated.
+ * Returns an error message if the output appears empty, or null if it looks OK.
+ *
+ * This catches the case where a model returns the minimal valid schema response
+ * (e.g. {"tasks": []}) instead of actual content — typically caused by output
+ * token limits being too low for the expected response size.
+ */
+function validateOutputNotEmpty(data: Record<string, unknown>): string | null {
+  // Check all top-level array fields — if ALL are empty, the output is trivially empty
+  const arrayFields: string[] = [];
+  let allArraysEmpty = true;
+  let hasNonArrayContent = false;
+
+  for (const [key, value] of Object.entries(data)) {
+    if (Array.isArray(value)) {
+      arrayFields.push(key);
+      if (value.length > 0) {
+        allArraysEmpty = false;
+      }
+    } else if (value !== null && value !== undefined && value !== '') {
+      hasNonArrayContent = true;
+    }
+  }
+
+  // If the schema has array fields and ALL of them are empty, and there's no other
+  // meaningful content, this is likely a degenerate response
+  if (arrayFields.length > 0 && allArraysEmpty && !hasNonArrayContent) {
+    return `Structured output has only empty arrays (${arrayFields.join(', ')}). ` +
+      `This typically means the model could not produce the full output within the ` +
+      `max_tokens limit. Consider increasing maxOutputTokens for this step.`;
+  }
+
+  return null;
 }
 
 export class StructuredOutputRunner {
@@ -146,7 +192,8 @@ export class StructuredOutputRunner {
    */
   private async runWithResponseFormat(options: StructuredOutputOptions): Promise<StructuredOutputResult> {
     const { baseUrl, modelId, apiKey } = resolveModel(options.model);
-    console.log(`[StructuredOutput] Calling ${baseUrl} with model ${modelId} (timeout: ${options.timeout || 300_000}ms)`);
+    const maxTokens = options.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS;
+    console.log(`[StructuredOutput] Calling ${baseUrl} with model ${modelId} (max_tokens: ${maxTokens}, timeout: ${options.timeout || 300_000}ms)`);
     
     const requestBody: Record<string, unknown> = {
       model: modelId,
@@ -163,7 +210,7 @@ export class StructuredOutputRunner {
         },
       },
       temperature: options.temperature ?? 0.7,
-      max_tokens: 16384,
+      max_tokens: maxTokens,
     };
     
     // Add OpenRouter-specific headers
@@ -189,7 +236,7 @@ export class StructuredOutputRunner {
     }, timeoutMs);
     
     try {
-      console.log(`[StructuredOutput] POST ${baseUrl}/chat/completions model=${modelId} timeout=${timeoutMs}ms`);
+      console.log(`[StructuredOutput] POST ${baseUrl}/chat/completions model=${modelId} max_tokens=${maxTokens} timeout=${timeoutMs}ms`);
       const response = await fetch(`${baseUrl}/chat/completions`, {
         method: 'POST',
         headers,
@@ -225,17 +272,33 @@ export class StructuredOutputRunner {
       const bodyText = await response.text();
       console.log(`[StructuredOutput] Body length: ${bodyText.length}, preview: ${bodyText.slice(0, 200)}`);
       const result = JSON.parse(bodyText);
-      console.log(`[StructuredOutput] Parsed response. choices: ${result.choices?.length}, model: ${result.model}`);
+      const modelUsed = result.model ?? modelId;
+      const finishReason = result.choices?.[0]?.finish_reason;
+      console.log(`[StructuredOutput] Parsed response. choices: ${result.choices?.length}, model: ${modelUsed}, finish_reason: ${finishReason}`);
       const content = result.choices?.[0]?.message?.content;
       console.log(`[StructuredOutput] Content length: ${content?.length ?? 'null'}, preview: ${content?.slice(0, 100)}`);
+      
+      // Check finish_reason — 'length' means output was truncated due to max_tokens
+      if (finishReason === 'length') {
+        console.error(`[StructuredOutput] TRUNCATED: finish_reason=length for ${modelId} (max_tokens=${maxTokens}). Output was cut off.`);
+        return {
+          success: false,
+          data: null,
+          rawJson: content || '',
+          error: `Output truncated (finish_reason=length). The model ran out of output tokens ` +
+            `(max_tokens=${maxTokens}). Increase maxOutputTokens for this step.`,
+          modelUsed,
+          finishReason,
+        };
+      }
       
       if (!content) {
         // Check for refusal
         const refusal = result.choices?.[0]?.message?.refusal;
         if (refusal) {
-          return { success: false, data: null, rawJson: '', error: `Model refused: ${refusal}` };
+          return { success: false, data: null, rawJson: '', error: `Model refused: ${refusal}`, modelUsed, finishReason };
         }
-        return { success: false, data: null, rawJson: '', error: 'No content in response' };
+        return { success: false, data: null, rawJson: '', error: 'No content in response', modelUsed, finishReason };
       }
       
       // Stream chunk for logging
@@ -246,13 +309,30 @@ export class StructuredOutputRunner {
       // Parse — should be guaranteed valid by the provider
       try {
         const parsed = JSON.parse(content);
-        return { success: true, data: parsed, rawJson: content };
+
+        // Validate that the output is non-trivially populated
+        const emptyError = validateOutputNotEmpty(parsed);
+        if (emptyError) {
+          console.error(`[StructuredOutput] EMPTY OUTPUT: ${emptyError} (model=${modelUsed}, max_tokens=${maxTokens}, finish_reason=${finishReason})`);
+          return {
+            success: false,
+            data: parsed,
+            rawJson: content,
+            error: emptyError,
+            modelUsed,
+            finishReason,
+          };
+        }
+
+        return { success: true, data: parsed, rawJson: content, modelUsed, finishReason };
       } catch (parseErr) {
         return {
           success: false,
           data: null,
           rawJson: content,
           error: `JSON parse failed despite response_format: ${parseErr}`,
+          modelUsed,
+          finishReason,
         };
       }
       
@@ -269,6 +349,7 @@ export class StructuredOutputRunner {
    */
   private async runWithToolUse(options: StructuredOutputOptions): Promise<StructuredOutputResult> {
     const { baseUrl, modelId, apiKey } = resolveModel(options.model);
+    const maxTokens = options.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS;
     
     const toolName = `submit_${options.outputSchema.name}`;
     
@@ -293,7 +374,7 @@ export class StructuredOutputRunner {
       ],
       tool_choice: { type: 'function', function: { name: toolName } },
       temperature: options.temperature ?? 0.7,
-      max_tokens: 16384,
+      max_tokens: maxTokens,
     };
     
     const headers: Record<string, string> = {
@@ -310,6 +391,7 @@ export class StructuredOutputRunner {
     const timeoutId = setTimeout(() => controller.abort(), options.timeout || 300_000);
     
     try {
+      console.log(`[StructuredOutput] tool_use POST ${baseUrl}/chat/completions model=${modelId} max_tokens=${maxTokens}`);
       const response = await fetch(`${baseUrl}/chat/completions`, {
         method: 'POST',
         headers,
@@ -325,6 +407,25 @@ export class StructuredOutputRunner {
       }
       
       const result = await response.json() as any;
+      const modelUsed = result.model ?? modelId;
+      const finishReason = result.choices?.[0]?.finish_reason;
+
+      console.log(`[StructuredOutput] tool_use response: model=${modelUsed}, finish_reason=${finishReason}`);
+
+      // Check finish_reason — 'length' means output was truncated
+      if (finishReason === 'length') {
+        console.error(`[StructuredOutput] TRUNCATED: finish_reason=length for tool_use (model=${modelUsed}, max_tokens=${maxTokens})`);
+        return {
+          success: false,
+          data: null,
+          rawJson: '',
+          error: `Output truncated (finish_reason=length). The model ran out of output tokens ` +
+            `(max_tokens=${maxTokens}). Increase maxOutputTokens for this step.`,
+          modelUsed,
+          finishReason,
+        };
+      }
+
       const toolCall = result.choices?.[0]?.message?.tool_calls?.[0];
       
       if (!toolCall || toolCall.function?.name !== toolName) {
@@ -333,12 +434,16 @@ export class StructuredOutputRunner {
         if (content) {
           try {
             const parsed = JSON.parse(content);
-            return { success: true, data: parsed, rawJson: content };
+            const emptyError = validateOutputNotEmpty(parsed);
+            if (emptyError) {
+              return { success: false, data: parsed, rawJson: content, error: emptyError, modelUsed, finishReason };
+            }
+            return { success: true, data: parsed, rawJson: content, modelUsed, finishReason };
           } catch {
-            return { success: false, data: null, rawJson: content || '', error: 'Model did not call tool and content is not valid JSON' };
+            return { success: false, data: null, rawJson: content || '', error: 'Model did not call tool and content is not valid JSON', modelUsed, finishReason };
           }
         }
-        return { success: false, data: null, rawJson: '', error: 'Model did not call the expected tool' };
+        return { success: false, data: null, rawJson: '', error: 'Model did not call the expected tool', modelUsed, finishReason };
       }
       
       const args = toolCall.function.arguments;
@@ -349,9 +454,13 @@ export class StructuredOutputRunner {
       
       try {
         const parsed = JSON.parse(args);
-        return { success: true, data: parsed, rawJson: args };
+        const emptyError = validateOutputNotEmpty(parsed);
+        if (emptyError) {
+          return { success: false, data: parsed, rawJson: args, error: emptyError, modelUsed, finishReason };
+        }
+        return { success: true, data: parsed, rawJson: args, modelUsed, finishReason };
       } catch (parseErr) {
-        return { success: false, data: null, rawJson: args, error: `Tool call JSON parse failed: ${parseErr}` };
+        return { success: false, data: null, rawJson: args, error: `Tool call JSON parse failed: ${parseErr}`, modelUsed, finishReason };
       }
       
     } catch (err) {

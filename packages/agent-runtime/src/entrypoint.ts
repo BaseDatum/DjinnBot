@@ -237,6 +237,7 @@ async function main(): Promise<void> {
           outputSchema: cmd.outputSchema,
           outputMethod: cmd.outputMethod,
           temperature: cmd.temperature,
+          maxOutputTokens: cmd.maxOutputTokens,
           model: cmd.model,
         });
 

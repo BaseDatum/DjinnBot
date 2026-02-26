@@ -16,6 +16,10 @@ export interface PipelineDefaults {
   maxRetries?: number;
   /** Max agent turns before forced stop (default: 50) */
   maxTurns?: number;
+  /** Max output tokens for structured output steps (default: 16384) */
+  maxOutputTokens?: number;
+  /** Temperature for structured output steps (default: 0.7) */
+  temperature?: number;
 }
 
 export interface AgentConfig {
@@ -44,6 +48,11 @@ export interface StepConfig {
   timeoutSeconds?: number;
   /** Max agent turns before forced stop (default: 50) */
   maxTurns?: number;
+  /** Max output tokens for structured output steps. Overrides pipeline default.
+   *  If not set, falls back to pipeline defaults.maxOutputTokens, then 16384. */
+  maxOutputTokens?: number;
+  /** Temperature for structured output steps. Overrides pipeline default. */
+  temperature?: number;
   /** JSON Schema for structured output. When set, the step uses constrained decoding
    *  to guarantee valid JSON matching this schema. */
   outputSchema?: {

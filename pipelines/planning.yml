@@ -22,6 +22,7 @@ description: AI-driven project decomposition into tasks with dependency chains, 
 defaults:
   model: openrouter/moonshotai/kimi-k2.5
   timeout: 600
+  maxOutputTokens: 32768
 
 agents:
   - id: eric

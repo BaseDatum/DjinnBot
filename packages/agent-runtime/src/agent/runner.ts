@@ -683,6 +683,7 @@ export class ContainerAgentRunner {
     outputSchema: { name: string; schema: Record<string, unknown>; strict?: boolean };
     outputMethod?: 'response_format' | 'tool_use';
     temperature?: number;
+    maxOutputTokens?: number;
     model?: string;
     timeout?: number;
   }): Promise<{ success: boolean; rawJson: string; error?: string }> {
@@ -706,12 +707,14 @@ export class ContainerAgentRunner {
       userPrompt: string;
       outputSchema: { name: string; schema: Record<string, unknown>; strict?: boolean };
       temperature?: number;
+      maxOutputTokens?: number;
       timeout?: number;
     },
   ): Promise<{ success: boolean; rawJson: string; error?: string }> {
     const { baseUrl, modelId, apiKey } = this.resolveModelForStructuredOutput(modelString);
+    const maxTokens = opts.maxOutputTokens ?? 32768;
     const timeoutMs = opts.timeout || 300_000;
-    console.log(`[AgentRunner] Structured output POST ${baseUrl}/chat/completions model=${modelId}`);
+    console.log(`[AgentRunner] Structured output POST ${baseUrl}/chat/completions model=${modelId} max_tokens=${maxTokens}`);
 
     const requestBody: Record<string, unknown> = {
       model: modelId,
@@ -728,7 +731,7 @@ export class ContainerAgentRunner {
         },
       },
       temperature: opts.temperature ?? 0.7,
-      max_tokens: 16384,
+      max_tokens: maxTokens,
     };
 
     const headers: Record<string, string> = {
@@ -774,7 +777,16 @@ export class ContainerAgentRunner {
 
       const bodyText = await response.text();
       const result = JSON.parse(bodyText);
+      const finishReason = result.choices?.[0]?.finish_reason;
       const content = result.choices?.[0]?.message?.content;
+
+      console.log(`[AgentRunner] Structured output response: model=${result.model}, finish_reason=${finishReason}, content_length=${content?.length ?? 0}`);
+
+      // Check finish_reason — 'length' means output was truncated due to max_tokens
+      if (finishReason === 'length') {
+        console.error(`[AgentRunner] TRUNCATED: finish_reason=length (max_tokens=${maxTokens}). Output was cut off.`);
+        return { success: false, rawJson: content || '', error: `Output truncated (finish_reason=length). Increase maxOutputTokens (currently ${maxTokens}).` };
+      }
 
       if (!content) {
         const refusal = result.choices?.[0]?.message?.refusal;
@@ -789,9 +801,22 @@ export class ContainerAgentRunner {
         data: content,
       });
 
-      // Validate JSON
+      // Validate JSON and check for empty output
       try {
-        JSON.parse(content);
+        const parsed = JSON.parse(content);
+        // Check for trivially empty output (all array fields empty)
+        const arrayFields: string[] = [];
+        let allEmpty = true;
+        let hasOther = false;
+        for (const [k, v] of Object.entries(parsed)) {
+          if (Array.isArray(v)) { arrayFields.push(k); if ((v as any[]).length > 0) allEmpty = false; }
+          else if (v !== null && v !== undefined && v !== '') hasOther = true;
+        }
+        if (arrayFields.length > 0 && allEmpty && !hasOther) {
+          const msg = `Empty structured output (${arrayFields.join(', ')} are all empty). Model may need higher maxOutputTokens (currently ${maxTokens}).`;
+          console.error(`[AgentRunner] ${msg}`);
+          return { success: false, rawJson: content, error: msg };
+        }
         return { success: true, rawJson: content };
       } catch (parseErr) {
         return { success: false, rawJson: content, error: `JSON parse failed: ${parseErr}` };
@@ -811,11 +836,13 @@ export class ContainerAgentRunner {
       userPrompt: string;
       outputSchema: { name: string; schema: Record<string, unknown>; strict?: boolean };
       temperature?: number;
+      maxOutputTokens?: number;
       timeout?: number;
     },
   ): Promise<{ success: boolean; rawJson: string; error?: string }> {
     const { baseUrl, modelId, apiKey } = this.resolveModelForStructuredOutput(modelString);
     const toolName = `submit_${opts.outputSchema.name}`;
+    const maxTokens = opts.maxOutputTokens ?? 32768;
     const timeoutMs = opts.timeout || 300_000;
 
     const requestBody: Record<string, unknown> = {
@@ -839,7 +866,7 @@ export class ContainerAgentRunner {
       ],
       tool_choice: { type: 'function', function: { name: toolName } },
       temperature: opts.temperature ?? 0.7,
-      max_tokens: 16384,
+      max_tokens: maxTokens,
     };
 
     const headers: Record<string, string> = {

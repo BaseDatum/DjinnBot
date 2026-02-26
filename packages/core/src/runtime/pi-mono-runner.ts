@@ -203,6 +203,8 @@ export class PiMonoRunner implements AgentRunner {
         outputSchema: options.outputSchema,
         outputMethod: options.outputMethod,
         timeout: options.timeout,
+        maxOutputTokens: options.maxOutputTokens,
+        temperature: options.temperature,
         userId: options.userId,
       });
 
@@ -212,6 +214,7 @@ export class PiMonoRunner implements AgentRunner {
           output: result.rawJson,
           success: true,
           parsedOutputs: { _structured_json: result.rawJson },
+          modelUsed: result.modelUsed,
         };
       }
       // On failure, fall through to normal agent execution as fallback

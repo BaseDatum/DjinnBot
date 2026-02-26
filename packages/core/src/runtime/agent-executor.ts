@@ -91,6 +91,10 @@ export interface RunAgentOptions {
    *  'response_format' = use provider's native JSON Schema enforcement (default)
    *  'tool_use' = wrap schema as a tool call for providers without native support */
   outputMethod?: 'response_format' | 'tool_use';
+  /** Max output tokens for structured output steps. */
+  maxOutputTokens?: number;
+  /** Temperature for structured output steps. */
+  temperature?: number;
 }
 
 export interface AgentRunResult {
@@ -99,6 +103,8 @@ export interface AgentRunResult {
   success: boolean;
   error?: string;
   parsedOutputs?: Record<string, string>;  // NEW: tool-based outputs
+  /** The model that actually served the request (from API response). */
+  modelUsed?: string;
 }
 
 /**
@@ -635,6 +641,8 @@ export class AgentExecutor {
           // Structured output config (when step has outputSchema)
           outputSchema: stepConfig.outputSchema,
           outputMethod: stepConfig.outputMethod,
+          maxOutputTokens: stepConfig.maxOutputTokens ?? pipeline.defaults.maxOutputTokens,
+          temperature: stepConfig.temperature ?? pipeline.defaults.temperature,
         });
 
         // For structured output steps, map the JSON result to step output keys
@@ -644,6 +652,10 @@ export class AgentExecutor {
             result.parsedOutputs._structured_json,
             stepConfig.outputs,
           );
+          // Store model_used from structured output result for debuggability
+          if (result.modelUsed) {
+            parsedOutputs['_model_used'] = result.modelUsed;
+          }
         } else {
           // Parse the output (prefer parsedOutputs from tools, fall back to parsing)
           parsedOutputs = result.parsedOutputs ?? parseOutputKeyValues(result.output);

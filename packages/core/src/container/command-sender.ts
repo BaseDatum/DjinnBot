@@ -179,6 +179,7 @@ export class CommandSender {
       };
       outputMethod?: 'response_format' | 'tool_use';
       temperature?: number;
+      maxOutputTokens?: number;
       model?: string;
     }
   ): Promise<string> {
@@ -192,6 +193,7 @@ export class CommandSender {
       outputSchema: options.outputSchema,
       outputMethod: options.outputMethod,
       temperature: options.temperature,
+      maxOutputTokens: options.maxOutputTokens,
       model: options.model,
       timestamp: createTimestamp(),
     };

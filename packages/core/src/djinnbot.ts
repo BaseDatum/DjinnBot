@@ -16,6 +16,7 @@ import { AgentMemoryManager, AgentMemory } from './memory/agent-memory.js';
 import { AgentLifecycleTracker } from './lifecycle/agent-lifecycle-tracker.js';
 import { parsePipeline } from './pipeline/parser.js';
 import { readdir } from 'node:fs/promises';
+import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import type { PipelineConfig } from './types/pipeline.js';
 import type { PipelineRun } from './types/state.js';
@@ -173,6 +174,7 @@ export class DjinnBot {
       onRunFailed: async (runId, error) => {
         await this.taskRunTracker?.handleRunFailed(runId, error);
       },
+      reloadPipeline: (pipelineId) => this.reloadPipelineFromDisk(pipelineId),
     });
     
     // Initialize session persister BEFORE creating runner (requires DJINNBOT_API_URL)
@@ -1347,6 +1349,34 @@ Start now.`;
     });
 
     await this.slackBridge.start();
+  }
+
+  /**
+   * Re-read a single pipeline from disk by scanning the pipelines directory
+   * for a YAML file whose parsed id matches. Returns the fresh config or null.
+   * Also updates the shared pipelines Map so AgentExecutor sees the change.
+   */
+  private reloadPipelineFromDisk(pipelineId: string): PipelineConfig | null {
+    try {
+      const entries = readdirSync(this.config.pipelinesDir, { withFileTypes: true });
+      for (const entry of entries) {
+        if (entry.isFile() && (entry.name.endsWith('.yaml') || entry.name.endsWith('.yml'))) {
+          const filePath = join(this.config.pipelinesDir, entry.name);
+          try {
+            const pipeline = parsePipeline(filePath);
+            if (pipeline.id === pipelineId) {
+              this.pipelines.set(pipeline.id, pipeline);
+              return pipeline;
+            }
+          } catch {
+            // Skip unparseable files
+          }
+        }
+      }
+    } catch (err) {
+      console.warn(`[DjinnBot] Failed to reload pipeline ${pipelineId} from disk:`, err);
+    }
+    return null;
   }
 
   // Load pipeline definitions from YAML files

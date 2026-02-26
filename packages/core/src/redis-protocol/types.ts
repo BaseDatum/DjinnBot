@@ -85,6 +85,7 @@ export const structuredOutputCommandSchema = baseMessageSchema.extend({
   }),
   outputMethod: z.enum(["response_format", "tool_use"]).optional(),
   temperature: z.number().optional(),
+  maxOutputTokens: z.number().optional(),
   model: z.string().optional(),
 });
 
