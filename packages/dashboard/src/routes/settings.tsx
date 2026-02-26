@@ -1,5 +1,5 @@
 import { createFileRoute, useNavigate } from '@tanstack/react-router';
-import { Settings, Key, Lock, Github, Zap, Puzzle, Workflow, LayoutTemplate } from 'lucide-react';
+import { Settings, Key, Lock, Github, Zap, Puzzle, Workflow, LayoutTemplate, Cookie } from 'lucide-react';
 import { UserProviderSettings } from '@/components/settings/UserProviderSettings';
 import { SecretsSettings } from '@/components/settings/SecretsSettings';
 import { GitHubAppInstallations } from '@/components/github/GitHubAppInstallations';
@@ -9,9 +9,10 @@ import type { NestedSidebarItem } from '@/components/layout/NestedSidebar';
 import { SkillsPage } from '@/routes/skills';
 import { McpPage } from '@/routes/mcp';
 import { PipelinesPage } from '@/routes/pipelines/';
+import { BrowserCookiesPage } from '@/routes/browser-cookies';
 
-type SettingsTab = 'providers' | 'secrets' | 'github' | 'skills' | 'mcp' | 'pipelines' | 'templates';
-const VALID_TABS: SettingsTab[] = ['providers', 'secrets', 'github', 'skills', 'mcp', 'pipelines', 'templates'];
+type SettingsTab = 'providers' | 'secrets' | 'github' | 'skills' | 'mcp' | 'pipelines' | 'templates' | 'cookies';
+const VALID_TABS: SettingsTab[] = ['providers', 'secrets', 'github', 'skills', 'mcp', 'pipelines', 'templates', 'cookies'];
 
 export const Route = createFileRoute('/settings')({
   validateSearch: (search: Record<string, unknown>) => ({
@@ -30,6 +31,7 @@ const NAV_ITEMS: NestedSidebarItem[] = [
   { key: 'mcp',        label: 'MCP Servers',      icon: Puzzle },
   { key: 'pipelines',  label: 'Pipelines',        icon: Workflow },
   { key: 'templates',  label: 'Templates',        icon: LayoutTemplate },
+  { key: 'cookies',    label: 'Browser Cookies',  icon: Cookie },
 ];
 
 function SettingsPage() {
@@ -125,6 +127,13 @@ function SettingsPage() {
         {activeTab === 'templates' && (
           <div className="max-w-5xl mx-auto">
             <TemplateManager />
+          </div>
+        )}
+
+        {/* ── Browser Cookies ── */}
+        {activeTab === 'cookies' && (
+          <div className="-m-4 md:-m-8">
+            <BrowserCookiesPage />
           </div>
         )}
       </NestedSidebar>

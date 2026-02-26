@@ -1,4 +1,3 @@
-import { createFileRoute } from '@tanstack/react-router';
 import { useState, useEffect, useCallback } from 'react';
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -23,11 +22,7 @@ import {
   type AgentListItem,
 } from '@/lib/api';
 
-export const Route = createFileRoute('/browser-cookies')({
-  component: BrowserCookiesPage,
-});
-
-function BrowserCookiesPage() {
+export function BrowserCookiesPage() {
   const [cookieSets, setCookieSets] = useState<BrowserCookieSetItem[]>([]);
   const [agents, setAgents] = useState<AgentListItem[]>([]);
   const [loading, setLoading] = useState(true);

@@ -202,9 +202,6 @@ RUN npm install -g playwright && \
 # (navigator, WebGL, AudioContext, screen geometry, WebRTC — all spoofed
 # before JavaScript ever sees them). Agents use this for all real web
 # browsing; Playwright/Chromium stays for automated testing only.
-ARG CAMOUFOX_VERSION=135.0.1
-ARG CAMOUFOX_RELEASE=beta.24
-
 # Firefox/Camoufox system dependencies not already installed by Playwright
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libgtk-3-0 \
@@ -213,24 +210,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libx11-xcb1 \
     && rm -rf /var/lib/apt/lists/*
 
-# Pre-bake Camoufox binary (~300MB) — avoids runtime download
-RUN ARCH=$(dpkg --print-architecture) && \
-    if [ "$ARCH" = "amd64" ]; then CF_ARCH="lin.x86_64"; \
-    else CF_ARCH="lin.aarch64"; fi && \
-    CAMOUFOX_URL="https://github.com/daijro/camoufox/releases/download/v${CAMOUFOX_VERSION}-${CAMOUFOX_RELEASE}/camoufox-${CAMOUFOX_VERSION}-${CAMOUFOX_RELEASE}-${CF_ARCH}.zip" && \
-    mkdir -p /root/.cache/camoufox && \
-    curl -fsSL -o /tmp/camoufox.zip "$CAMOUFOX_URL" && \
-    (unzip -q /tmp/camoufox.zip -d /root/.cache/camoufox || true) && \
-    rm /tmp/camoufox.zip && \
-    chmod -R 755 /root/.cache/camoufox && \
-    echo "{\"version\":\"${CAMOUFOX_VERSION}\",\"release\":\"${CAMOUFOX_RELEASE}\"}" \
-      > /root/.cache/camoufox/version.json
-
 # Install camofox-browser server (REST API wrapper around Camoufox)
+# The camoufox-js dependency's postinstall fetches the correct Camoufox
+# binary for the current platform automatically.
 RUN mkdir -p /opt/camofox && \
     cd /opt/camofox && \
     npm init -y > /dev/null 2>&1 && \
     npm install --omit=dev @askjo/camofox-browser && \
+    npx camoufox-js fetch && \
     rm -rf /tmp/* /root/.npm/_cacache
 
 # Install yt-dlp for YouTube transcript extraction (used by camofox)
@@ -302,8 +289,7 @@ RUN echo "=== Agent Runtime Tools ===" && \
     bun --version && playwright --version && \
     juicefs version && \
     qmd --version 2>/dev/null || echo "qmd: installed" && \
-    test -f /root/.cache/camoufox/version.json && echo "camoufox: $(cat /root/.cache/camoufox/version.json)" && \
-    node -e "require('/opt/camofox/node_modules/@askjo/camofox-browser/server.js'); process.exit(0);" 2>/dev/null || echo "camofox-browser: installed" && \
+    ls /opt/camofox/node_modules/@askjo/camofox-browser/server.js > /dev/null && echo "camofox-browser: installed" && \
     yt-dlp --version && \
     echo "=== All tools verified! ==="
 
