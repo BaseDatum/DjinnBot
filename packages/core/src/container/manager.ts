@@ -1,7 +1,7 @@
 import Docker from 'dockerode';
-import { mkdirSync } from 'node:fs';
 import { Redis, type Redis as RedisType } from 'ioredis';
 import { channels } from '../redis-protocol/index.js';
+import { ensureJfsDirs } from './juicefs.js';
 
 export interface ContainerConfig {
   runId: string;
@@ -237,21 +237,23 @@ export class ContainerManager {
       // e.g. "/data/workspaces/proj_xxx" → "workspaces/proj_xxx"
       const projectRelative = projectWorkspacePath ? projectWorkspacePath.replace('/data/', '') : null;
 
-      // ── Pre-create JuiceFS subdirectories on the engine's mount ──────────
+      // ── Pre-create JuiceFS subdirectories ────────────────────────────────
       // `juicefs mount --subdir` requires the subdirectory to already exist.
-      // The engine has the JuiceFS volume mounted at /data, so we create
-      // the necessary paths here before the agent container tries to mount them.
+      // For read-only mounts (e.g. cookies), JuiceFS cannot auto-create them.
+      //
+      // ensureJfsDirs writes through the engine's own JuiceFS FUSE mount
+      // (started at engine startup via mountJuiceFS).  If that mount isn't
+      // available it falls back to the raw Docker volume path — which works
+      // for rw mounts (JuiceFS auto-creates) but not ro mounts.
       const dataPath = process.env.DJINN_DATA_PATH || process.env.DATA_DIR || '/data';
-      const dirsToEnsure = [
-        `${dataPath}/sandboxes/${agentId}`,
-        `${dataPath}/vaults/${agentId}`,
-        `${dataPath}/${runRelative}`,
-        `${dataPath}/cookies/${agentId}`,
-        ...(projectRelative ? [`${dataPath}/${projectRelative}`] : []),
+      const jfsDirsToEnsure = [
+        `/sandboxes/${agentId}`,
+        `/vaults/${agentId}`,
+        `/${runRelative}`,
+        `/cookies/${agentId}`,
+        ...(projectRelative ? [`/${projectRelative}`] : []),
       ];
-      for (const dir of dirsToEnsure) {
-        try { mkdirSync(dir, { recursive: true }); } catch { /* may already exist */ }
-      }
+      ensureJfsDirs(jfsDirsToEnsure, dataPath);
 
       // ── Build the JuiceFS mount table ────────────────────────────────────
       // Each entry: [subdir, mountpoint, readOnly?]
@@ -402,6 +404,12 @@ export class ContainerManager {
               `git config --global credential.helper /usr/local/bin/djinnbot-git-credential && `
             );
           })() +
+          // ── Restore Camoufox cache into agent HOME ────────────────────────
+          // camoufox-js expects ~/.cache/camoufox/version.json but the JuiceFS
+          // mount on /home/agent wipes anything baked into the image, so we
+          // copy the cache from a stable image path after mounts are ready.
+          `mkdir -p /home/agent/.cache && ` +
+          `cp -r /opt/camofox/.camoufox-cache /home/agent/.cache/camoufox && ` +
           // ── Start Camofox browser server (background) ──────────────────────
           // Generates a per-container API key for cookie import auth.
           // The server listens on 127.0.0.1:9377 — only accessible within this container.

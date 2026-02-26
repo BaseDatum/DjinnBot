@@ -203,6 +203,14 @@ services:
     image: ghcr.io/basedatum/djinnbot/engine:${DJINNBOT_VERSION:-latest}
     cap_add:
       - SYS_ADMIN
+    # Allow FUSE mount syscall — the engine mounts JuiceFS directly so that
+    # subdirectory pre-creation (especially read-only mounts like /cookies/{agentId})
+    # goes through the real JuiceFS FUSE filesystem.
+    security_opt:
+      - seccomp=unconfined
+      - apparmor=unconfined
+    devices:
+      - /dev/fuse:/dev/fuse
     container_name: djinnbot-engine
     environment:
       # API Store mode - use PostgreSQL via API instead of local SQLite

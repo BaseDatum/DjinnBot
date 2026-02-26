@@ -15,6 +15,7 @@ WORKDIR /build
 
 # Copy root workspace files
 COPY package.json package-lock.json tsconfig.base.json ./
+COPY packages/code-graph/package.json ./packages/code-graph/
 COPY packages/core/package.json ./packages/core/
 COPY packages/agent-runtime/package.json ./packages/agent-runtime/
 
@@ -22,10 +23,12 @@ COPY packages/agent-runtime/package.json ./packages/agent-runtime/
 RUN npm install --include=dev
 
 # Copy source
+COPY packages/code-graph ./packages/code-graph
 COPY packages/core ./packages/core
 COPY packages/agent-runtime ./packages/agent-runtime
 
 # Build TypeScript
+RUN npm run build -w @djinnbot/code-graph
 RUN npm run build -w @djinnbot/core
 RUN npm run build -w @djinnbot/agent-runtime
 
@@ -218,6 +221,7 @@ RUN mkdir -p /opt/camofox && \
     npm init -y > /dev/null 2>&1 && \
     npm install --omit=dev @askjo/camofox-browser && \
     npx camoufox-js fetch && \
+    cp -r /root/.cache/camoufox /opt/camofox/.camoufox-cache && \
     rm -rf /tmp/* /root/.npm/_cacache
 
 # Install yt-dlp for YouTube transcript extraction (used by camofox)
@@ -240,6 +244,7 @@ RUN sed -i 's/await remote.embed(formattedText, { model, isQuery })/await remote
 
 # Copy root workspace for npm
 COPY package.json package-lock.json ./
+COPY packages/code-graph/package.json ./packages/code-graph/
 COPY packages/core/package.json ./packages/core/
 COPY packages/agent-runtime/package.json ./packages/agent-runtime/
 
@@ -247,6 +252,7 @@ COPY packages/agent-runtime/package.json ./packages/agent-runtime/
 RUN npm install --omit=dev
 
 # Copy built code
+COPY --from=builder /build/packages/code-graph/dist ./packages/code-graph/dist
 COPY --from=builder /build/packages/core/dist ./packages/core/dist
 COPY --from=builder /build/packages/agent-runtime/dist ./packages/agent-runtime/dist
 

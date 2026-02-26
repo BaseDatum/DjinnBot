@@ -5,19 +5,26 @@
  * Features:
  *  - ForceAtlas2 physics layout (web-worker based)
  *  - Community-coloured nodes
+ *  - Monorepo package detection + per-package filtering
  *  - Node type + edge type filtering
  *  - Click-to-select with neighbour highlighting
  *  - Zoom / pan / focus / reset controls
+ *  - Fullscreen toggle
  *  - Layout pause/resume
  */
 
 import { useEffect, useCallback, useState, useMemo } from 'react';
 import {
-  ZoomIn, ZoomOut, Maximize2, Focus, RotateCcw,
-  Play, Pause, Filter,
+  ZoomIn, ZoomOut, Maximize2, Minimize2, Focus, RotateCcw,
+  Play, Pause, Filter, Package,
 } from 'lucide-react';
 import { useSigma } from './useSigma';
-import { apiGraphToGraphology, filterByLabels, type APIGraphData } from './graph-adapter';
+import {
+  apiGraphToGraphology,
+  filterByLabels,
+  type APIGraphData,
+  type APINode,
+} from './graph-adapter';
 import {
   DEFAULT_VISIBLE_LABELS,
   DEFAULT_VISIBLE_EDGES,
@@ -25,23 +32,114 @@ import {
   EDGE_STYLES,
 } from './constants';
 
+// ── Monorepo package detection ─────────────────────────────────────────────
+
+interface DetectedPackage {
+  name: string;       // e.g. "packages/core"
+  prefix: string;     // path prefix for filtering
+  nodeCount: number;
+}
+
+/**
+ * Detect monorepo packages from node file paths.
+ * Looks for common monorepo patterns:
+ *   packages/*, apps/*, services/*, libs/*, cli/*
+ * Falls back to top-level directories if nothing matches.
+ */
+function detectPackages(nodes: APINode[]): DetectedPackage[] {
+  const MONOREPO_DIRS = new Set(['packages', 'apps', 'services', 'libs', 'lib', 'modules', 'cli', 'tools', 'plugins']);
+
+  const pkgCounts = new Map<string, number>();
+  for (const n of nodes) {
+    const fp = n.filePath;
+    if (!fp) continue;
+    const parts = fp.split('/');
+    if (parts.length >= 2 && MONOREPO_DIRS.has(parts[0])) {
+      const key = `${parts[0]}/${parts[1]}`;
+      pkgCounts.set(key, (pkgCounts.get(key) || 0) + 1);
+    }
+  }
+
+  // If we found monorepo-style packages, use them
+  if (pkgCounts.size >= 2) {
+    return Array.from(pkgCounts.entries())
+      .map(([name, nodeCount]) => ({ name, prefix: name + '/', nodeCount }))
+      .sort((a, b) => b.nodeCount - a.nodeCount);
+  }
+
+  // Fallback: top-level dirs with enough nodes
+  const topDirs = new Map<string, number>();
+  for (const n of nodes) {
+    const fp = n.filePath;
+    if (!fp) continue;
+    const parts = fp.split('/');
+    if (parts.length >= 2) {
+      topDirs.set(parts[0], (topDirs.get(parts[0]) || 0) + 1);
+    }
+  }
+  const dirs = Array.from(topDirs.entries())
+    .filter(([, c]) => c >= 5)
+    .map(([name, nodeCount]) => ({ name, prefix: name + '/', nodeCount }))
+    .sort((a, b) => b.nodeCount - a.nodeCount);
+
+  return dirs.length >= 2 ? dirs : [];
+}
+
+/**
+ * Filter graph data to only include nodes matching a package prefix,
+ * plus edges where both endpoints are in the filtered set.
+ */
+function filterByPackage(data: APIGraphData, prefix: string): APIGraphData {
+  const filteredNodes = data.nodes.filter(n => n.filePath.startsWith(prefix) || !n.filePath);
+  const nodeIds = new Set(filteredNodes.map(n => n.id));
+  // Also include community/process nodes that are referenced
+  const extraIds = new Set<string>();
+  for (const e of data.edges) {
+    if (e.type === 'MEMBER_OF' && nodeIds.has(e.sourceId)) extraIds.add(e.targetId);
+    if (e.type === 'STEP_IN_PROCESS' && nodeIds.has(e.sourceId)) extraIds.add(e.targetId);
+  }
+  const allIds = new Set([...nodeIds, ...extraIds]);
+  const allNodes = data.nodes.filter(n => allIds.has(n.id));
+  const allEdges = data.edges.filter(e => allIds.has(e.sourceId) && allIds.has(e.targetId));
+  return {
+    nodes: allNodes,
+    edges: allEdges,
+    communities: data.communities.filter(c => allIds.has(c.id)),
+    processes: data.processes.filter(p => allIds.has(p.id)),
+  };
+}
+
+// ── Component ──────────────────────────────────────────────────────────────
+
 interface Props {
   graphData: APIGraphData;
   onNodeSelect?: (node: { id: string; name: string; label: string; filePath: string; startLine?: number } | null) => void;
+  isFullscreen?: boolean;
+  onToggleFullscreen?: () => void;
 }
 
-export function CodeGraphCanvas({ graphData, onNodeSelect }: Props) {
+export function CodeGraphCanvas({ graphData, onNodeSelect, isFullscreen, onToggleFullscreen }: Props) {
+  // Package detection
+  const packages = useMemo(() => detectPackages(graphData.nodes), [graphData]);
+  const [selectedPackage, setSelectedPackage] = useState<string | null>(null);
+
+  // Effective graph data (filtered by package if selected)
+  const effectiveData = useMemo(() => {
+    if (!selectedPackage) return graphData;
+    return filterByPackage(graphData, selectedPackage);
+  }, [graphData, selectedPackage]);
+
   // Filter state
   const [visibleLabels, setVisibleLabels] = useState<Set<string>>(new Set(DEFAULT_VISIBLE_LABELS));
   const [visibleEdges, setVisibleEdges] = useState<Set<string>>(new Set(DEFAULT_VISIBLE_EDGES));
   const [showFilters, setShowFilters] = useState(false);
 
   const handleNodeClick = useCallback((nodeId: string) => {
-    const n = graphData.nodes.find(n => n.id === nodeId);
+    const n = effectiveData.nodes.find(n => n.id === nodeId);
     if (n && onNodeSelect) {
       onNodeSelect({ id: n.id, name: n.name, label: n.label, filePath: n.filePath, startLine: n.startLine });
     }
-  }, [graphData, onNodeSelect]);
+  }, [effectiveData, onNodeSelect]);
 
   const handleStageClick = useCallback(() => {
     onNodeSelect?.(null);
@@ -58,12 +156,12 @@ export function CodeGraphCanvas({ graphData, onNodeSelect }: Props) {
     visibleEdgeTypes: visibleEdges,
   });
 
-  // Build + set the graphology graph when data changes
+  // Build + set the graphology graph when effective data changes
   useEffect(() => {
-    if (!graphData || graphData.nodes.length === 0) return;
-    const g = apiGraphToGraphology(graphData);
+    if (!effectiveData || effectiveData.nodes.length === 0) return;
+    const g = apiGraphToGraphology(effectiveData);
     setGraph(g);
-  }, [graphData, setGraph]);
+  }, [effectiveData, setGraph]);
 
   // Apply label filters
   useEffect(() => {
@@ -76,11 +174,11 @@ export function CodeGraphCanvas({ graphData, onNodeSelect }: Props) {
   // Stats
   const stats = useMemo(() => {
     const labelCounts: Record<string, number> = {};
-    for (const n of graphData.nodes) {
+    for (const n of effectiveData.nodes) {
       labelCounts[n.label] = (labelCounts[n.label] || 0) + 1;
     }
-    return { total: graphData.nodes.length, edges: graphData.edges.length, labelCounts };
-  }, [graphData]);
+    return { total: effectiveData.nodes.length, edges: effectiveData.edges.length, labelCounts };
+  }, [effectiveData]);
 
   const toggleLabel = (label: string) => {
     setVisibleLabels(prev => {
@@ -98,7 +196,6 @@ export function CodeGraphCanvas({ graphData, onNodeSelect }: Props) {
     });
   };
 
-  // Focus on selected
   const handleFocus = useCallback(() => {
     if (selectedNode) focusNode(selectedNode);
   }, [selectedNode, focusNode]);
@@ -115,19 +212,40 @@ export function CodeGraphCanvas({ graphData, onNodeSelect }: Props) {
       <div
         ref={containerRef}
         className="w-full h-full cursor-grab active:cursor-grabbing"
-        style={{ minHeight: 500 }}
       />
 
-      {/* Hovered node tooltip */}
+      {/* Selected node tooltip */}
       {selectedNode && (
         <div className="absolute top-3 left-1/2 -translate-x-1/2 flex items-center gap-2 px-3 py-1.5 bg-primary/10 border border-primary/30 rounded-lg backdrop-blur-sm z-20 text-xs">
           <div className="w-1.5 h-1.5 bg-primary rounded-full animate-pulse" />
           <span className="font-mono font-medium">
-            {graphData.nodes.find(n => n.id === selectedNode)?.name || selectedNode}
+            {effectiveData.nodes.find(n => n.id === selectedNode)?.name || selectedNode}
           </span>
           <button onClick={handleClear} className="ml-1 px-1.5 py-0.5 text-[10px] text-muted-foreground hover:text-foreground hover:bg-muted rounded transition-colors">
             Clear
           </button>
+        </div>
+      )}
+
+      {/* Package selector — top left (only for monorepos) */}
+      {packages.length > 0 && (
+        <div className="absolute top-3 left-3 z-20">
+          <div className="flex items-center gap-1 bg-background/95 backdrop-blur-sm border rounded-lg p-1">
+            <Package className="w-3.5 h-3.5 text-muted-foreground ml-1.5" />
+            <select
+              value={selectedPackage || '__all__'}
+              onChange={e => setSelectedPackage(e.target.value === '__all__' ? null : e.target.value)}
+              className="bg-transparent text-xs font-medium py-1 pr-6 pl-1 border-0 focus:ring-0 focus:outline-none cursor-pointer appearance-none"
+              style={{ backgroundImage: 'none' }}
+            >
+              <option value="__all__">All packages ({graphData.nodes.length})</option>
+              {packages.map(pkg => (
+                <option key={pkg.prefix} value={pkg.prefix}>
+                  {pkg.name} ({pkg.nodeCount})
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
       )}
 
@@ -136,6 +254,12 @@ export function CodeGraphCanvas({ graphData, onNodeSelect }: Props) {
         <ControlButton onClick={zoomIn} title="Zoom In"><ZoomIn className="w-3.5 h-3.5" /></ControlButton>
         <ControlButton onClick={zoomOut} title="Zoom Out"><ZoomOut className="w-3.5 h-3.5" /></ControlButton>
         <ControlButton onClick={resetZoom} title="Fit to Screen"><Maximize2 className="w-3.5 h-3.5" /></ControlButton>
+
+        {onToggleFullscreen && (
+          <ControlButton onClick={onToggleFullscreen} title={isFullscreen ? 'Shrink' : 'Enlarge'}>
+            {isFullscreen ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
+          </ControlButton>
+        )}
 
         <div className="h-px bg-border my-0.5" />
 
@@ -225,8 +349,11 @@ export function CodeGraphCanvas({ graphData, onNodeSelect }: Props) {
 
       {/* Stats bar — bottom left */}
       <div className="absolute bottom-3 left-3 z-10 text-[10px] text-muted-foreground bg-background/80 backdrop-blur-sm rounded px-2 py-1 border">
-        {stats.total} nodes &middot; {stats.edges} edges &middot; {graphData.communities.length} communities &middot; {graphData.processes.length} flows
+        {stats.total} nodes &middot; {stats.edges} edges &middot; {effectiveData.communities.length} communities &middot; {effectiveData.processes.length} flows
+        {selectedPackage && <span className="ml-1 text-primary font-medium">&middot; {packages.find(p => p.prefix === selectedPackage)?.name}</span>}
       </div>
+
+      
     </div>
   );
 }

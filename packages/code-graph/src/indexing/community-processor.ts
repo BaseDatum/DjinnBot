@@ -9,8 +9,18 @@
  * detection. Falls back to connected components if Louvain is not available.
  */
 
-import Graph from 'graphology';
+import GraphLib from 'graphology';
+import type { AbstractGraph, Attributes } from 'graphology-types';
 import type { KnowledgeGraph, GraphNode, NodeLabel } from '../types/index.js';
+
+// graphology ships CJS without an "exports" field — under NodeNext the default
+// export ends up wrapped in the module namespace.  Unwrap it so `new Graph()`
+// works at both the value and type level.
+const Graph: new (options?: { type?: string; multi?: boolean }) => AbstractGraph =
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (GraphLib as any).default ?? GraphLib;
+
+type Graph = AbstractGraph<Attributes, Attributes, Attributes>;
 
 const CODE_LABELS = new Set<NodeLabel>([
   'Function', 'Class', 'Method', 'Interface', 'CodeElement',

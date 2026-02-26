@@ -27,6 +27,7 @@ import { authFetch } from './api/auth-fetch.js';
 import { ensureAgentKeys } from './api/agent-key-manager.js';
 import { SwarmSessionManager, type SwarmSessionDeps } from './runtime/swarm-session.js';
 import { type SwarmRequest, type SwarmProgressEvent, swarmChannel, swarmStateKey } from './runtime/swarm-types.js';
+import { mountJuiceFS } from './container/juicefs.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -1263,6 +1264,11 @@ async function main(): Promise<void> {
   });
   
   try {
+    // Mount JuiceFS inside the engine so subdirectory pre-creation (especially
+    // for read-only mounts like /cookies/{agentId}) writes through the real FUSE
+    // filesystem instead of the raw Docker named volume.
+    await mountJuiceFS();
+
     // Fetch global settings from Redis
     const SETTINGS_KEY = "djinnbot:global:settings";
     let globalSettings: Record<string, any> = {

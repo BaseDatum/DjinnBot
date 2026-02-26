@@ -10,6 +10,7 @@ import Sigma from 'sigma';
 import Graph from 'graphology';
 import FA2Layout from 'graphology-layout-forceatlas2/worker';
 import forceAtlas2 from 'graphology-layout-forceatlas2';
+import EdgeCurveProgram from '@sigma/edge-curve';
 import type { SigmaNodeAttributes, SigmaEdgeAttributes } from './graph-adapter';
 
 // ── ForceAtlas2 tuning ─────────────────────────────────────────────────────
@@ -51,7 +52,7 @@ export interface UseSigmaOptions {
 
 export interface UseSigmaReturn {
   containerRef: React.RefObject<HTMLDivElement | null>;
-  sigmaRef: React.RefObject<Sigma | null>;
+  sigmaRef: React.RefObject<Sigma<SigmaNodeAttributes, SigmaEdgeAttributes> | null>;
   graphRef: React.RefObject<Graph<SigmaNodeAttributes, SigmaEdgeAttributes> | null>;
   setGraph: (g: Graph<SigmaNodeAttributes, SigmaEdgeAttributes>) => void;
   zoomIn: () => void;
@@ -67,7 +68,7 @@ export interface UseSigmaReturn {
 
 export function useSigma(opts: UseSigmaOptions = {}): UseSigmaReturn {
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const sigmaRef     = useRef<Sigma | null>(null);
+  const sigmaRef     = useRef<Sigma<SigmaNodeAttributes, SigmaEdgeAttributes> | null>(null);
   const graphRef     = useRef<Graph<SigmaNodeAttributes, SigmaEdgeAttributes> | null>(null);
   const layoutRef    = useRef<FA2Layout | null>(null);
   const timerRef     = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -106,7 +107,10 @@ export function useSigma(opts: UseSigmaOptions = {}): UseSigmaReturn {
       labelGridCellSize: 70,
       defaultNodeColor: '#6b7280',
       defaultEdgeColor: '#2a2a3a',
-      // Edge curve rendering handled by sigma defaults
+      defaultEdgeType: 'curved',
+      edgeProgramClasses: {
+        curved: EdgeCurveProgram,
+      },
       minCameraRatio: 0.002,
       maxCameraRatio: 50,
       hideEdgesOnMove: true,
@@ -186,7 +190,15 @@ export function useSigma(opts: UseSigmaOptions = {}): UseSigmaReturn {
       if (containerRef.current) containerRef.current.style.cursor = 'grab';
     });
 
+    // Resize sigma when container dimensions change (e.g. enlarge toggle)
+    const ro = new ResizeObserver(() => {
+      sigma.resize();
+      sigma.refresh();
+    });
+    ro.observe(containerRef.current);
+
     return () => {
+      ro.disconnect();
       if (timerRef.current) clearTimeout(timerRef.current);
       layoutRef.current?.kill();
       sigma.kill();

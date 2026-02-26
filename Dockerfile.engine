@@ -115,11 +115,23 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     imagemagick \
     # PDF tools
     poppler-utils \
+    # FUSE — required for JuiceFS mount inside the engine container
+    fuse3 \
     # Misc development
     make \
     patch \
     diffutils \
     && rm -rf /var/lib/apt/lists/*
+
+# Install JuiceFS CE client — the engine mounts JuiceFS directly so that
+# pre-created subdirectories (e.g. /cookies/{agentId}) are written through
+# the real FUSE filesystem, not just the raw Docker named volume.
+RUN ARCH=$(dpkg --print-architecture) && \
+    JFS_VERSION="1.3.1" && \
+    curl -fsSL "https://github.com/juicedata/juicefs/releases/download/v${JFS_VERSION}/juicefs-${JFS_VERSION}-linux-${ARCH}.tar.gz" -o /tmp/juicefs.tar.gz && \
+    tar -xzf /tmp/juicefs.tar.gz -C /usr/local/bin juicefs && \
+    chmod +x /usr/local/bin/juicefs && \
+    rm /tmp/juicefs.tar.gz
 
 # Install Node.js 22 via NodeSource
 RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
@@ -303,6 +315,7 @@ RUN echo "=== Core Languages ===" && \
     jq --version && \
     docker --version && \
     docker compose version && \
+    juicefs version && \
     echo "=== Network Tools ===" && \
     curl --version | head -1 && \
     wget --version | head -1 && \

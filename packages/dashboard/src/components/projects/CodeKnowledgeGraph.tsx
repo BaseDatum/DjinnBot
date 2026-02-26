@@ -80,6 +80,7 @@ export function CodeKnowledgeGraph({ projectId }: CodeKnowledgeGraphProps) {
   const [selectedGraphNode, setSelectedGraphNode] = useState<{
     id: string; name: string; label: string; filePath: string; startLine?: number;
   } | null>(null);
+  const [graphFullscreen, setGraphFullscreen] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const loadStatus = useCallback(async () => {
@@ -102,6 +103,16 @@ export function CodeKnowledgeGraph({ projectId }: CodeKnowledgeGraphProps) {
       setLoading(false);
     }
   }, [projectId]);
+
+  // ESC to exit fullscreen graph
+  useEffect(() => {
+    if (!graphFullscreen) return;
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setGraphFullscreen(false);
+    };
+    window.addEventListener('keydown', handleKey);
+    return () => window.removeEventListener('keydown', handleKey);
+  }, [graphFullscreen]);
 
   useEffect(() => {
     loadStatus();
@@ -181,7 +192,7 @@ export function CodeKnowledgeGraph({ projectId }: CodeKnowledgeGraphProps) {
 
   if (loading) {
     return (
-      <div className="p-4 md:px-6 space-y-4 max-w-4xl mx-auto">
+    <div className={graphFullscreen ? 'p-2 space-y-4' : 'p-4 md:px-6 space-y-4 max-w-4xl mx-auto'}>
         <Skeleton height={40} />
         <div className="grid grid-cols-2 gap-4">
           <Skeleton height={200} />
@@ -201,7 +212,7 @@ export function CodeKnowledgeGraph({ projectId }: CodeKnowledgeGraphProps) {
   };
 
   return (
-    <div className="p-4 md:px-6 space-y-4 max-w-4xl mx-auto">
+    <div className={graphFullscreen ? 'p-2 space-y-4' : 'p-4 md:px-6 space-y-4 max-w-4xl mx-auto'}>
       {/* Header + Action Bar */}
       <div className="flex items-center justify-between gap-4">
         <div className="flex items-center gap-3">
@@ -295,10 +306,12 @@ export function CodeKnowledgeGraph({ projectId }: CodeKnowledgeGraphProps) {
         <div className="space-y-4">
           {/* Interactive Graph Visualisation */}
           {graphData && graphData.nodes.length > 0 && (
-            <div className="h-[600px]">
+            <div className={graphFullscreen ? 'h-[calc(100vh-120px)]' : 'h-[600px]'}>
               <CodeGraphCanvas
                 graphData={graphData}
                 onNodeSelect={setSelectedGraphNode}
+                isFullscreen={graphFullscreen}
+                onToggleFullscreen={() => setGraphFullscreen(f => !f)}
               />
             </div>
           )}

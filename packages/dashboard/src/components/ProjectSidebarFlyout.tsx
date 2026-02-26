@@ -8,6 +8,7 @@ import {
   Users,
   Settings,
   Brain,
+  Network,
   FolderKanban,
   ChevronDown,
   MessageSquarePlus,
@@ -73,7 +74,7 @@ const VIEWS: { id: ViewType; label: string; icon: React.ElementType }[] = [
   { id: 'graph',    label: 'Deps',     icon: Activity },
   { id: 'timeline', label: 'Timeline', icon: Calendar },
   { id: 'team',     label: 'Team',     icon: Users },
-  { id: 'code',     label: 'Code',     icon: Brain },
+  { id: 'code',     label: 'Code',     icon: Network },
   { id: 'settings', label: 'Settings', icon: Settings },
 ];
 

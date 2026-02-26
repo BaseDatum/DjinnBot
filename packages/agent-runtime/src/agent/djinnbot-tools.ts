@@ -20,6 +20,7 @@ import { createSwarmExecutorTools } from './djinnbot-tools/swarm-executor.js';
 import { createWorkLedgerTools } from './djinnbot-tools/work-ledger.js';
 import { createRunHistoryTools } from './djinnbot-tools/run-history.js';
 import { createFocusedAnalysisTools } from './djinnbot-tools/focused-analysis.js';
+import { createCodeGraphTools } from './djinnbot-tools/code-graph.js';
 import type { MemoryRetrievalTracker } from './djinnbot-tools/memory-scoring.js';
 
 export interface DjinnBotToolsConfig {
@@ -111,6 +112,9 @@ export function createDjinnBotTools(config: DjinnBotToolsConfig): AgentTool[] {
 
     // Focused analysis — lightweight analytical delegation to a sub-model
     ...createFocusedAnalysisTools({ agentId }),
+
+    // Code knowledge graph — search, context, impact analysis, change mapping
+    ...createCodeGraphTools({ apiBaseUrl }),
 
     // Onboarding tools — only for onboarding sessions (ONBOARDING_SESSION_ID is set)
     ...(isOnboardingSession ? createOnboardingTools({ agentId, apiBaseUrl }) : []),

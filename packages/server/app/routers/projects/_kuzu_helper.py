@@ -135,16 +135,31 @@ async def query_graph_data(db_path: str) -> dict:
     }
     DEFAULT_LIMIT = 300
 
+    # File/Folder have a simpler schema (no startLine, language, etc.)
+    # Community/Process are queried separately below.
+    SIMPLE_LABELS = {"File", "Folder"}
+    SKIP_LABELS = {"Community", "Process"}
+
     for label in ALL_LABELS:
+        if label in SKIP_LABELS:
+            continue
         limit = LIMIT_PER_TYPE.get(label, DEFAULT_LIMIT)
         try:
-            rows = await _query(
-                db_path,
-                f"MATCH (n:`{label}`) RETURN n.id AS id, n.name AS name, "
-                f"n.filePath AS filePath, n.startLine AS startLine, "
-                f"n.language AS language, "
-                f"'{label}' AS label LIMIT {limit}",
-            )
+            if label in SIMPLE_LABELS:
+                rows = await _query(
+                    db_path,
+                    f"MATCH (n:`{label}`) RETURN n.id AS id, n.name AS name, "
+                    f"n.filePath AS filePath, "
+                    f"'{label}' AS label LIMIT {limit}",
+                )
+            else:
+                rows = await _query(
+                    db_path,
+                    f"MATCH (n:`{label}`) RETURN n.id AS id, n.name AS name, "
+                    f"n.filePath AS filePath, n.startLine AS startLine, "
+                    f"n.language AS language, "
+                    f"'{label}' AS label LIMIT {limit}",
+                )
             for r in rows:
                 nodes.append(
                     {
@@ -156,8 +171,8 @@ async def query_graph_data(db_path: str) -> dict:
                         "label": label,
                     }
                 )
-        except Exception:
-            pass
+        except Exception as err:
+            logger.debug(f"Failed to query {label} nodes: {err}")
 
     # Get communities
     try:
@@ -218,7 +233,7 @@ async def query_graph_data(db_path: str) -> dict:
             f"MATCH (a)-[r:CodeRelation]->(b) "
             f"WHERE r.type IN [{type_list}] "
             f"RETURN a.id AS sourceId, b.id AS targetId, r.type AS type, "
-            f"r.confidence AS confidence, r.step AS step LIMIT 10000",
+            f"r.confidence AS confidence, r.step AS step LIMIT 50000",
         )
         edges = [
             {
