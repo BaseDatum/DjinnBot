@@ -28,6 +28,8 @@
     "tree-sitter-java": "^0.21.0",
     "tree-sitter-c": "^0.21.0",
     "tree-sitter-cpp": "^0.22.0",
+    "tree-sitter-c-sharp": "^0.21.0",
+    "tree-sitter-php": "^0.22.0",
     "kuzu": "^0.11.3",
     "graphology": "^0.25.4",
     "graphology-indices": "^0.17.0",

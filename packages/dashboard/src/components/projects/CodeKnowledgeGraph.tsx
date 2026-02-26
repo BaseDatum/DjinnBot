@@ -21,7 +21,10 @@ import {
   fetchCodeGraphCommunities,
   fetchCodeGraphProcesses,
   fetchCodeGraphSearch,
+  fetchCodeGraphData,
 } from '@/lib/api';
+import { CodeGraphCanvas } from './code-graph/CodeGraphCanvas';
+import type { APIGraphData } from './code-graph/graph-adapter';
 
 interface CodeKnowledgeGraphProps {
   projectId: string;
@@ -72,6 +75,11 @@ export function CodeKnowledgeGraph({ projectId }: CodeKnowledgeGraphProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [searching, setSearching] = useState(false);
+  const [indexError, setIndexError] = useState<string | null>(null);
+  const [graphData, setGraphData] = useState<APIGraphData | null>(null);
+  const [selectedGraphNode, setSelectedGraphNode] = useState<{
+    id: string; name: string; label: string; filePath: string; startLine?: number;
+  } | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const loadStatus = useCallback(async () => {
@@ -79,12 +87,14 @@ export function CodeKnowledgeGraph({ projectId }: CodeKnowledgeGraphProps) {
       const s = await fetchCodeGraphStatus(projectId);
       setStatus(s);
       if (s.indexed) {
-        const [commData, procData] = await Promise.all([
+        const [commData, procData, gData] = await Promise.all([
           fetchCodeGraphCommunities(projectId),
           fetchCodeGraphProcesses(projectId),
+          fetchCodeGraphData(projectId),
         ]);
         setCommunities(commData.communities || []);
         setProcesses(procData.processes || []);
+        setGraphData(gData as APIGraphData);
       }
     } catch (err) {
       console.error('Failed to load knowledge graph status:', err);
@@ -102,6 +112,7 @@ export function CodeKnowledgeGraph({ projectId }: CodeKnowledgeGraphProps) {
 
   const handleIndex = async () => {
     setIndexing(true);
+    setIndexError(null);
     setIndexProgress({ phase: 'starting', percent: 0, message: 'Starting...' });
     try {
       const { job_id } = await triggerCodeGraphIndex(projectId);
@@ -119,17 +130,22 @@ export function CodeKnowledgeGraph({ projectId }: CodeKnowledgeGraphProps) {
             if (pollRef.current) clearInterval(pollRef.current);
             setIndexing(false);
             setIndexProgress(null);
+            if (progress.status === 'failed') {
+              setIndexError(progress.message || 'Indexing failed');
+            }
             await loadStatus();
           }
-        } catch {
+        } catch (err) {
           if (pollRef.current) clearInterval(pollRef.current);
           setIndexing(false);
           setIndexProgress(null);
+          setIndexError(err instanceof Error ? err.message : 'Failed to track indexing progress');
         }
       }, 2000);
     } catch (err) {
       setIndexing(false);
       setIndexProgress(null);
+      setIndexError(err instanceof Error ? err.message : 'Failed to start indexing');
       console.error('Failed to start indexing:', err);
     }
   };
@@ -231,8 +247,8 @@ export function CodeKnowledgeGraph({ projectId }: CodeKnowledgeGraphProps) {
         </div>
       )}
 
-      {/* Error */}
-      {status?.error && (
+      {/* Status error (from server) */}
+      {status?.error && !indexError && (
         <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
           {status.error}
         </div>
@@ -266,9 +282,39 @@ export function CodeKnowledgeGraph({ projectId }: CodeKnowledgeGraphProps) {
         </div>
       )}
 
+      {/* Indexing error */}
+      {indexError && (
+        <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-3 flex items-start gap-2">
+          <AlertTriangle className="h-4 w-4 text-destructive shrink-0 mt-0.5" />
+          <div className="text-sm text-destructive">{indexError}</div>
+        </div>
+      )}
+
       {/* Main content when indexed */}
       {status?.indexed && (
         <div className="space-y-4">
+          {/* Interactive Graph Visualisation */}
+          {graphData && graphData.nodes.length > 0 && (
+            <div className="h-[600px]">
+              <CodeGraphCanvas
+                graphData={graphData}
+                onNodeSelect={setSelectedGraphNode}
+              />
+            </div>
+          )}
+
+          {/* Selected node detail bar */}
+          {selectedGraphNode && (
+            <div className="rounded-lg border bg-muted/30 p-3 flex items-center gap-3 text-sm">
+              <Badge variant="outline" className="text-[10px]">{selectedGraphNode.label}</Badge>
+              <span className="font-mono font-medium">{selectedGraphNode.name}</span>
+              <span className="text-muted-foreground truncate text-xs">{selectedGraphNode.filePath}</span>
+              {selectedGraphNode.startLine && (
+                <span className="text-muted-foreground text-xs">:{selectedGraphNode.startLine}</span>
+              )}
+            </div>
+          )}
+
           {/* Search */}
           <div className="flex gap-2">
             <div className="flex-1 relative">

@@ -2,10 +2,11 @@
  * KuzuDB Storage Adapter — persists the knowledge graph to disk.
  *
  * KuzuDB is an embedded graph database. Each project gets its own
- * database directory at {workspace}/.code-graph/
+ * database file at {workspace}/.code-graph.kuzu
  */
 
 import { mkdirSync } from 'node:fs';
+import { dirname } from 'node:path';
 import type { KnowledgeGraph, GraphNode, NodeLabel } from '../types/index.js';
 
 // KuzuDB loaded dynamically
@@ -22,7 +23,9 @@ async function ensureKuzu(): Promise<any> {
 const NODE_TABLES: NodeLabel[] = [
   'File', 'Folder', 'Function', 'Class', 'Interface', 'Method', 'CodeElement',
   'Community', 'Process', 'Struct', 'Enum', 'Trait', 'Impl', 'Namespace',
-  'TypeAlias', 'Constructor',
+  'TypeAlias', 'Constructor', 'Variable', 'Decorator', 'Import', 'Type',
+  'Macro', 'Typedef', 'Union', 'Const', 'Static', 'Property', 'Record',
+  'Delegate', 'Annotation', 'Template', 'Module', 'Package',
 ];
 
 export interface KuzuStore {
@@ -36,7 +39,7 @@ export interface KuzuStore {
 
 export async function createKuzuStore(dbPath: string): Promise<KuzuStore> {
   const kuzu = await ensureKuzu();
-  mkdirSync(dbPath, { recursive: true });
+  mkdirSync(dirname(dbPath), { recursive: true });
 
   const db = new kuzu.Database(dbPath);
   const conn = new kuzu.Connection(db);

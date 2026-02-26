@@ -677,7 +677,7 @@ async function handleSystemUpdate(targetVersion: string): Promise<void> {
 async function handleCodeGraphIndex(projectId: string, jobId?: string): Promise<void> {
   const workspacesDir = process.env.WORKSPACES_DIR || '/data/workspaces';
   const repoPath = `${workspacesDir}/${projectId}`;
-  const dbPath = `${workspacesDir}/${projectId}/.code-graph`;
+  const dbPath = `${workspacesDir}/${projectId}/.code-graph.kuzu`;
 
   const resultKey = `djinnbot:code-graph:result:${projectId}`;
   const progressKey = `djinnbot:code-graph:progress:${projectId}`;

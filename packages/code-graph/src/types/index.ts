@@ -25,7 +25,24 @@ export type NodeLabel =
   | 'Impl'
   | 'Namespace'
   | 'TypeAlias'
-  | 'Constructor';
+  | 'Constructor'
+  // Extended types (C#, PHP, C/C++)
+  | 'Variable'
+  | 'Decorator'
+  | 'Import'
+  | 'Type'
+  | 'Macro'
+  | 'Typedef'
+  | 'Union'
+  | 'Const'
+  | 'Static'
+  | 'Property'
+  | 'Record'
+  | 'Delegate'
+  | 'Annotation'
+  | 'Template'
+  | 'Module'
+  | 'Package';
 
 export interface NodeProperties {
   name: string;
@@ -66,7 +83,10 @@ export type RelationshipType =
   | 'EXTENDS'
   | 'IMPLEMENTS'
   | 'MEMBER_OF'
-  | 'STEP_IN_PROCESS';
+  | 'STEP_IN_PROCESS'
+  | 'USES'
+  | 'OVERRIDES'
+  | 'DECORATES';
 
 export interface GraphRelationship {
   id: string;

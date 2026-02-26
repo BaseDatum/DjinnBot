@@ -12,7 +12,9 @@ export type SupportedLanguage =
   | 'rust'
   | 'java'
   | 'c'
-  | 'cpp';
+  | 'cpp'
+  | 'csharp'
+  | 'php';
 
 /** Extension → language mapping. */
 const EXT_MAP: Record<string, SupportedLanguage> = {
@@ -33,6 +35,8 @@ const EXT_MAP: Record<string, SupportedLanguage> = {
   '.cxx': 'cpp',
   '.hpp': 'cpp',
   '.hh': 'cpp',
+  '.cs': 'csharp',
+  '.php': 'php',
 };
 
 export const SUPPORTED_EXTENSIONS = new Set(Object.keys(EXT_MAP));
@@ -96,6 +100,17 @@ export async function getGrammar(language: SupportedLanguage): Promise<unknown> 
     case 'cpp': {
       const mod = await import('tree-sitter-cpp');
       grammar = (mod as any).default ?? mod;
+      break;
+    }
+    case 'csharp': {
+      const mod = await import('tree-sitter-c-sharp');
+      grammar = (mod as any).default ?? mod;
+      break;
+    }
+    case 'php': {
+      const mod = await import('tree-sitter-php');
+      // tree-sitter-php exports .php and .php_only — use php_only for pure PHP
+      grammar = (mod as any).default?.php_only ?? (mod as any).php_only ?? (mod as any).default ?? mod;
       break;
     }
   }

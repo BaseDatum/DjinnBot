@@ -77,7 +77,7 @@ def _workspace_path(project_id: str) -> Path:
 
 
 def _db_path(project_id: str) -> str:
-    return str(Path(WORKSPACES_DIR) / project_id / ".code-graph")
+    return str(Path(WORKSPACES_DIR) / project_id / ".code-graph.kuzu")
 
 
 def _get_current_commit(workspace: Path) -> Optional[str]:
