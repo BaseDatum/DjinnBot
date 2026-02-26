@@ -3,7 +3,7 @@ title: Bot Interfaces
 weight: 2
 ---
 
-DjinnBot agents can interact through multiple interfaces. Currently Slack and the built-in dashboard chat are supported, with more platforms planned.
+DjinnBot agents can interact through multiple interfaces. The dashboard chat, CLI chat, and Slack are all supported today, with more platforms planned.
 
 ## Current Interfaces
 
@@ -15,9 +15,55 @@ The built-in chat interface at `http://localhost:3000/chat` requires no addition
 - Full tool access (code execution, file operations, web research)
 - Persistent chat history
 - Real-time streaming responses
+- File uploads and image attachments
+- HTML preview for generated content
 - Supports onboarding and project-context sessions
 
-This is the primary interface for users who don't use Slack.
+This is the primary interface for users who prefer a browser-based experience.
+
+### CLI Chat
+
+The `djinn chat` command provides a full terminal-based chat TUI built with [Textual](https://textual.textualize.io/). It connects to the same API and agent containers as the dashboard — same tools, same models, same persistence.
+
+```bash
+# Interactive — pick agent and model from menus
+djinn chat
+
+# Direct — skip selection
+djinn chat --agent finn --model anthropic/claude-sonnet-4
+```
+
+Features:
+
+- **Streaming markdown** — responses render as markdown in the terminal in real-time
+- **Collapsible thinking blocks** — extended thinking is collapsed by default, expand with Enter or right arrow
+- **Collapsible tool calls** — each tool call and result appears inline as a collapsed block with syntax-highlighted JSON. Expand to inspect arguments and output
+- **Fuzzy-search model picker** — type to filter, arrow keys to navigate
+- **Activity indicators** — the agent's current state (`thinking...`, `using bash...`, `writing...`) is shown inline next to the agent name
+- **Stop and resume** — press Esc to abort the current response mid-stream
+- **Copyable content** — tool call arguments and results use read-only text areas that support text selection
+
+**Keybindings:**
+
+| Key | Action |
+|-----|--------|
+| Enter | Send message / expand collapsible |
+| Esc | Stop current response |
+| Ctrl+C | End session and quit |
+| Right arrow | Expand focused collapsible |
+| Left arrow | Collapse focused collapsible |
+
+The CLI chat creates a real chat session backed by a Docker container — the agent has the same tools, memory access, and workspace capabilities as in the dashboard. Sessions persist server-side, so you can see CLI chat history in the dashboard afterward.
+
+Requires the CLI to be installed and authenticated:
+
+```bash
+pip install djinn-bot-cli
+djinn login
+djinn chat
+```
+
+See the [CLI Reference](/docs/reference/cli) for full installation and configuration details.
 
 ### Slack
 

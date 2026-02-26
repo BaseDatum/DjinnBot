@@ -171,15 +171,15 @@ coordination:
     max_wakes_per_pair_per_day: 5      # Prevent agent-to-agent loops
 ```
 
-These limits are critical for production deployments — they prevent runaway costs and ensure agents don't get stuck in infinite communication loops.
+These limits are critical for production deployments — they prevent runaway costs and ensure agents don't get stuck in infinite communication loops. See [Event-Driven Wakes](/docs/concepts/event-driven-wakes) for the full breakdown of how agents wake each other and how each guardrail layer works.
 
 ### Plan + Execute Model
 
-For complex tasks, agents use a two-stage delegation pattern where a planner agent writes a detailed brief, then spawns a separate executor in a fresh container with a clean context window.
+For complex tasks, agents use a two-stage delegation pattern where a planner agent analyzes the problem and writes a detailed brief, then spawns a separate executor in a fresh container with a clean context window to carry out the implementation.
 
 #### How it works
 
-1. **Planner** runs first using the `planning_model` (typically a fast/cheap model). It reads the task, analyzes the codebase, and formulates a plan.
+1. **Planner** runs first using the `planning_model` (typically a powerful, capable model). It reads the task, analyzes the codebase, reasons about architecture, and formulates a thorough execution plan.
 
 2. **Planner calls `spawn_executor()`** — a tool that:
    - Takes a `projectId`, `taskId`, and a complete `executionPrompt` written by the planner
@@ -190,7 +190,7 @@ For complex tasks, agents use a two-stage delegation pattern where a planner age
 3. **Executor** runs in a separate container with:
    - ONLY the execution prompt — no conversation history, no context pollution
    - The task's git workspace pre-mounted
-   - The `executor_model` (typically a more capable model)
+   - The `executor_model` (typically a fast, cheaper model that can follow detailed instructions well)
    - A set of **deviation rules** that govern how it handles unexpected situations
 
 #### Deviation Rules
@@ -213,16 +213,16 @@ Limits:
 
 ```yaml
 # In agent config.yml
-planning_model: openrouter/x-ai/grok-4.1-fast
-executor_model: openrouter/anthropic/claude-sonnet-4
+planning_model: openrouter/anthropic/claude-sonnet-4
+executor_model: openrouter/x-ai/grok-4.1-fast
 ```
 
-Per-routine model overrides are also supported — see [Routine-to-Project Mapping](#routine-to-project-mapping) below.
+Per-routine model overrides are also supported — see [Routine-to-Project Mapping](#routine-to-project-mapping) above.
 
 #### Why this matters
 
 The separation achieves three things:
-1. **Cost efficiency** — fast models handle planning, capable models only fire for implementation
+1. **Cost efficiency** — the powerful model only runs once for planning, then a cheaper model handles the (often lengthy) implementation. Planning is typically 5-10% of total tokens.
 2. **Context hygiene** — the executor gets a clean context window with only the execution prompt, avoiding the "lost in conversation" problem
 3. **Structured handoff** — the planner writes a complete brief as if briefing a skilled engineer with zero prior context, forcing thorough task decomposition
 

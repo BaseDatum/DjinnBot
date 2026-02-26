@@ -15,7 +15,6 @@ Every agent is defined by a directory under `agents/`:
     {{< filetree/file name="SOUL.md" >}}
     {{< filetree/file name="AGENTS.md" >}}
     {{< filetree/file name="DECISION.md" >}}
-    {{< filetree/file name="PULSE.md" >}}
     {{< filetree/file name="config.yml" >}}
     {{< filetree/file name="slack.yml" >}}
   {{< /filetree/folder >}}
@@ -69,10 +68,6 @@ A memory-first decision framework shared across agents:
 3. Reflect on interactions for self-improvement
 4. Stay in character and add value
 
-### PULSE.md
-
-The autonomous wake-up routine for pulse mode. See [Pulse Mode](/docs/concepts/pulse) for details.
-
 ### config.yml
 
 Runtime configuration for the agent:
@@ -103,8 +98,8 @@ coordination:
     max_wakes_per_day: 12
     max_wakes_per_pair_per_day: 5
 
-# Model overrides for different contexts
-planning_model: openrouter/x-ai/grok-4.1-fast
+# Model overrides for plan+execute delegation
+planning_model: openrouter/anthropic/claude-sonnet-4
 executor_model: openrouter/x-ai/grok-4.1-fast
 ```
 
@@ -195,7 +190,6 @@ Shared templates in `agents/_templates/` provide common workflow and memory inst
 
 - **AGENTS.md** — environment description, git workflow, memory tools, communication tools
 - **DECISION.md** — memory-first decision framework
-- **PULSE.md** — autonomous wake-up routine with project tools
 - **MEMORY_TOOLS.md** — detailed memory tool reference with examples
 
 When creating a new agent, these templates provide the baseline behavior. Agent-specific files add role-specific expertise on top.
@@ -229,7 +223,6 @@ At minimum, define who the agent is, their personality, and their runtime config
 ```bash
 cp agents/_templates/AGENTS.md agents/nova/AGENTS.md
 cp agents/_templates/DECISION.md agents/nova/DECISION.md
-cp agents/_templates/PULSE.md agents/nova/PULSE.md
 ```
 
 ### Customize and restart
