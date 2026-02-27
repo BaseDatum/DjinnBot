@@ -881,7 +881,7 @@ async function shutdown(signal: string): Promise<void> {
       await chatSessionManager.shutdown();
     }
     
-    // Shutdown DjinnBot (stops executor and engine)
+    // Shutdown DjinnBot (stops executor, engine, Telegram bridge, etc.)
     if (djinnBot) {
       await djinnBot.shutdown();
     }
@@ -1445,6 +1445,19 @@ async function main(): Promise<void> {
       }
     }
 
+    // Start Telegram bridge — one bot per agent, managed by TelegramBridgeManager.
+    // Started before CSM init so the RPC handler is available; CSM is injected later.
+    {
+      try {
+        await djinnBot.startTelegramBridge({
+          defaultConversationModel: process.env.TELEGRAM_DEFAULT_MODEL,
+        });
+        console.log('[Engine] Telegram bridge started');
+      } catch (err) {
+        console.warn('[Engine] Telegram bridge failed to start (non-fatal):', err);
+      }
+    }
+
     // Publish engine version to Redis so the API can report it
     {
       const engineVersion = process.env.DJINNBOT_BUILD_VERSION || 'dev';
@@ -1598,6 +1611,15 @@ async function main(): Promise<void> {
         djinnBot.setWhatsAppChatSessionManager(chatSessionManager);
       } catch (err) {
         console.warn('[Engine] Failed to inject ChatSessionManager into WhatsAppBridge:', err);
+      }
+
+      // Inject ChatSessionManager into TelegramBridgeManager.
+      // Uses setTelegramChatSessionManager which handles the race: if the bridge
+      // hasn't started yet, the CSM is stored and injected once the bridge is ready.
+      try {
+        djinnBot.setTelegramChatSessionManager(chatSessionManager);
+      } catch (err) {
+        console.warn('[Engine] Failed to inject ChatSessionManager into TelegramBridge:', err);
       }
     }
     
