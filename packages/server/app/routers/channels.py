@@ -96,6 +96,60 @@ CHANNEL_CATALOG: Dict[str, dict] = {
         ],
         "docsUrl": "https://api.slack.com/apps",
     },
+    "discord": {
+        "name": "Discord",
+        "description": "Connect this agent to a Discord server as a bot.",
+        "primaryTokenLabel": "Bot Token",
+        "primaryTokenEnvVarSuffix": "BOT_TOKEN",
+        "primaryTokenPlaceholder": "MTIzNDU2Nzg5...",
+        "primaryTokenHint": (
+            "The bot token from Discord Developer Portal → Bot → Reset Token. "
+            "IMPORTANT: Enable 'Message Content Intent' under Privileged Gateway Intents "
+            "in the Bot settings page."
+        ),
+        "secondaryTokenLabel": "Application ID",
+        "secondaryTokenEnvVarSuffix": "APP_ID",
+        "secondaryTokenPlaceholder": "123456789012345678",
+        "secondaryTokenHint": (
+            "The Application ID from Discord Developer Portal → General Information. "
+            "Used for registering slash commands."
+        ),
+        "extraFields": [
+            {
+                "key": "guild_id",
+                "label": "Guild ID",
+                "placeholder": "123456789012345678",
+                "description": (
+                    "Optional. Restrict this bot to a specific Discord server. "
+                    "Leave blank to allow the bot in all servers it has been added to."
+                ),
+                "secret": False,
+            },
+            {
+                "key": "allow_from",
+                "label": "Allowlist",
+                "placeholder": "* or 123456789,role:Admin",
+                "description": (
+                    "Comma-separated list of who can interact with this agent. "
+                    "Use * for everyone, Discord user IDs for specific users, "
+                    "or role:RoleName for role-based access (e.g. role:Admin,role:Moderator). "
+                    "Leave empty to ignore all messages."
+                ),
+                "secret": False,
+            },
+            {
+                "key": "dm_policy",
+                "label": "DM Policy",
+                "placeholder": "allowlist",
+                "description": (
+                    "How to handle direct messages. 'allowlist' (default) uses the same "
+                    "allowlist above. 'open' responds to DMs from any user."
+                ),
+                "secret": False,
+            },
+        ],
+        "docsUrl": "https://discord.com/developers/applications",
+    },
 }
 
 

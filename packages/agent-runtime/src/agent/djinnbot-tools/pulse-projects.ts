@@ -4,6 +4,14 @@ import { authFetch } from '../../api/auth-fetch.js';
 
 // ── Schemas ────────────────────────────────────────────────────────────────
 
+const CreateProjectParamsSchema = Type.Object({
+  name: Type.String({ description: 'Project name' }),
+  description: Type.Optional(Type.String({ description: 'Project description' })),
+  repository: Type.Optional(Type.String({ description: 'Git repository URL (e.g. https://github.com/org/repo)' })),
+  templateId: Type.Optional(Type.String({ description: 'Template ID or slug to create from (e.g. "software-dev"). Omit for default columns.' })),
+});
+type CreateProjectParams = Static<typeof CreateProjectParamsSchema>;
+
 const GetMyProjectsParamsSchema = Type.Object({
   includeArchived: Type.Optional(Type.Boolean({
     default: false,
@@ -51,6 +59,84 @@ export function createPulseProjectsTools(config: PulseProjectsToolsConfig): Agen
     config.apiBaseUrl || process.env.DJINNBOT_API_URL || 'http://api:8000';
 
   return [
+    {
+      name: 'create_project',
+      description:
+        'Create a new project in DjinnBot. Optionally specify a template (e.g. "software-dev") ' +
+        'and a git repository URL. You will be automatically assigned as a member. ' +
+        'Returns the new project ID so you can immediately create tasks or set a vision.',
+      label: 'create_project',
+      parameters: CreateProjectParamsSchema,
+      execute: async (
+        _toolCallId: string,
+        params: unknown,
+        signal?: AbortSignal,
+      ): Promise<AgentToolResult<VoidDetails>> => {
+        const p = params as CreateProjectParams;
+        const apiBase = getApiBase();
+        try {
+          // 1. Create the project
+          const createUrl = `${apiBase}/v1/projects`;
+          const body: Record<string, unknown> = { name: p.name };
+          if (p.description) body.description = p.description;
+          if (p.repository) body.repository = p.repository;
+          if (p.templateId) body.templateId = p.templateId;
+
+          const createResp = await authFetch(createUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+            signal,
+          });
+          const createData = (await createResp.json()) as any;
+          if (!createResp.ok) throw new Error(createData.detail || `${createResp.status} ${createResp.statusText}`);
+
+          const projectId: string = createData.id;
+
+          // 2. Auto-assign the calling agent as member
+          let assignNote = '';
+          try {
+            const assignUrl = `${apiBase}/v1/projects/${projectId}/agents`;
+            const assignResp = await authFetch(assignUrl, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ agentId, role: 'member' }),
+              signal,
+            });
+            if (assignResp.ok) {
+              assignNote = 'You have been assigned as a **member**.';
+            } else {
+              const assignErr = (await assignResp.json().catch(() => ({}))) as any;
+              assignNote = `Agent assignment failed: ${assignErr.detail || assignResp.status}`;
+            }
+          } catch (assignErr) {
+            assignNote = `Agent assignment error: ${assignErr instanceof Error ? assignErr.message : String(assignErr)}`;
+          }
+
+          return {
+            content: [{
+              type: 'text',
+              text: [
+                `Project created successfully.`, ``,
+                `**Project ID**: ${projectId}`,
+                `**Name**: ${createData.name}`,
+                createData.template_id ? `**Template**: ${createData.template_id}` : null,
+                assignNote ? `\n${assignNote}` : null,
+                ``,
+                `You can now:`,
+                `- \`get_project_vision("${projectId}")\` to read/set the vision`,
+                `- \`create_task("${projectId}", ...)\` to add tasks`,
+                `- \`get_ready_tasks("${projectId}")\` to see work`,
+              ].filter(Boolean).join('\n'),
+            }],
+            details: {},
+          };
+        } catch (err) {
+          return { content: [{ type: 'text', text: `Error creating project: ${err instanceof Error ? err.message : String(err)}` }], details: {} };
+        }
+      },
+    },
+
     {
       name: 'get_my_projects',
       description: 'Get list of projects you are assigned to. Returns projects where you have an active role (owner or member). Use this during pulse to discover work.',

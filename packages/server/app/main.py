@@ -56,6 +56,7 @@ from app.routers import pulse_routines
 from app.routers import llm_calls
 from app.routers import user_usage
 from app.routers import slack as slack_router
+from app.routers import discord as discord_router
 from app.routers import signal as signal_router
 from app.routers import whatsapp as whatsapp_router
 from app.routers import telegram as telegram_router
@@ -736,6 +737,7 @@ app.include_router(user_usage.router, prefix="/v1", tags=["user-usage"])
 app.include_router(waitlist_router.router, prefix="/v1/waitlist", tags=["waitlist"])
 app.include_router(updates_router.router, prefix="/v1/system/updates", tags=["updates"])
 app.include_router(slack_router.router, prefix="/v1/slack", tags=["slack"])
+app.include_router(discord_router.router, prefix="/v1/discord", tags=["discord"])
 app.include_router(signal_router.router, prefix="/v1/signal", tags=["signal"])
 app.include_router(whatsapp_router.router, prefix="/v1/whatsapp", tags=["whatsapp"])
 app.include_router(telegram_router.router, prefix="/v1/telegram", tags=["telegram"])

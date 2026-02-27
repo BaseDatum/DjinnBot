@@ -1458,6 +1458,48 @@ async function main(): Promise<void> {
       }
     }
 
+    // Start Discord bridge — agents with Discord credentials will connect to the gateway
+    {
+      console.log('[Engine] Starting Discord bridge...');
+      try {
+        await djinnBot.startDiscordBridge(
+          async (agentId, systemPrompt, userPrompt, modelString) => {
+            const { Agent } = await import('@mariozechner/pi-agent-core');
+            const { registerBuiltInApiProviders } = await import('@mariozechner/pi-ai');
+
+            registerBuiltInApiProviders();
+            const model = parseModelString(modelString);
+
+            const agent = new Agent({
+              initialState: {
+                systemPrompt,
+                model,
+                messages: [],
+              },
+            });
+
+            let output = '';
+            const unsubscribe = agent.subscribe((event: any) => {
+              if (event.type === 'message_update' && event.assistantMessageEvent?.type === 'text_delta') {
+                output += event.assistantMessageEvent.delta;
+              }
+            });
+
+            await agent.prompt(userPrompt);
+            await agent.waitForIdle();
+            unsubscribe();
+
+            return output;
+          },
+          undefined, // onHumanGuidance
+          globalSettings.defaultSlackDecisionModel, // reuse same model setting
+        );
+        console.log('[Engine] Discord bridge started');
+      } catch (err) {
+        console.warn('[Engine] Discord bridge failed to start (non-fatal):', err);
+      }
+    }
+
     // Publish engine version to Redis so the API can report it
     {
       const engineVersion = process.env.DJINNBOT_BUILD_VERSION || 'dev';
@@ -1620,6 +1662,27 @@ async function main(): Promise<void> {
         djinnBot.setTelegramChatSessionManager(chatSessionManager);
       } catch (err) {
         console.warn('[Engine] Failed to inject ChatSessionManager into TelegramBridge:', err);
+      }
+
+      // Inject ChatSessionManager into DiscordBridge for conversation streaming.
+      if (djinnBot.discordBridge) {
+        try {
+          djinnBot.discordBridge.setChatSessionManager(chatSessionManager);
+          console.log('[Engine] DiscordBridge wired to ChatSessionManager for conversation streaming');
+        } catch (err) {
+          console.warn('[Engine] Failed to inject ChatSessionManager into DiscordBridge:', err);
+        }
+
+        try {
+          djinnBot.discordBridge.setOnBeforeTeardown(async (sessionId: string, _agentId: string) => {
+            if (chatSessionManager) {
+              await chatSessionManager.triggerConsolidation(sessionId);
+            }
+          });
+          console.log('[Engine] Memory consolidation wired to DiscordBridge teardown');
+        } catch (err) {
+          console.warn('[Engine] Failed to wire Discord memory consolidation:', err);
+        }
       }
     }
     
