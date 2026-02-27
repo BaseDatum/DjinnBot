@@ -15,26 +15,36 @@ layout: hextra-home
   border: 1px solid rgba(128,128,128,0.2);
   border-radius: 12px;
   padding: 1.5rem;
-  position: relative;
-  overflow: hidden;
-}
-.token-card .label {
-  font-size: 0.85rem;
-  opacity: 0.7;
-  margin-bottom: 0.25rem;
+  text-align: center;
 }
 .token-card .task {
   font-weight: 600;
-  font-size: 1rem;
-  margin-bottom: 1rem;
+  font-size: 0.95rem;
   line-height: 1.4;
+  margin-bottom: 0.5rem;
+}
+.token-card .reduction {
+  font-size: 2.25rem;
+  font-weight: 800;
+  color: #10b981;
+  line-height: 1;
+  margin-bottom: 1rem;
+}
+.token-bars {
+  max-width: 14rem;
+  margin: 0 auto;
 }
 .token-bar {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
-  margin-bottom: 0.5rem;
-  font-size: 0.85rem;
+  gap: 0.5rem;
+  margin-bottom: 0.4rem;
+  font-size: 0.8rem;
+}
+.token-bar .bar-label {
+  width: 4rem;
+  text-align: right;
+  flex-shrink: 0;
 }
 .token-bar .bar {
   height: 8px;
@@ -48,22 +58,47 @@ layout: hextra-home
 .token-bar .bar-djinn {
   background: #10b981;
 }
-.token-bar .num {
+.token-bar .bar-num {
   white-space: nowrap;
-  min-width: 5rem;
-}
-.token-card .reduction {
-  position: absolute;
-  top: 1.25rem;
-  right: 1.5rem;
-  font-size: 1.5rem;
-  font-weight: 800;
-  color: #10b981;
+  flex-shrink: 0;
 }
 .token-card .how {
-  font-size: 0.8rem;
-  opacity: 0.6;
-  margin-top: 0.5rem;
+  font-size: 0.78rem;
+  opacity: 0.55;
+  margin-top: 0.75rem;
+  line-height: 1.4;
+}
+
+/* ── Styled info rows (reused for multiple sections) ──────── */
+.info-grid {
+  display: grid;
+  gap: 0.5rem;
+  margin: 2rem 0;
+}
+.info-row {
+  display: grid;
+  grid-template-columns: 10rem 1fr;
+  gap: 1rem;
+  padding: 1rem 1.25rem;
+  border-radius: 10px;
+  align-items: start;
+}
+.info-row:nth-child(odd) {
+  background: rgba(128,128,128,0.05);
+}
+.info-row .row-label {
+  font-weight: 700;
+  font-size: 0.9rem;
+}
+.info-row .row-val {
+  font-size: 0.88rem;
+  line-height: 1.5;
+}
+@media (max-width: 640px) {
+  .info-row {
+    grid-template-columns: 1fr;
+    gap: 0.25rem;
+  }
 }
 
 /* ── Agent roster ──────────────────────────────────────────── */
@@ -269,94 +304,111 @@ Most agent tools burn through context windows dumping raw files and verbose sche
 <div class="token-grid">
 
 <div class="token-card">
-  <div class="reduction">40x</div>
   <div class="task">Understand a function and every caller &amp; callee</div>
-  <div class="token-bar">
-    <span class="num" style="opacity:0.6">Others</span>
-    <span class="bar bar-other" style="width:100%"></span>
-    <span class="num" style="opacity:0.6">~20,000 tok</span>
-  </div>
-  <div class="token-bar">
-    <span class="num" style="color:#10b981;font-weight:600">DjinnBot</span>
-    <span class="bar bar-djinn" style="width:2.5%"></span>
-    <span class="num" style="color:#10b981;font-weight:600">~500 tok</span>
+  <div class="reduction">40x</div>
+  <div class="token-bars">
+    <div class="token-bar">
+      <span class="bar-label" style="opacity:0.55">Others</span>
+      <span class="bar bar-other" style="width:7rem"></span>
+      <span class="bar-num" style="opacity:0.55">~20k tok</span>
+    </div>
+    <div class="token-bar">
+      <span class="bar-label" style="color:#10b981;font-weight:600">DjinnBot</span>
+      <span class="bar bar-djinn" style="width:0.4rem"></span>
+      <span class="bar-num" style="color:#10b981;font-weight:600">~500 tok</span>
+    </div>
   </div>
   <div class="how">1 call to <code>code_graph_context</code> vs. 15+ file reads</div>
 </div>
 
 <div class="token-card">
-  <div class="reduction">37x</div>
   <div class="task">"What breaks if I change this service?"</div>
-  <div class="token-bar">
-    <span class="num" style="opacity:0.6">Others</span>
-    <span class="bar bar-other" style="width:100%"></span>
-    <span class="num" style="opacity:0.6">~30,000 tok</span>
-  </div>
-  <div class="token-bar">
-    <span class="num" style="color:#10b981;font-weight:600">DjinnBot</span>
-    <span class="bar bar-djinn" style="width:2.7%"></span>
-    <span class="num" style="color:#10b981;font-weight:600">~800 tok</span>
+  <div class="reduction">37x</div>
+  <div class="token-bars">
+    <div class="token-bar">
+      <span class="bar-label" style="opacity:0.55">Others</span>
+      <span class="bar bar-other" style="width:7rem"></span>
+      <span class="bar-num" style="opacity:0.55">~30k tok</span>
+    </div>
+    <div class="token-bar">
+      <span class="bar-label" style="color:#10b981;font-weight:600">DjinnBot</span>
+      <span class="bar bar-djinn" style="width:0.4rem"></span>
+      <span class="bar-num" style="color:#10b981;font-weight:600">~800 tok</span>
+    </div>
   </div>
   <div class="how">1 call to <code>code_graph_impact</code> vs. codebase-wide grep + read</div>
 </div>
 
 <div class="token-card">
-  <div class="reduction">12x</div>
   <div class="task">30 tool schemas in the system prompt</div>
-  <div class="token-bar">
-    <span class="num" style="opacity:0.6">Others</span>
-    <span class="bar bar-other" style="width:100%"></span>
-    <span class="num" style="opacity:0.6">~18,000 tok</span>
+  <div class="reduction">12x</div>
+  <div class="token-bars">
+    <div class="token-bar">
+      <span class="bar-label" style="opacity:0.55">Others</span>
+      <span class="bar bar-other" style="width:7rem"></span>
+      <span class="bar-num" style="opacity:0.55">~18k tok</span>
+    </div>
+    <div class="token-bar">
+      <span class="bar-label" style="color:#10b981;font-weight:600">DjinnBot</span>
+      <span class="bar bar-djinn" style="width:1.2rem"></span>
+      <span class="bar-num" style="color:#10b981;font-weight:600">~1.5k tok</span>
+    </div>
   </div>
-  <div class="token-bar">
-    <span class="num" style="color:#10b981;font-weight:600">DjinnBot</span>
-    <span class="bar bar-djinn" style="width:8.3%"></span>
-    <span class="num" style="color:#10b981;font-weight:600">~1,500 tok</span>
-  </div>
-  <div class="how">Compact one-line Python signatures via Programmatic Tool Calling</div>
+  <div class="how">Compact Python signatures via Programmatic Tool Calling</div>
 </div>
 
 <div class="token-card">
+  <div class="task">Read 5 files, grep, aggregate results</div>
   <div class="reduction">24x</div>
-  <div class="task">Read 5 files, grep for patterns, aggregate results</div>
-  <div class="token-bar">
-    <span class="num" style="opacity:0.6">Others</span>
-    <span class="bar bar-other" style="width:100%"></span>
-    <span class="num" style="opacity:0.6">~12,000 tok</span>
-  </div>
-  <div class="token-bar">
-    <span class="num" style="color:#10b981;font-weight:600">DjinnBot</span>
-    <span class="bar bar-djinn" style="width:4.2%"></span>
-    <span class="num" style="color:#10b981;font-weight:600">~500 tok</span>
+  <div class="token-bars">
+    <div class="token-bar">
+      <span class="bar-label" style="opacity:0.55">Others</span>
+      <span class="bar bar-other" style="width:7rem"></span>
+      <span class="bar-num" style="opacity:0.55">~12k tok</span>
+    </div>
+    <div class="token-bar">
+      <span class="bar-label" style="color:#10b981;font-weight:600">DjinnBot</span>
+      <span class="bar bar-djinn" style="width:0.4rem"></span>
+      <span class="bar-num" style="color:#10b981;font-weight:600">~500 tok</span>
+    </div>
   </div>
   <div class="how">1 <code>exec_code</code> call &mdash; intermediate results stay in Python</div>
 </div>
 
 <div class="token-card">
-  <div class="reduction">13x</div>
   <div class="task">Analyze a 500-line diff for security issues</div>
-  <div class="token-bar">
-    <span class="num" style="opacity:0.6">Others</span>
-    <span class="bar bar-other" style="width:100%"></span>
-    <span class="num" style="opacity:0.6">~4,000 tok</span>
+  <div class="reduction">13x</div>
+  <div class="token-bars">
+    <div class="token-bar">
+      <span class="bar-label" style="opacity:0.55">Others</span>
+      <span class="bar bar-other" style="width:7rem"></span>
+      <span class="bar-num" style="opacity:0.55">~4k tok</span>
+    </div>
+    <div class="token-bar">
+      <span class="bar-label" style="color:#10b981;font-weight:600">DjinnBot</span>
+      <span class="bar bar-djinn" style="width:1rem"></span>
+      <span class="bar-num" style="color:#10b981;font-weight:600">~300 tok</span>
+    </div>
   </div>
-  <div class="token-bar">
-    <span class="num" style="color:#10b981;font-weight:600">DjinnBot</span>
-    <span class="bar bar-djinn" style="width:7.5%"></span>
-    <span class="num" style="color:#10b981;font-weight:600">~300 tok</span>
-  </div>
-  <div class="how"><code>focused_analysis</code> delegates to a sub-model &mdash; main context stays clean</div>
+  <div class="how"><code>focused_analysis</code> delegates to a sub-model</div>
 </div>
 
 </div>
 
-Three systems make this possible:
-
-**[Code Knowledge Graph](/docs/concepts/code-knowledge-graph)** &mdash; Tree-sitter parses every source file into a graph of functions, classes, call chains, and functional clusters stored in KuzuDB. Agents query the graph instead of reading files. One call returns what 15+ file reads would piece together.
-
-**[Programmatic Tool Calling](/docs/concepts/programmatic-tool-calling)** &mdash; Instead of 30 full JSON schemas in every prompt, agents get compact Python function signatures and write code that calls tools, loops, and aggregates. Only the final result enters the context window.
-
-**Focused Analysis** &mdash; When an agent needs to analyze a large diff or spec, `focused_analysis` delegates to a fast sub-model. The agent's context stays clean for high-level reasoning.
+<div class="info-grid" style="margin-top: 2.5rem;">
+  <div class="info-row">
+    <div class="row-label" style="color:#10b981"><a href="/docs/concepts/code-knowledge-graph" style="color:inherit">Code Knowledge Graph</a></div>
+    <div class="row-val">Tree-sitter parses every source file into a graph of functions, classes, call chains, and functional clusters stored in KuzuDB. Agents query the graph instead of reading files. One call returns what 15+ file reads would piece together.</div>
+  </div>
+  <div class="info-row">
+    <div class="row-label" style="color:#10b981"><a href="/docs/concepts/programmatic-tool-calling" style="color:inherit">Programmatic Tool Calling</a></div>
+    <div class="row-val">Instead of 30 full JSON schemas in every prompt, agents get compact Python function signatures and write code that calls tools, loops, and aggregates. Only the final result enters the context window.</div>
+  </div>
+  <div class="info-row">
+    <div class="row-label" style="color:#10b981">Focused Analysis</div>
+    <div class="row-val">When an agent needs to analyze a large diff or spec, <code>focused_analysis</code> delegates to a fast sub-model. The agent's context stays clean for high-level reasoning.</div>
+  </div>
+</div>
 
 </div>
 
@@ -368,35 +420,34 @@ Three systems make this possible:
 
 </div>
 
-<div class="hx-mt-4 hx-mb-8" style="max-width: 52rem; margin: 0 auto;">
+<div class="hx-mt-2 hx-mb-8" style="max-width: 62rem; margin-left: auto; margin-right: auto;">
 
-```mermaid
-graph LR
-    A["Define Work"] --> B["Plan"]
-    B --> C["Agents Claim Tasks"]
-    C --> D["Autonomous Work"]
-    D --> E["Review & Iterate"]
-    E --> F["Deliver"]
-    
-    style A fill:#3b82f6,color:#fff,stroke:#2563eb
-    style B fill:#8b5cf6,color:#fff,stroke:#7c3aed
-    style C fill:#f59e0b,color:#000,stroke:#d97706
-    style D fill:#059669,color:#fff,stroke:#047857
-    style E fill:#ec4899,color:#fff,stroke:#db2777
-    style F fill:#10b981,color:#fff,stroke:#059669
-```
-
-**1. Define the work** &mdash; describe what you need via the dashboard's guided onboarding, chat, or API. Software projects, research tasks, content campaigns, operations workflows &mdash; anything.
-
-**2. Plan it** &mdash; the planning pipeline decomposes your project into tasks on a kanban board with priorities, dependencies, and hour estimates. Or define tasks manually.
-
-**3. Agents claim tasks** &mdash; each agent watches specific board columns matching their role. Engineers grab implementation work. Reviewers grab review tasks. Any agent can be configured to watch any column.
-
-**4. Autonomous work** &mdash; on pulse cycles, agents wake up, claim a task, spin up an isolated container, and do the work &mdash; writing code, researching topics, generating content, browsing the web, or running any tools you've given them. Use **swarm execution** for parallel multi-agent processing.
-
-**5. Review & iterate** &mdash; agents review each other's work. If changes are needed, the task cycles back. They coordinate via inbox messages and can wake each other for urgent blockers.
-
-**6. Deliver** &mdash; watch the whole thing happen in real-time via the dashboard, Slack, CLI, or the live activity feed.
+<div class="info-grid">
+  <div class="info-row">
+    <div class="row-label">1. Define the work</div>
+    <div class="row-val">Describe what you need via the dashboard's guided onboarding, chat, or API. Software projects, research tasks, content campaigns, operations workflows &mdash; anything.</div>
+  </div>
+  <div class="info-row">
+    <div class="row-label">2. Plan it</div>
+    <div class="row-val">The planning pipeline decomposes your project into tasks on a kanban board with priorities, dependencies, and hour estimates. Or define tasks manually.</div>
+  </div>
+  <div class="info-row">
+    <div class="row-label">3. Agents claim</div>
+    <div class="row-val">Each agent watches specific board columns matching their role. Engineers grab implementation work. Reviewers grab review tasks. Any agent can be configured to watch any column.</div>
+  </div>
+  <div class="info-row">
+    <div class="row-label">4. Autonomous work</div>
+    <div class="row-val">On pulse cycles, agents wake up, claim a task, spin up an isolated container, and do the work &mdash; writing code, researching topics, generating content, browsing the web, or running any tools you've given them. Use <strong>swarm execution</strong> for parallel multi-agent processing.</div>
+  </div>
+  <div class="info-row">
+    <div class="row-label">5. Review &amp; iterate</div>
+    <div class="row-val">Agents review each other's work. If changes are needed, the task cycles back. They coordinate via inbox messages and can wake each other for urgent blockers.</div>
+  </div>
+  <div class="info-row">
+    <div class="row-label">6. Deliver</div>
+    <div class="row-val">Watch the whole thing happen in real-time via the dashboard, Slack, CLI, or the live activity feed.</div>
+  </div>
+</div>
 
 </div>
 
