@@ -317,6 +317,16 @@ export class DiscordBridge {
     streamer.updateTask(cardId, toolName, status, undefined, output).catch(() => {});
   }
 
+  // Track sessions that were triggered by voice messages for TTS follow-up
+  private voiceSessions = new Set<string>();
+  // Track accumulated text for TTS generation
+  private sessionAccumulatedText = new Map<string, string>();
+
+  /** Mark a session as voice-triggered (called by session pool on voice input). */
+  markVoiceSession(sessionId: string): void {
+    this.voiceSessions.add(sessionId);
+  }
+
   private async routeSessionStepEnd(sessionId: string, success: boolean): Promise<void> {
     const location = this.findRuntimeForSession(sessionId);
     if (!location) return;
@@ -332,6 +342,58 @@ export class DiscordBridge {
       await streamer.stop({ includeFeedback: true });
     } else {
       await streamer.stopWithError('Something went wrong. Please try again.');
+    }
+
+    // Generate TTS follow-up for voice message sessions
+    if (success && this.voiceSessions.has(sessionId)) {
+      this.voiceSessions.delete(sessionId);
+      const responseText = this.sessionAccumulatedText.get(sessionId) || '';
+      this.sessionAccumulatedText.delete(sessionId);
+
+      if (responseText.length > 0 && location) {
+        try {
+          const { authFetch } = await import('@djinnbot/core');
+          const agentId = sessionId.split('_')[1] || 'unknown';
+          const res = await authFetch(
+            `${this.config.apiBaseUrl}/v1/internal/tts/synthesize`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                text: responseText,
+                agent_id: agentId,
+                session_id: sessionId,
+                channel: 'discord',
+              }),
+              signal: AbortSignal.timeout(30000),
+            },
+          );
+
+          if (res.ok) {
+            const data = await res.json() as { ok: boolean; attachmentId?: string; filename?: string };
+            if (data.ok && data.attachmentId) {
+              // Download and send audio as Discord file attachment
+              const audioRes = await authFetch(
+                `${this.config.apiBaseUrl}/v1/chat/attachments/${data.attachmentId}/content`,
+                { signal: AbortSignal.timeout(10000) },
+              );
+              if (audioRes.ok) {
+                const audioBuffer = Buffer.from(await audioRes.arrayBuffer());
+                const channel = runtime.getClient()?.channels.cache.get(location.channelId);
+                if (channel && 'send' in channel) {
+                  const { AttachmentBuilder } = await import('discord.js');
+                  await (channel as any).send({
+                    files: [new AttachmentBuilder(audioBuffer, { name: data.filename || 'voice.ogg' })],
+                  });
+                  console.log(`[DiscordBridge] TTS audio sent for session ${sessionId}`);
+                }
+              }
+            }
+          }
+        } catch (err) {
+          console.warn(`[DiscordBridge] TTS generation failed (non-fatal):`, err);
+        }
+      }
     }
 
     runtime.removeConvStreamer(sessionId);

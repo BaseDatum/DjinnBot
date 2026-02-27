@@ -578,11 +578,28 @@ export class SignalBridge {
       if (rawFiles.length === 0) rawFiles = undefined;
     }
 
+    // Detect if input is a voice message (audio attachment with no text)
+    const isVoiceMessage = !text && rawFiles?.some(f =>
+      f.mimeType.startsWith('audio/') || f.mimeType === 'application/ogg'
+    ) || false;
+
     // 7. Process with agent (session created inside, then attachments uploaded)
     try {
       const response = await this.processWithAgent(route.agentId, normalized, text || '[Voice/media message — see attachments]', rawFiles);
       this.typingManager.stopTyping(normalized);
+
+      // Send text response first (always)
       await this.sendFormattedMessage(normalized, response);
+
+      // If input was a voice message, generate TTS audio as a follow-up
+      if (isVoiceMessage && response.length > 0) {
+        try {
+          const sessionId = `signal_${normalized}_${route.agentId}`;
+          await this.generateAndSendTts(normalized, route.agentId, response, sessionId);
+        } catch (ttsErr) {
+          console.warn(`[SignalBridge] TTS generation failed (non-fatal):`, ttsErr);
+        }
+      }
     } catch (err) {
       this.typingManager.stopTyping(normalized);
       console.error(`[SignalBridge] Agent ${route.agentId} processing failed:`, err);
@@ -924,6 +941,66 @@ export class SignalBridge {
       account: this.account,
       textStyles: styles.length > 0 ? styles : undefined,
     });
+  }
+
+  /**
+   * Generate TTS audio and send as a Signal attachment.
+   */
+  private async generateAndSendTts(
+    to: string,
+    agentId: string,
+    text: string,
+    sessionId: string,
+  ): Promise<boolean> {
+    try {
+      const res = await authFetch(
+        `${this.config.apiUrl}/v1/internal/tts/synthesize`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            text,
+            agent_id: agentId,
+            session_id: sessionId,
+            channel: 'signal',
+          }),
+          signal: AbortSignal.timeout(30000),
+        },
+      );
+
+      if (!res.ok) return false;
+
+      const data = await res.json() as { ok: boolean; attachmentId?: string; filename?: string };
+      if (!data.ok || !data.attachmentId) return false;
+
+      // Download the audio
+      const audioRes = await authFetch(
+        `${this.config.apiUrl}/v1/chat/attachments/${data.attachmentId}/content`,
+        { signal: AbortSignal.timeout(10000) },
+      );
+      if (!audioRes.ok) return false;
+
+      const audioBuffer = Buffer.from(await audioRes.arrayBuffer());
+
+      // Write to temp file and send via signal-cli
+      const { writeFile, unlink } = await import('node:fs/promises');
+      const { join } = await import('node:path');
+      const { tmpdir } = await import('node:os');
+      const tmpPath = join(tmpdir(), data.filename || `tts_${Date.now()}.mp3`);
+      await writeFile(tmpPath, audioBuffer);
+
+      await this.client.sendMessage(to, '', {
+        account: this.account,
+        attachments: [tmpPath],
+      });
+
+      await unlink(tmpPath).catch(() => {});
+      console.log(`[SignalBridge] TTS audio sent to ${to}`);
+      return true;
+    } catch (err) {
+      console.warn(`[SignalBridge] TTS send failed:`, err);
+      return false;
+    }
   }
 
   /**

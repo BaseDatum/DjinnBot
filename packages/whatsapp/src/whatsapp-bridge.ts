@@ -278,12 +278,27 @@ export class WhatsAppBridge {
       }
     }
 
+    // Detect if input is a voice message
+    const isVoiceMessage = !msg.text && msg.media?.type === 'audio' || false;
+
     // 8. Process with agent (session created inside, then media uploaded)
     const messageText = msg.text || (msg.media ? `[${msg.media.type} message — see attachments]` : '');
     try {
       const response = await this.processWithAgent(route.agentId, normalized, messageText, rawMedia);
       this.typingManager.stopTyping(msg.senderJid);
+
+      // Send text response first (always)
       await this.sendFormattedMessage(msg.senderJid, response);
+
+      // If input was a voice message, generate TTS audio as a follow-up
+      if (isVoiceMessage && response.length > 0) {
+        try {
+          const sessionId = `whatsapp_${normalized}_${route.agentId}`;
+          await this.generateAndSendTts(msg.senderJid, route.agentId, response, sessionId);
+        } catch (ttsErr) {
+          console.warn(`[WhatsAppBridge] TTS generation failed (non-fatal):`, ttsErr);
+        }
+      }
     } catch (err) {
       this.typingManager.stopTyping(msg.senderJid);
       console.error(`[WhatsAppBridge] Agent ${route.agentId} processing failed:`, err);
@@ -616,6 +631,61 @@ export class WhatsAppBridge {
 
     for (const chunk of messageChunks) {
       await this.socket.sendTextMessage(jid, chunk);
+    }
+  }
+
+  /**
+   * Generate TTS audio and send as a WhatsApp voice message.
+   */
+  private async generateAndSendTts(
+    jid: string,
+    agentId: string,
+    text: string,
+    sessionId: string,
+  ): Promise<boolean> {
+    if (!this.socket) return false;
+    try {
+      const { authFetch } = await import('@djinnbot/core');
+      const res = await authFetch(
+        `${this.config.apiUrl}/v1/internal/tts/synthesize`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            text,
+            agent_id: agentId,
+            session_id: sessionId,
+            channel: 'whatsapp',
+          }),
+          signal: AbortSignal.timeout(30000),
+        },
+      );
+
+      if (!res.ok) return false;
+      const data = await res.json() as { ok: boolean; attachmentId?: string; filename?: string; mimeType?: string };
+      if (!data.ok || !data.attachmentId) return false;
+
+      // Download the audio
+      const audioRes = await authFetch(
+        `${this.config.apiUrl}/v1/chat/attachments/${data.attachmentId}/content`,
+        { signal: AbortSignal.timeout(10000) },
+      );
+      if (!audioRes.ok) return false;
+
+      const audioBuffer = Buffer.from(await audioRes.arrayBuffer());
+
+      // Send as WhatsApp audio message
+      await this.socket.sendMessage(jid, {
+        audio: audioBuffer,
+        mimetype: data.mimeType || 'audio/ogg; codecs=opus',
+        ptt: true, // Push-to-talk flag = renders as voice note
+      } as any);
+
+      console.log(`[WhatsAppBridge] TTS audio sent to ${jid}`);
+      return true;
+    } catch (err) {
+      console.warn(`[WhatsAppBridge] TTS send failed:`, err);
+      return false;
     }
   }
 

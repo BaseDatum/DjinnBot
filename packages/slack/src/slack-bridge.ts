@@ -318,6 +318,12 @@ export class SlackBridge {
     streamer.appendText(chunk).catch(err =>
       console.warn(`[SlackBridge] appendText failed for ${sessionId}:`, err)
     );
+
+    // Accumulate text for TTS generation on voice sessions
+    if (this.sessionPool?._voiceSessions?.has(sessionId)) {
+      const existing = this.sessionAccumulatedText.get(sessionId) || '';
+      this.sessionAccumulatedText.set(sessionId, existing + chunk);
+    }
   }
 
   // Per-session counter for unique tool call task card IDs.
@@ -370,10 +376,13 @@ export class SlackBridge {
     streamer.updateTask(cardId, toolName, status, undefined, output).catch(() => {});
   }
 
+  // Accumulated text per session for TTS generation
+  private sessionAccumulatedText = new Map<string, string>();
+
   private async routeSessionStepEnd(sessionId: string, success: boolean): Promise<void> {
     const location = this.findRuntimeForSession(sessionId);
     if (!location) return;
-    const { runtime } = location;
+    const { runtime, channelId, threadTs } = location;
     const streamer = runtime.getConvStreamer(sessionId);
 
     if (!streamer) {
@@ -400,11 +409,84 @@ export class SlackBridge {
       }
     }
 
+    // Generate TTS follow-up for voice message sessions
+    const isVoiceSession = this.sessionPool?._voiceSessions?.has(sessionId);
+    if (success && isVoiceSession) {
+      this.sessionPool!._voiceSessions.delete(sessionId);
+      const responseText = this.sessionAccumulatedText.get(sessionId) || '';
+      this.sessionAccumulatedText.delete(sessionId);
+
+      if (responseText.length > 0) {
+        void this.sendTtsFollowUp(sessionId, responseText, runtime, channelId, threadTs);
+      }
+    } else {
+      this.sessionAccumulatedText.delete(sessionId);
+    }
+
     runtime.removeConvStreamer(sessionId);
 
     // Clean up per-session tool call tracking state
     this.toolCallCounters.delete(sessionId);
     this.activeToolCardIds.delete(sessionId);
+  }
+
+  /**
+   * Generate TTS audio and post as a Slack file in the thread.
+   * Fire-and-forget — errors are logged but don't break the response flow.
+   */
+  private async sendTtsFollowUp(
+    sessionId: string,
+    text: string,
+    runtime: AgentSlackRuntime,
+    channelId: string,
+    threadTs: string,
+  ): Promise<void> {
+    try {
+      const apiBaseUrl = (this.sessionPool as any)?.config?.apiBaseUrl
+        || process.env.DJINNBOT_API_URL
+        || 'http://api:8000';
+      const agentId = sessionId.split('_')[1] || 'unknown';
+
+      const { authFetch } = await import('@djinnbot/core');
+      const res = await authFetch(`${apiBaseUrl}/v1/internal/tts/synthesize`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          text,
+          agent_id: agentId,
+          session_id: sessionId,
+          channel: 'slack',
+        }),
+      });
+
+      if (!res.ok) return;
+      const data = await res.json() as { ok: boolean; attachmentId?: string; filename?: string };
+      if (!data.ok || !data.attachmentId) return;
+
+      // Download the audio
+      const audioRes = await authFetch(
+        `${apiBaseUrl}/v1/chat/attachments/${data.attachmentId}/content`,
+        { signal: AbortSignal.timeout(10000) },
+      );
+      if (!audioRes.ok) return;
+
+      const audioBuffer = Buffer.from(await audioRes.arrayBuffer());
+
+      // Upload to Slack and post in thread
+      const client = runtime.getClient();
+      if (client) {
+        await client.filesUploadV2({
+          channel_id: channelId,
+          thread_ts: threadTs,
+          file: audioBuffer,
+          filename: data.filename || 'voice_response.mp3',
+          title: 'Voice Response',
+        });
+        console.log(`[SlackBridge] TTS audio posted to thread ${threadTs}`);
+      }
+    } catch (err) {
+      console.warn(`[SlackBridge] TTS follow-up failed (non-fatal):`, err);
+    }
   }
 
   /**

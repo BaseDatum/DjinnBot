@@ -38,6 +38,7 @@ import {
   AlertCircle,
   Activity,
   Zap,
+  Volume2,
 } from 'lucide-react';
 import {
   Dialog,
@@ -66,7 +67,7 @@ export const Route = createFileRoute('/admin')({
   component: AdminPage,
 });
 
-type AdminTab = 'users' | 'providers' | 'sharing' | 'memory' | 'memory-scoring' | 'models' | 'approvals' | 'runtime' | 'secrets' | 'waitlist' | 'email' | 'logs' | 'notifications' | 'usage' | 'pulse';
+type AdminTab = 'users' | 'providers' | 'sharing' | 'memory' | 'memory-scoring' | 'models' | 'approvals' | 'runtime' | 'secrets' | 'waitlist' | 'email' | 'logs' | 'notifications' | 'usage' | 'pulse' | 'tts';
 
 const NAV_ITEMS: NestedSidebarItem[] = [
   { key: 'notifications', label: 'Notifications', icon: Bell },
@@ -77,6 +78,7 @@ const NAV_ITEMS: NestedSidebarItem[] = [
   { key: 'email', label: 'Email Settings', icon: Mail },
   { key: 'providers', label: 'Instance Providers', icon: Layers },
   { key: 'sharing', label: 'Key Sharing', icon: Share2 },
+  { key: 'tts', label: 'Text-to-Speech', icon: Volume2 },
   { key: 'memory', label: 'Memory Search', icon: Database },
   { key: 'memory-scoring', label: 'Memory Scoring', icon: Brain },
   { key: 'models', label: 'Default Models', icon: Cpu },
@@ -615,6 +617,9 @@ function AdminPage() {
 
         {/* ── API Usage ── */}
         {activeTab === 'usage' && <ApiUsagePanel />}
+
+        {/* ── Text-to-Speech ── */}
+        {activeTab === 'tts' && <AdminTtsPanel />}
 
         {/* ── Pulse System Kill Switch ── */}
         {activeTab === 'pulse' && (
@@ -1828,6 +1833,205 @@ function AdminPage() {
           </div>
         )}
       </NestedSidebar>
+    </div>
+  );
+}
+
+
+// ── Admin TTS Panel ──────────────────────────────────────────────────────────
+
+function AdminTtsPanel() {
+  const [ttsSettings, setTtsSettings] = useState({
+    ttsEnabled: true,
+    ttsCharacterThreshold: 1000,
+    ttsMaxConcurrentRequests: 5,
+  });
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [providers, setProviders] = useState<any[]>([]);
+  const [apiKey, setApiKey] = useState('');
+
+  useEffect(() => {
+    loadAll();
+  }, []);
+
+  const loadAll = async () => {
+    try {
+      const [settingsRes, providersRes] = await Promise.all([
+        authFetch(`${API_BASE}/admin/tts-settings`),
+        authFetch(`${API_BASE}/settings/tts-providers`),
+      ]);
+      if (settingsRes.ok) setTtsSettings(await settingsRes.json());
+      if (providersRes.ok) setProviders(await providersRes.json());
+    } catch (err) {
+      console.error('Failed to load TTS settings:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSaveSettings = async () => {
+    setSaving(true);
+    try {
+      const res = await authFetch(`${API_BASE}/admin/tts-settings`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(ttsSettings),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setTtsSettings(data);
+        toast.success('TTS settings saved');
+      } else {
+        toast.error('Failed to save TTS settings');
+      }
+    } catch {
+      toast.error('Failed to save TTS settings');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleSaveProviderKey = async (providerId: string) => {
+    if (!apiKey.trim()) return;
+    try {
+      const res = await authFetch(`${API_BASE}/settings/tts-providers/${providerId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ providerId, enabled: true, apiKey: apiKey.trim() }),
+      });
+      if (res.ok) {
+        toast.success('API key saved');
+        setApiKey('');
+        loadAll();
+      } else {
+        toast.error('Failed to save API key');
+      }
+    } catch {
+      toast.error('Failed to save API key');
+    }
+  };
+
+  if (loading) {
+    return <div className="max-w-5xl mx-auto"><Loader2 className="h-5 w-5 animate-spin mx-auto mt-8" /></div>;
+  }
+
+  return (
+    <div className="max-w-5xl mx-auto space-y-6">
+      <div>
+        <h2 className="text-lg font-semibold flex items-center gap-2">
+          <Volume2 className="h-5 w-5" />
+          Text-to-Speech
+        </h2>
+        <p className="text-sm text-muted-foreground mt-1">
+          Configure Fish Audio text-to-speech settings and instance-level API keys.
+        </p>
+      </div>
+
+      {/* Global TTS Settings */}
+      <div className="border rounded-lg p-4 space-y-4">
+        <h3 className="font-medium text-sm">Global Settings</h3>
+
+        <div className="flex items-center justify-between">
+          <div>
+            <Label className="text-sm font-medium">Enable TTS</Label>
+            <p className="text-xs text-muted-foreground">
+              Master switch for text-to-speech across all agents
+            </p>
+          </div>
+          <input
+            type="checkbox"
+            checked={ttsSettings.ttsEnabled}
+            onChange={(e) => setTtsSettings({ ...ttsSettings, ttsEnabled: e.target.checked })}
+            className="h-4 w-4"
+          />
+        </div>
+
+        <div>
+          <Label className="text-sm font-medium">Character Threshold</Label>
+          <p className="text-xs text-muted-foreground mb-2">
+            Maximum response length (characters) for generating TTS audio.
+            Responses longer than this will be text-only.
+          </p>
+          <Input
+            type="number"
+            value={ttsSettings.ttsCharacterThreshold}
+            onChange={(e) => setTtsSettings({
+              ...ttsSettings,
+              ttsCharacterThreshold: parseInt(e.target.value) || 1000,
+            })}
+            className="w-32"
+            min={100}
+            max={10000}
+          />
+        </div>
+
+        <div>
+          <Label className="text-sm font-medium">Max Concurrent Requests</Label>
+          <p className="text-xs text-muted-foreground mb-2">
+            Maximum number of simultaneous Fish Audio API requests.
+            Fish Audio starter tier allows 5 concurrent requests.
+          </p>
+          <Input
+            type="number"
+            value={ttsSettings.ttsMaxConcurrentRequests}
+            onChange={(e) => setTtsSettings({
+              ...ttsSettings,
+              ttsMaxConcurrentRequests: parseInt(e.target.value) || 5,
+            })}
+            className="w-32"
+            min={1}
+            max={50}
+          />
+        </div>
+
+        <Button onClick={handleSaveSettings} disabled={saving} size="sm">
+          {saving ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : null}
+          Save Settings
+        </Button>
+      </div>
+
+      {/* Instance TTS Provider Keys */}
+      <div className="border rounded-lg p-4 space-y-4">
+        <h3 className="font-medium text-sm">Instance TTS Provider Keys</h3>
+        <p className="text-xs text-muted-foreground">
+          Configure the instance-level Fish Audio API key. This can be shared
+          with users via the Key Sharing mechanism, or users can provide their own.
+        </p>
+
+        {providers.map((provider) => (
+          <div key={provider.providerId} className="flex items-center gap-3 p-3 border rounded-md">
+            <div className="flex-1">
+              <div className="font-medium text-sm">{provider.name}</div>
+              <div className="text-xs text-muted-foreground">{provider.description}</div>
+              {provider.configured && provider.maskedApiKey && (
+                <div className="text-xs text-muted-foreground mt-1 font-mono">
+                  Key: {provider.maskedApiKey}
+                </div>
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="relative">
+                <Input
+                  type="password"
+                  placeholder="API key..."
+                  value={apiKey}
+                  onChange={(e) => setApiKey(e.target.value)}
+                  className="text-sm w-48 h-8"
+                />
+              </div>
+              <Button
+                size="sm"
+                onClick={() => handleSaveProviderKey(provider.providerId)}
+                disabled={!apiKey.trim()}
+                className="h-8"
+              >
+                Save
+              </Button>
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

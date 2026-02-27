@@ -966,6 +966,18 @@ export class ChatSessionManager {
   private reaperTimer: ReturnType<typeof setInterval> | null = null;
   private lifecycleTracker?: AgentLifecycleTracker;
 
+  /** Track sessions triggered by voice messages for TTS follow-up. */
+  private voiceSessions = new Set<string>();
+
+  /**
+   * Mark a session as triggered by a voice message.
+   * When the agent responds, TTS audio will be generated and published
+   * as a `tts_audio` event on the session's SSE channel.
+   */
+  markVoiceSession(sessionId: string): void {
+    this.voiceSessions.add(sessionId);
+  }
+
   // ─── External event hooks ────────────────────────────────────────────────────
   // Multiple consumers (SlackBridge, SignalBridge, TelegramBridge, etc.) can
   // register hooks concurrently. Each registerHooks() call adds to the list
@@ -2503,6 +2515,54 @@ export class ChatSessionManager {
           timestamp: Date.now(),
           data: { success: msg.success },
         });
+
+        // Trigger TTS generation for voice message sessions (fire-and-forget).
+        // Text response is already sent above; audio follows as a separate event.
+        if (msg.success && msg.result && this.voiceSessions.has(sessionId)) {
+          this.voiceSessions.delete(sessionId);
+          const ttsAgentId = activeSession?.agentId ?? sessionId.split('_')[1] ?? 'unknown';
+          const ttsUserId = activeSession?.userId;
+          const ttsChannel = sessionId.startsWith('telegram_') ? 'telegram'
+            : sessionId.startsWith('signal_') ? 'signal'
+            : sessionId.startsWith('whatsapp_') ? 'whatsapp'
+            : sessionId.startsWith('discord_') ? 'discord'
+            : sessionId.startsWith('slack_') ? 'slack'
+            : 'dashboard';
+
+          // Fire-and-forget TTS synthesis — publishes tts_audio event to SSE when done
+          authFetch(`${this.apiBaseUrl}/v1/internal/tts/synthesize`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              text: msg.result,
+              agent_id: ttsAgentId,
+              session_id: sessionId,
+              user_id: ttsUserId,
+              channel: ttsChannel,
+            }),
+          })
+            .then(async (res) => {
+              if (res.ok) {
+                const data = await res.json() as { ok: boolean; attachmentId?: string; filename?: string; mimeType?: string; sizeBytes?: number; format?: string };
+                if (data.ok && data.attachmentId) {
+                  // Publish TTS audio event to the session's SSE channel
+                  this.publishToChannel(sessionId, {
+                    type: 'tts_audio',
+                    timestamp: Date.now(),
+                    data: {
+                      attachmentId: data.attachmentId,
+                      filename: data.filename,
+                      mimeType: data.mimeType,
+                      sizeBytes: data.sizeBytes,
+                      format: data.format,
+                    },
+                  });
+                  console.log(`[ChatSessionManager] TTS audio ready for ${sessionId}: ${data.attachmentId}`);
+                }
+              }
+            })
+            .catch(err => console.warn(`[ChatSessionManager] TTS synthesis failed for ${sessionId}:`, err));
+        }
 
         if (activeSession) {
           activeSession.status = 'ready';

@@ -1,6 +1,6 @@
 import { createFileRoute, useNavigate } from '@tanstack/react-router';
 import { useState } from 'react';
-import { Settings, Key, Lock, Github, Zap, Puzzle, Workflow, LayoutTemplate, Cookie, Plug } from 'lucide-react';
+import { Settings, Key, Lock, Github, Zap, Puzzle, Workflow, LayoutTemplate, Cookie, Plug, Volume2 } from 'lucide-react';
 import { UserProviderSettings } from '@/components/settings/UserProviderSettings';
 import { SecretsSettings } from '@/components/settings/SecretsSettings';
 import { GitHubAppInstallations } from '@/components/github/GitHubAppInstallations';
@@ -13,9 +13,10 @@ import { SkillsPage } from '@/routes/skills';
 import { McpPage } from '@/routes/mcp';
 import { PipelinesPage } from '@/routes/pipelines/';
 import { BrowserCookiesPage } from '@/routes/browser-cookies';
+import { TtsProviderSettings } from '@/components/settings/TtsProviderSettings';
 
-type SettingsTab = 'providers' | 'secrets' | 'github' | 'skills' | 'mcp' | 'pipelines' | 'templates' | 'cookies' | 'channels';
-const VALID_TABS: SettingsTab[] = ['providers', 'secrets', 'github', 'skills', 'mcp', 'pipelines', 'templates', 'cookies', 'channels'];
+type SettingsTab = 'providers' | 'tts' | 'secrets' | 'github' | 'skills' | 'mcp' | 'pipelines' | 'templates' | 'cookies' | 'channels';
+const VALID_TABS: SettingsTab[] = ['providers', 'tts', 'secrets', 'github', 'skills', 'mcp', 'pipelines', 'templates', 'cookies', 'channels'];
 
 export const Route = createFileRoute('/settings')({
   validateSearch: (search: Record<string, unknown>) => ({
@@ -28,6 +29,7 @@ export const Route = createFileRoute('/settings')({
 // Admin/instance-level settings live exclusively in /admin.
 const NAV_ITEMS: NestedSidebarItem[] = [
   { key: 'providers',  label: 'My API Keys',     icon: Key },
+  { key: 'tts',        label: 'TTS Providers',    icon: Volume2 },
   { key: 'secrets',    label: 'My Secrets',       icon: Lock },
   { key: 'github',     label: 'GitHub App',       icon: Github },
   { key: 'skills',     label: 'Skills',           icon: Zap },
@@ -80,6 +82,23 @@ function SettingsPage() {
               </p>
             </div>
             <UserProviderSettings />
+          </div>
+        )}
+
+        {/* ── TTS Providers ── */}
+        {activeTab === 'tts' && (
+          <div className="max-w-5xl mx-auto space-y-4">
+            <div>
+              <h2 className="text-lg font-semibold flex items-center gap-2">
+                <Volume2 className="h-5 w-5" />
+                TTS Providers
+              </h2>
+              <p className="text-sm text-muted-foreground mt-1">
+                Manage your text-to-speech API keys. When an agent has TTS enabled
+                and you send a voice message, the response will be spoken back to you.
+              </p>
+            </div>
+            <TtsProviderSettings />
           </div>
         )}
 

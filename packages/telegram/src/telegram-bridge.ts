@@ -167,6 +167,7 @@ class TelegramAgentBridge {
         msg.from.first_name,
         '',
         [{ url: fileUrl, name: `voice_${msg.voice.file_unique_id}.ogg`, mimeType: msg.voice.mime_type || 'audio/ogg' }],
+        true, // isVoiceMessage
       );
     });
 
@@ -237,6 +238,7 @@ class TelegramAgentBridge {
     firstName: string,
     text: string,
     telegramFiles?: Array<{ url: string; name: string; mimeType: string }>,
+    isVoiceMessage: boolean = false,
   ): Promise<void> {
     const displayName = username ? `@${username}` : firstName;
     const displayText = text || (telegramFiles?.length ? `[${telegramFiles.length} file(s)]` : '');
@@ -273,7 +275,22 @@ class TelegramAgentBridge {
     try {
       const response = await this.processWithAgent(chatId, userId, text || '[Voice/media message — see attachments]', telegramFiles);
       this.typingManager.stopTyping(chatId);
+
+      // Send text response first (always)
       await this.sendFormattedMessage(chatId, response);
+
+      // If input was a voice message, generate TTS audio as a follow-up
+      if (isVoiceMessage && response.length > 0) {
+        try {
+          const sessionId = `telegram_${chatId}_${this.agentId}`;
+          const ttsResult = await this.generateAndSendTts(chatId, response, sessionId);
+          if (ttsResult) {
+            console.log(`[TelegramBridge:${this.agentId}] TTS audio sent as follow-up`);
+          }
+        } catch (ttsErr) {
+          console.warn(`[TelegramBridge:${this.agentId}] TTS generation failed (non-fatal):`, ttsErr);
+        }
+      }
     } catch (err) {
       this.typingManager.stopTyping(chatId);
       console.error(
@@ -633,6 +650,76 @@ class TelegramAgentBridge {
         }
         throw err;
       }
+    }
+  }
+
+  /**
+   * Generate TTS audio via the API server and send as a Telegram voice message.
+   * Returns true if audio was sent, false if TTS was skipped or failed.
+   */
+  private async generateAndSendTts(
+    chatId: number,
+    text: string,
+    sessionId: string,
+  ): Promise<boolean> {
+    try {
+      // Call the server's TTS synthesis endpoint
+      const res = await authFetch(
+        `${this.config.apiUrl}/v1/internal/tts/synthesize`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            text,
+            agent_id: this.agentId,
+            session_id: sessionId,
+            channel: 'telegram',
+          }),
+          signal: AbortSignal.timeout(30000),
+        },
+      );
+
+      if (!res.ok) {
+        const errText = await res.text().catch(() => '');
+        console.warn(`[TelegramBridge:${this.agentId}] TTS API returned ${res.status}: ${errText}`);
+        return false;
+      }
+
+      const data = await res.json() as {
+        ok: boolean;
+        attachmentId?: string;
+        storagePath?: string;
+        filename?: string;
+        mimeType?: string;
+        sizeBytes?: number;
+      };
+
+      if (!data.ok || !data.attachmentId) {
+        return false;
+      }
+
+      // Download the audio file via the existing attachment content endpoint
+      const audioRes = await authFetch(
+        `${this.config.apiUrl}/v1/chat/attachments/${data.attachmentId}/content`,
+        { signal: AbortSignal.timeout(10000) },
+      );
+
+      if (!audioRes.ok) return false;
+
+      const audioBuffer = await audioRes.arrayBuffer();
+      const audioUint8 = new Uint8Array(audioBuffer);
+
+      // Send as a Telegram voice message using the grammy API
+      const { InputFile } = await import('grammy');
+      await this.client.getBot().api.sendVoice(
+        chatId,
+        new InputFile(audioUint8, data.filename || 'voice.ogg'),
+      );
+
+      return true;
+    } catch (err) {
+      console.warn(`[TelegramBridge:${this.agentId}] TTS send failed:`, err);
+      return false;
     }
   }
 
