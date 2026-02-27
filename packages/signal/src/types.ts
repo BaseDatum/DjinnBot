@@ -169,7 +169,7 @@ export interface SignalConfig {
 
 export interface SignalRpcRequest {
   id: string;
-  method: 'link' | 'link_status' | 'send' | 'health';
+  method: 'link' | 'link_status' | 'unlink' | 'reload_config' | 'send' | 'health';
   params: Record<string, unknown>;
 }
 

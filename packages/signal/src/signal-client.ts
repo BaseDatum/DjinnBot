@@ -99,10 +99,8 @@ export class SignalClient {
    * Start the device linking process.
    * Returns a tsdevice:/ URI that the dashboard renders as a QR code.
    */
-  async startLink(deviceName: string): Promise<{ uri: string }> {
-    const result = await this.rpc<{ deviceLinkUri?: string }>('startLink', {
-      name: deviceName,
-    });
+  async startLink(_deviceName?: string): Promise<{ uri: string }> {
+    const result = await this.rpc<{ deviceLinkUri?: string }>('startLink');
     if (!result?.deviceLinkUri) {
       throw new Error('Signal link did not return a device URI');
     }
@@ -114,9 +112,10 @@ export class SignalClient {
    * This blocks until the user scans the QR code on their primary device,
    * so it needs a long timeout (default 5 minutes).
    * @param deviceLinkUri The URI returned by startLink.
+   * @param deviceName Name shown in the linked devices list on the phone.
    */
-  async finishLink(deviceLinkUri: string, timeoutMs = 5 * 60 * 1000): Promise<{ account: string }> {
-    const result = await this.rpc<{ number?: string }>('finishLink', { deviceLinkUri }, timeoutMs);
+  async finishLink(deviceLinkUri: string, deviceName = 'DjinnBot', timeoutMs = 5 * 60 * 1000): Promise<{ account: string }> {
+    const result = await this.rpc<{ number?: string }>('finishLink', { deviceLinkUri, deviceName }, timeoutMs);
     return { account: result?.number ?? '' };
   }
 
@@ -124,6 +123,15 @@ export class SignalClient {
   async listAccounts(): Promise<SignalAccount[]> {
     const result = await this.rpc<SignalAccount[]>('listAccounts');
     return result ?? [];
+  }
+
+  /**
+   * Unregister the account (disables push) and delete local data.
+   * After this the device is fully unlinked.
+   */
+  async unlink(account: string): Promise<void> {
+    await this.rpc('unregister', { account });
+    await this.rpc('deleteLocalAccountData', { account });
   }
 
   // ── Messaging ──────────────────────────────────────────────────────────

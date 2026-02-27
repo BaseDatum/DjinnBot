@@ -54,7 +54,7 @@ COPY --from=libsignal-builder /libsignal_jni_aarch64.so /tmp/libsignal_jni_aarch
 # When repo packages are newer, microdnf can't resolve the conflict.
 # --nobest allows installing older compatible versions instead of failing.
 RUN if [ "$TARGETARCH" = "arm64" ]; then \
-      microdnf install -y --nobest git findutils tar gzip gcc glibc-devel zlib-devel unzip zip && \
+      microdnf install -y --nobest git findutils tar gzip gcc glibc-devel zlib-devel unzip zip curl && \
       git clone --depth 1 --branch v${SIGNAL_CLI_VERSION} \
         https://github.com/AsamK/signal-cli.git /build && \
       # Inject the aarch64 native lib into the libsignal-client jar so
@@ -70,7 +70,14 @@ RUN if [ "$TARGETARCH" = "arm64" ]; then \
       cd /tmp && jar uf "${JARPATH}" libsignal_jni.so libsignal_jni_aarch64.so && \
       echo "[signal-cli-builder] Verifying injection..." && \
       jar tf "${JARPATH}" | grep signal_jni && \
-      cd /build && ./gradlew --no-daemon nativeCompile ; \
+      # Apply JNI config fix for libsignal internal.PreKeyStore (upstream #1919).
+      # The v0.13.24 tag was cut before this fix; the official amd64 binary was re-uploaded with it.
+      # Download the fixed jni-config.json from the post-fix commit on master.
+      cd /build && \
+      curl -fsSL "https://raw.githubusercontent.com/AsamK/signal-cli/d9f5a573cdaeb52cb28a477fbe7d558005b7d1f6/graalvm-config-dir/jni-config.json" \
+        -o graalvm-config-dir/jni-config.json && \
+      echo "[signal-cli-builder] Applied JNI config fix (internal.PreKeyStore)" && \
+      ./gradlew --no-daemon nativeCompile ; \
     else \
       mkdir -p /build/build/native/nativeCompile && \
       touch /build/build/native/nativeCompile/signal-cli ; \

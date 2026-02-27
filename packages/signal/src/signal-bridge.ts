@@ -54,8 +54,12 @@ export class SignalBridge {
   private daemonHandle: SignalDaemonHandle | null = null;
   private lockRelease: (() => Promise<void>) | null = null;
   private abortController = new AbortController();
+  /** Separate abort controller for the SSE loop — allows restarting SSE without full shutdown. */
+  private sseAbortController: AbortController | null = null;
   private signalConfig: SignalConfig | null = null;
   private account: string | undefined;
+  /** Tracks whether we're running in full mode (SSE + routing) vs receive-only. */
+  private fullModeActive = false;
 
   constructor(config: SignalBridgeFullConfig) {
     this.config = config;
@@ -63,13 +67,26 @@ export class SignalBridge {
     this.rpcRedis = new Redis(config.redisUrl);
   }
 
+  /** Inject the ChatSessionManager after construction (same pattern as SlackBridge). */
+  setChatSessionManager(csm: ChatSessionManager): void {
+    this.config.chatSessionManager = csm;
+    console.log('[SignalBridge] ChatSessionManager injected');
+  }
+
   // ── Lifecycle ──────────────────────────────────────────────────────────
 
   async start(): Promise<void> {
-    // 1. Acquire distributed lock
-    const lock = await acquireSignalDaemonLock(this.redis);
-    if (!lock.acquired) {
-      console.log('[SignalBridge] Another engine instance holds the Signal lock — skipping');
+    // 1. Acquire distributed lock (retry up to 5 times with backoff —
+    //    after a container restart the old heartbeat may take up to 30s to expire)
+    let lock: { acquired: boolean; release: () => Promise<void> } | null = null;
+    for (let attempt = 1; attempt <= 5; attempt++) {
+      lock = await acquireSignalDaemonLock(this.redis);
+      if (lock.acquired) break;
+      console.log(`[SignalBridge] Lock not acquired (attempt ${attempt}/5) — retrying in ${attempt * 5}s...`);
+      await new Promise((r) => setTimeout(r, attempt * 5000));
+    }
+    if (!lock?.acquired) {
+      console.error('[SignalBridge] Could not acquire Signal lock after 5 attempts — skipping');
       return;
     }
     this.lockRelease = lock.release;
@@ -83,8 +100,18 @@ export class SignalBridge {
 
       // 3. Load config from API
       await this.loadConfig();
+
       if (!this.signalConfig?.enabled) {
-        console.log('[SignalBridge] Signal integration is disabled — RPC handler active for linking');
+        if (this.signalConfig?.linked && this.signalConfig?.phoneNumber) {
+          // Account is linked but integration is disabled.
+          // Still start the daemon so signal-cli keeps receiving messages
+          // (Signal may deregister inactive linked devices). We just skip
+          // the SSE listener and message routing.
+          console.log('[SignalBridge] Signal disabled but account linked — starting daemon for message receive only');
+          await this.startDaemonReceiveOnly();
+        } else {
+          console.log('[SignalBridge] Signal integration is disabled — RPC handler active for linking');
+        }
         return;
       }
 
@@ -148,13 +175,53 @@ export class SignalBridge {
 
     this.typingManager = new SignalTypingManager(this.client, this.account);
 
-    // Start SSE listener (runs in background)
+    // Start SSE listener (runs in background, uses its own abort controller)
+    this.sseAbortController = new AbortController();
     this.startSseLoop();
+    this.fullModeActive = true;
 
     console.log(
       `[SignalBridge] Daemon started — account=${this.account ?? 'not linked'} ` +
       `defaultAgent=${this.signalConfig?.defaultAgentId ?? 'none'}`
     );
+  }
+
+  /**
+   * Start the daemon in receive-only mode — keeps signal-cli connected so
+   * messages are drained and the account stays active, but does NOT route
+   * messages to agents or start the SSE listener for processing.
+   */
+  private async startDaemonReceiveOnly(): Promise<void> {
+    this.account = this.signalConfig?.phoneNumber ?? undefined;
+    const baseUrl = `http://127.0.0.1:${this.config.httpPort ?? 8820}`;
+    this.client = new SignalClient({ baseUrl });
+
+    this.daemonHandle = spawnSignalDaemon({
+      cliPath: this.config.signalCliPath ?? 'signal-cli',
+      configDir: this.config.signalDataDir,
+      account: this.account,
+      httpPort: this.config.httpPort ?? 8820,
+      sendReadReceipts: true,
+    });
+
+    void this.daemonHandle.exited.then((exit) => {
+      if (!this.abortController.signal.aborted) {
+        console.error(`[SignalBridge] signal-cli daemon (receive-only) exited: code=${exit.code} signal=${exit.signal}`);
+      }
+    });
+
+    try {
+      await waitForDaemonReady({
+        baseUrl,
+        timeoutMs: 30_000,
+        abortSignal: this.abortController.signal,
+      });
+      console.log(`[SignalBridge] Daemon running in receive-only mode — account=${this.account}`);
+    } catch (err) {
+      console.error('[SignalBridge] signal-cli daemon (receive-only) failed to start:', err);
+      this.daemonHandle.stop();
+      this.daemonHandle = null;
+    }
   }
 
   /** Whether the signal-cli daemon is running and ready for RPC. */
@@ -164,8 +231,8 @@ export class SignalBridge {
 
   async shutdown(): Promise<void> {
     console.log('[SignalBridge] Shutting down...');
+    this.stopFullMode();
     this.abortController.abort();
-    this.typingManager?.stopAll();
     this.daemonHandle?.stop();
 
     if (this.lockRelease) {
@@ -180,12 +247,16 @@ export class SignalBridge {
   // ── SSE message loop ───────────────────────────────────────────────────
 
   private startSseLoop(): void {
+    const sse = this.sseAbortController;
+    if (!sse) return;
+
     const run = async () => {
-      while (!this.abortController.signal.aborted) {
+      while (!sse.signal.aborted && !this.abortController.signal.aborted) {
         try {
+          console.log(`[SignalBridge] Connecting SSE stream for account=${this.account ?? 'all'}...`);
           await this.client.streamEvents({
             account: this.account,
-            signal: this.abortController.signal,
+            signal: sse.signal,
             onEvent: (event) => {
               if (event.data) {
                 void this.handleSseEvent(event.data).catch((err) => {
@@ -195,7 +266,7 @@ export class SignalBridge {
             },
           });
         } catch (err) {
-          if (this.abortController.signal.aborted) return;
+          if (sse.signal.aborted || this.abortController.signal.aborted) return;
           console.warn('[SignalBridge] SSE stream disconnected, reconnecting in 3s:', err);
           await new Promise((r) => setTimeout(r, 3000));
         }
@@ -204,13 +275,103 @@ export class SignalBridge {
     void run();
   }
 
+  /** Stop the SSE loop and routing without killing the daemon. */
+  private stopFullMode(): void {
+    if (!this.fullModeActive) return;
+    console.log('[SignalBridge] Stopping full mode (SSE + routing)...');
+    this.sseAbortController?.abort();
+    this.sseAbortController = null;
+    this.typingManager?.stopAll();
+    this.fullModeActive = false;
+  }
+
+  /**
+   * Reload config from the API and transition between modes:
+   *  - disabled + linked → receive-only (daemon running, no routing)
+   *  - enabled + linked → full mode (daemon + SSE + routing)
+   *  - disabled + not linked → daemon stopped
+   */
+  async reloadConfig(): Promise<void> {
+    const prevEnabled = this.signalConfig?.enabled ?? false;
+    await this.loadConfig();
+    const nowEnabled = this.signalConfig?.enabled ?? false;
+    const nowLinked = this.signalConfig?.linked && this.signalConfig?.phoneNumber;
+
+    console.log(`[SignalBridge] Config reloaded — enabled: ${prevEnabled} → ${nowEnabled}, linked: ${!!nowLinked}`);
+
+    if (nowEnabled && nowLinked && !this.fullModeActive) {
+      // Transition to full mode
+      // Stop SSE if somehow running
+      this.stopFullMode();
+
+      // Ensure daemon is running
+      if (!this.isDaemonRunning) {
+        await this.startDaemonReceiveOnly();
+      }
+
+      if (!this.isDaemonRunning) {
+        console.error('[SignalBridge] Cannot enter full mode — daemon failed to start');
+        return;
+      }
+
+      // Set account from config
+      this.account = this.signalConfig?.phoneNumber ?? undefined;
+
+      // Add router, typing, and SSE on top of the running daemon
+      this.router = new SignalRouter({
+        agentRegistry: this.config.agentRegistry,
+        redis: this.redis,
+        defaultAgentId: this.signalConfig?.defaultAgentId ?? this.getFirstAgentId(),
+        stickyTtlMs: (this.signalConfig?.stickyTtlMinutes ?? 30) * 60 * 1000,
+      });
+      this.typingManager = new SignalTypingManager(this.client, this.account);
+      this.sseAbortController = new AbortController();
+      this.startSseLoop();
+      this.fullModeActive = true;
+
+      console.log('[SignalBridge] Transitioned to full mode');
+    } else if (!nowEnabled && this.fullModeActive) {
+      // Transition from full → receive-only (keep daemon, stop routing)
+      this.stopFullMode();
+      console.log('[SignalBridge] Transitioned to receive-only mode');
+    } else if (nowEnabled && this.fullModeActive) {
+      // Already in full mode — update router settings in case they changed
+      this.router = new SignalRouter({
+        agentRegistry: this.config.agentRegistry,
+        redis: this.redis,
+        defaultAgentId: this.signalConfig?.defaultAgentId ?? this.getFirstAgentId(),
+        stickyTtlMs: (this.signalConfig?.stickyTtlMinutes ?? 30) * 60 * 1000,
+      });
+      console.log('[SignalBridge] Updated router settings');
+    }
+  }
+
   private async handleSseEvent(data: string): Promise<void> {
-    let envelope: SignalEnvelope;
+    let parsed: any;
     try {
-      envelope = JSON.parse(data);
+      parsed = JSON.parse(data);
     } catch {
       return; // Malformed event
     }
+
+    // Uncomment for envelope debugging:
+    // console.log(`[SignalBridge] SSE raw: ${data.slice(0, 500)}`);
+
+    // signal-cli SSE events may be:
+    //   JSON-RPC: {"jsonrpc":"2.0","method":"receive","params":{"envelope":{...}}}
+    //   Or nested: {"envelope":{...}}
+    //   Or flat: {"sourceNumber":...,"dataMessage":{...}}
+    const envelope: SignalEnvelope =
+      parsed?.params?.envelope ??
+      parsed?.envelope ??
+      parsed;
+
+    // Log all SSE events for debugging
+    const eventType = envelope.dataMessage ? 'dataMessage' :
+      envelope.receiptMessage ? 'receipt' :
+      envelope.typingMessage ? 'typing' :
+      envelope.syncMessage ? 'sync' : 'unknown';
+    console.log(`[SignalBridge] SSE event: type=${eventType} from=${envelope.sourceNumber ?? envelope.source ?? '?'}`);
 
     // Only handle data messages (not receipts, typing, sync)
     if (!envelope.dataMessage?.message) return;
@@ -296,7 +457,9 @@ export class SignalBridge {
       return 'Signal chat sessions are not yet configured. Please set up ChatSessionManager.';
     }
 
-    const sessionId = `signal_${normalizeE164(sender)}_${agentId}`;
+    // Strip non-alphanumeric chars from phone number for Docker-safe container names
+    const safeSender = normalizeE164(sender).replace(/[^a-zA-Z0-9]/g, '');
+    const sessionId = `signal_${safeSender}_${agentId}`;
 
     // Collect response chunks
     const chunks: string[] = [];
@@ -417,6 +580,9 @@ export class SignalBridge {
 
   private startRpcHandler(): void {
     const sub = this.rpcRedis.duplicate();
+    sub.on('error', (err) => {
+      console.error('[SignalBridge] RPC subscriber error:', err);
+    });
     sub.subscribe('signal:rpc:request');
     console.log('[SignalBridge] RPC handler listening on signal:rpc:request');
 
@@ -441,15 +607,15 @@ export class SignalBridge {
               await this.ensureDaemon();
               const deviceName = (req.params.deviceName as string) ?? 'DjinnBot';
               console.log('[SignalBridge] Calling startLink...');
-              const linkResult = await this.client.startLink(deviceName);
+              const linkResult = await this.client.startLink();
               console.log('[SignalBridge] startLink returned URI, calling finishLink in background...');
               result = linkResult;
 
               // finishLink blocks until the user scans the QR code on their
               // primary device, then completes provisioning. Fire it in the
               // background so we can return the URI to the dashboard immediately.
-              // Uses a 5-minute timeout (default) to give the user time to scan.
-              this.client.finishLink(linkResult.uri).then(
+              // The device name (shown in Signal's linked devices list) is set here.
+              this.client.finishLink(linkResult.uri, deviceName).then(
                 (fin) => console.log(`[SignalBridge] finishLink completed — account: ${fin.account}`),
                 (err) => console.error('[SignalBridge] finishLink failed:', err),
               );
@@ -463,6 +629,25 @@ export class SignalBridge {
                 linked,
                 phoneNumber: linked ? accounts[0].number : null,
               };
+              break;
+            }
+            case 'unlink': {
+              await this.ensureDaemon();
+              const accounts = await this.client.listAccounts();
+              if (accounts.length === 0) {
+                throw new Error('No linked account to unlink');
+              }
+              const account = accounts[0].number;
+              console.log(`[SignalBridge] Unlinking account ${account}...`);
+              await this.client.unlink(account);
+              console.log('[SignalBridge] Account unlinked successfully');
+              this.account = undefined;
+              result = { unlinked: true };
+              break;
+            }
+            case 'reload_config': {
+              await this.reloadConfig();
+              result = { reloaded: true };
               break;
             }
             case 'send': {
@@ -558,8 +743,8 @@ export class SignalBridge {
 
   // ── Linking (proxied from API) ─────────────────────────────────────────
 
-  async startLinking(deviceName: string): Promise<{ uri: string }> {
-    return this.client.startLink(deviceName);
+  async startLinking(_deviceName?: string): Promise<{ uri: string }> {
+    return this.client.startLink();
   }
 
   async getLinkStatus(): Promise<{ linked: boolean; phoneNumber?: string }> {

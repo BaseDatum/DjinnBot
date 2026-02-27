@@ -27,7 +27,7 @@ import { authFetch } from './api/auth-fetch.js';
 import { ensureAgentKeys } from './api/agent-key-manager.js';
 import { SwarmSessionManager, type SwarmSessionDeps } from './runtime/swarm-session.js';
 import { type SwarmRequest, type SwarmProgressEvent, swarmChannel, swarmStateKey } from './runtime/swarm-types.js';
-import { mountJuiceFS } from './container/juicefs.js';
+import { mountJuiceFS, ensureJfsDirs } from './container/juicefs.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -1407,21 +1407,26 @@ async function main(): Promise<void> {
     // Starts the RPC handler immediately so the dashboard can initiate linking even
     // before Signal is fully configured.
     {
-      const signalDataDir = process.env.SIGNAL_DATA_DIR || '/data/signal/data';
+      const signalDataDir = process.env.SIGNAL_DATA_DIR || '/jfs/signal/data';
       const signalCliPath = process.env.SIGNAL_CLI_PATH || 'signal-cli';
       const signalHttpPort = parseInt(process.env.SIGNAL_HTTP_PORT || '8820', 10);
 
-      try {
-        await djinnBot.startSignalBridge({
-          signalDataDir,
-          signalCliPath,
-          httpPort: signalHttpPort,
-          defaultConversationModel: process.env.SIGNAL_DEFAULT_MODEL,
-        });
+      // Ensure signal data directory exists on JuiceFS
+      ensureJfsDirs(['/signal/data'], '/data');
+
+      // Start Signal bridge in the background — lock acquisition may retry
+      // for up to 75s after a container restart, so we don't block engine startup.
+      // The CSM is injected later once both the bridge and CSM are ready.
+      djinnBot.startSignalBridge({
+        signalDataDir,
+        signalCliPath,
+        httpPort: signalHttpPort,
+        defaultConversationModel: process.env.SIGNAL_DEFAULT_MODEL,
+      }).then(() => {
         console.log('[Engine] Signal bridge started');
-      } catch (err) {
+      }).catch((err) => {
         console.warn('[Engine] Signal bridge failed to start (non-fatal):', err);
-      }
+      });
     }
 
     // Publish engine version to Redis so the API can report it
@@ -1532,6 +1537,16 @@ async function main(): Promise<void> {
       });
       
       console.log('[Engine] Chat session support enabled');
+
+      // Inject ChatSessionManager into SignalBridge for message processing.
+      // Uses setSignalChatSessionManager which handles the race: if the bridge
+      // hasn't started yet (background lock retry), the CSM is stored and
+      // injected once the bridge is ready.
+      try {
+        djinnBot.setSignalChatSessionManager(chatSessionManager);
+      } catch (err) {
+        console.warn('[Engine] Failed to inject ChatSessionManager into SignalBridge:', err);
+      }
 
       // Inject ChatSessionManager into SlackBridge for conversation streaming.
       // The bridge must already be running (started above) — we inject after

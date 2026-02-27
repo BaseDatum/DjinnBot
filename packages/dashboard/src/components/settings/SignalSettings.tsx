@@ -11,6 +11,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { API_BASE } from '@/lib/api';
 import { authFetch } from '@/lib/auth';
 import { fetchAgents, type AgentListItem } from '@/lib/api';
+import { Switch } from '@/components/ui/switch';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -66,6 +67,11 @@ async function checkLinkStatus(): Promise<{ linked: boolean; phoneNumber?: strin
   return handleResponse(res, 'Failed to check link status');
 }
 
+async function unlinkSignal(): Promise<void> {
+  const res = await authFetch(`${API_BASE}/signal/unlink`, { method: 'POST' });
+  await handleResponse(res, 'Failed to unlink Signal');
+}
+
 async function fetchAllowlist(): Promise<{ entries: AllowlistEntry[]; total: number }> {
   const res = await authFetch(`${API_BASE}/signal/allowlist`);
   return handleResponse(res, 'Failed to fetch allowlist');
@@ -98,6 +104,8 @@ export function SignalSettings() {
   const [error, setError] = useState<string | null>(null);
   const [linkUri, setLinkUri] = useState<string | null>(null);
   const [linking, setLinking] = useState(false);
+  const [unlinking, setUnlinking] = useState(false);
+  const [showUnlinkConfirm, setShowUnlinkConfirm] = useState(false);
   const linkPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // New entry form
@@ -160,13 +168,32 @@ export function SignalSettings() {
     }
   };
 
+  const handleUnlink = async () => {
+    try {
+      setUnlinking(true);
+      setError(null);
+      await unlinkSignal();
+      setShowUnlinkConfirm(false);
+      await loadAll();
+    } catch (err) {
+      console.error('[SignalSettings] Unlink failed:', err);
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setUnlinking(false);
+    }
+  };
+
   // ── Config updates ───────────────────────────────────────────────────
 
   const handleToggle = async (field: keyof SignalConfig, value: boolean) => {
+    // Optimistic update so the UI reflects the change immediately
+    setConfig((prev) => prev ? { ...prev, [field]: value } : prev);
     try {
       const updated = await updateSignalConfig({ [field]: value });
       setConfig(updated);
     } catch (err) {
+      // Revert on failure
+      setConfig((prev) => prev ? { ...prev, [field]: !value } : prev);
       setError(err instanceof Error ? err.message : String(err));
     }
   };
@@ -246,13 +273,20 @@ export function SignalSettings() {
         </div>
 
         {!config?.linked && !linkUri && (
-          <button
-            onClick={handleStartLink}
-            disabled={linking}
-            className="px-4 py-2 bg-primary text-primary-foreground rounded-md text-sm hover:bg-primary/90 disabled:opacity-50"
-          >
-            {linking ? 'Starting...' : 'Link Signal Account'}
-          </button>
+          <div className="space-y-3">
+            <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-lg p-3 text-yellow-700 dark:text-yellow-400 text-sm">
+              <strong>Important:</strong> Use a separate phone number dedicated to DjinnBot.
+              Do not link your personal Signal number &mdash; DjinnBot will send and receive
+              messages as this number.
+            </div>
+            <button
+              onClick={handleStartLink}
+              disabled={linking}
+              className="px-4 py-2 bg-primary text-primary-foreground rounded-md text-sm hover:bg-primary/90 disabled:opacity-50"
+            >
+              {linking ? 'Starting...' : 'Link Signal Account'}
+            </button>
+          </div>
         )}
 
         {linkUri && (
@@ -274,6 +308,44 @@ export function SignalSettings() {
           </div>
         )}
 
+        {config?.linked && (
+          <div className="space-y-3">
+            {!showUnlinkConfirm ? (
+              <button
+                onClick={() => setShowUnlinkConfirm(true)}
+                className="px-4 py-2 bg-destructive text-destructive-foreground rounded-md text-sm hover:bg-destructive/90"
+              >
+                Unlink Account
+              </button>
+            ) : (
+              <div className="bg-destructive/10 border border-destructive/20 rounded-lg p-4 space-y-3">
+                <p className="text-sm text-destructive font-medium">
+                  Are you sure you want to unlink {config.phoneNumber}?
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  This will disconnect DjinnBot from Signal. You will need to re-link to use Signal messaging again.
+                </p>
+                <div className="flex gap-2">
+                  <button
+                    onClick={handleUnlink}
+                    disabled={unlinking}
+                    className="px-4 py-2 bg-destructive text-destructive-foreground rounded-md text-sm hover:bg-destructive/90 disabled:opacity-50"
+                  >
+                    {unlinking ? 'Unlinking...' : 'Yes, Unlink'}
+                  </button>
+                  <button
+                    onClick={() => setShowUnlinkConfirm(false)}
+                    disabled={unlinking}
+                    className="px-4 py-2 bg-muted text-muted-foreground rounded-md text-sm hover:bg-muted/80"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Manual setup instructions */}
         <details className="text-sm">
           <summary className="cursor-pointer text-muted-foreground hover:text-foreground">
@@ -283,15 +355,14 @@ export function SignalSettings() {
             <p>
               <strong>Register a new number:</strong>
             </p>
-            <code className="block bg-muted p-2 rounded text-xs">
-              signal-cli -a +NUMBER register{'\n'}
-              signal-cli -a +NUMBER verify CODE
+            <code className="block bg-muted p-2 rounded text-xs whitespace-pre">
+              {'signal-cli -a +NUMBER register\nsignal-cli -a +NUMBER verify CODE'}
             </code>
             <p>
               <strong>Link an existing Signal account:</strong>
             </p>
             <code className="block bg-muted p-2 rounded text-xs">
-              signal-cli link -n "DjinnBot"
+              signal-cli link -n &quot;DjinnBot&quot;
             </code>
             <p>
               Signal data is stored at <code>/data/signal/data</code> on JuiceFS.
@@ -304,15 +375,13 @@ export function SignalSettings() {
       <section className="space-y-4">
         <h3 className="text-lg font-semibold">Settings</h3>
 
-        <label className="flex items-center gap-3">
-          <input
-            type="checkbox"
+        <div className="flex items-center gap-3">
+          <Switch
             checked={config?.enabled ?? false}
-            onChange={(e) => handleToggle('enabled', e.target.checked)}
-            className="rounded"
+            onCheckedChange={(checked) => handleToggle('enabled', checked)}
           />
           <span className="text-sm">Enable Signal integration</span>
-        </label>
+        </div>
 
         <div className="space-y-2">
           <label className="text-sm font-medium">Default Agent</label>
@@ -356,15 +425,13 @@ export function SignalSettings() {
       <section className="space-y-4">
         <h3 className="text-lg font-semibold">Allowlist</h3>
 
-        <label className="flex items-center gap-3">
-          <input
-            type="checkbox"
+        <div className="flex items-center gap-3">
+          <Switch
             checked={config?.allowAll ?? false}
-            onChange={(e) => handleToggle('allowAll', e.target.checked)}
-            className="rounded"
+            onCheckedChange={(checked) => handleToggle('allowAll', checked)}
           />
           <span className="text-sm">Allow all incoming messages (no filtering)</span>
-        </label>
+        </div>
 
         {/* Add entry form */}
         <div className="flex gap-2 items-end flex-wrap">

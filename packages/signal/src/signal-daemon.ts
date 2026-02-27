@@ -13,6 +13,8 @@
  */
 
 import { spawn, type ChildProcess } from 'node:child_process';
+import { readdirSync, unlinkSync, existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { Redis } from 'ioredis';
 
 // ── Daemon handle ────────────────────────────────────────────────────────────
@@ -99,11 +101,55 @@ function buildDaemonArgs(config: SignalDaemonConfig): string[] {
   return args;
 }
 
+// ── Stale lock cleanup ───────────────────────────────────────────────────────
+
+/**
+ * Remove stale signal-cli lock files from the data directory.
+ *
+ * signal-cli uses Java NIO file locks on account data files. When the container
+ * is killed (SIGKILL / OOM), the lock isn't released — especially on FUSE
+ * filesystems like JuiceFS where the kernel doesn't get an unlock syscall.
+ * This causes the next signal-cli startup to block with:
+ *   "Config file is in use by another instance, waiting…"
+ *
+ * Since we hold a Redis distributed lock guaranteeing only one engine instance
+ * runs signal-cli at a time, any leftover lock files are stale and safe to remove.
+ */
+function cleanStaleLocks(configDir: string): void {
+  const dataDir = join(configDir, 'data');
+  if (!existsSync(dataDir)) return;
+
+  try {
+    const entries = readdirSync(dataDir, { withFileTypes: true });
+    for (const entry of entries) {
+      // signal-cli lock files: *.lock or lock files inside account directories
+      if (entry.isFile() && entry.name.endsWith('.lock')) {
+        const lockPath = join(dataDir, entry.name);
+        console.log(`[SignalDaemon] Removing stale lock: ${lockPath}`);
+        unlinkSync(lockPath);
+      }
+      if (entry.isDirectory()) {
+        const lockPath = join(dataDir, entry.name, 'lock');
+        if (existsSync(lockPath)) {
+          console.log(`[SignalDaemon] Removing stale lock: ${lockPath}`);
+          unlinkSync(lockPath);
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('[SignalDaemon] Failed to clean stale locks:', err);
+  }
+}
+
 // ── Spawn ────────────────────────────────────────────────────────────────────
 
 export function spawnSignalDaemon(config: SignalDaemonConfig): SignalDaemonHandle {
   const cliPath = config.cliPath ?? 'signal-cli';
   const args = buildDaemonArgs(config);
+
+  // Clean stale lock files before spawning — safe because we hold the
+  // Redis distributed lock (only one engine instance runs signal-cli).
+  cleanStaleLocks(config.configDir);
 
   console.log(`[SignalDaemon] Spawning: ${cliPath} ${args.join(' ')}`);
 
@@ -172,6 +218,7 @@ export function spawnSignalDaemon(config: SignalDaemonConfig): SignalDaemonHandl
 // Ensures only one engine instance runs signal-cli at a time.
 
 const LOCK_KEY = 'djinnbot:signal:daemon-lock';
+const LOCK_HEARTBEAT_KEY = 'djinnbot:signal:daemon-heartbeat';
 const LOCK_TTL_MS = 30_000;
 const LOCK_RENEW_INTERVAL_MS = 10_000;
 
@@ -179,26 +226,48 @@ export async function acquireSignalDaemonLock(redis: Redis): Promise<{
   acquired: boolean;
   release: () => Promise<void>;
 }> {
-  const lockValue = `${process.pid}-${Date.now()}`;
+  const lockValue = `${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
   // Try to SET NX with TTL
-  const result = await redis.set(LOCK_KEY, lockValue, 'PX', LOCK_TTL_MS, 'NX');
+  let result = await redis.set(LOCK_KEY, lockValue, 'PX', LOCK_TTL_MS, 'NX');
 
   if (result !== 'OK') {
+    // Lock is held — but in a container environment, the holder is always
+    // from a previous container (PID 1 check is useless since every container
+    // has PID 1). Instead, we use a heartbeat key: the lock holder writes a
+    // heartbeat on every renewal. If the heartbeat is older than 2x the
+    // renewal interval, the lock is stale.
     const holder = await redis.get(LOCK_KEY);
-    console.warn(`[SignalDaemon] Lock held by ${holder ?? 'unknown'} — skipping Signal startup`);
-    return { acquired: false, release: async () => {} };
+    const lastHeartbeat = await redis.get(LOCK_HEARTBEAT_KEY);
+    const heartbeatAge = lastHeartbeat ? Date.now() - parseInt(lastHeartbeat, 10) : Infinity;
+    const stale = heartbeatAge > LOCK_RENEW_INTERVAL_MS * 3;
+
+    if (stale) {
+      console.log(`[SignalDaemon] Stale lock from ${holder ?? 'unknown'} (heartbeat ${heartbeatAge}ms old) — force-acquiring`);
+      await redis.del(LOCK_KEY);
+      await redis.del(LOCK_HEARTBEAT_KEY);
+      result = await redis.set(LOCK_KEY, lockValue, 'PX', LOCK_TTL_MS, 'NX');
+    }
+
+    if (result !== 'OK') {
+      console.warn(`[SignalDaemon] Lock held by ${holder ?? 'unknown'} — skipping Signal startup`);
+      return { acquired: false, release: async () => {} };
+    }
   }
 
   console.log(`[SignalDaemon] Acquired daemon lock: ${lockValue}`);
 
-  // Renew TTL periodically
+  // Write initial heartbeat
+  await redis.set(LOCK_HEARTBEAT_KEY, String(Date.now()), 'PX', LOCK_TTL_MS);
+
+  // Renew TTL and heartbeat periodically
   const renewTimer = setInterval(async () => {
     try {
       // Only renew if we still own the lock
       const current = await redis.get(LOCK_KEY);
       if (current === lockValue) {
         await redis.pexpire(LOCK_KEY, LOCK_TTL_MS);
+        await redis.set(LOCK_HEARTBEAT_KEY, String(Date.now()), 'PX', LOCK_TTL_MS);
       }
     } catch (err) {
       console.warn('[SignalDaemon] Lock renewal failed:', err);
@@ -211,12 +280,13 @@ export async function acquireSignalDaemonLock(redis: Redis): Promise<{
       // Only delete if we still own it (atomic check-and-delete via Lua)
       const script = `
         if redis.call("get", KEYS[1]) == ARGV[1] then
+          redis.call("del", KEYS[2])
           return redis.call("del", KEYS[1])
         else
           return 0
         end
       `;
-      await redis.eval(script, 1, LOCK_KEY, lockValue);
+      await redis.eval(script, 2, LOCK_KEY, LOCK_HEARTBEAT_KEY, lockValue);
       console.log('[SignalDaemon] Released daemon lock');
     } catch (err) {
       console.warn('[SignalDaemon] Lock release failed:', err);

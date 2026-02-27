@@ -1451,6 +1451,18 @@ Start now.`;
     await this.slackBridge.start();
   }
 
+  /** Pending CSM to inject into SignalBridge once it's ready. */
+  private _pendingSignalCsm: any = null;
+
+  /** Inject CSM into the signal bridge if both are ready. */
+  setSignalChatSessionManager(csm: any): void {
+    this._pendingSignalCsm = csm;
+    if (this.signalBridge) {
+      this.signalBridge.setChatSessionManager(csm);
+      console.log('[DjinnBot] SignalBridge wired to ChatSessionManager');
+    }
+  }
+
   /** Start the Signal bridge for account linking and message routing */
   async startSignalBridge(opts: {
     signalDataDir: string;
@@ -1476,6 +1488,12 @@ Start now.`;
       eventBus: this.eventBus as any,
       agentRegistry: this.agentRegistry as any,
     });
+
+    // If CSM was already created before the bridge started, inject it now.
+    if (this._pendingSignalCsm) {
+      this.signalBridge.setChatSessionManager(this._pendingSignalCsm);
+      console.log('[DjinnBot] SignalBridge wired to ChatSessionManager (deferred)');
+    }
 
     await this.signalBridge.start();
   }

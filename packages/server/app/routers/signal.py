@@ -8,6 +8,7 @@ Endpoints (all under /v1/signal):
   PUT    /v1/signal/config              — Update config
   POST   /v1/signal/link                — Start linking (returns QR URI)
   GET    /v1/signal/link/status         — Check link status
+  POST   /v1/signal/unlink              — Unlink Signal account
   GET    /v1/signal/allowlist           — List allowlist entries
   POST   /v1/signal/allowlist           — Add entry
   PUT    /v1/signal/allowlist/{id}      — Update entry
@@ -197,6 +198,16 @@ async def update_signal_config(
     await session.commit()
     await session.refresh(row)
 
+    # Notify the engine to reload config and transition daemon mode if needed.
+    # Fire-and-forget via background task so the PUT returns immediately.
+    async def _notify_reload():
+        try:
+            await _signal_rpc("reload_config", {}, timeout=30.0)
+        except Exception as e:
+            logger.warning("Failed to notify engine of config reload: %s", e)
+
+    asyncio.ensure_future(_notify_reload())
+
     return SignalConfigResponse(
         enabled=row.enabled,
         phoneNumber=row.phone_number,
@@ -219,7 +230,8 @@ async def start_signal_link(
     Returns a tsdevice:/ URI that the dashboard renders as a QR code.
     The user scans this QR with their Signal app to link the number.
     """
-    result = await _signal_rpc("link", {"deviceName": "DjinnBot"})
+    # Longer timeout: may need to start signal-cli daemon first (up to 30s)
+    result = await _signal_rpc("link", {"deviceName": "DjinnBot"}, timeout=45.0)
     uri = result.get("uri", "")
     if not uri:
         raise HTTPException(
@@ -247,6 +259,26 @@ async def get_link_status(
             await session.commit()
 
     return LinkStatusResponse(linked=linked, phoneNumber=phone)
+
+
+@router.post("/unlink")
+async def unlink_signal(
+    session: AsyncSession = Depends(get_async_session),
+) -> dict:
+    """Unlink the Signal account and clear local data."""
+    # Longer timeout: may need to start daemon (30s) + unregister from Signal servers
+    await _signal_rpc("unlink", {}, timeout=45.0)
+
+    # Clear linked state in DB
+    row = await session.get(SignalConfig, 1)
+    if row:
+        row.linked = False
+        row.phone_number = None
+        row.enabled = False
+        row.updated_at = now_ms()
+        await session.commit()
+
+    return {"unlinked": True}
 
 
 # ─── Allowlist endpoints ──────────────────────────────────────────────────────
