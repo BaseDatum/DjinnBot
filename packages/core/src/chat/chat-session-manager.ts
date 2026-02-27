@@ -967,23 +967,24 @@ export class ChatSessionManager {
   private lifecycleTracker?: AgentLifecycleTracker;
 
   // ─── External event hooks ────────────────────────────────────────────────────
-  // Registered by SlackBridge to pipe session output into live Slack streamers.
+  // Multiple consumers (SlackBridge, SignalBridge, TelegramBridge, etc.) can
+  // register hooks concurrently. Each registerHooks() call adds to the list
+  // and returns a cleanup function that removes exactly those hooks.
 
-  /** Called for each streaming text chunk from the container. */
-  private outputHook?: (sessionId: string, chunk: string) => void;
+  private outputHooks: Array<(sessionId: string, chunk: string) => void> = [];
+  private toolStartHooks: Array<(sessionId: string, toolName: string, args: Record<string, unknown>) => void> = [];
+  private toolEndHooks: Array<(sessionId: string, toolName: string, result: string, isError: boolean, durationMs: number) => void> = [];
+  private stepEndHooks: Array<(sessionId: string, success: boolean) => void> = [];
+  private agentMessageHooks: Array<(agentId: string, sessionId: string, to: string, message: string, priority: string, messageType: string) => void> = [];
+  private slackDmHooks: Array<(agentId: string, sessionId: string, message: string, urgent: boolean) => void> = [];
+  private wakeAgentHooks: Array<(agentId: string, sessionId: string, to: string, message: string, reason: string) => void> = [];
 
-  private toolStartHook?: (sessionId: string, toolName: string, args: Record<string, unknown>) => void;
-
-  private toolEndHook?: (sessionId: string, toolName: string, result: string, isError: boolean, durationMs: number) => void;
-
-  private stepEndHook?: (sessionId: string, success: boolean) => void;
-
-  private agentMessageHook?: (agentId: string, sessionId: string, to: string, message: string, priority: string, messageType: string) => void;
-
-  private slackDmHook?: (agentId: string, sessionId: string, message: string, urgent: boolean) => void;
-
-  private wakeAgentHook?: (agentId: string, sessionId: string, to: string, message: string, reason: string) => void;
-
+  /**
+   * Register event hooks. Multiple consumers can register concurrently — each
+   * call appends to the hook list and returns a cleanup function that removes
+   * exactly those hooks. This allows SlackBridge, SignalBridge, Telegram, etc.
+   * to coexist without clobbering each other's hooks.
+   */
   registerHooks(hooks: {
     onOutput?: (sessionId: string, chunk: string) => void;
     onToolStart?: (sessionId: string, toolName: string, args: Record<string, unknown>) => void;
@@ -992,17 +993,25 @@ export class ChatSessionManager {
     onAgentMessage?: (agentId: string, sessionId: string, to: string, message: string, priority: string, messageType: string) => void;
     onSlackDm?: (agentId: string, sessionId: string, message: string, urgent: boolean) => void;
     onWakeAgent?: (agentId: string, sessionId: string, to: string, message: string, reason: string) => void;
-  }): void {
-    // Merge — only overwrite hooks that are provided. This allows multiple
-    // callers (engine for messaging hooks, SlackBridge for streaming hooks)
-    // to register their hooks without clobbering each other.
-    if (hooks.onOutput !== undefined) this.outputHook = hooks.onOutput;
-    if (hooks.onToolStart !== undefined) this.toolStartHook = hooks.onToolStart;
-    if (hooks.onToolEnd !== undefined) this.toolEndHook = hooks.onToolEnd;
-    if (hooks.onStepEnd !== undefined) this.stepEndHook = hooks.onStepEnd;
-    if (hooks.onAgentMessage !== undefined) this.agentMessageHook = hooks.onAgentMessage;
-    if (hooks.onSlackDm !== undefined) this.slackDmHook = hooks.onSlackDm;
-    if (hooks.onWakeAgent !== undefined) this.wakeAgentHook = hooks.onWakeAgent;
+  }): () => void {
+    if (hooks.onOutput) this.outputHooks.push(hooks.onOutput);
+    if (hooks.onToolStart) this.toolStartHooks.push(hooks.onToolStart);
+    if (hooks.onToolEnd) this.toolEndHooks.push(hooks.onToolEnd);
+    if (hooks.onStepEnd) this.stepEndHooks.push(hooks.onStepEnd);
+    if (hooks.onAgentMessage) this.agentMessageHooks.push(hooks.onAgentMessage);
+    if (hooks.onSlackDm) this.slackDmHooks.push(hooks.onSlackDm);
+    if (hooks.onWakeAgent) this.wakeAgentHooks.push(hooks.onWakeAgent);
+
+    // Return cleanup function that removes exactly these hooks
+    return () => {
+      if (hooks.onOutput) this.outputHooks = this.outputHooks.filter(h => h !== hooks.onOutput);
+      if (hooks.onToolStart) this.toolStartHooks = this.toolStartHooks.filter(h => h !== hooks.onToolStart);
+      if (hooks.onToolEnd) this.toolEndHooks = this.toolEndHooks.filter(h => h !== hooks.onToolEnd);
+      if (hooks.onStepEnd) this.stepEndHooks = this.stepEndHooks.filter(h => h !== hooks.onStepEnd);
+      if (hooks.onAgentMessage) this.agentMessageHooks = this.agentMessageHooks.filter(h => h !== hooks.onAgentMessage);
+      if (hooks.onSlackDm) this.slackDmHooks = this.slackDmHooks.filter(h => h !== hooks.onSlackDm);
+      if (hooks.onWakeAgent) this.wakeAgentHooks = this.wakeAgentHooks.filter(h => h !== hooks.onWakeAgent);
+    };
   }
 
   constructor(config: ChatSessionManagerConfig) {
@@ -2051,7 +2060,7 @@ export class ChatSessionManager {
 
       // Fire external output hook (e.g. SlackBridge streaming) — assistant text only
       if (msg.type === 'stdout' && msg.data) {
-        this.outputHook?.(sessionId, msg.data);
+        for (const hook of this.outputHooks) hook(sessionId, msg.data);
       }
 
       // Build JSON string directly — avoids an intermediate JS object + JSON.stringify
@@ -2089,7 +2098,7 @@ export class ChatSessionManager {
           args: msg.args,
         });
         // Fire external hook (e.g. SlackBridge streaming)
-        this.toolStartHook?.(sessionId, msg.toolName, (msg.args as Record<string, unknown>) ?? {});
+        for (const hook of this.toolStartHooks) hook(sessionId, msg.toolName, (msg.args as Record<string, unknown>) ?? {});
       }
       
       if (msg.type === 'toolEnd' && activeSession) {
@@ -2112,7 +2121,7 @@ export class ChatSessionManager {
           matchedTool.durationMs = msg.durationMs;
         }
         // Fire external hook
-        this.toolEndHook?.(sessionId, msg.toolName, String(msg.result ?? ''), !msg.success, msg.durationMs ?? 0);
+        for (const hook of this.toolEndHooks) hook(sessionId, msg.toolName, String(msg.result ?? ''), !msg.success, msg.durationMs ?? 0);
       }
       
       // Route inter-agent messages and Slack DMs via hooks.
@@ -2120,16 +2129,16 @@ export class ChatSessionManager {
       if (msg.type === 'agentMessage') {
         const agentId = activeSession?.agentId ?? sessionId.split('_')[1] ?? 'unknown';
         console.log(`[ChatSessionManager] Received agentMessage from ${agentId} (session ${sessionId}): to=${msg.to}, priority=${msg.priority}, messageType=${msg.messageType}, message="${msg.message.slice(0, 80)}"`);
-        if (this.agentMessageHook) {
-          this.agentMessageHook(agentId, sessionId, msg.to, msg.message, msg.priority, msg.messageType);
+        if (this.agentMessageHooks.length > 0) {
+          for (const hook of this.agentMessageHooks) hook(agentId, sessionId, msg.to, msg.message, msg.priority, msg.messageType);
         } else {
           console.warn(`[ChatSessionManager] No agentMessage hook registered — message from ${agentId} to ${msg.to} will be dropped`);
         }
       }
       if (msg.type === 'slackDm') {
         const agentId = activeSession?.agentId ?? sessionId.split('_')[1] ?? 'unknown';
-        if (this.slackDmHook) {
-          this.slackDmHook(agentId, sessionId, msg.message, msg.urgent);
+        if (this.slackDmHooks.length > 0) {
+          for (const hook of this.slackDmHooks) hook(agentId, sessionId, msg.message, msg.urgent);
         } else {
           console.warn(`[ChatSessionManager] No slackDm hook registered — DM from ${agentId} will be dropped`);
         }
@@ -2137,8 +2146,8 @@ export class ChatSessionManager {
       if (msg.type === 'wakeAgent') {
         const agentId = activeSession?.agentId ?? sessionId.split('_')[1] ?? 'unknown';
         console.log(`[ChatSessionManager] Received wakeAgent from ${agentId} (session ${sessionId}): to=${msg.to}, reason=${msg.reason}, message="${msg.message.slice(0, 80)}"`);
-        if (this.wakeAgentHook) {
-          this.wakeAgentHook(agentId, sessionId, msg.to, msg.message, msg.reason);
+        if (this.wakeAgentHooks.length > 0) {
+          for (const hook of this.wakeAgentHooks) hook(agentId, sessionId, msg.to, msg.message, msg.reason);
         } else {
           console.warn(`[ChatSessionManager] No wakeAgent hook registered — wake from ${agentId} to ${msg.to} will be dropped`);
         }
@@ -2163,7 +2172,7 @@ export class ChatSessionManager {
       // Handle turn end - update session state
       if (msg.type === 'stepEnd') {
         // Fire external step-end hook (e.g. SlackBridge to finalise streamer)
-        this.stepEndHook?.(sessionId, msg.success);
+        for (const hook of this.stepEndHooks) hook(sessionId, msg.success);
 
         const resultLen = (msg.result || '').length;
         const thinkingLen = activeSession?.accumulatedThinking?.length ?? 0;

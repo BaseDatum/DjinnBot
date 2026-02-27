@@ -470,8 +470,9 @@ export class SignalBridge {
       rejectResponse = reject;
     });
 
-    // Register temporary hooks for this session
-    const hookCleanup = csm.registerHooks({
+    // Register temporary hooks for this session — returns a cleanup function
+    // that removes exactly these hooks without affecting other consumers.
+    const cleanupHooks = csm.registerHooks({
       onOutput: (sid: string, chunk: string) => {
         if (sid === sessionId) chunks.push(chunk);
       },
@@ -513,7 +514,7 @@ export class SignalBridge {
 
       return response || '(No response from agent)';
     } finally {
-      // Hook cleanup is handled by ChatSessionManager's session lifecycle
+      cleanupHooks();
     }
   }
 
