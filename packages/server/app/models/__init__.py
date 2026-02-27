@@ -80,6 +80,7 @@ from app.models.memory_score import (
 )
 from app.models.code_graph import CodeGraphIndex
 from app.models.signal import SignalConfig, SignalAllowlistEntry
+from app.models.telegram import TelegramConfig, TelegramAllowlistEntry
 
 __all__ = [
     # Pydantic models (backward compatibility)
@@ -170,4 +171,7 @@ __all__ = [
     # Signal integration
     "SignalConfig",
     "SignalAllowlistEntry",
+    # Telegram integration
+    "TelegramConfig",
+    "TelegramAllowlistEntry",
 ]

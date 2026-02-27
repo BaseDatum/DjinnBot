@@ -36,9 +36,10 @@ import { Redis } from 'ioredis';
 import { TaskRunTracker } from './task/task-run-tracker.js';
 import { SessionPersister } from './sessions/session-persister.js';
 
-// Dynamic import for SlackBridge to avoid circular dependency
-// @djinnbot/slack depends on @djinnbot/core for types
+// Dynamic import for SlackBridge and TelegramBridgeManager to avoid circular dependency
+// @djinnbot/slack and @djinnbot/telegram depend on @djinnbot/core for types
 type SlackBridgeType = any;
+type TelegramBridgeManagerType = any;
 
 export interface DjinnBotConfig {
   redisUrl: string;
@@ -64,6 +65,7 @@ export class DjinnBot {
   private pipelines: Map<string, PipelineConfig> = new Map();
   private agentRegistry: AgentRegistry;
   slackBridge?: SlackBridgeType;
+  telegramBridgeManager?: TelegramBridgeManagerType;
   private agentMemoryManager?: AgentMemoryManager;
   private lifecycleManager: AgentLifecycleManager;
   private lifecycleTracker?: AgentLifecycleTracker;
@@ -1578,11 +1580,52 @@ Start now.`;
     return this.store;
   }
   
+  private _pendingTelegramCsm: any = null;
+
+  /** Inject CSM into the Telegram bridge manager if both are ready. */
+  setTelegramChatSessionManager(csm: any): void {
+    this._pendingTelegramCsm = csm;
+    if (this.telegramBridgeManager) {
+      this.telegramBridgeManager.setChatSessionManager(csm);
+      console.log('[DjinnBot] TelegramBridgeManager wired to ChatSessionManager');
+    }
+  }
+
+  /** Start the Telegram bridge manager for per-agent bot connections */
+  async startTelegramBridge(opts: {
+    defaultConversationModel?: string;
+  }): Promise<void> {
+    const redisUrl = this.config.redisUrl;
+    const apiUrl = this.config.apiUrl || 'http://api:8000';
+
+    // Dynamic import to avoid circular dependency
+    // @ts-ignore - @djinnbot/telegram is loaded dynamically to avoid circular dependency
+    const telegramModule = await import('@djinnbot/telegram');
+    const TelegramBridgeManager = telegramModule.TelegramBridgeManager;
+
+    this.telegramBridgeManager = new TelegramBridgeManager({
+      redisUrl,
+      apiUrl,
+      defaultConversationModel: opts.defaultConversationModel,
+      eventBus: this.eventBus as any,
+      agentRegistry: this.agentRegistry as any,
+    });
+
+    // If CSM was already created before the bridge started, inject it now.
+    if (this._pendingTelegramCsm) {
+      this.telegramBridgeManager.setChatSessionManager(this._pendingTelegramCsm);
+      console.log('[DjinnBot] TelegramBridgeManager wired to ChatSessionManager (deferred)');
+    }
+
+    await this.telegramBridgeManager.start();
+  }
+
   // Shutdown
   async shutdown(): Promise<void> {
     this.agentPulse?.stop();
     await this.agentWake?.stop();
     await this.slackBridge?.shutdown();
+    await this.telegramBridgeManager?.shutdown();
     await this.executor.shutdown();
     await this.engine.shutdown();
     await this.agentInbox.close();

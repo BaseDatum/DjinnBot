@@ -19,6 +19,7 @@ import {
 import { toast } from 'sonner';
 import { fetchAgentChannels, upsertAgentChannel, removeAgentChannel } from '@/lib/api';
 import type { AgentChannel } from '@/lib/api';
+import { TelegramSetupPanel } from './TelegramSetupPanel';
 
 interface ChannelCardProps {
   agentId: string;
@@ -417,6 +418,9 @@ export function AgentChannelsTab({ agentId }: AgentChannelsTabProps) {
             onRemove={handleRemove}
           />
         ))}
+
+        {/* Telegram — dedicated setup panel with allowlist management */}
+        <TelegramSetupPanel agentId={agentId} />
       </div>
 
       <p className="text-xs text-muted-foreground">
