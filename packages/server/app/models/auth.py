@@ -34,6 +34,10 @@ class User(Base):
     # e.g. "U0123456789". Users set this in their profile.
     slack_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
 
+    # Phone number in E.164 format (e.g. +15551234567).
+    # Used for Signal notifications from agents and matching incoming messages.
+    phone_number: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+
     created_at: Mapped[int] = mapped_column(BigInteger, nullable=False)
     updated_at: Mapped[int] = mapped_column(BigInteger, nullable=False)
 

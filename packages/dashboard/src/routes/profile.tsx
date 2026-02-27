@@ -32,6 +32,7 @@ interface UserProfile {
   displayName: string | null;
   isAdmin: boolean;
   slackId: string | null;
+  phoneNumber: string | null;
   totpEnabled: boolean;
 }
 
@@ -65,6 +66,7 @@ function ProfilePage() {
         body: JSON.stringify({
           displayName: value.displayName,
           slackId: value.slackId,
+          phoneNumber: value.phoneNumber,
         }),
       });
       if (!res.ok) throw new Error('Failed to save');
@@ -169,20 +171,35 @@ function ProfilePage() {
               {saveState === 'saving' && <span className="text-xs text-muted-foreground animate-pulse">Saving...</span>}
               {saveState === 'saved' && <span className="text-xs text-green-500">&#x2713; Saved</span>}
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="slackId">Slack Member ID</Label>
-              <p className="text-xs text-muted-foreground mb-2">
-                Your Slack member ID (e.g. U0123456789). Find it in Slack under your profile
-                &rarr; "Copy member ID". This is required for agents to recognize your Slack messages.
-              </p>
-              <Input
-                id="slackId"
-                value={profile.slackId || ''}
-                onChange={(e) => handleChange('slackId', e.target.value)}
-                placeholder="U0123456789"
-                className="max-w-sm font-mono"
-              />
-            </div>
+              <div className="space-y-2">
+                <Label htmlFor="slackId">Slack Member ID</Label>
+                <p className="text-xs text-muted-foreground mb-2">
+                  Your Slack member ID (e.g. U0123456789). Find it in Slack under your profile
+                  &rarr; "Copy member ID". This is required for agents to recognize your Slack messages.
+                </p>
+                <Input
+                  id="slackId"
+                  value={profile.slackId || ''}
+                  onChange={(e) => handleChange('slackId', e.target.value)}
+                  placeholder="U0123456789"
+                  className="max-w-sm font-mono"
+                />
+              </div>
+
+              <div className="space-y-2 pt-4 border-t">
+                <Label htmlFor="phoneNumber">Phone Number</Label>
+                <p className="text-xs text-muted-foreground mb-2">
+                  Your phone number in E.164 format (e.g. +15551234567).
+                  Used for Signal notifications from agents.
+                </p>
+                <Input
+                  id="phoneNumber"
+                  value={profile.phoneNumber || ''}
+                  onChange={(e) => handleChange('phoneNumber', e.target.value)}
+                  placeholder="+15551234567"
+                  className="max-w-sm font-mono"
+                />
+              </div>
           </div>
         )}
 

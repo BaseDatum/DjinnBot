@@ -1,0 +1,210 @@
+/**
+ * SignalRouter — routes incoming Signal messages to the correct agent.
+ *
+ * One phone number serves the entire DjinnBot platform. The router
+ * determines which agent should handle each incoming message.
+ *
+ * Routing order (first match wins):
+ *   1. Explicit prefix: message starts with @agentname or /agentname
+ *   2. Sticky conversation: sender recently talked to an agent (Redis TTL)
+ *   3. Sender default: allowlist entry has a default_agent_id
+ *   4. Fallback: system-wide default agent
+ *
+ * Sticky conversation state is stored in Redis (survives engine restarts).
+ */
+
+import { Redis } from 'ioredis';
+import type { AgentRegistry } from '@djinnbot/core';
+import type { RouteResult } from './types.js';
+import { normalizeE164 } from './allowlist.js';
+
+const STICKY_KEY_PREFIX = 'signal:conv:';
+
+export interface SignalRouterConfig {
+  agentRegistry: AgentRegistry;
+  redis: Redis;
+  defaultAgentId: string;
+  stickyTtlMs: number;
+}
+
+/** Built-in commands handled before routing. */
+export interface CommandResult {
+  handled: boolean;
+  response?: string;
+}
+
+export class SignalRouter {
+  private config: SignalRouterConfig;
+
+  constructor(config: SignalRouterConfig) {
+    this.config = config;
+  }
+
+  // ── Built-in commands ──────────────────────────────────────────────────
+
+  /**
+   * Check if the message is a built-in command.
+   * Returns { handled: true, response } if it is.
+   */
+  async handleCommand(sender: string, text: string): Promise<CommandResult> {
+    const trimmed = text.trim();
+    const lower = trimmed.toLowerCase();
+
+    if (lower === '/help') {
+      return {
+        handled: true,
+        response: [
+          'Available commands:',
+          '  /agents  — List available agents',
+          '  /switch <name> — Switch to a different agent',
+          '  /end — End current conversation',
+          '  /help — Show this help',
+          '',
+          'You can also start a message with @agentname to route to a specific agent.',
+        ].join('\n'),
+      };
+    }
+
+    if (lower === '/agents') {
+      const agents = this.getRoutableAgents();
+      if (agents.length === 0) {
+        return { handled: true, response: 'No agents are available on Signal.' };
+      }
+      const lines = agents.map((a) => `  ${a.emoji} ${a.name} (${a.id})`);
+      return {
+        handled: true,
+        response: `Available agents:\n${lines.join('\n')}`,
+      };
+    }
+
+    if (lower === '/end') {
+      await this.clearConversation(sender);
+      return { handled: true, response: 'Conversation ended. Your next message will be routed to the default agent.' };
+    }
+
+    if (lower.startsWith('/switch ')) {
+      const name = trimmed.slice('/switch '.length).trim().toLowerCase();
+      const agent = this.findAgentByName(name);
+      if (!agent) {
+        const available = this.getRoutableAgents().map((a) => a.id).join(', ');
+        return {
+          handled: true,
+          response: `Agent "${name}" not found. Available: ${available}`,
+        };
+      }
+      await this.setActiveConversation(sender, agent.id);
+      return {
+        handled: true,
+        response: `Switched to ${agent.emoji} ${agent.name}. Your messages will now be routed to them.`,
+      };
+    }
+
+    return { handled: false };
+  }
+
+  // ── Routing ────────────────────────────────────────────────────────────
+
+  /**
+   * Route an incoming message to the correct agent.
+   */
+  async route(
+    sender: string,
+    messageText: string,
+    senderDefaults: Map<string, string>,
+  ): Promise<RouteResult> {
+    const normalized = normalizeE164(sender);
+
+    // 1. Explicit prefix: @agentname or /agentname at start of message
+    const prefixAgent = this.extractAgentPrefix(messageText);
+    if (prefixAgent) {
+      await this.setActiveConversation(normalized, prefixAgent);
+      return { agentId: prefixAgent, reason: 'explicit_prefix' };
+    }
+
+    // 2. Sticky conversation (Redis)
+    const sticky = await this.getActiveConversation(normalized);
+    if (sticky) {
+      // Refresh TTL on continued conversation
+      await this.setActiveConversation(normalized, sticky);
+      return { agentId: sticky, reason: 'sticky_conversation' };
+    }
+
+    // 3. Sender default from allowlist
+    const senderDefault = senderDefaults.get(normalized);
+    if (senderDefault) {
+      await this.setActiveConversation(normalized, senderDefault);
+      return { agentId: senderDefault, reason: 'sender_default' };
+    }
+
+    // 4. Fallback
+    const fallback = this.config.defaultAgentId;
+    await this.setActiveConversation(normalized, fallback);
+    return { agentId: fallback, reason: 'fallback' };
+  }
+
+  // ── Sticky conversation state (Redis) ──────────────────────────────────
+
+  async setActiveConversation(sender: string, agentId: string): Promise<void> {
+    const key = `${STICKY_KEY_PREFIX}${normalizeE164(sender)}`;
+    await this.config.redis.set(key, agentId, 'PX', this.config.stickyTtlMs);
+  }
+
+  async clearConversation(sender: string): Promise<void> {
+    const key = `${STICKY_KEY_PREFIX}${normalizeE164(sender)}`;
+    await this.config.redis.del(key);
+  }
+
+  private async getActiveConversation(sender: string): Promise<string | null> {
+    const key = `${STICKY_KEY_PREFIX}${normalizeE164(sender)}`;
+    return this.config.redis.get(key);
+  }
+
+  // ── Agent lookup helpers ───────────────────────────────────────────────
+
+  /**
+   * Extract an agent name from @prefix or /prefix at the start of a message.
+   * Returns the agent ID if found, null otherwise.
+   */
+  private extractAgentPrefix(text: string): string | null {
+    const trimmed = text.trim();
+    const match = trimmed.match(/^[@/](\w+)\s/);
+    if (!match) return null;
+
+    const name = match[1].toLowerCase();
+    const agent = this.findAgentByName(name);
+    return agent?.id ?? null;
+  }
+
+  private findAgentByName(name: string): { id: string; name: string; emoji: string } | null {
+    const lower = name.toLowerCase();
+    const agents = this.config.agentRegistry.getAll();
+
+    for (const agent of agents) {
+      if (agent.id.toLowerCase() === lower) {
+        return { id: agent.id, name: agent.identity.name, emoji: agent.identity.emoji };
+      }
+      if (agent.identity.name.toLowerCase() === lower) {
+        return { id: agent.id, name: agent.identity.name, emoji: agent.identity.emoji };
+      }
+    }
+    return null;
+  }
+
+  private getRoutableAgents(): Array<{ id: string; name: string; emoji: string }> {
+    // All agents with signal channel enabled
+    const signalAgents = this.config.agentRegistry.getAgentsByChannel('signal');
+    if (signalAgents.length > 0) {
+      return signalAgents.map((a) => ({
+        id: a.id,
+        name: a.identity.name,
+        emoji: a.identity.emoji,
+      }));
+    }
+    // Fallback: all agents
+    return this.config.agentRegistry.getAll().map((a) => ({
+      id: a.id,
+      name: a.identity.name,
+      emoji: a.identity.emoji,
+    }));
+  }
+}
