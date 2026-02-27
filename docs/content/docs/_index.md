@@ -3,7 +3,7 @@ title: Documentation
 toc: false
 ---
 
-Welcome to the DjinnBot documentation. Everything you need to go from zero to a fully autonomous AI development team — in under 5 minutes.
+Welcome to the DjinnBot documentation. Everything you need to go from zero to a fully autonomous AI team — in under 5 minutes.
 
 {{< cards >}}
   {{< card link="getting-started" title="Getting Started" icon="play" subtitle="Install, configure, and run your first pipeline in under 5 minutes." >}}

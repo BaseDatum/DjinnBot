@@ -58,6 +58,10 @@ The API server is the central coordination point:
 - **Authentication** — JWT access/refresh tokens, TOTP 2FA, API keys, OIDC SSO
 - **Database access** — PostgreSQL via SQLAlchemy with Alembic migrations
 - **File handling** — attachment uploads with text extraction and image processing
+- **PDF processing** — structured extraction via OpenDataLoader with automatic chunking and shared vault ingest
+- **Code Knowledge Graph** — Tree-sitter indexing pipeline, KuzuDB graph storage, and query/impact/context endpoints per project
+- **Browser cookie management** — upload, grant/revoke, and distribute cookies to agent containers for authenticated browsing
+- **Workflow policies** — per-project SDLC stage routing rules that define which stages are required, optional, or skipped per task work type
 - **GitHub webhooks** — receive events from GitHub for issue/PR integration
 - **Ingest endpoint** — accept meeting transcripts and documents for Grace to process
 
@@ -77,6 +81,8 @@ The engine is the brain of the system:
 - **MCP manager** — writes tool server config, monitors health, discovers tools
 - **Container log streaming** — relays container logs to the admin panel via Redis
 - **LLM call logging** — captures per-API-call token counts, latency, and cost data
+- **Code graph indexing** — triggers and monitors code knowledge graph builds via Redis events
+- **Camoufox browser** — integrates an anti-detection browser into agent containers for authenticated web browsing
 
 The engine communicates with agent containers via Redis pub/sub — sending commands and receiving events (output chunks, tool calls, completion signals).
 
@@ -88,9 +94,11 @@ A full-featured single-page application:
 - **Tailwind CSS** for styling
 - **SSE** for real-time streaming (activity feed, run output, swarm progress, LLM tracking)
 - **Three.js / WebGL** for 3D memory graph visualization
+- **Sigma.js** for interactive code knowledge graph visualization
 - **Admin panel** — container logs, LLM call log, API usage analytics, user management, notifications
 - **Rich chat** — file uploads, image attachments, HTML previews, grouped tool calls
 - **Swarm views** — DAG visualization, task detail, status bar, timeline
+- **Browser cookie management** — upload cookies, manage agent grants, Cookie Bridge extension support
 
 The dashboard talks directly to the API server. It's served as static files by nginx in the Docker container, with runtime API URL injection (no rebuild needed for custom domains).
 
@@ -226,7 +234,8 @@ For parallel multi-task execution:
 | Pipeline Engine | Custom state machine, Redis Streams | TypeScript |
 | Swarm Executor | DAG scheduler, parallel container orchestration | TypeScript |
 | Dashboard | React, TanStack Router, Tailwind, Three.js | TypeScript |
-| Agent Runtime | pi-mono (pi-agent-core) | TypeScript |
+| Agent Runtime | pi-mono (pi-agent-core), PTC, Camoufox | TypeScript |
+| Code Graph | Tree-sitter, KuzuDB, Louvain clustering | TypeScript |
 | Agent Containers | Debian bookworm, full toolbox | Multi-language |
 | Memory | ClawVault + QMDR | TypeScript |
 | Event Bus | Redis Streams + Pub/Sub | — |
@@ -257,7 +266,15 @@ DjinnBot is a Turborepo monorepo with npm workspaces:
       {{< filetree/file name="Slack bridge and per-agent bots (TypeScript)" >}}
     {{< /filetree/folder >}}
     {{< filetree/folder name="agent-runtime" >}}
-      {{< filetree/file name="Container entrypoint and tools (TypeScript)" >}}
+      {{< filetree/file name="Container entrypoint, tools, and PTC bridge (TypeScript)" >}}
+    {{< /filetree/folder >}}
+    {{< filetree/folder name="code-graph" >}}
+      {{< filetree/file name="Tree-sitter indexing pipeline, KuzuDB storage (TypeScript)" >}}
+    {{< /filetree/folder >}}
+  {{< /filetree/folder >}}
+  {{< filetree/folder name="apps" >}}
+    {{< filetree/folder name="browser-extension" >}}
+      {{< filetree/file name="Cookie Bridge extension for Chrome and Firefox" >}}
     {{< /filetree/folder >}}
   {{< /filetree/folder >}}
 {{< /filetree/container >}}

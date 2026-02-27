@@ -95,9 +95,11 @@ Click an agent to edit their configuration — change models, enable pulse routi
 The projects page provides kanban-style project management:
 
 - **Board view** — drag tasks between columns (Backlog, Ready, In Progress, Review, Done)
-- **Task details** — description, acceptance criteria, assigned agent, linked PRs, review fields
+- **Task details** — description, acceptance criteria, assigned agent, linked PRs, review fields, work type classification
 - **Project vision** — high-level project description and goals
-- **Planning pipeline** — run the planning pipeline to auto-decompose projects into tasks
+- **Planning pipeline** — run the planning pipeline to auto-decompose projects into tasks (structured or agentic)
+- **Workflow policies** — per-project SDLC stage routing rules that define which stages are required/optional/skip per task work type
+- **Code tab** — interactive Sigma.js visualization of the project's [Code Knowledge Graph](/docs/concepts/code-knowledge-graph) with community clustering, node details, and index management
 - **Pulse integration** — agents autonomously pick up and work on Ready tasks during pulse cycles
 - **User provider settings** — per-user API key configuration for cost control
 
@@ -153,11 +155,22 @@ The admin panel is available to admin users when authentication is enabled.
 The admin panel provides full operational control:
 
 - **API Usage** — per-provider API call analytics with key source tracking (system vs. user keys)
-- **LLM Call Log** — searchable log of every LLM API call with model, tokens, latency, and cost
+- **LLM Call Log** — searchable log of every LLM API call with model, tokens, latency, cost, and approximate USD cost per call
 - **Container Logs** — real-time streaming logs from all Docker containers
 - **Notifications** — system notifications and alerts
 - **User Management** — create, edit, and manage user accounts
 - **System Health** — service status, active containers, and resource usage
+
+## Browser Cookies
+
+Manage browser cookies for authenticated agent browsing via Camoufox:
+
+- **Upload cookies** — upload Netscape-format cookie files (exported from your browser or the Cookie Bridge extension)
+- **Cookie sets** — view, rename, and delete uploaded cookie sets
+- **Agent grants** — grant or revoke cookie access per agent, controlling which agents can browse with your credentials
+- **Cookie Bridge extension** — install the Chrome/Firefox extension to export cookies directly from your browser to DjinnBot
+
+See [Bot Interfaces](/docs/advanced/bot-interfaces#cookie-bridge-browser-extension) for extension installation details.
 
 ## Settings
 
@@ -169,6 +182,7 @@ Configure global and personal settings:
 - **Memory scoring** — configure how memory relevance is calculated
 - **Secrets** — manage encrypted secrets (GitHub tokens, SSH keys, etc.)
 - **User provider keys** — configure personal API keys that override system keys
+- **Browser cookies** — manage cookie sets and agent grants (also accessible from the dedicated Browser Cookies page)
 - **Two-Factor Authentication** — enable/disable TOTP 2FA, view recovery codes
 - **API Keys** — generate and manage API keys for CLI and programmatic access
 - **OIDC Providers** — configure external identity providers for single sign-on

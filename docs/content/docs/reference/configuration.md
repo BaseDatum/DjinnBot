@@ -127,6 +127,21 @@ The Traefik proxy also uses `proxy/.env`:
 | `LOG_LEVEL` | `INFO` | Logging level |
 | `DJINNBOT_VERSION` | `latest` | Current version (for update checking) |
 
+### Programmatic Tool Calling (PTC)
+
+| Variable | Default | Description |
+|----------|---------|------------|
+| `PTC_ENABLED` | `false` | Enable Programmatic Tool Calling. Reduces context usage by 30-40%+ by replacing JSON tool schemas with a compact Python SDK. See [Programmatic Tool Calling](/docs/concepts/programmatic-tool-calling). |
+| `PTC_TIMEOUT` | `120` | Default timeout in seconds for `exec_code` Python execution. |
+
+### Camoufox Browser
+
+| Variable | Default | Description |
+|----------|---------|------------|
+| `CAMOFOX_URL` | `http://127.0.0.1:9377` | Camoufox REST API URL inside agent containers. |
+| `CAMOFOX_API_KEY` | — | Optional API key for the Camoufox instance. |
+| `CAMOFOX_COOKIES_DIR` | `/home/agent/cookies` | Directory where granted cookie files are mounted. |
+
 ## Agent Configuration (config.yml)
 
 Per-agent settings in `agents/<id>/config.yml`:

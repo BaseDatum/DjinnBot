@@ -240,6 +240,60 @@ POST /v1/admin/pull-image           # Pull a Docker image
 GET  /v1/admin/users                # User management
 ```
 
+## Browser Cookies
+
+```
+GET    /v1/browser/cookies                                    # List cookie sets
+POST   /v1/browser/cookies                                    # Upload cookie file
+GET    /v1/browser/cookies/{cookie_set_id}                    # Get cookie set
+DELETE /v1/browser/cookies/{cookie_set_id}                    # Delete cookie set
+GET    /v1/browser/cookies/agents/{agent_id}                  # List grants for agent
+POST   /v1/browser/cookies/agents/{agent_id}/{id}/grant       # Grant access
+DELETE /v1/browser/cookies/agents/{agent_id}/{id}             # Revoke access
+```
+
+## Code Knowledge Graph
+
+```
+GET    /v1/projects/{id}/knowledge-graph/status               # Index status
+POST   /v1/projects/{id}/knowledge-graph/index                # Trigger indexing
+GET    /v1/projects/{id}/knowledge-graph/index/{job_id}       # Job progress
+GET    /v1/projects/{id}/knowledge-graph/graph-data            # Full graph data
+GET    /v1/projects/{id}/knowledge-graph/communities           # Community list
+GET    /v1/projects/{id}/knowledge-graph/processes             # Process list
+POST   /v1/projects/{id}/knowledge-graph/query                 # Search graph
+GET    /v1/projects/{id}/knowledge-graph/context/{symbol}      # Symbol context
+POST   /v1/projects/{id}/knowledge-graph/impact                # Impact analysis
+GET    /v1/projects/{id}/knowledge-graph/changes               # Map git changes
+POST   /v1/projects/{id}/knowledge-graph/cypher                # Raw Cypher query
+```
+
+## Documents
+
+```
+GET  /v1/documents                      # List ingested documents
+GET  /v1/documents/{id}/toc             # Get table of contents
+GET  /v1/documents/{id}/section         # Read a specific section
+GET  /v1/documents/search               # Search across document chunks
+```
+
+## Workflow Policies
+
+```
+GET  /v1/projects/{id}/workflow-policy             # Get policy
+PUT  /v1/projects/{id}/workflow-policy             # Update policy
+POST /v1/projects/{id}/tasks/{tid}/resolve-workflow  # Resolve workflow for task
+```
+
+## Run History (Internal)
+
+```
+GET /v1/internal/run-history            # Query execution history
+    ?project_id=&task_id=&agent_id=&status=&since=&limit=
+```
+
+Used by agents via the `get_run_history` tool to query their own execution history.
+
 ## Ingest
 
 ```

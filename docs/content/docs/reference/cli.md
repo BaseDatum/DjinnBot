@@ -233,6 +233,35 @@ djinn agent config stas
 djinn agent projects stas
 ```
 
+### Cookies
+
+Manage browser cookies for authenticated agent browsing via Camoufox:
+
+```bash
+# List all uploaded cookie sets
+djinn cookies list
+
+# Upload a Netscape-format cookie file
+djinn cookies upload cookies.txt --name "GitHub Session"
+
+# Delete a cookie set
+djinn cookies delete <cookie_set_id>
+
+# List cookie grants for an agent
+djinn cookies grants yukihiro
+
+# Grant an agent access to a cookie set
+djinn cookies grant yukihiro <cookie_set_id>
+
+# Revoke access
+djinn cookies revoke yukihiro <cookie_set_id>
+
+# Export cookies from your local browser (Chrome/Firefox/Safari)
+djinn cookies export
+```
+
+The `export` subcommand reads cookies directly from your local browser's cookie database (supports Chrome, Firefox, and Safari on macOS/Linux/Windows). It exports them in Netscape format and uploads to the server in one step.
+
 ### Memory
 
 ```bash

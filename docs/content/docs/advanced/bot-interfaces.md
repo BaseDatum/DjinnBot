@@ -75,6 +75,46 @@ Features:
 - Direct mentions and DMs
 - Active/passive thread participation
 
+### Camoufox Anti-Detection Browser
+
+Agent containers include [Camoufox](https://camoufox.com/), an anti-detection browser based on Firefox. This enables agents to browse the web with realistic browser fingerprints, bypassing bot detection on sites that block standard HTTP clients.
+
+Camoufox runs as a local REST API inside each agent container (`http://127.0.0.1:9377`). Agents interact with it through browser tools:
+
+- **`create_tab`** — open a URL in a new browser tab
+- **`get_tab_content`** — extract page content as cleaned text or HTML
+- **`click_element`** — click a page element by CSS selector or text
+- **`type_text`** — type into form fields
+- **`scroll`** — scroll the page
+- **`screenshot`** — capture a screenshot
+- **`close_tab`** — close a tab
+
+#### Authenticated Browsing with Cookies
+
+Agents can browse authenticated sites using cookies uploaded by the user. The flow:
+
+1. User uploads a Netscape-format cookie file via the dashboard, CLI, or Cookie Bridge extension
+2. Admin grants cookie access to specific agents
+3. When the agent's container starts, granted cookies are mounted at `/home/agent/cookies/`
+4. Camoufox loads the cookies before navigating, enabling authenticated sessions
+
+### Cookie Bridge Browser Extension
+
+The **DjinnBot Cookie Bridge** is a Chrome/Firefox extension that exports browser cookies directly to DjinnBot:
+
+1. Install the extension from `apps/browser-extension/` (load unpacked in Chrome, or build for Firefox)
+2. Click the extension icon and enter your DjinnBot server URL
+3. Click **Export Cookies** — the extension reads all cookies for the current domain and uploads them to the DjinnBot API
+4. Grant agent access via the dashboard or CLI
+
+This eliminates the need to manually export cookie files from browser developer tools.
+
+```bash
+# Build the extension
+cd apps/browser-extension
+./build.sh chrome    # or: ./build.sh firefox
+```
+
 ## Planned Interfaces
 
 ### Discord

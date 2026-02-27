@@ -12,9 +12,13 @@ DjinnBot includes built-in project management with kanban boards, task decomposi
 3. Provide a name, description, and optionally a GitHub repository URL
 4. The project board is created with default columns: Backlog, Ready, In Progress, Review, Done
 
-## Planning Pipeline
+## Planning Pipelines
 
-Use the planning pipeline to automatically decompose a project into tasks:
+DjinnBot offers two planning pipelines to decompose projects into tasks:
+
+### Structured Planning (Default)
+
+The multi-step structured pipeline uses structured output to produce task breakdowns:
 
 1. Open your project
 2. Click **Plan Project** (or start a planning pipeline run)
@@ -24,11 +28,44 @@ Use the planning pipeline to automatically decompose a project into tasks:
 6. Eric decomposes into bite-sized subtasks (1-4 hours each)
 7. Finn validates the subtasks
 
-Tasks are automatically imported into the project board with:
+### Agentic Planning
+
+The agentic planning pipeline (`planning-agentic`) uses a single agent with full tool access to incrementally create tasks via API calls. This approach:
+
+- Eliminates output token limits (tasks created via tool calls, not JSON blobs)
+- Enables perfect dependency resolution (real task IDs, not title matching)
+- Survives large contexts (92k+ char project docs in a single context window)
+- Provides incremental progress (tasks appear in the board as they're created)
+- Uses the API's built-in cycle detection on each `add_dependency` call
+
+The planner systematically works through four steps: create top-level tasks, wire dependencies, create subtasks, then wire subtask dependencies. It uses `create_task`, `create_subtask`, and `add_dependency` tools throughout.
+
+Both pipelines produce tasks with:
 - Priority labels (P0-P3)
 - Dependency chains
 - Hour estimates
 - Tags (backend, frontend, devops, etc.)
+
+## Workflow Policies
+
+Workflow policies let you define per-project SDLC routing rules. For each task **work type** (e.g., `feature`, `bugfix`, `refactor`, `docs`), you configure which stages are required, optional, or skipped:
+
+| Stage | Feature | Bugfix | Docs |
+|-------|---------|--------|------|
+| Spec | Required | Skip | Skip |
+| Design | Required | Skip | Skip |
+| Implement | Required | Required | Required |
+| Test | Required | Required | Optional |
+| Review | Required | Required | Required |
+| Deploy | Optional | Required | Skip |
+
+Agents use workflow policies to determine the correct kanban transitions for each task. Policies are managed via the dashboard (project settings) or the API:
+
+```
+GET  /v1/projects/{id}/workflow-policy
+PUT  /v1/projects/{id}/workflow-policy
+POST /v1/projects/{id}/tasks/{tid}/resolve-workflow
+```
 
 ## Task Workflow
 
@@ -93,3 +130,9 @@ Tasks can depend on other tasks. The dependency resolver ensures:
 - Circular dependencies are detected and flagged
 
 Dependencies are set during project planning (via the planning pipeline) or manually through the dashboard.
+
+## Code Knowledge Graph
+
+Projects with a git workspace can be indexed into a Code Knowledge Graph. This gives agents structural understanding of the codebase — they can query functions, trace call chains, analyze impact of changes, and understand functional clusters.
+
+See [Code Knowledge Graph](/docs/concepts/code-knowledge-graph) for full details on indexing, agent tools, and the dashboard visualization.

@@ -84,6 +84,9 @@ Available in `input` fields:
 | `{{task_description}}` | From the run creation request |
 | `{{human_context}}` | Optional human guidance from run request |
 | `{{project_name}}` | Project name from run request |
+| `{{project_id}}` | Project ID (for tool calls like `create_task`) |
+| `{{project_vision}}` | Project vision text (if set) |
+| `{{additional_context}}` | Extra context from run request |
 | `{{output_name}}` | Any named output from a previous step |
 | `{{current_item}}` | Current item in a loop iteration |
 | `{{completed_items}}` | JSON array of completed loop items |
@@ -144,4 +147,17 @@ Tools that can be listed in the `tools` array:
 | `ls` | List directory contents |
 | `web_search` | Search the web (via research tool) |
 
-Agents also have access to built-in tools (memory, messaging, project management) that are always available regardless of the `tools` list.
+Agents also have access to built-in tools (memory, messaging, project management, code graph, focused analysis, run history) that are always available regardless of the `tools` list.
+
+## Built-in Pipelines
+
+DjinnBot ships with several built-in pipelines:
+
+| Pipeline | Description |
+|----------|-------------|
+| `engineering` | Full SDLC pipeline: spec, design, implement, test, review, deploy |
+| `planning` | Structured planning with Eric + Finn validation loop |
+| `planning-agentic` | Single-agent planning with tool-based task creation and dependency wiring |
+| `onboarding` | Interactive project onboarding that creates vision and runs planning |
+
+The `planning-agentic` pipeline is particularly useful for large projects where structured output hits token limits. It uses a single powerful model (e.g., Claude Opus) with full tool access to incrementally create tasks, subtasks, and dependency edges via API calls.

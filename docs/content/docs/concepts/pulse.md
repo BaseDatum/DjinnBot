@@ -226,9 +226,11 @@ The separation achieves three things:
 2. **Context hygiene** — the executor gets a clean context window with only the execution prompt, avoiding the "lost in conversation" problem
 3. **Structured handoff** — the planner writes a complete brief as if briefing a skilled engineer with zero prior context, forcing thorough task decomposition
 
-## Project Tools
+## Agent Tools
 
-During pulse sessions, agents have access to project management tools:
+During pulse and chat sessions, agents have access to a rich set of built-in tools beyond the standard file operations and shell access.
+
+### Project Management
 
 | Tool | Purpose |
 |------|---------|
@@ -239,6 +241,24 @@ During pulse sessions, agents have access to project management tools:
 | `open_pull_request(projectId, taskId, title, body)` | Open a GitHub PR |
 | `transition_task(projectId, taskId, status)` | Move task through kanban |
 | `execute_task(projectId, taskId)` | Kick off a pipeline run for the task |
+
+### Code Knowledge Graph
+
+| Tool | Purpose |
+|------|---------|
+| `code_graph_query(projectId, query)` | Search the codebase graph for functions, classes, and flows |
+| `code_graph_context(projectId, symbol_name)` | Get full context for a symbol: callers, callees, clusters, flows |
+| `code_graph_impact(projectId, target, direction)` | Analyze what breaks if you change a symbol |
+| `code_graph_changes(projectId)` | Map uncommitted changes to affected symbols and flows |
+
+See [Code Knowledge Graph](/docs/concepts/code-knowledge-graph) for details.
+
+### Analysis and Introspection
+
+| Tool | Purpose |
+|------|---------|
+| `focused_analysis(prompt, context)` | Delegate a focused question to a fast sub-model without consuming your own context window. Supports personas: `analyst`, `security`, `reviewer`, `architect`, `tester`. Completes in 3-30 seconds. |
+| `get_run_history(projectId?, taskId?, status?)` | Query execution history — past pipeline runs, executor results, and task attempts. Use to learn from previous work, check if an executor succeeded, or see recent failures. |
 
 ## Git Workflow
 

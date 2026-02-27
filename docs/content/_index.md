@@ -5,13 +5,13 @@ layout: hextra-home
 
 <div class="hx-mt-6 hx-mb-6">
 {{< hextra/hero-headline >}}
-  Autonomous AI Teams<br class="sm:hx-block hx-hidden" /> That Build Software
+  Autonomous AI Teams<br class="sm:hx-block hx-hidden" /> That Can Do Anything
 {{< /hextra/hero-headline >}}
 </div>
 
 <div class="hx-mb-12">
 {{< hextra/hero-subtitle >}}
-  Deploy a full team of AI agents — product owner, architect, engineers, QA, SRE, and executive assistant — that collaborate to spec, design, implement, review, test, and deploy your software. Fully containerized. Self-hosted and free.
+  Deploy a team of AI agents that collaborate autonomously — engineering, research, content, operations, finance, or any workflow you define. Each agent has a real persona, persistent memory, and a full toolbox inside an isolated container. Self-hosted and free.
 {{< /hextra/hero-subtitle >}}
 </div>
 
@@ -32,15 +32,15 @@ layout: hextra-home
     style="background: radial-gradient(ellipse at 50% 80%,rgba(45,112,234,0.15),hsla(0,0%,100%,0));"
   >}}
   {{< hextra/feature-card
-    title="11 Specialized Agents"
-    subtitle="Not generic chatbots — real characters with backstories, opinions, and domain expertise. Eric pushes back on vague specs. Finn rejects bad architecture. Grace tracks your commitments. Chieko finds the edge cases you forgot."
+    title="11 Agents, Any Workflow"
+    subtitle="Not generic chatbots — real characters with backstories, opinions, and domain expertise. Ships with a full engineering team, an executive assistant, marketing, SEO, and finance leads. Customize the team or build your own agents for any domain."
     class="hx-aspect-auto md:hx-aspect-[1.1/1] max-md:hx-min-h-[340px]"
     icon="user-group"
     style="background: radial-gradient(ellipse at 50% 80%,rgba(142,53,234,0.15),hsla(0,0%,100%,0));"
   >}}
   {{< hextra/feature-card
     title="Container Isolation"
-    subtitle="Every agent runs in its own ephemeral Docker container with a complete engineering toolbox — Node 22, Python, Go, Rust, and 30+ dev tools. No host access. Destroyed after every step. Zero security concerns."
+    subtitle="Every agent runs in its own ephemeral Docker container with a full toolbox — Node 22, Python, Go, Rust, an anti-detection browser, and 30+ tools. No host access. Destroyed after every step. Zero security concerns."
     class="hx-aspect-auto md:hx-aspect-[1.1/1] max-md:hx-min-h-[340px]"
     icon="shield-check"
     style="background: radial-gradient(ellipse at 50% 80%,rgba(234,90,45,0.15),hsla(0,0%,100%,0));"
@@ -62,7 +62,7 @@ layout: hextra-home
   >}}
   {{< hextra/feature-card
     title="YAML Pipelines"
-    subtitle="Define workflows as simple YAML — steps, agents, branching, loops, retries, structured output schemas, and per-step model overrides. Drop a file in pipelines/ and it's live. No code required."
+    subtitle="Define any multi-agent workflow as simple YAML — steps, agents, branching, loops, retries, structured output, and per-step model overrides. Drop a file in pipelines/ and it's live. Engineering, research, content, ops — any process."
     icon="document-text"
   >}}
   {{< hextra/feature-card
@@ -104,11 +104,11 @@ layout: hextra-home
 
 ```mermaid
 graph LR
-    A["Create Project"] --> B["Plan"]
+    A["Define Work"] --> B["Plan"]
     B --> C["Agents Claim Tasks"]
     C --> D["Autonomous Work"]
-    D --> E["Review & Test"]
-    E --> F["Ship"]
+    D --> E["Review & Iterate"]
+    E --> F["Deliver"]
     
     style A fill:#3b82f6,color:#fff,stroke:#2563eb
     style B fill:#8b5cf6,color:#fff,stroke:#7c3aed
@@ -118,17 +118,17 @@ graph LR
     style F fill:#10b981,color:#fff,stroke:#059669
 ```
 
-**1. Create a project** — describe what you want built via the dashboard's guided onboarding, or import an existing repo.
+**1. Define the work** — describe what you need via the dashboard's guided onboarding, chat, or API. Software projects, research tasks, content campaigns, operations workflows — anything.
 
-**2. Plan it** — the two-stage planning pipeline decomposes your project into tasks on a kanban board with priorities, dependencies, and hour estimates.
+**2. Plan it** — the planning pipeline decomposes your project into tasks on a kanban board with priorities, dependencies, and hour estimates. Or define tasks manually.
 
-**3. Agents claim tasks** — each agent watches specific board columns matching their role. Yukihiro grabs implementation work from "Ready." Chieko grabs review tasks. Stas watches for deployment.
+**3. Agents claim tasks** — each agent watches specific board columns matching their role. Engineers grab implementation work. Reviewers grab review tasks. Any agent can be configured to watch any column.
 
-**4. Autonomous work** — on pulse cycles, agents wake up, claim a task, spin up an isolated container, write code, run tests, and open a PR. Or use **swarm execution** for parallel multi-agent processing.
+**4. Autonomous work** — on pulse cycles, agents wake up, claim a task, spin up an isolated container, and do the work — writing code, researching topics, generating content, browsing the web, or running any tools you've given them. Use **swarm execution** for parallel multi-agent processing.
 
-**5. Review & test** — Finn reviews the PR. If changes are needed, the task cycles back. If approved, Chieko runs the test suite.
+**5. Review & iterate** — agents review each other's work. If changes are needed, the task cycles back. They coordinate via inbox messages and can wake each other for urgent blockers.
 
-**6. Ship it** — Stas handles deployment. Watch the whole thing happen in real-time via the dashboard, Slack, or the live activity feed.
+**6. Deliver** — watch the whole thing happen in real-time via the dashboard, Slack, CLI, or the live activity feed.
 
 </div>
 
@@ -161,7 +161,7 @@ graph LR
 </tbody>
 </table>
 
-Each agent has a 100-200 line personality file with backstory, core beliefs, productive flaws, and anti-patterns. They're not generic wrappers &mdash; they're characters with opinions. The engineering pipeline is fully autonomous. Grace handles organizational memory and executive tasks. Business agents work in chat and pulse modes.
+Each agent has a 100-200 line personality file with backstory, core beliefs, productive flaws, and anti-patterns. They're not generic wrappers &mdash; they're characters with opinions. The default team covers a full engineering SDLC, organizational memory, marketing, SEO, and finance &mdash; but you can create agents for any domain by adding a directory with a few markdown files.
 
 </div>
 
@@ -192,6 +192,6 @@ Each agent has a 100-200 line personality file with backstory, core beliefs, pro
 </tbody>
 </table>
 
-DjinnBot is built for people who want autonomous AI teams working on real projects &mdash; not another chatbot, not another framework to wire together.
+DjinnBot is built for people who want autonomous AI teams working on real projects &mdash; software, research, content, ops, or anything else &mdash; not another chatbot, not another framework to wire together.
 
 </div>
