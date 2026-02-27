@@ -81,6 +81,8 @@ from app.models.memory_score import (
 from app.models.code_graph import CodeGraphIndex
 from app.models.signal import SignalConfig, SignalAllowlistEntry
 from app.models.telegram import TelegramConfig, TelegramAllowlistEntry
+from app.models.tts_call_log import TtsCallLog
+from app.models.tts_provider import TtsProvider, UserTtsProvider, AdminSharedTtsProvider
 
 __all__ = [
     # Pydantic models (backward compatibility)
@@ -174,4 +176,9 @@ __all__ = [
     # Telegram integration
     "TelegramConfig",
     "TelegramAllowlistEntry",
+    # TTS integration
+    "TtsCallLog",
+    "TtsProvider",
+    "UserTtsProvider",
+    "AdminSharedTtsProvider",
 ]

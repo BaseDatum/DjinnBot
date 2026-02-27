@@ -41,6 +41,7 @@ import { AgentSkillsTab } from '@/components/skills/AgentSkillsTab';
 import { AgentChannelsTab } from '@/components/channels/AgentChannelsTab';
 import { BuiltInToolsTab } from '@/components/agents/BuiltInToolsTab';
 import { AgentCoordinationTab } from '@/components/agents/AgentCoordinationTab';
+import { AgentTtsSettings } from '@/components/agents/AgentTtsSettings';
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '@/components/ui/collapsible';
 import { NestedSidebar } from '@/components/layout/NestedSidebar';
 import type { NestedSidebarItem } from '@/components/layout/NestedSidebar';
@@ -516,6 +517,12 @@ function AgentDetailPage() {
                 </div>
               </CardContent>
             </Card>
+
+            <AgentTtsSettings
+              agentId={agentId}
+              config={config}
+              onConfigChange={(updates) => handleConfigChange({ ...config, ...updates })}
+            />
 
             <DangerZone agentId={agentId} agentName={agent.name} />
           </div>

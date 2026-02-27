@@ -677,6 +677,36 @@ export function useChatStream({
           break;
         }
 
+        case 'tts_audio': {
+          // TTS audio generated — add a system message with the audio attachment
+          const ttsData = event.data as {
+            attachmentId: string;
+            filename: string;
+            mimeType: string;
+            sizeBytes: number;
+            format: string;
+          };
+          if (ttsData?.attachmentId) {
+            setMessages(prev => [
+              ...prev,
+              {
+                id: nextMsgId('tts'),
+                type: 'assistant' as const,
+                content: '',
+                timestamp: Date.now(),
+                ttsAudio: {
+                  attachmentId: ttsData.attachmentId,
+                  filename: ttsData.filename,
+                  mimeType: ttsData.mimeType,
+                  sizeBytes: ttsData.sizeBytes,
+                  format: ttsData.format,
+                },
+              },
+            ]);
+          }
+          break;
+        }
+
         case 'session_complete':
           commitStreaming();
           setIsStreaming(false);

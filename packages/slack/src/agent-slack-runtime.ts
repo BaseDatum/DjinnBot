@@ -635,6 +635,13 @@ export class AgentSlackRuntime {
       }
     }
 
+    // Detect if this is a voice message (audio file with no/empty text)
+    const isVoiceMessage = !message.trim() && slackFiles?.some(
+      (f: any) => f.mimetype?.startsWith('audio/') || f.name?.endsWith('.webm') || f.name?.endsWith('.ogg')
+    ) || (slackFiles?.some(
+      (f: any) => f.subtype === 'slack_audio' || f.mimetype?.startsWith('audio/')
+    ) && !message.trim());
+
     // pool.sendMessage() now returns the sessionId synchronously (pre-registered),
     // then does the actual cold-start async. This means we can register the streamer
     // immediately — before the container even starts — so output hooks can find it
@@ -655,6 +662,11 @@ export class AgentSlackRuntime {
         model: this.resolveSlackModel(),
       attachments,
     });
+
+    // Mark voice message session for TTS follow-up (via SlackBridge hook)
+    if (isVoiceMessage && this.config.sessionPool) {
+      (this.config.sessionPool as any)._voiceSessions?.add(sessionId);
+    }
 
     // Register streamer immediately by sessionId — cold-start is running in background
     const streamKey = `conv:${sessionId}`;

@@ -30,6 +30,8 @@ dependencies = [
     "opendataloader-pdf>=0.1.0",
     # Audio transcription (voice notes from Signal/Telegram/WhatsApp/Discord)
     "faster-whisper>=1.1.0",
+    # Text-to-speech (Fish Audio integration for voice replies)
+    "fishaudio>=1.0.0",
 ]
 
 [project.optional-dependencies]

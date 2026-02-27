@@ -68,6 +68,7 @@ from app.routers import ingest as ingest_router
 from app.routers import memory_scores as memory_scores_router
 from app.routers import project_templates as project_templates_router
 from app.routers import workflow_policies as workflow_policies_router
+from app.routers import tts as tts_router
 
 
 async def _handle_task_run_event(run_id: str, event_type: str):
@@ -774,6 +775,7 @@ app.include_router(
     workflow_policies_router.router,
     tags=["workflow-policies"],
 )
+app.include_router(tts_router.router, prefix="/v1", tags=["tts"])
 
 
 @app.get("/v1/status")

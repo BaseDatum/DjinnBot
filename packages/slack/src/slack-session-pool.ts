@@ -101,6 +101,10 @@ export class SlackSessionPool {
   private sessions = new Map<string, SlackSessionEntry>();
   private config: SlackSessionPoolConfig;
 
+  /** Track sessions triggered by voice messages for TTS follow-up.
+   *  Public so AgentSlackRuntime can add to it from respondViaPool(). */
+  _voiceSessions = new Set<string>();
+
   private readonly DM_IDLE_MS: number;
   private readonly THREAD_IDLE_MS: number;
 
