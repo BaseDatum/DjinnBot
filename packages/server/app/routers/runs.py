@@ -247,8 +247,8 @@ async def get_run(run_id: str, session: AsyncSession = Depends(get_async_session
 
     # Check if workspace exists (helps dashboard show status).
     # For persistent_directory runs, the workspace is the project directory.
-    runs_dir = os.getenv("SHARED_RUNS_DIR", "/data/runs")
-    workspaces_dir = os.getenv("WORKSPACES_DIR", "/data/workspaces")
+    runs_dir = os.getenv("SHARED_RUNS_DIR", "/jfs/runs")
+    workspaces_dir = os.getenv("WORKSPACES_DIR", "/jfs/workspaces")
     ws_type = getattr(run, "workspace_type", None)
     if ws_type == "persistent_directory" and run.project_id:
         workspace_path = Path(workspaces_dir) / run.project_id

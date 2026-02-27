@@ -197,7 +197,7 @@ export class ContainerRunner implements AgentRunner {
     } = options;
 
     const sessionId = `session_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
-    const dataPath = this.config.dataPath ?? '/data';
+    const dataPath = this.config.dataPath ?? '/jfs';
 
     // Collect output and events
     let output = '';

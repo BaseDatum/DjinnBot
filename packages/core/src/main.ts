@@ -34,8 +34,8 @@ const execFileAsync = promisify(execFile);
 // Configuration from environment variables
 const CONFIG: DjinnBotConfig = {
   redisUrl: process.env.REDIS_URL || 'redis://localhost:6379',
-  databasePath: process.env.DATABASE_PATH || './data/djinnbot.db',
-  dataDir: process.env.DATA_DIR || './data',
+  databasePath: process.env.DATABASE_PATH || '/jfs/djinnbot.db',
+  dataDir: process.env.DATA_DIR || '/jfs',
   agentsDir: process.env.AGENTS_DIR || './agents',
   pipelinesDir: process.env.PIPELINES_DIR || './pipelines',
   agentRunner: process.env.MOCK_RUNNER === 'true' 
@@ -70,7 +70,7 @@ let swarmLifecycle: AgentLifecycleTracker | null = null;
 /** Maps swarmId → agentId for activity feed attribution. */
 const swarmAgentMap = new Map<string, string>();
 
-const VAULTS_DIR = process.env.VAULTS_DIR || '/data/vaults';
+const VAULTS_DIR = process.env.VAULTS_DIR || '/jfs/vaults';
 const CLAWVAULT_BIN = '/usr/local/bin/clawvault';
 const GRAPH_REBUILD_CHANNEL = 'djinnbot:graph:rebuild';
 const GRAPH_REBUILT_CHANNEL = 'djinnbot:graph:rebuilt';
@@ -676,7 +676,7 @@ async function handleSystemUpdate(targetVersion: string): Promise<void> {
  * Results and progress are published to Redis keys that the API server polls.
  */
 async function handleCodeGraphIndex(projectId: string, jobId?: string): Promise<void> {
-  const workspacesDir = process.env.WORKSPACES_DIR || '/data/workspaces';
+  const workspacesDir = process.env.WORKSPACES_DIR || '/jfs/workspaces';
   const repoPath = `${workspacesDir}/${projectId}`;
   const dbPath = `${workspacesDir}/${projectId}/.code-graph.kuzu`;
 
@@ -1412,7 +1412,7 @@ async function main(): Promise<void> {
       const signalHttpPort = parseInt(process.env.SIGNAL_HTTP_PORT || '8820', 10);
 
       // Ensure signal data directory exists on JuiceFS
-      ensureJfsDirs(['/signal/data'], '/data');
+      ensureJfsDirs(['/signal/data']);
 
       // Start Signal bridge in the background — lock acquisition may retry
       // for up to 75s after a container restart, so we don't block engine startup.
@@ -1432,7 +1432,7 @@ async function main(): Promise<void> {
     // Start WhatsApp bridge — handles account linking and message routing via Redis RPC.
     // Uses Baileys (WhatsApp Web multi-device protocol) running in-process.
     {
-      const whatsappAuthDir = process.env.WHATSAPP_AUTH_DIR || '/data/whatsapp/auth';
+      const whatsappAuthDir = process.env.WHATSAPP_AUTH_DIR || '/jfs/whatsapp/auth';
 
       try {
         await djinnBot.startWhatsAppBridge({
@@ -1523,7 +1523,7 @@ async function main(): Promise<void> {
 
     // Start MCP / mcpo manager (writes config.json, tails logs, polls health)
     if (process.env.MCPO_CONFIG_PATH || process.env.MCPO_BASE_URL) {
-      const mcpoDataDir = process.env.DATA_DIR || '/data';
+      const mcpoDataDir = process.env.DATA_DIR || '/jfs';
       mcpoManager = new McpoManager({
         redis: new Redis(CONFIG.redisUrl),  // Dedicated connection — XADD log publishing must not contend with blocking XREADGROUP on redisClient
         apiBaseUrl: CONFIG.apiUrl || 'http://api:8000',

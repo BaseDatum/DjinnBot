@@ -1,7 +1,7 @@
 """Agent sandbox file browsing endpoints.
 
 Unified sandbox structure per agent:
-/data/sandboxes/{agentId}/
+/jfs/sandboxes/{agentId}/
 ├── home/           # Agent's home dir (persists installed packages, configs)
 ├── usr-local/      # /usr/local overlay (pip installs, etc.)
 ├── workspace/      # Agent's work files
@@ -24,19 +24,19 @@ router = APIRouter()
 
 def get_sandboxes_dir() -> str:
     """Get unified sandboxes directory - where each agent's full sandbox lives."""
-    return os.getenv("SANDBOXES_DIR", "/data/sandboxes")
+    return os.getenv("SANDBOXES_DIR", "/jfs/sandboxes")
 
 
 SANDBOXES_DIR = get_sandboxes_dir()
 MAX_FILE_SIZE = 1024 * 1024  # 1MB limit for file content
 
-# The unified data volume is mounted at /data in the API/engine containers but at
+# The JuiceFS volume is mounted at /jfs in the API/engine containers but at
 # /djinnbot-data in agent containers.  Agent entrypoint scripts create symlinks
 # using /djinnbot-data/... paths (e.g. run-workspace -> /djinnbot-data/runs/{runId}).
 # When the API server follows those symlinks the targets don't exist because here
-# the same volume is at /data.  We fix this by resolving the symlink target manually
-# and translating /djinnbot-data → /data.
-DATA_DIR = os.getenv("DJINN_DATA_PATH", "/data")
+# the same volume is at /jfs.  We fix this by resolving the symlink target manually
+# and translating /djinnbot-data → /jfs.
+DATA_DIR = os.getenv("DJINN_DATA_PATH", "/jfs")
 
 
 class FileNode(BaseModel):

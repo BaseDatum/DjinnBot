@@ -40,7 +40,7 @@ logger = get_logger(__name__)
 
 router = APIRouter()
 
-WORKSPACES_DIR = os.getenv("WORKSPACES_DIR", "/data/workspaces")
+WORKSPACES_DIR = os.getenv("WORKSPACES_DIR", "/jfs/workspaces")
 
 # In-memory job tracking (simple dict — not persistent across restarts)
 _index_jobs: dict[str, dict] = {}

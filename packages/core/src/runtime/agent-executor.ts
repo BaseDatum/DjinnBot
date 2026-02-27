@@ -526,7 +526,7 @@ export class AgentExecutor {
       let unwatchWorkspace: (() => void) | undefined;
 
       // Agent personal workspace (used by in-process PiMonoRunner for file tools)
-      const workspacesDir = process.env.WORKSPACES_DIR || '/data/workspaces';
+      const workspacesDir = process.env.WORKSPACES_DIR || '/jfs/workspaces';
       workspacePath = `${workspacesDir}/${agentId}`;
 
       // Get projectId — used for workspace setup. userId is already resolved above
@@ -548,7 +548,7 @@ export class AgentExecutor {
               runWorkspacePath = `${workspacesDir}/${projectId}`;
               projectWorkspacePath = runWorkspacePath;
             } else {
-              const runsDir = process.env.SHARED_RUNS_DIR || '/data/runs';
+              const runsDir = process.env.SHARED_RUNS_DIR || '/jfs/runs';
               runWorkspacePath = `${runsDir}/${runId}`;
               if (projectId) {
                 projectWorkspacePath = `${workspacesDir}/${projectId}`;
@@ -635,7 +635,7 @@ export class AgentExecutor {
           // For container runner: these map to /home/agent/run-workspace and /home/agent/project-workspace
           runWorkspacePath,
           projectWorkspacePath,
-          vaultPath: `${process.env.VAULTS_DIR || '/data/vaults'}/${agentId}`,
+          vaultPath: `${process.env.VAULTS_DIR || '/jfs/vaults'}/${agentId}`,
           signal: abortController.signal,
           maxTurns: stepConfig.maxTurns ?? pipeline.defaults.maxTurns ?? 999,
           projectId,

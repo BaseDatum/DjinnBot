@@ -143,26 +143,35 @@ services:
   api:
     image: ghcr.io/basedatum/djinnbot/api:${DJINNBOT_VERSION:-latest}
     container_name: djinnbot-api
+    # FUSE capabilities — the API mounts JuiceFS directly at /jfs
+    cap_add:
+      - SYS_ADMIN
+    security_opt:
+      - seccomp=unconfined
+      - apparmor=unconfined
+    devices:
+      - /dev/fuse:/dev/fuse
     ports:
       - "${BIND_HOST:-0.0.0.0}:${API_PORT:-8000}:8000"
     environment:
       - DATABASE_URL=postgresql+asyncpg://djinnbot:djinnbot@postgres:5432/djinnbot
       - REDIS_URL=redis://redis:6379
-      - DJINN_DATA_PATH=/data
+      - DJINN_DATA_PATH=/jfs
+      - DATA_DIR=/jfs
       - PIPELINES_DIR=/pipelines
       - AGENTS_DIR=/agents
       - SKILLS_DIR=/skills
-      # Unified sandbox directory - each agent gets /data/sandboxes/{agentId}/
-      - SANDBOXES_DIR=/data/sandboxes
+      # Unified sandbox directory - each agent gets /jfs/sandboxes/{agentId}/
+      - SANDBOXES_DIR=/jfs/sandboxes
       # Project workspaces (git repos for each project)
-      - WORKSPACES_DIR=/data/workspaces
+      - WORKSPACES_DIR=/jfs/workspaces
       # Shared runs for pipeline collaboration (run worktrees)
-      - SHARED_RUNS_DIR=/data/runs
+      - SHARED_RUNS_DIR=/jfs/runs
       # GitHub App Configuration
       - GITHUB_APP_ID=${GITHUB_APP_ID:-}
       - GITHUB_APP_CLIENT_ID=${GITHUB_APP_CLIENT_ID:-}
       - GITHUB_APP_WEBHOOK_SECRET=${GITHUB_APP_WEBHOOK_SECRET:-}
-      - GITHUB_APP_PRIVATE_KEY_PATH=${GITHUB_APP_PRIVATE_KEY_PATH:-/data/secrets/github-app.pem}
+      - GITHUB_APP_PRIVATE_KEY_PATH=${GITHUB_APP_PRIVATE_KEY_PATH:-/secrets/github-app.pem}
       - GITHUB_APP_NAME=${GITHUB_APP_NAME:-djinnbot}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - MCPO_BASE_URL=http://djinnbot-mcpo:8000
@@ -175,13 +184,15 @@ services:
       - SECRET_ENCRYPTION_KEY=${SECRET_ENCRYPTION_KEY:-}
       - CORS_ORIGINS=${CORS_ORIGINS:-*}
       - DJINNBOT_VERSION=${DJINNBOT_VERSION:-latest}
+      # ── JuiceFS direct-mount ──
+      # The API mounts JuiceFS at /jfs on startup via the entrypoint script.
+      - JFS_META_URL=redis://redis:6379/2
     volumes:
-      # JuiceFS-backed data directory (host bind mount from FUSE)
-      - juicefs-data:/data
+      # No Docker volume for persistent data — JuiceFS is mounted at /jfs by the entrypoint.
       - ./pipelines:/pipelines
       - ./agents:/agents
       - ./skills:/skills:ro
-      - ./secrets:/data/secrets:ro
+      - ./secrets:/secrets:ro
     networks:
       - djinnbot_default
     depends_on:
@@ -203,9 +214,9 @@ services:
     image: ghcr.io/basedatum/djinnbot/engine:${DJINNBOT_VERSION:-latest}
     cap_add:
       - SYS_ADMIN
-    # Allow FUSE mount syscall — the engine mounts JuiceFS directly so that
-    # subdirectory pre-creation (especially read-only mounts like /cookies/{agentId})
-    # goes through the real JuiceFS FUSE filesystem.
+    # Allow FUSE mount syscall — the engine mounts JuiceFS directly at /jfs.
+    # All persistent data (vaults, workspaces, runs, sandboxes, signal, etc.)
+    # is read/written through the JuiceFS FUSE filesystem — no Docker volumes.
     security_opt:
       - seccomp=unconfined
       - apparmor=unconfined
@@ -218,12 +229,12 @@ services:
       - DJINNBOT_API_URL=http://api:8000
       - DATABASE_URL=postgresql+asyncpg://djinnbot:djinnbot@postgres:5432/djinnbot
       - REDIS_URL=redis://redis:6379
-      - DJINN_DATA_PATH=/data
-      - DATA_DIR=/data
+      - DJINN_DATA_PATH=/jfs
+      - DATA_DIR=/jfs
       - PIPELINES_DIR=/pipelines
       - AGENTS_DIR=/agents
       - SKILLS_DIR=/skills
-      - VAULTS_DIR=/data/vaults
+      - VAULTS_DIR=/jfs/vaults
       - MOCK_RUNNER=${MOCK_RUNNER:-false}
       - USE_CONTAINER_RUNNER=${USE_CONTAINER_RUNNER:-true}
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
@@ -237,8 +248,8 @@ services:
       - QMD_OPENAI_MODEL=openai/gpt-4o-mini
       - QMD_QUERY_EXPANSION_PROVIDER=openai
       - QMD_ALLOW_SQLITE_EXTENSIONS=1
-      # HOME=/data puts the qmd index at /data/.cache/qmd/index.sqlite (on the shared volume).
-      - HOME=/data
+      # HOME=/jfs puts the qmd index at /jfs/.cache/qmd/index.sqlite (on JuiceFS).
+      - HOME=/jfs
       - SLACK_CHANNEL_ID=${SLACK_CHANNEL_ID:-}
       - SLACK_CHIEKO_BOT_TOKEN=${SLACK_CHIEKO_BOT_TOKEN:-}
       - SLACK_CHIEKO_APP_TOKEN=${SLACK_CHIEKO_APP_TOKEN:-}
@@ -260,38 +271,39 @@ services:
       - SLACK_YANG_APP_TOKEN=${SLACK_YANG_APP_TOKEN:-}
       - SLACK_YUKIHIRO_BOT_TOKEN=${SLACK_YUKIHIRO_BOT_TOKEN:-}
       - SLACK_YUKIHIRO_APP_TOKEN=${SLACK_YUKIHIRO_APP_TOKEN:-}
-      # Unified sandbox directory - each agent gets /data/sandboxes/{agentId}/
-      - SANDBOXES_DIR=/data/sandboxes
+      # Unified sandbox directory - each agent gets /jfs/sandboxes/{agentId}/
+      - SANDBOXES_DIR=/jfs/sandboxes
       # Project workspaces (git repos for each project)
-      - WORKSPACES_DIR=/data/workspaces
+      - WORKSPACES_DIR=/jfs/workspaces
       # Shared runs for pipeline collaboration (run worktrees)
-      - SHARED_RUNS_DIR=/data/runs
+      - SHARED_RUNS_DIR=/jfs/runs
       - GITHUB_TOKEN=${GITHUB_TOKEN:-}
       - GITHUB_USER=${GITHUB_USER:-djinnbot}
       - LOG_LEVEL=${LOG_LEVEL:-DEBUG}
       # MCP / mcpo integration
       - MCPO_API_KEY=${MCPO_API_KEY:-changeme}
       - MCPO_BASE_URL=http://djinnbot-mcpo:8000
-      - MCPO_CONFIG_PATH=/data/mcp/config.json
+      - MCPO_CONFIG_PATH=/mcp/config.json
       # Internal service-to-service auth token
       - ENGINE_INTERNAL_TOKEN=${ENGINE_INTERNAL_TOKEN:-}
       # Docker image for agent runtime containers (overridable via dashboard or env)
       - AGENT_RUNTIME_IMAGE=${AGENT_RUNTIME_IMAGE:-ghcr.io/basedatum/djinnbot/agent-runtime:${DJINNBOT_VERSION:-latest}}
-      # ── JuiceFS direct-mount for agent containers ──
-      # Agent containers mount JuiceFS subdirectories directly over the network
-      # (no Docker volume indirection). The engine passes these credentials when
-      # spawning containers via ContainerManager.
+      # ── JuiceFS direct-mount ──
+      # The engine mounts JuiceFS at /jfs on startup (via mountJuiceFS()).
+      # Agent containers mount JuiceFS subdirectories directly over the network.
       - JFS_META_URL=redis://redis:6379/2
       - JFS_AGENT_CACHE_SIZE=${JFS_AGENT_CACHE_SIZE:-2048}
+      # Signal integration — signal-cli runs as a child process inside the engine
+      - SIGNAL_DATA_DIR=/jfs/signal/data
+      - SIGNAL_HTTP_PORT=8820
     volumes:
-      # JuiceFS-backed data directory (host bind mount from FUSE)
-      - juicefs-data:/data
+      # No Docker volume for persistent data — JuiceFS is mounted at /jfs by the engine.
       - ./pipelines:/pipelines:ro
       - ./agents:/agents:ro
       - ./skills:/skills:ro
-      # MCP config directory — same bind-mount as mcpo so the engine can write config.json
+      # MCP config directory — bind-mounted so engine can write config.json
       # and mcpo picks it up immediately via hot-reload.
-      - ./mcp:/data/mcp
+      - ./mcp:/mcp
       # Docker socket for spawning agent containers (required for USE_CONTAINER_RUNNER=true)
       - /var/run/docker.sock:/var/run/docker.sock
       # Compose files mounted for self-update (engine runs docker compose from /compose)
@@ -315,22 +327,20 @@ services:
       # Pass secrets needed by MCP servers through to the container.
       # mcpo substitutes ${VAR} references in config.json env blocks.
       - GITHUB_TOKEN=${GITHUB_TOKEN:-}
-    # mcpo reads config.json from the shared data volume.
+    # mcpo reads config.json from the bind-mounted /mcp directory.
     # --hot-reload watches the file for changes and reloads servers without downtime.
-    # The engine writes /data/mcp/config.json via the MCP manager.
+    # The engine writes /mcp/config.json via the MCP manager.
     command: >
-      --config /data/mcp/config.json
+      --config /mcp/config.json
       --hot-reload
       --port 8000
       --api-key "${MCPO_API_KEY:-changeme}"
     ports:
       - "${BIND_HOST:-0.0.0.0}:${MCPO_PORT:-8001}:8000"
     volumes:
-      - juicefs-data:/data
-      # Bind-mount the project-root ./mcp/ directory so config.json is always
-      # readable at /data/mcp/config.json without needing it in the Docker volume.
+      # No Docker volume — mcpo only needs the config file from the bind mount.
       # The engine also writes to this path when servers are added via the UI.
-      - ./mcp:/data/mcp
+      - ./mcp:/mcp
     networks:
       - djinnbot_default
     restart: unless-stopped

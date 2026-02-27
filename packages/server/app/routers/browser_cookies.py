@@ -42,8 +42,8 @@ router = APIRouter()
 
 COOKIES_CHANGED_CHANNEL = "djinnbot:browser:cookies-changed"
 
-# JuiceFS data path — cookie files are stored at /data/cookies/{agent_id}/
-DATA_PATH = os.environ.get("DJINN_DATA_PATH", "/data")
+# JuiceFS data path — cookie files are stored at /jfs/cookies/{agent_id}/
+DATA_PATH = os.environ.get("DJINN_DATA_PATH", "/jfs")
 
 
 async def _publish_cookies_changed(agent_id: str) -> None:

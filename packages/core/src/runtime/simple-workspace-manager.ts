@@ -20,7 +20,7 @@ import type {
   CreateRunWorkspaceOptions,
 } from './workspace-types.js';
 
-const WORKSPACES_DIR = process.env.WORKSPACES_DIR || '/data/workspaces';
+const WORKSPACES_DIR = process.env.WORKSPACES_DIR || '/jfs/workspaces';
 const RUNS_DIR = process.env.SHARED_RUNS_DIR || join(WORKSPACES_DIR, '.runs');
 
 export class PersistentDirectoryWorkspaceManager implements IWorkspaceManager {

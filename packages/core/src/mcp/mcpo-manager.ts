@@ -2,7 +2,7 @@
  * MCP Manager — Engine-side orchestration for the mcpo proxy container.
  *
  * Responsibilities:
- *  1. Write /data/mcp/config.json from the API server's MCP registry
+ *  1. Write /mcp/config.json from the API server's MCP registry
  *  2. Stream mcpo container logs to the Redis stream djinnbot:mcp:logs
  *  3. Poll mcpo health after a config write and update server statuses
  *  4. Listen for MCP_RESTART_REQUESTED global events and act on them

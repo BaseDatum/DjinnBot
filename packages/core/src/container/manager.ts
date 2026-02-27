@@ -8,11 +8,11 @@ export interface ContainerConfig {
   agentId: string;
   /** @deprecated Use runWorkspacePath instead. Kept for backward-compat with non-pipeline callers. */
   workspacePath: string;
-  /** Absolute host path to the run's git worktree (e.g. /data/runs/{runId}).
-   *  Symlinked inside the container as /home/agent/run-workspace. */
+  /** Absolute path to the run's git worktree on JuiceFS (e.g. /jfs/runs/{runId}).
+   *  Mounted inside the container as /home/agent/run-workspace. */
   runWorkspacePath?: string;
-  /** Absolute host path to the project's main git repo (e.g. /data/workspaces/{projectId}).
-   *  Symlinked inside the container as /home/agent/project-workspace. */
+  /** Absolute path to the project's main git repo on JuiceFS (e.g. /jfs/workspaces/{projectId}).
+   *  Mounted inside the container as /home/agent/project-workspace. */
   projectWorkspacePath?: string;
   image?: string;
   env?: Record<string, string>;
@@ -229,23 +229,20 @@ export class ContainerManager {
       // Prefer the explicit runWorkspacePath; fall back to the legacy workspacePath field.
       const effectiveRunPath = runWorkspacePath ?? workspacePath;
 
-      // Extract relative path from /data/... to use as JuiceFS subdir.
-      // e.g. "/data/runs/run_xxx" → "runs/run_xxx"
-      const runRelative = effectiveRunPath.replace('/data/', '');
+      // Extract relative path from /jfs/... to use as JuiceFS subdir.
+      // e.g. "/jfs/runs/run_xxx" → "runs/run_xxx"
+      const runRelative = effectiveRunPath.replace('/jfs/', '');
 
       // Project workspace relative path (only used when projectWorkspacePath is provided).
-      // e.g. "/data/workspaces/proj_xxx" → "workspaces/proj_xxx"
-      const projectRelative = projectWorkspacePath ? projectWorkspacePath.replace('/data/', '') : null;
+      // e.g. "/jfs/workspaces/proj_xxx" → "workspaces/proj_xxx"
+      const projectRelative = projectWorkspacePath ? projectWorkspacePath.replace('/jfs/', '') : null;
 
       // ── Pre-create JuiceFS subdirectories ────────────────────────────────
       // `juicefs mount --subdir` requires the subdirectory to already exist.
       // For read-only mounts (e.g. cookies), JuiceFS cannot auto-create them.
       //
       // ensureJfsDirs writes through the engine's own JuiceFS FUSE mount
-      // (started at engine startup via mountJuiceFS).  If that mount isn't
-      // available it falls back to the raw Docker volume path — which works
-      // for rw mounts (JuiceFS auto-creates) but not ro mounts.
-      const dataPath = process.env.DJINN_DATA_PATH || process.env.DATA_DIR || '/data';
+      // (started at engine startup via mountJuiceFS).
       const jfsDirsToEnsure = [
         `/sandboxes/${agentId}`,
         `/vaults/${agentId}`,
@@ -253,7 +250,7 @@ export class ContainerManager {
         `/cookies/${agentId}`,
         ...(projectRelative ? [`/${projectRelative}`] : []),
       ];
-      ensureJfsDirs(jfsDirsToEnsure, dataPath);
+      ensureJfsDirs(jfsDirsToEnsure);
 
       // ── Build the JuiceFS mount table ────────────────────────────────────
       // Each entry: [subdir, mountpoint, readOnly?]
