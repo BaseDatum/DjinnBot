@@ -1484,20 +1484,20 @@ async function main(): Promise<void> {
       });
     }
 
-    // Start WhatsApp bridge — handles account linking and message routing via Redis RPC.
+    // Start WhatsApp bridge in the background — lock acquisition may retry
+    // for up to 75s after a container restart, so we don't block engine startup.
     // Uses Baileys (WhatsApp Web multi-device protocol) running in-process.
     {
       const whatsappAuthDir = process.env.WHATSAPP_AUTH_DIR || '/jfs/whatsapp/auth';
 
-      try {
-        await djinnBot.startWhatsAppBridge({
-          authDir: whatsappAuthDir,
-          defaultConversationModel: process.env.WHATSAPP_DEFAULT_MODEL,
-        });
+      djinnBot.startWhatsAppBridge({
+        authDir: whatsappAuthDir,
+        defaultConversationModel: process.env.WHATSAPP_DEFAULT_MODEL,
+      }).then(() => {
         console.log('[Engine] WhatsApp bridge started');
-      } catch (err) {
+      }).catch((err) => {
         console.warn('[Engine] WhatsApp bridge failed to start (non-fatal):', err);
-      }
+      });
     }
 
     // Start Telegram bridge — one bot per agent, managed by TelegramBridgeManager.
