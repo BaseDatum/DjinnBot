@@ -1,0 +1,52 @@
+FROM ghcr.io/open-webui/mcpo:main AS base
+
+FROM golang:1.25-alpine AS github-mcp-builder
+ARG GITHUB_MCP_VERSION=latest
+
+WORKDIR /build
+
+RUN apk add --no-cache git
+
+RUN git clone https://github.com/github/github-mcp-server.git . && \
+  if [ "$GITHUB_MCP_VERSION" != "latest" ]; then \
+  git checkout "$GITHUB_MCP_VERSION"; \
+  fi
+
+RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /github-mcp-server cmd/github-mcp-server/main.go
+
+FROM base
+
+USER root
+
+RUN groupadd -r app -g 1000 && \
+  useradd -r -u 1000 -g app -m -s /bin/bash app
+
+COPY --from=github-mcp-builder /github-mcp-server /usr/local/bin/github-mcp-server
+RUN chmod +x /usr/local/bin/github-mcp-server && \
+  github-mcp-server --version || echo "GitHub MCP Server installed"
+
+# Camoufox/Firefox system dependencies (needed by Scrapling's stealth browser)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+  libgtk-3-0 \
+  libdbus-glib-1-2 \
+  libxt6 \
+  libx11-xcb1 \
+  && rm -rf /var/lib/apt/lists/*
+
+RUN chown -R app:app /app /home/app
+
+USER app
+
+WORKDIR /app
+
+RUN npx -y @modelcontextprotocol/server-memory --version || echo "memory server cached" && \
+  npx -y mcp-fetch-server --version || echo "fetch server cached" && \
+  npx -y @brave/brave-search-mcp-server --version || echo "brave server cached" && \
+  npx -y searxng-mul-mcp --version || echo "searxng mcp cached" && \
+  uv tool install mcp-server-time || echo "time server installed" && \
+  uv tool install git+https://github.com/skymoore/perplexica-mcp-open-webui.git || echo "perplexica-mcp installed" && \
+  uv tool install grokipedia-mcp || echo "grokipedia-mcp installed" && \
+  uv tool install "scrapling[ai]" || echo "scrapling installed" && \
+  scrapling install || echo "scrapling browsers installed"
+
+CMD ["mcpo"]

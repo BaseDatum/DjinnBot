@@ -23,6 +23,7 @@ data "slackapp_manifest" "agent" {
     }
 
     app_home {
+      home_tab_enabled               = false
       messages_tab_enabled           = true
       messages_tab_read_only_enabled = false
     }
@@ -38,9 +39,15 @@ data "slackapp_manifest" "agent" {
   oauth_config {
     scopes {
       bot = [
-        "chat:write",
+        "app_mentions:read",
+        "assistant:write",
         "channels:history",
         "channels:read",
+        "chat:write",
+        "commands",
+        "emoji:read",
+        "files:read",
+        "files:write",
         "groups:history",
         "groups:read",
         "groups:write",
@@ -50,21 +57,38 @@ data "slackapp_manifest" "agent" {
         "mpim:history",
         "mpim:read",
         "mpim:write",
-        "users:read",
-        "app_mentions:read",
-        "reactions:read",
-        "reactions:write",
         "pins:read",
         "pins:write",
-        "emoji:read",
-        "commands",
-        "files:read",
-        "files:write"
+        "reactions:read",
+        "reactions:write",
+        "users:read",
+      ]
+
+      user = [
+        "canvases:read",
+        "canvases:write",
+        "channels:history",
+        "chat:write",
+        "groups:history",
+        "im:history",
+        "mpim:history",
+        "search:read.files",
+        "search:read.im",
+        "search:read.mpim",
+        "search:read.private",
+        "search:read.public",
+        "search:read.users",
+        "users:read",
+        "users:read.email",
       ]
     }
   }
 
   settings {
+    interactivity {
+      is_enabled = true
+    }
+
     org_deploy_enabled     = false
     socket_mode_enabled    = true
     token_rotation_enabled = false

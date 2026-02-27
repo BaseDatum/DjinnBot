@@ -27,6 +27,8 @@ jobs:
             image: ghcr.io/basedatum/djinnbot/agent-runtime
           - dockerfile: Dockerfile.dashboard
             image: ghcr.io/basedatum/djinnbot/dashboard
+          - dockerfile: Dockerfile.mcpo
+            image: ghcr.io/basedatum/djinnbot/mcpo
 
     steps:
       - name: Checkout

@@ -300,8 +300,9 @@ services:
     restart: unless-stopped
 
   mcpo:
-    image: ghcr.io/skymoore/mcpo:latest
-    platform: linux/amd64
+    build:
+      context: .
+      dockerfile: Dockerfile.mcpo
     container_name: djinnbot-mcpo
     environment:
       # Pass secrets needed by MCP servers through to the container.
