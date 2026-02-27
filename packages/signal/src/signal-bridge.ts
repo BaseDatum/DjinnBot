@@ -682,6 +682,87 @@ export class SignalBridge {
       }
       return;
     }
+
+    if (action.type === 'context') {
+      const agentId = action.agentId ?? this.signalConfig?.defaultAgentId ?? this.getFirstAgentId();
+      if (!agentId) {
+        await this.sendFormattedMessage(sender, 'No active conversation.');
+        return;
+      }
+      const sessionId = `signal_${safeSender}_${agentId}`;
+      if (!csm?.isSessionActive(sessionId)) {
+        await this.sendFormattedMessage(sender, 'No active session. Send a message first.');
+        return;
+      }
+      try {
+        const usage = await csm.getContextUsage(sessionId);
+        if (usage) {
+          const usedK = Math.round(usage.usedTokens / 1000);
+          const limitK = Math.round(usage.contextWindow / 1000);
+          await this.sendFormattedMessage(sender, `Context: ${usage.percent}% — ${usedK}k/${limitK}k tokens\nModel: ${usage.model || 'unknown'}`);
+        } else {
+          await this.sendFormattedMessage(sender, 'Context usage not yet available.');
+        }
+      } catch (err) {
+        await this.sendFormattedMessage(sender, 'Failed to retrieve context usage.');
+      }
+      return;
+    }
+
+    if (action.type === 'compact') {
+      const agentId = action.agentId ?? this.signalConfig?.defaultAgentId ?? this.getFirstAgentId();
+      if (!agentId) {
+        await this.sendFormattedMessage(sender, 'No active conversation.');
+        return;
+      }
+      const sessionId = `signal_${safeSender}_${agentId}`;
+      if (!csm?.isSessionActive(sessionId)) {
+        await this.sendFormattedMessage(sender, 'No active session. Send a message first.');
+        return;
+      }
+      await this.sendFormattedMessage(sender, 'Compacting session context...');
+      try {
+        const result = await csm.compactSession(sessionId, action.instructions);
+        if (result?.success) {
+          const beforeK = Math.round(result.tokensBefore / 1000);
+          const afterK = Math.round(result.tokensAfter / 1000);
+          const savedPct = result.tokensBefore > 0
+            ? Math.round(((result.tokensBefore - result.tokensAfter) / result.tokensBefore) * 100)
+            : 0;
+          await this.sendFormattedMessage(sender, `Compacted: ${beforeK}k → ${afterK}k tokens (saved ${savedPct}%)`);
+        } else {
+          await this.sendFormattedMessage(sender, `Compaction failed: ${result?.error || 'unknown error'}`);
+        }
+      } catch (err) {
+        await this.sendFormattedMessage(sender, 'Failed to compact session.');
+      }
+      return;
+    }
+
+    if (action.type === 'status') {
+      const agentId = action.agentId ?? this.signalConfig?.defaultAgentId ?? this.getFirstAgentId();
+      if (!agentId) {
+        await this.sendFormattedMessage(sender, 'No active conversation.');
+        return;
+      }
+      const sessionId = `signal_${safeSender}_${agentId}`;
+      const model = this.senderModelOverrides.get(normalizeE164(sender)) ?? 'default';
+      const lines = [`Model: ${model}`];
+      if (csm?.isSessionActive(sessionId)) {
+        try {
+          const usage = await csm.getContextUsage(sessionId);
+          if (usage) {
+            const usedK = Math.round(usage.usedTokens / 1000);
+            const limitK = Math.round(usage.contextWindow / 1000);
+            lines.push(`Context: ${usage.percent}% (${usedK}k/${limitK}k)`);
+          }
+        } catch { /* ignore */ }
+      } else {
+        lines.push('Session: inactive');
+      }
+      await this.sendFormattedMessage(sender, lines.join('\n'));
+      return;
+    }
   }
 
   // ── Agent processing ───────────────────────────────────────────────────

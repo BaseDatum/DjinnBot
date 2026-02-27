@@ -91,6 +91,22 @@ export const structuredOutputCommandSchema = baseMessageSchema.extend({
 
 export type StructuredOutputCommand = z.infer<typeof structuredOutputCommandSchema>;
 
+export const getContextUsageCommandSchema = baseMessageSchema.extend({
+  type: z.literal("getContextUsage"),
+  requestId: z.string(),
+});
+
+export type GetContextUsageCommand = z.infer<typeof getContextUsageCommandSchema>;
+
+export const compactSessionCommandSchema = baseMessageSchema.extend({
+  type: z.literal("compactSession"),
+  requestId: z.string(),
+  /** Optional user instructions to guide the compaction summary. */
+  instructions: z.string().optional(),
+});
+
+export type CompactSessionCommand = z.infer<typeof compactSessionCommandSchema>;
+
 export const commandMessageSchema = z.discriminatedUnion("type", [
   agentStepCommandSchema,
   toolCommandSchema,
@@ -98,6 +114,8 @@ export const commandMessageSchema = z.discriminatedUnion("type", [
   abortCommandSchema,
   structuredOutputCommandSchema,
   changeModelCommandSchema,
+  getContextUsageCommandSchema,
+  compactSessionCommandSchema,
 ]);
 
 export type CommandMessage =
@@ -106,7 +124,9 @@ export type CommandMessage =
   | ShutdownCommand
   | AbortCommand
   | StructuredOutputCommand
-  | ChangeModelCommand;
+  | ChangeModelCommand
+  | GetContextUsageCommand
+  | CompactSessionCommand;
 
 // ============================================================================
 // Output Messages (Container → Engine)
@@ -241,6 +261,37 @@ export const wakeAgentEventSchema = baseMessageSchema.extend({
 
 export type WakeAgentEvent = z.infer<typeof wakeAgentEventSchema>;
 
+// Context usage report (Container → Engine)
+export const contextUsageEventSchema = baseMessageSchema.extend({
+  type: z.literal("contextUsage"),
+  requestId: z.string(),
+  usedTokens: z.number(),
+  contextWindow: z.number(),
+  percent: z.number(),
+  /** Model ID the usage was measured for. */
+  model: z.string().optional(),
+});
+
+export type ContextUsageEvent = z.infer<typeof contextUsageEventSchema>;
+
+// Compaction complete event (Container → Engine)
+export const compactionCompleteEventSchema = baseMessageSchema.extend({
+  type: z.literal("compactionComplete"),
+  requestId: z.string(),
+  /** The compaction summary text to be persisted. */
+  summary: z.string(),
+  /** Tokens used before compaction. */
+  tokensBefore: z.number(),
+  /** Tokens used after compaction (summary + tail). */
+  tokensAfter: z.number(),
+  /** Number of recent messages preserved verbatim after compaction. */
+  tailMessageCount: z.number(),
+  /** How many compactions have occurred in this session. */
+  compactionNumber: z.number(),
+});
+
+export type CompactionCompleteEvent = z.infer<typeof compactionCompleteEventSchema>;
+
 export const eventMessageSchema = z.discriminatedUnion("type", [
   stepStartEventSchema,
   stepEndEventSchema,
@@ -252,6 +303,8 @@ export const eventMessageSchema = z.discriminatedUnion("type", [
   agentMessageEventSchema,
   slackDmEventSchema,
   wakeAgentEventSchema,
+  contextUsageEventSchema,
+  compactionCompleteEventSchema,
 ]);
 
 export type EventMessage =
@@ -264,7 +317,9 @@ export type EventMessage =
   | MessageEvent
   | AgentMessageEvent
   | SlackDmEvent
-  | WakeAgentEvent;
+  | WakeAgentEvent
+  | ContextUsageEvent
+  | CompactionCompleteEvent;
 
 // ============================================================================
 // Status Messages (Container → Engine)

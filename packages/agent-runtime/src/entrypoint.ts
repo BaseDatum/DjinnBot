@@ -213,6 +213,51 @@ async function main(): Promise<void> {
       runner.setModel(cmd.model);
     },
 
+    onGetContextUsage: async (cmd) => {
+      console.log(`[AgentRuntime] Context usage requested: ${cmd.requestId}`);
+      const usage = runner.getContextUsage();
+      await publisher.publishEvent({
+        type: 'contextUsage',
+        requestId: cmd.requestId,
+        usedTokens: usage.usedTokens,
+        contextWindow: usage.contextWindow,
+        percent: usage.percent,
+        model: usage.model,
+      } as any);
+    },
+
+    onCompactSession: async (cmd) => {
+      console.log(`[AgentRuntime] Compaction requested: ${cmd.requestId}${cmd.instructions ? ` (instructions: "${cmd.instructions.slice(0, 50)}")` : ''}`);
+
+      await publisher.publishStatus({
+        type: 'busy',
+        runId: config.runId,
+        requestId: cmd.requestId,
+      });
+
+      try {
+        const result = await runner.compactSessionContext(cmd.instructions);
+
+        await publisher.publishEvent({
+          type: 'compactionComplete',
+          requestId: cmd.requestId,
+          summary: result.summary,
+          tokensBefore: result.tokensBefore,
+          tokensAfter: result.tokensAfter,
+          tailMessageCount: result.tailMessageCount,
+          compactionNumber: result.success ? 1 : 0,
+        } as any);
+
+        if (!result.success) {
+          console.error(`[AgentRuntime] Compaction failed: ${result.error}`);
+        }
+      } catch (err) {
+        console.error(`[AgentRuntime] Compaction error:`, err);
+      }
+
+      await publisher.publishStatus({ type: 'idle', runId: config.runId });
+    },
+
     onStructuredOutput: async (cmd: StructuredOutputCommand) => {
       console.log(`[AgentRuntime] Received structured output request: ${cmd.requestId}`);
 

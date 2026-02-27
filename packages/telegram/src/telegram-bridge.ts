@@ -302,6 +302,9 @@ class TelegramAgentBridge {
         '  /new — Start a fresh conversation (clears history)',
         '  /model <name> — Switch the AI model',
         '  /modelfavs — Show your favorite models',
+        '  /context — Show current context window usage',
+        '  /compact [instructions] — Compact session context',
+        '  /status — Show session status',
         '  /help — Show this help',
       ].join('\n'));
       return true;
@@ -371,6 +374,88 @@ class TelegramAgentBridge {
       } catch (err) {
         console.warn(`[TelegramBridge:${this.agentId}] /modelfavs: failed to fetch favorites:`, err);
         await this.sendFormattedMessage(chatId, 'Failed to load favorite models. Please try again.');
+      }
+      return true;
+    }
+
+    if (lower === '/context') {
+      const csm = this.config.chatSessionManager;
+      const sessionId = `telegram_${chatId}_${this.agentId}`;
+
+      if (!csm?.isSessionActive(sessionId)) {
+        await this.sendFormattedMessage(chatId, 'No active session. Send a message first.');
+        return true;
+      }
+
+      try {
+        const usage = await csm.getContextUsage(sessionId);
+        if (usage) {
+          const usedK = Math.round(usage.usedTokens / 1000);
+          const limitK = Math.round(usage.contextWindow / 1000);
+          await this.sendFormattedMessage(chatId, `**Context:** ${usage.percent}% — ${usedK}k/${limitK}k tokens\n**Model:** ${usage.model || 'unknown'}`);
+        } else {
+          await this.sendFormattedMessage(chatId, 'Context usage not yet available. Send a message first.');
+        }
+      } catch (err) {
+        console.warn(`[TelegramBridge:${this.agentId}] /context failed:`, err);
+        await this.sendFormattedMessage(chatId, 'Failed to retrieve context usage.');
+      }
+      return true;
+    }
+
+    if (lower === '/compact' || lower.startsWith('/compact ')) {
+      const csm = this.config.chatSessionManager;
+      const sessionId = `telegram_${chatId}_${this.agentId}`;
+      const instructions = trimmed.slice('/compact'.length).trim() || undefined;
+
+      if (!csm?.isSessionActive(sessionId)) {
+        await this.sendFormattedMessage(chatId, 'No active session. Send a message first.');
+        return true;
+      }
+
+      await this.sendFormattedMessage(chatId, 'Compacting session context...');
+
+      try {
+        const result = await csm.compactSession(sessionId, instructions);
+        if (result?.success) {
+          const beforeK = Math.round(result.tokensBefore / 1000);
+          const afterK = Math.round(result.tokensAfter / 1000);
+          const savedPct = result.tokensBefore > 0
+            ? Math.round(((result.tokensBefore - result.tokensAfter) / result.tokensBefore) * 100)
+            : 0;
+          await this.sendFormattedMessage(chatId, `**Compacted:** ${beforeK}k → ${afterK}k tokens (saved ${savedPct}%)`);
+        } else {
+          await this.sendFormattedMessage(chatId, `Compaction failed: ${result?.error || 'unknown error'}`);
+        }
+      } catch (err) {
+        console.warn(`[TelegramBridge:${this.agentId}] /compact failed:`, err);
+        await this.sendFormattedMessage(chatId, 'Failed to compact session.');
+      }
+      return true;
+    }
+
+    if (lower === '/status') {
+      const csm = this.config.chatSessionManager;
+      const sessionId = `telegram_${chatId}_${this.agentId}`;
+
+      if (!csm?.isSessionActive(sessionId)) {
+        await this.sendFormattedMessage(chatId, 'No active session.');
+        return true;
+      }
+
+      try {
+        const usage = await csm.getContextUsage(sessionId);
+        const model = this.chatModelOverrides.get(chatId) ?? this.config.defaultConversationModel ?? 'unknown';
+        const lines = [`**Model:** ${model}`];
+        if (usage) {
+          const usedK = Math.round(usage.usedTokens / 1000);
+          const limitK = Math.round(usage.contextWindow / 1000);
+          lines.push(`**Context:** ${usage.percent}% (${usedK}k/${limitK}k)`);
+        }
+        await this.sendFormattedMessage(chatId, lines.join('\n'));
+      } catch (err) {
+        console.warn(`[TelegramBridge:${this.agentId}] /status failed:`, err);
+        await this.sendFormattedMessage(chatId, 'Failed to retrieve status.');
       }
       return true;
     }

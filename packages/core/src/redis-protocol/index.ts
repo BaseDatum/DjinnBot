@@ -22,6 +22,12 @@ export type { StructuredOutputCommand } from "./types.js";
 export { changeModelCommandSchema } from "./types.js";
 export type { ChangeModelCommand } from "./types.js";
 
+export { getContextUsageCommandSchema } from "./types.js";
+export type { GetContextUsageCommand } from "./types.js";
+
+export { compactSessionCommandSchema } from "./types.js";
+export type { CompactSessionCommand } from "./types.js";
+
 export { commandMessageSchema } from "./types.js";
 export type { CommandMessage } from "./types.js";
 
@@ -63,6 +69,12 @@ export type { SlackDmEvent } from "./types.js";
 
 export { wakeAgentEventSchema } from "./types.js";
 export type { WakeAgentEvent } from "./types.js";
+
+export { contextUsageEventSchema } from "./types.js";
+export type { ContextUsageEvent } from "./types.js";
+
+export { compactionCompleteEventSchema } from "./types.js";
+export type { CompactionCompleteEvent } from "./types.js";
 
 export { eventMessageSchema } from "./types.js";
 export type { EventMessage } from "./types.js";

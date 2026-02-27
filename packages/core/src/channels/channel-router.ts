@@ -35,7 +35,10 @@ export interface RouteResult {
 export type CommandAction =
   | { type: 'reset'; agentId?: string }
   | { type: 'model'; model: string; agentId?: string }
-  | { type: 'modelfavs' };
+  | { type: 'modelfavs' }
+  | { type: 'context'; agentId?: string }
+  | { type: 'compact'; instructions?: string; agentId?: string }
+  | { type: 'status'; agentId?: string };
 
 export interface CommandResult {
   handled: boolean;
@@ -86,6 +89,9 @@ export class ChannelRouter {
           '  /new — Start a fresh conversation (clears history)',
           '  /model <name> — Switch the AI model',
           '  /modelfavs — Show your favorite models',
+          '  /context — Show current context window usage',
+          '  /compact [instructions] — Compact session context',
+          '  /status — Show session status',
           '  /end — End current conversation routing',
           '  /help — Show this help',
           '',
@@ -158,6 +164,31 @@ export class ChannelRouter {
       return {
         handled: true,
         action: { type: 'model', model: modelArg, agentId: agentId ?? undefined },
+      };
+    }
+
+    if (lower === '/context') {
+      const agentId = await this.getActiveConversation(normalizeE164(sender));
+      return {
+        handled: true,
+        action: { type: 'context', agentId: agentId ?? undefined },
+      };
+    }
+
+    if (lower === '/compact' || lower.startsWith('/compact ')) {
+      const instructions = trimmed.slice('/compact'.length).trim() || undefined;
+      const agentId = await this.getActiveConversation(normalizeE164(sender));
+      return {
+        handled: true,
+        action: { type: 'compact', instructions, agentId: agentId ?? undefined },
+      };
+    }
+
+    if (lower === '/status') {
+      const agentId = await this.getActiveConversation(normalizeE164(sender));
+      return {
+        handled: true,
+        action: { type: 'status', agentId: agentId ?? undefined },
       };
     }
 
