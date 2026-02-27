@@ -32,6 +32,9 @@
 		CC00000A /* StatusFooterView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC00001A /* StatusFooterView.swift */; };
 		CC00000C /* FluidAudio in Frameworks */ = {isa = PBXBuildFile; productRef = CC000082 /* FluidAudio */; };
 		CC00000D /* SystemAudioCaptureManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC00001B /* SystemAudioCaptureManager.swift */; };
+		CC00000E /* TranscriptionServiceProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC00001C /* TranscriptionServiceProtocol.swift */; };
+		CC00000F /* AppleSpeechTranscriptionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC00001D /* AppleSpeechTranscriptionService.swift */; };
+		CC000090 /* Speech.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = CC000091 /* Speech.framework */; settings = {ATTRIBUTES = (Weak, ); }; };
 		DD000001 /* ChatModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD000011 /* ChatModels.swift */; };
 		DD000002 /* StreamingChatService.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD000012 /* StreamingChatService.swift */; };
 		DD000003 /* ChatSessionManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD000013 /* ChatSessionManager.swift */; };
@@ -68,6 +71,9 @@
 		CC000019 /* VoiceEnrollmentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceEnrollmentView.swift; sourceTree = "<group>"; };
 		CC00001A /* StatusFooterView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusFooterView.swift; sourceTree = "<group>"; };
 		CC00001B /* SystemAudioCaptureManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemAudioCaptureManager.swift; sourceTree = "<group>"; };
+		CC00001C /* TranscriptionServiceProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptionServiceProtocol.swift; sourceTree = "<group>"; };
+		CC00001D /* AppleSpeechTranscriptionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleSpeechTranscriptionService.swift; sourceTree = "<group>"; };
+		CC000091 /* Speech.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Speech.framework; path = System/Library/Frameworks/Speech.framework; sourceTree = SDKROOT; };
 		DD000011 /* ChatModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatModels.swift; sourceTree = "<group>"; };
 		DD000012 /* StreamingChatService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamingChatService.swift; sourceTree = "<group>"; };
 		DD000013 /* ChatSessionManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatSessionManager.swift; sourceTree = "<group>"; };
@@ -83,6 +89,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				CC00000C /* FluidAudio in Frameworks */,
+				CC000090 /* Speech.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -195,6 +202,8 @@
 				CC000016 /* LiveRecordingPanel.swift */,
 				CC000017 /* PostMeetingVoiceLabeler.swift */,
 				CC00001B /* SystemAudioCaptureManager.swift */,
+				CC00001C /* TranscriptionServiceProtocol.swift */,
+				CC00001D /* AppleSpeechTranscriptionService.swift */,
 			);
 			path = Meeting;
 			sourceTree = "<group>";
@@ -335,6 +344,8 @@
 				CC000009 /* VoiceEnrollmentView.swift in Sources */,
 				CC00000A /* StatusFooterView.swift in Sources */,
 				CC00000D /* SystemAudioCaptureManager.swift in Sources */,
+				CC00000E /* TranscriptionServiceProtocol.swift in Sources */,
+				CC00000F /* AppleSpeechTranscriptionService.swift in Sources */,
 				DD000001 /* ChatModels.swift in Sources */,
 				DD000002 /* StreamingChatService.swift in Sources */,
 				DD000003 /* ChatSessionManager.swift in Sources */,

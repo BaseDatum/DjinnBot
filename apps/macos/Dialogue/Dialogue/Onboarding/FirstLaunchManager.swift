@@ -105,19 +105,32 @@ final class FirstLaunchManager: ObservableObject {
     
     private func startModelDownload(isMigration: Bool = false) {
         phase = .downloading
+        let selectedEngine = ASREngine.current
         statusMessage = isMigration
-            ? "Upgrading AI models to FluidAudio..."
-            : "Downloading AI models (\u{2248}850 MB)..."
+            ? "Upgrading AI models..."
+            : "Downloading AI models..."
         downloadProgress = 0
         
         Task {
             do {
-                // Download FluidAudio ASR models (Parakeet TDT v3)
-                statusMessage = "Downloading speech recognition model..."
-                let _ = try await AsrModels.download()
-                downloadProgress = 0.5
+                // Download ASR models based on selected engine
+                switch selectedEngine {
+                case .fluidAudio:
+                    // Download FluidAudio ASR models (Parakeet TDT v3)
+                    statusMessage = "Downloading speech recognition model (Parakeet TDT)..."
+                    let _ = try await AsrModels.download()
+                    downloadProgress = 0.5
+                    
+                case .appleSpeech:
+                    // Apple manages its own model downloads via AssetInventory.
+                    // The actual download happens in AppleSpeechTranscriptionService.loadModel().
+                    // We just skip the ASR download step here.
+                    statusMessage = "Apple Speech model will be downloaded on first use..."
+                    downloadProgress = 0.5
+                }
                 
-                // Download FluidAudio diarization models (Sortformer/Pyannote)
+                // Download FluidAudio diarization models (always needed — diarization
+                // stays on FluidAudio regardless of ASR engine choice)
                 statusMessage = "Downloading speaker diarization model..."
                 let _ = try await DiarizerModels.download()
                 downloadProgress = 1.0

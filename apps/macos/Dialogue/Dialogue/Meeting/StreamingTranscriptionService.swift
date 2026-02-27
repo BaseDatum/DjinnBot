@@ -16,7 +16,7 @@ import FluidAudio
 ///   confirmed. `update.text` is the deduplicated tail (new volatile).
 /// - `isConfirmed == false`: `update.text` is the current volatile/partial.
 @MainActor
-final class StreamingTranscriptionService: ObservableObject {
+final class StreamingTranscriptionService: ObservableObject, TranscriptionServiceProtocol {
     
     // MARK: - Audio Source
     
@@ -92,6 +92,20 @@ final class StreamingTranscriptionService: ObservableObject {
     static func modelsExistLocally() -> Bool {
         let cacheDir = AsrModels.defaultCacheDirectory(for: .v3)
         return FileManager.default.fileExists(atPath: cacheDir.path)
+    }
+    
+    func unloadModel() {
+        micManager = nil
+        systemManager = nil
+        micConsumerTask?.cancel()
+        systemConsumerTask?.cancel()
+        micConsumerTask = nil
+        systemConsumerTask = nil
+        cachedModels = nil
+        isReady = false
+        partialText = ""
+        errorMessage = nil
+        print("[Dialogue] FluidAudio ASR unloaded")
     }
     
     // MARK: - Streaming Interface
