@@ -157,8 +157,8 @@ export class WhatsAppSocket {
   async isOnWhatsApp(phone: string): Promise<boolean> {
     if (!this.sock) return false;
     try {
-      const [result] = await this.sock.onWhatsApp(phone);
-      return result?.exists ?? false;
+      const results = await this.sock.onWhatsApp(phone);
+      return results?.[0]?.exists === true;
     } catch {
       return false;
     }
