@@ -127,7 +127,7 @@ async def _validate_github_config(session: AsyncSession) -> dict:
     client_id = os.getenv("GITHUB_APP_CLIENT_ID")
     webhook_secret = os.getenv("GITHUB_APP_WEBHOOK_SECRET")
     private_key_path = os.getenv(
-        "GITHUB_APP_PRIVATE_KEY_PATH", "/data/secrets/github-app.pem"
+        "GITHUB_APP_PRIVATE_KEY_PATH", "/secrets/github-app.pem"
     )
     app_name = os.getenv("GITHUB_APP_NAME", "djinnbot")
 

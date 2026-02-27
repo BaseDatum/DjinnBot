@@ -17,13 +17,13 @@ import type {
 // Re-export shared types from the canonical location
 export type { WorkspaceInfo, FinalizeResult } from './workspace-types.js';
 
-const WORKSPACES_DIR = process.env.WORKSPACES_DIR || '/data/workspaces';
+const WORKSPACES_DIR = process.env.WORKSPACES_DIR || '/jfs/workspaces';
 // SHARED_RUNS_DIR aligns with docker-compose env var used by both engine and API
 // This ensures TypeScript and Python look in the same location for run workspaces
 const RUNS_DIR = process.env.SHARED_RUNS_DIR || join(WORKSPACES_DIR, '.runs');
 // SANDBOXES_DIR is the persistent home directory root for agents.
 // Inside containers, each agent's sandbox is mounted via JuiceFS --subdir at /home/agent.
-const SANDBOXES_DIR = process.env.SANDBOXES_DIR || '/data/sandboxes';
+const SANDBOXES_DIR = process.env.SANDBOXES_DIR || '/jfs/sandboxes';
 const API_BASE_URL = process.env.DJINNBOT_API_URL || 'http://localhost:8000';
 
 

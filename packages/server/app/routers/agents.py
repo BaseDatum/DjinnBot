@@ -27,7 +27,7 @@ class FileUpdateRequest(BaseModel):
 
 
 AGENTS_DIR = os.getenv("AGENTS_DIR", "./agents")
-VAULTS_DIR = os.getenv("VAULTS_DIR", "/data/vaults")
+VAULTS_DIR = os.getenv("VAULTS_DIR", "/jfs/vaults")
 PERSONA_FILES = ["IDENTITY.md", "SOUL.md", "AGENTS.md", "DECISION.md"]
 
 EXCLUDED_DIRS = {"templates", ".clawvault", ".git", "node_modules"}

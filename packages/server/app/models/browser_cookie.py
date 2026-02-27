@@ -24,7 +24,7 @@ from app.models.base import Base, now_ms
 class BrowserCookieSet(Base):
     """A named set of cookies uploaded by a user for a specific domain.
 
-    Cookie files are stored on JuiceFS at /data/cookies/{agent_id}/{filename}
+    Cookie files are stored on JuiceFS at /jfs/cookies/{agent_id}/{filename}
     in Netscape cookie format. When an agent is granted access, the file
     appears in the agent's container at /home/agent/cookies/{filename}.
     """

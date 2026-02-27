@@ -407,7 +407,7 @@ export class PiMonoRunner implements AgentRunner {
       // In-process runner uses host paths directly (not container paths)
       // Container paths like /home/agent/clawvault are only valid inside containers
       const workspacePath = options.workspacePath;
-      const vaultPath = options.vaultPath || `/data/vaults/${options.agentId}`;
+      const vaultPath = options.vaultPath || `/jfs/vaults/${options.agentId}`;
 
       // Simple path resolution - translate agent paths to host paths
       const translatePath = (agentPath: string): string => {

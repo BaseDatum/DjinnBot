@@ -15,14 +15,9 @@ from app.logging_config import get_logger
 
 logger = get_logger(__name__)
 
-# Root directory for uploads — defaults to ./data/uploads alongside the DB
+# Root directory for uploads — stored on JuiceFS at /jfs/uploads
 UPLOAD_DIR = os.path.join(
-    os.getenv(
-        "DATA_DIR",
-        os.path.join(
-            os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "data"
-        ),
-    ),
+    os.getenv("DATA_DIR", "/jfs"),
     "uploads",
 )
 

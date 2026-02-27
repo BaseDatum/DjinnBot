@@ -20,10 +20,10 @@ __all__ = [
 
 # Run workspaces are created by SandboxManager at SHARED_RUNS_DIR
 # This is where nsjail mounts /workspace/.run for each pipeline run
-RUNS_DIR = os.getenv("SHARED_RUNS_DIR", "/data/runs")
+RUNS_DIR = os.getenv("SHARED_RUNS_DIR", "/jfs/runs")
 
 # Project workspaces (persistent_directory) live in WORKSPACES_DIR/{projectId}
-WORKSPACES_DIR = os.getenv("WORKSPACES_DIR", "/data/workspaces")
+WORKSPACES_DIR = os.getenv("WORKSPACES_DIR", "/jfs/workspaces")
 
 
 def _resolve_workspace_base(

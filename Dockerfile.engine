@@ -406,8 +406,10 @@ COPY --from=ts-builder /build/packages/telegram/dist ./packages/telegram/dist
 COPY --from=ts-builder /build/packages/discord/dist ./packages/discord/dist
 COPY --from=ts-builder /build/packages/code-graph/dist ./packages/code-graph/dist
 
-# Create directories for runtime data
-RUN mkdir -p /data /data/vaults /data/signal/data /data/signal/attachments /pipelines /agents
+# Create mount point for JuiceFS FUSE and static config directories.
+# /jfs is the JuiceFS mount point — all persistent data lives here.
+# Subdirectories (vaults, signal, etc.) are created by JuiceFS at runtime.
+RUN mkdir -p /jfs /pipelines /agents
 
 # VERIFY ALL TOOLS
 RUN echo "=== Core Languages ===" && \
@@ -454,16 +456,15 @@ ENV DJINNBOT_BUILD_VERSION=${BUILD_VERSION}
 
 ENV NODE_ENV=production
 ENV REDIS_URL=redis://localhost:6379
-ENV DATABASE_PATH=/data/djinnbot.db
-ENV DATA_DIR=/data
-ENV VAULTS_DIR=/data/vaults
+ENV DATA_DIR=/jfs
+ENV VAULTS_DIR=/jfs/vaults
 ENV PIPELINES_DIR=/pipelines
 ENV AGENTS_DIR=/agents
 
-# Allow git to work with directories owned by other users (Docker volumes).
+# Allow git to work with directories owned by other users (JuiceFS FUSE mounts).
 # Use --system (/etc/gitconfig) instead of --global (~/.gitconfig) because
-# the engine runs with HOME=/data, so --global would write to /data/.gitconfig
-# which is on the shared volume and not guaranteed to have the setting.
+# the engine runs with HOME=/jfs, so --global would write to /jfs/.gitconfig
+# which is on the JuiceFS volume and not guaranteed to have the setting.
 RUN git config --system --add safe.directory '*'
 
 CMD ["node", "packages/core/dist/main.js"]

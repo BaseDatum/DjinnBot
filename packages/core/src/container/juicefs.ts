@@ -1,18 +1,16 @@
 /**
  * JuiceFS direct mount for the engine container.
  *
- * The engine's Docker named volume (`juicefs-data:/data`) is the raw volume
- * storage — NOT the JuiceFS FUSE filesystem.  Directories created via plain
- * `mkdirSync('/data/...')` are invisible to JuiceFS clients.
- *
- * This module mounts JuiceFS directly inside the engine container (via the
- * `juicefs` CLI + FUSE) so that subdirectory pre-creation for agent containers
- * goes through the real filesystem.  This is critical for read-only `--subdir`
- * mounts (e.g. `/cookies/{agentId}`): JuiceFS auto-creates missing subdirs for
- * rw mounts, but cannot for ro mounts — they must already exist.
+ * The engine mounts JuiceFS directly via the `juicefs` CLI + FUSE at /jfs.
+ * ALL persistent data (sandboxes, vaults, workspaces, runs, signal, etc.)
+ * lives on this mount.  No Docker named volumes are used for engine
+ * persistent storage — only postgres, redis, rustfs, and the juicefs-mount
+ * sidecar are allowed Docker volumes.
  *
  * The mount is started once at engine startup and kept alive for the lifetime
- * of the process.  `createContainer` uses the mount path for pre-creation.
+ * of the process.  `createContainer` uses the mount path for pre-creation of
+ * subdirectories needed by agent containers (especially read-only --subdir
+ * mounts like /cookies/{agentId} which JuiceFS cannot auto-create).
  */
 
 import { execFile } from 'node:child_process';
@@ -21,8 +19,8 @@ import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
 
-/** Where the engine's own JuiceFS FUSE mount lives. */
-const JFS_ENGINE_MOUNT = '/jfs';
+/** Where the engine's JuiceFS FUSE mount lives — all persistent data goes here. */
+const JFS_MOUNT = '/jfs';
 
 let mounted = false;
 
@@ -36,7 +34,7 @@ let mounted = false;
  *  - JFS_META_URL env var pointing to Redis metadata (e.g. redis://redis:6379/2)
  */
 export async function mountJuiceFS(): Promise<string> {
-  if (mounted) return JFS_ENGINE_MOUNT;
+  if (mounted) return JFS_MOUNT;
 
   const metaUrl = process.env.JFS_META_URL;
   if (!metaUrl) {
@@ -45,8 +43,8 @@ export async function mountJuiceFS(): Promise<string> {
   }
 
   // Ensure mount point exists
-  if (!existsSync(JFS_ENGINE_MOUNT)) {
-    mkdirSync(JFS_ENGINE_MOUNT, { recursive: true });
+  if (!existsSync(JFS_MOUNT)) {
+    mkdirSync(JFS_MOUNT, { recursive: true });
   }
 
   try {
@@ -60,11 +58,11 @@ export async function mountJuiceFS(): Promise<string> {
       '--dir-entry-cache', '1',
       '--background',
       metaUrl,
-      JFS_ENGINE_MOUNT,
+      JFS_MOUNT,
     ]);
     mounted = true;
-    console.log(`[JuiceFS] Engine FUSE mount ready at ${JFS_ENGINE_MOUNT}`);
-    return JFS_ENGINE_MOUNT;
+    console.log(`[JuiceFS] Engine FUSE mount ready at ${JFS_MOUNT}`);
+    return JFS_MOUNT;
   } catch (err: any) {
     console.error('[JuiceFS] Failed to mount JuiceFS in engine:', err.stderr || err.message);
     return '';
@@ -75,18 +73,23 @@ export async function mountJuiceFS(): Promise<string> {
  * Return the engine's JuiceFS mount path, or empty string if not mounted.
  */
 export function getJfsMountPath(): string {
-  return mounted ? JFS_ENGINE_MOUNT : '';
+  return mounted ? JFS_MOUNT : '';
 }
 
 /**
  * Ensure directories exist on the JuiceFS volume.
- * Falls back to the raw Docker volume path if JuiceFS is not mounted.
+ * This MUST be called after mountJuiceFS() — directories are created on the
+ * real JuiceFS FUSE filesystem so that agent containers can use
+ * `juicefs mount --subdir` (which requires pre-existing directories for
+ * read-only mounts).
  *
- * @param jfsDirs  - paths relative to the JuiceFS root (e.g. `/cookies/yukihiro`)
- * @param fallbackDataPath - raw Docker volume path (e.g. `/data`)
+ * @param jfsDirs - paths relative to the JuiceFS root (e.g. `/cookies/yukihiro`)
  */
-export function ensureJfsDirs(jfsDirs: string[], fallbackDataPath: string): void {
-  const basePath = mounted ? JFS_ENGINE_MOUNT : fallbackDataPath;
+export function ensureJfsDirs(jfsDirs: string[]): void {
+  if (!mounted) {
+    console.warn('[JuiceFS] ensureJfsDirs called but JuiceFS is not mounted — directories may not be visible to agents');
+  }
+  const basePath = JFS_MOUNT;
   for (const dir of jfsDirs) {
     const full = `${basePath}${dir}`;
     try {

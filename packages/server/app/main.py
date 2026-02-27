@@ -836,7 +836,7 @@ async def status():
 
     # Storage backend health (JuiceFS + RustFS)
     storage_status = None
-    data_path = os.getenv("DJINN_DATA_PATH", "/data")
+    data_path = os.getenv("DJINN_DATA_PATH", "/jfs")
     try:
         jfs_mounted = os.path.ismount(data_path)
         # Also verify the mount is functional by checking readability

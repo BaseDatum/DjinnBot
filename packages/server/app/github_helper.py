@@ -39,7 +39,7 @@ class GitHubHelper:
         self.app_name = os.getenv("GITHUB_APP_NAME", "djinnbot")
         self.client_id = os.getenv("GITHUB_APP_CLIENT_ID")
         self.private_key_path = os.getenv(
-            "GITHUB_APP_PRIVATE_KEY_PATH", "/data/secrets/github-app.pem"
+            "GITHUB_APP_PRIVATE_KEY_PATH", "/secrets/github-app.pem"
         )
         self.webhook_secret = os.getenv("GITHUB_APP_WEBHOOK_SECRET")
         self._private_key = None

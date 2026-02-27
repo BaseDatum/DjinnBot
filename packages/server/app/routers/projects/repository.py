@@ -395,7 +395,7 @@ async def clone_project_repository(
         )
 
     # Determine workspace path
-    workspaces_dir = os.getenv("WORKSPACES_DIR", "/data/workspaces")
+    workspaces_dir = os.getenv("WORKSPACES_DIR", "/jfs/workspaces")
     workspace_path = os.path.join(workspaces_dir, project_id)
 
     # Check if already cloned
@@ -529,7 +529,7 @@ async def _auto_clone_repository(
     """
     import shutil
 
-    workspaces_dir = os.getenv("WORKSPACES_DIR", "/data/workspaces")
+    workspaces_dir = os.getenv("WORKSPACES_DIR", "/jfs/workspaces")
     workspace_path = os.path.join(workspaces_dir, project_id)
 
     # Already cloned — pull latest instead

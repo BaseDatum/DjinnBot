@@ -44,7 +44,7 @@ logger = get_logger(__name__)
 
 router = APIRouter()
 
-VAULTS_DIR = __import__("os").getenv("VAULTS_DIR", "/data/vaults")
+VAULTS_DIR = __import__("os").getenv("VAULTS_DIR", "/jfs/vaults")
 
 
 # ══════════════════════════════════════════════════════════════════════════

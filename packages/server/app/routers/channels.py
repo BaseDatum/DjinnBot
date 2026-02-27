@@ -29,7 +29,7 @@ logger = get_logger(__name__)
 
 router = APIRouter()
 
-AGENTS_DIR = os.environ.get("AGENTS_DIR", "/data/agents")
+AGENTS_DIR = os.environ.get("AGENTS_DIR", "/agents")
 
 # ─── Channel catalog ──────────────────────────────────────────────────────────
 # One entry per supported channel integration.  Each entry describes the two

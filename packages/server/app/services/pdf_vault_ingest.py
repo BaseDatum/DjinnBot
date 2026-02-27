@@ -27,7 +27,7 @@ from app.services.pdf_chunker import PdfChunk, TableOfContentsEntry, format_toc
 
 logger = get_logger(__name__)
 
-VAULTS_DIR = os.getenv("VAULTS_DIR", "/data/vaults")
+VAULTS_DIR = os.getenv("VAULTS_DIR", "/jfs/vaults")
 
 
 def _slugify(text: str) -> str:
