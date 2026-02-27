@@ -102,6 +102,9 @@ COPY package.json package-lock.json tsconfig.base.json ./
 COPY packages/core/package.json ./packages/core/
 COPY packages/slack/package.json ./packages/slack/
 COPY packages/signal/package.json ./packages/signal/
+COPY packages/whatsapp/package.json ./packages/whatsapp/
+COPY packages/telegram/package.json ./packages/telegram/
+COPY packages/discord/package.json ./packages/discord/
 COPY packages/code-graph/package.json ./packages/code-graph/
 
 # Install all deps (workspace resolution needs root context)
@@ -114,14 +117,20 @@ RUN npm install -g bun
 COPY packages/core ./packages/core
 COPY packages/slack ./packages/slack
 COPY packages/signal ./packages/signal
+COPY packages/whatsapp ./packages/whatsapp
+COPY packages/telegram ./packages/telegram
+COPY packages/discord ./packages/discord
 COPY packages/code-graph ./packages/code-graph
 
 # Build TypeScript (clean dist first; code-graph before core since core depends on it)
-RUN rm -rf packages/core/dist packages/slack/dist packages/signal/dist packages/code-graph/dist
+RUN rm -rf packages/core/dist packages/slack/dist packages/signal/dist packages/whatsapp/dist packages/telegram/dist packages/discord/dist packages/code-graph/dist
 RUN npm run build -w @djinnbot/code-graph
 RUN npm run build -w @djinnbot/core
 RUN npm run build -w @djinnbot/slack
 RUN npm run build -w @djinnbot/signal
+RUN npm run build -w @djinnbot/whatsapp
+RUN npm run build -w @djinnbot/telegram
+RUN npm run build -w @djinnbot/discord
 
 # Stage 2: Production Runtime
 FROM debian:bookworm-slim
@@ -341,6 +350,9 @@ COPY package.json package-lock.json ./
 COPY packages/core/package.json ./packages/core/
 COPY packages/slack/package.json ./packages/slack/
 COPY packages/signal/package.json ./packages/signal/
+COPY packages/whatsapp/package.json ./packages/whatsapp/
+COPY packages/telegram/package.json ./packages/telegram/
+COPY packages/discord/package.json ./packages/discord/
 COPY packages/code-graph/package.json ./packages/code-graph/
 
 # Install production deps only
@@ -389,6 +401,9 @@ RUN ln -sf /app/node_modules/.bin/clawvault /usr/local/bin/clawvault
 COPY --from=ts-builder /build/packages/core/dist ./packages/core/dist
 COPY --from=ts-builder /build/packages/slack/dist ./packages/slack/dist
 COPY --from=ts-builder /build/packages/signal/dist ./packages/signal/dist
+COPY --from=ts-builder /build/packages/whatsapp/dist ./packages/whatsapp/dist
+COPY --from=ts-builder /build/packages/telegram/dist ./packages/telegram/dist
+COPY --from=ts-builder /build/packages/discord/dist ./packages/discord/dist
 COPY --from=ts-builder /build/packages/code-graph/dist ./packages/code-graph/dist
 
 # Create directories for runtime data
