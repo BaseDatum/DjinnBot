@@ -114,15 +114,16 @@ async def upload_attachment(
     if not file.filename:
         raise HTTPException(400, "Missing filename")
 
-    # Detect MIME: trust the client header, then fall back to extension
-    mime = file.content_type or "application/octet-stream"
+    # Detect MIME: trust the client header, then fall back to extension.
+    # Strip codec params (e.g. 'audio/webm;codecs=opus' → 'audio/webm').
+    mime = _normalize_mime(file.content_type or "application/octet-stream")
     if mime == "application/octet-stream":
         mime = _guess_mime(file.filename)
 
     if mime not in ALLOWED_MIME_TYPES:
         raise HTTPException(
             400,
-            f"Unsupported file type: {mime}. Allowed: images, PDFs, text, code files.",
+            f"Unsupported file type: {mime}. Allowed: images, PDFs, text, code, audio files.",
         )
 
     data = await file.read()
@@ -149,8 +150,8 @@ async def upload_attachment(
     processing_status = "ready"
 
     if is_audio:
-        # Audio: transcription runs as a background task (same pattern as PDF vault ingest).
-        # Upload returns immediately; transcript lands in extracted_text when done.
+        # Audio: transcription runs as a background task.  The agent-runtime
+        # polls processing_status and waits for "ready" before fetching /text.
         processing_status = "transcribing"
         estimated_tokens = 0
     elif not is_image:
@@ -462,6 +463,15 @@ _EXTENSION_MIME_MAP = {
 }
 
 
+def _normalize_mime(mime: str) -> str:
+    """Strip codec parameters from MIME types.
+
+    Browsers send e.g. 'audio/webm;codecs=opus' but our ALLOWED_MIME_TYPES
+    set contains 'audio/webm'.  Strip everything after the semicolon.
+    """
+    return mime.split(";")[0].strip()
+
+
 def _guess_mime(filename: str) -> str:
     """Guess MIME type from file extension."""
     import os
@@ -576,6 +586,10 @@ async def _transcribe_audio_async(
             None, transcribe_audio, data, mime_type, filename
         )
 
+        # Wrap transcript so the agent knows it's a voice message
+        if transcript:
+            transcript = f'[Voice message from user, transcribed]: "{transcript}"'
+
         # Update the attachment record with the transcript
         async with AsyncSessionLocal() as db:
             att_result = await db.execute(
@@ -583,10 +597,22 @@ async def _transcribe_audio_async(
             )
             att = att_result.scalar_one_or_none()
             if att:
-                att.extracted_text = transcript
-                att.estimated_tokens = tokens
+                att.extracted_text = (
+                    transcript or f"[Voice message ({filename}) — no speech detected]"
+                )
+                att.estimated_tokens = tokens or 15
                 att.processing_status = "ready"
                 await db.commit()
+
+        # Notify waiting consumers (engine/CSM) via Redis pub/sub
+        if dependencies.redis_client:
+            try:
+                await dependencies.redis_client.publish(
+                    f"attachment:ready:{attachment_id}",
+                    "ready",
+                )
+            except Exception:
+                pass  # Best-effort — CSM will fall back to timeout
 
         if transcript:
             logger.info(
@@ -614,5 +640,11 @@ async def _transcribe_audio_async(
                     )
                     att.estimated_tokens = 15
                     await db.commit()
+            # Still notify so CSM doesn't hang waiting
+            if dependencies.redis_client:
+                await dependencies.redis_client.publish(
+                    f"attachment:ready:{attachment_id}",
+                    "failed",
+                )
         except Exception:
             pass  # Best-effort status update

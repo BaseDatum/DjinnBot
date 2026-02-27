@@ -1563,6 +1563,19 @@ export class ChatSessionManager {
       timestamp: Date.now(),
     });
 
+    // ── Wait for any audio attachments still being transcribed ────────────
+    // The server transcribes audio as a background task and publishes a
+    // Redis event when done.  We wait here so the container gets the
+    // transcript via /text immediately — no polling needed in the runtime.
+    if (attachments?.length) {
+      const audioAttachments = attachments.filter(
+        a => a.mimeType.startsWith('audio/'),
+      );
+      if (audioAttachments.length > 0) {
+        await this.waitForTranscriptions(audioAttachments);
+      }
+    }
+
     // Send only the new user message to the container.
     // The container's ContainerAgentRunner keeps a persistent Agent instance
     // alive across turns, so it accumulates conversation history (including
@@ -1576,6 +1589,60 @@ export class ChatSessionManager {
       ...(attachments?.length ? { attachments } : {}),
       ...(model ? { model } : {}),
     });
+  }
+
+  /**
+   * Wait for audio transcriptions to complete before dispatching to the container.
+   *
+   * Subscribes to Redis `attachment:ready:{id}` channels published by the
+   * server's background transcription task.  Returns once all attachments
+   * report ready, or after a timeout (15s).  On timeout the command is sent
+   * anyway — the agent will see "[transcription unavailable]" from the /text
+   * endpoint, which is better than hanging forever.
+   */
+  private async waitForTranscriptions(
+    audioAttachments: Array<{ id: string; filename: string; mimeType: string }>,
+  ): Promise<void> {
+    const TIMEOUT_MS = 15_000;
+    const channels = audioAttachments.map(a => `attachment:ready:${a.id}`);
+
+    console.log(
+      `[ChatSessionManager] Waiting for ${channels.length} audio transcription(s): ` +
+      audioAttachments.map(a => a.filename).join(', '),
+    );
+
+    const subscriber = new Redis(this.redis.options);
+    const remaining = new Set(channels);
+
+    try {
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(() => {
+          console.warn(
+            `[ChatSessionManager] Transcription wait timed out after ${TIMEOUT_MS}ms ` +
+            `(${remaining.size} still pending)`,
+          );
+          resolve();
+        }, TIMEOUT_MS);
+
+        subscriber.on('message', (channel: string) => {
+          remaining.delete(channel);
+          if (remaining.size === 0) {
+            clearTimeout(timer);
+            resolve();
+          }
+        });
+
+        subscriber.subscribe(...channels).catch(() => {
+          clearTimeout(timer);
+          resolve(); // Can't subscribe — proceed without waiting
+        });
+      });
+    } finally {
+      await subscriber.unsubscribe().catch(() => {});
+      await subscriber.quit().catch(() => {});
+    }
+
+    console.log('[ChatSessionManager] All audio transcriptions ready');
   }
 
   /**

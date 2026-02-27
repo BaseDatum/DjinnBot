@@ -8,7 +8,7 @@
  * be handled:
  *   - Images on vision models → base64 ImageContent
  *   - PDFs → lightweight vault reference (NOT full text inline)
- *   - Audio → transcribed text via whisper.cpp (container-local)
+ *   - Audio → inline text (transcribed server-side by faster-whisper)
  *   - Small text/code → inline TextContent
  *   - Large text/code → vault reference note
  *   - Images on non-vision models → text note suggesting model swap
