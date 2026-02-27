@@ -2927,6 +2927,43 @@ export async function fetchCodeGraphSearch(
   return handleResponse(res, 'Failed to search knowledge graph');
 }
 
+export async function fetchCodeGraphFileContent(
+  projectId: string,
+  filePath: string,
+): Promise<{ content: string; path: string; language: string; lines: number; size: number }> {
+  const res = await authFetch(
+    `${API_BASE}/projects/${projectId}/knowledge-graph/file-content?path=${encodeURIComponent(filePath)}`,
+  );
+  return handleResponse(res, 'Failed to fetch file content');
+}
+
+export async function fetchCodeGraphImpact(
+  projectId: string,
+  target: string,
+  direction: 'upstream' | 'downstream' = 'upstream',
+  maxDepth = 3,
+  minConfidence = 0.7,
+): Promise<any> {
+  const res = await authFetch(`${API_BASE}/projects/${projectId}/knowledge-graph/impact`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ target, direction, max_depth: maxDepth, min_confidence: minConfidence }),
+  });
+  return handleResponse(res, 'Failed to fetch impact analysis');
+}
+
+export async function fetchCodeGraphContext(
+  projectId: string,
+  symbolName: string,
+  filePath?: string,
+): Promise<any> {
+  const qp = filePath ? `?file_path=${encodeURIComponent(filePath)}` : '';
+  const res = await authFetch(
+    `${API_BASE}/projects/${projectId}/knowledge-graph/context/${encodeURIComponent(symbolName)}${qp}`,
+  );
+  return handleResponse(res, 'Failed to fetch symbol context');
+}
+
 // ── Browser Cookies ───────────────────────────────────────────────────────
 
 export interface BrowserCookieSetItem {

@@ -1,29 +1,37 @@
+/**
+ * CodeKnowledgeGraph — full-featured code exploration UI.
+ *
+ * Layout (when indexed):
+ *   [FileTree] | [Graph Canvas] | [Code Inspector / Processes / Blast Radius]
+ *
+ * Features:
+ *   P0: Code Inspector Panel — click a node → see source code with line highlighting
+ *   P0: AI Chat hint — banner telling users they can chat with the agent about the code graph
+ *   P1: Process Flow Mermaid Diagrams — visual execution flow charts
+ *   P1: Blast Radius Visualization — impact analysis with depth-coloured graph highlights
+ *   P2: File Tree Sidebar — navigable tree that highlights nodes + connections
+ */
+
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
-  RefreshCw,
-  Brain,
-  GitBranch,
-  Workflow,
-  AlertTriangle,
-  CheckCircle2,
-  Clock,
-  ChevronDown,
-  ChevronRight,
-  Search,
+  RefreshCw, Brain, AlertTriangle, CheckCircle2, Clock,
+  Search, MessageSquare, Workflow, GitBranch,
 } from 'lucide-react';
 import {
   fetchCodeGraphStatus,
   triggerCodeGraphIndex,
   pollCodeGraphIndexProgress,
-  fetchCodeGraphCommunities,
-  fetchCodeGraphProcesses,
   fetchCodeGraphSearch,
   fetchCodeGraphData,
 } from '@/lib/api';
 import { CodeGraphCanvas } from './code-graph/CodeGraphCanvas';
+import { CodeInspectorPanel } from './code-graph/CodeInspectorPanel';
+import { FileTreePanel } from './code-graph/FileTreePanel';
+import { ProcessFlowPanel } from './code-graph/ProcessFlowPanel';
+import { BlastRadiusOverlay } from './code-graph/BlastRadiusOverlay';
 import type { APIGraphData } from './code-graph/graph-adapter';
 
 interface CodeKnowledgeGraphProps {
@@ -43,58 +51,51 @@ interface GraphStatus {
   error: string | null;
 }
 
-interface Community {
-  id: string;
-  label: string;
-  cohesion: number;
-  symbolCount: number;
-  members: Array<{ name: string; filePath: string }>;
-}
-
-interface Process {
-  id: string;
-  label: string;
-  processType: string;
-  stepCount: number;
-  steps: Array<{ name: string; filePath: string; step: number }>;
-}
+type RightPanelTab = 'inspector' | 'processes';
 
 export function CodeKnowledgeGraph({ projectId }: CodeKnowledgeGraphProps) {
+  // ── Core state ──────────────────────────────────────────────────────
   const [status, setStatus] = useState<GraphStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [indexing, setIndexing] = useState(false);
   const [indexProgress, setIndexProgress] = useState<{
-    phase: string;
-    percent: number;
-    message: string;
+    phase: string; percent: number; message: string;
   } | null>(null);
-  const [communities, setCommunities] = useState<Community[]>([]);
-  const [processes, setProcesses] = useState<Process[]>([]);
-  const [expandedCommunities, setExpandedCommunities] = useState<Set<string>>(new Set());
-  const [expandedProcesses, setExpandedProcesses] = useState<Set<string>>(new Set());
-  const [searchQuery, setSearchQuery] = useState('');
-  const [searchResults, setSearchResults] = useState<any[]>([]);
-  const [searching, setSearching] = useState(false);
   const [indexError, setIndexError] = useState<string | null>(null);
   const [graphData, setGraphData] = useState<APIGraphData | null>(null);
-  const [selectedGraphNode, setSelectedGraphNode] = useState<{
-    id: string; name: string; label: string; filePath: string; startLine?: number;
-  } | null>(null);
   const [graphFullscreen, setGraphFullscreen] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  // ── Selection state ─────────────────────────────────────────────────
+  const [selectedGraphNode, setSelectedGraphNode] = useState<{
+    id: string; name: string; label: string; filePath: string; startLine?: number;
+  } | null>(null);
+  const [rightPanelTab, setRightPanelTab] = useState<RightPanelTab>('inspector');
+  const [showInspector, setShowInspector] = useState(false);
+
+  // ── Package selector (shared between graph & file tree) ─────────────
+  const [selectedPackage, setSelectedPackage] = useState<string | null>(null);
+
+  // ── Highlight state ─────────────────────────────────────────────────
+  const [highlightedNodeIds, setHighlightedNodeIds] = useState<Set<string>>(new Set());
+  const [blastRadiusMap, setBlastRadiusMap] = useState<Map<string, number>>(new Map());
+  const [blastRadiusTarget, setBlastRadiusTarget] = useState<string | null>(null);
+
+  // ── Graph focus function ref ────────────────────────────────────────
+  const focusNodeFnRef = useRef<((nodeId: string) => void) | null>(null);
+
+  // ── Search state ────────────────────────────────────────────────────
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState<any[]>([]);
+  const [, setSearching] = useState(false);
+
+  // ── Data loading ────────────────────────────────────────────────────
   const loadStatus = useCallback(async () => {
     try {
       const s = await fetchCodeGraphStatus(projectId);
       setStatus(s);
       if (s.indexed) {
-        const [commData, procData, gData] = await Promise.all([
-          fetchCodeGraphCommunities(projectId),
-          fetchCodeGraphProcesses(projectId),
-          fetchCodeGraphData(projectId),
-        ]);
-        setCommunities(commData.communities || []);
-        setProcesses(procData.processes || []);
+        const gData = await fetchCodeGraphData(projectId);
         setGraphData(gData as APIGraphData);
       }
     } catch (err) {
@@ -104,31 +105,26 @@ export function CodeKnowledgeGraph({ projectId }: CodeKnowledgeGraphProps) {
     }
   }, [projectId]);
 
-  // ESC to exit fullscreen graph
-  useEffect(() => {
-    if (!graphFullscreen) return;
-    const handleKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setGraphFullscreen(false);
-    };
-    window.addEventListener('keydown', handleKey);
-    return () => window.removeEventListener('keydown', handleKey);
-  }, [graphFullscreen]);
-
   useEffect(() => {
     loadStatus();
-    return () => {
-      if (pollRef.current) clearInterval(pollRef.current);
-    };
+    return () => { if (pollRef.current) clearInterval(pollRef.current); };
   }, [loadStatus]);
 
+  // ESC to exit fullscreen
+  useEffect(() => {
+    if (!graphFullscreen) return;
+    const h = (e: KeyboardEvent) => { if (e.key === 'Escape') setGraphFullscreen(false); };
+    window.addEventListener('keydown', h);
+    return () => window.removeEventListener('keydown', h);
+  }, [graphFullscreen]);
+
+  // ── Indexing ────────────────────────────────────────────────────────
   const handleIndex = async () => {
     setIndexing(true);
     setIndexError(null);
     setIndexProgress({ phase: 'starting', percent: 0, message: 'Starting...' });
     try {
       const { job_id } = await triggerCodeGraphIndex(projectId);
-
-      // Poll progress
       pollRef.current = setInterval(async () => {
         try {
           const progress = await pollCodeGraphIndexProgress(projectId, job_id);
@@ -141,9 +137,7 @@ export function CodeKnowledgeGraph({ projectId }: CodeKnowledgeGraphProps) {
             if (pollRef.current) clearInterval(pollRef.current);
             setIndexing(false);
             setIndexProgress(null);
-            if (progress.status === 'failed') {
-              setIndexError(progress.message || 'Indexing failed');
-            }
+            if (progress.status === 'failed') setIndexError(progress.message || 'Indexing failed');
             await loadStatus();
           }
         } catch (err) {
@@ -157,51 +151,69 @@ export function CodeKnowledgeGraph({ projectId }: CodeKnowledgeGraphProps) {
       setIndexing(false);
       setIndexProgress(null);
       setIndexError(err instanceof Error ? err.message : 'Failed to start indexing');
-      console.error('Failed to start indexing:', err);
     }
   };
 
+  // ── Search ──────────────────────────────────────────────────────────
   const handleSearch = async () => {
     if (!searchQuery.trim()) return;
     setSearching(true);
     try {
       const data = await fetchCodeGraphSearch(projectId, searchQuery);
       setSearchResults(data.results || []);
-    } catch {
-      setSearchResults([]);
-    } finally {
-      setSearching(false);
+    } catch { setSearchResults([]); }
+    finally { setSearching(false); }
+  };
+
+  // ── Node selection handlers ─────────────────────────────────────────
+  const handleNodeSelect = useCallback((node: typeof selectedGraphNode) => {
+    setSelectedGraphNode(node);
+    if (node) {
+      setShowInspector(true);
+      setRightPanelTab('inspector');
     }
-  };
+  }, []);
 
-  const toggleCommunity = (id: string) => {
-    setExpandedCommunities(prev => {
-      const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
-      return next;
-    });
-  };
+  const handleNodeSelectById = useCallback((nodeId: string) => {
+    if (!graphData) return;
+    const n = graphData.nodes.find(n => n.id === nodeId);
+    if (n) {
+      handleNodeSelect({ id: n.id, name: n.name, label: n.label, filePath: n.filePath, startLine: n.startLine });
+      focusNodeFnRef.current?.(nodeId);
+    }
+  }, [graphData, handleNodeSelect]);
 
-  const toggleProcess = (id: string) => {
-    setExpandedProcesses(prev => {
-      const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
-      return next;
-    });
-  };
+  // ── File tree selection → highlight node + direct connections ───────
+  const handleFileTreeSelect = useCallback((nodeId: string, _filePath: string) => {
+    if (!graphData) return;
+    // Find all direct connections of this file node
+    const connected = new Set<string>([nodeId]);
+    for (const edge of graphData.edges) {
+      if (edge.sourceId === nodeId) connected.add(edge.targetId);
+      if (edge.targetId === nodeId) connected.add(edge.sourceId);
+    }
+    setHighlightedNodeIds(connected);
+    // Also select the node
+    const n = graphData.nodes.find(n => n.id === nodeId);
+    if (n) {
+      handleNodeSelect({ id: n.id, name: n.name, label: n.label, filePath: n.filePath, startLine: n.startLine });
+    }
+    focusNodeFnRef.current?.(nodeId);
+  }, [graphData, handleNodeSelect]);
 
-  if (loading) {
-    return (
-    <div className={graphFullscreen ? 'p-2 space-y-4' : 'p-4 md:px-6 space-y-4 max-w-4xl mx-auto'}>
-        <Skeleton height={40} />
-        <div className="grid grid-cols-2 gap-4">
-          <Skeleton height={200} />
-          <Skeleton height={200} />
-        </div>
-      </div>
-    );
-  }
+  // ── Blast radius ────────────────────────────────────────────────────
+  const handleShowImpact = useCallback((symbolName: string) => {
+    setBlastRadiusTarget(symbolName);
+    setBlastRadiusMap(new Map());
+  }, []);
 
+  const handleImpactHighlight = useCallback((map: Map<string, number>) => {
+    setBlastRadiusMap(map);
+    // Clear other highlights when blast radius active
+    if (map.size > 0) setHighlightedNodeIds(new Set());
+  }, []);
+
+  // ── Helpers ─────────────────────────────────────────────────────────
   const formatTimeAgo = (ts: number) => {
     const diff = Date.now() - ts;
     const mins = Math.floor(diff / 60000);
@@ -211,10 +223,21 @@ export function CodeKnowledgeGraph({ projectId }: CodeKnowledgeGraphProps) {
     return `${Math.floor(hrs / 24)}d ago`;
   };
 
+  // ── Loading state ───────────────────────────────────────────────────
+  if (loading) {
+    return (
+      <div className="p-4 md:px-6 space-y-4 max-w-6xl mx-auto">
+        <Skeleton height={40} />
+        <Skeleton height={400} />
+      </div>
+    );
+  }
+
+  // ── Render ──────────────────────────────────────────────────────────
   return (
-    <div className={graphFullscreen ? 'p-2 space-y-4' : 'p-4 md:px-6 space-y-4 max-w-4xl mx-auto'}>
-      {/* Header + Action Bar */}
-      <div className="flex items-center justify-between gap-4">
+    <div className={graphFullscreen ? 'flex flex-col h-screen' : 'flex flex-col'}>
+      {/* Header */}
+      <div className="flex items-center justify-between gap-4 px-4 md:px-6 py-3 border-b">
         <div className="flex items-center gap-3">
           <Brain className="h-5 w-5 text-primary" />
           <h2 className="text-lg font-semibold">Code Knowledge Graph</h2>
@@ -226,236 +249,238 @@ export function CodeKnowledgeGraph({ projectId }: CodeKnowledgeGraphProps) {
           )}
           {status?.stale && (
             <Badge variant="outline" className="text-xs text-amber-600 border-amber-500/30 bg-amber-500/5 gap-1">
-              <AlertTriangle className="h-3 w-3" />
-              Stale
+              <AlertTriangle className="h-3 w-3" /> Stale
             </Badge>
           )}
+          {status?.indexed && status.last_indexed_at && (
+            <span className="text-[11px] text-muted-foreground flex items-center gap-1">
+              <Clock className="h-3 w-3" />
+              {formatTimeAgo(status.last_indexed_at)}
+            </span>
+          )}
         </div>
-        <Button
-          size="sm"
-          onClick={handleIndex}
-          disabled={indexing || status?.status === 'indexing'}
-          className="gap-1.5"
-        >
-          <RefreshCw className={`h-3.5 w-3.5 ${indexing ? 'animate-spin' : ''}`} />
-          {indexing ? 'Indexing...' : status?.indexed ? 'Update' : 'Build Knowledge Graph'}
-        </Button>
+        <div className="flex items-center gap-2">
+          {/* Search */}
+          {status?.indexed && (
+            <div className="flex items-center gap-1.5">
+              <div className="relative">
+                <Search className="absolute left-2 top-2 h-3.5 w-3.5 text-muted-foreground" />
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={e => setSearchQuery(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && handleSearch()}
+                  placeholder="Search symbols..."
+                  className="w-48 pl-7 pr-2 py-1.5 rounded-md border bg-background text-xs"
+                />
+              </div>
+            </div>
+          )}
+          <Button
+            size="sm"
+            onClick={handleIndex}
+            disabled={indexing || status?.status === 'indexing'}
+            className="gap-1.5"
+          >
+            <RefreshCw className={`h-3.5 w-3.5 ${indexing ? 'animate-spin' : ''}`} />
+            {indexing ? 'Indexing...' : status?.indexed ? 'Update' : 'Build'}
+          </Button>
+        </div>
       </div>
 
       {/* Indexing Progress */}
       {indexProgress && (
-        <div className="rounded-lg border border-primary/20 bg-primary/5 p-4 space-y-2">
+        <div className="mx-4 md:mx-6 mt-3 rounded-lg border border-primary/20 bg-primary/5 p-3 space-y-2">
           <div className="flex items-center justify-between text-sm">
             <span>{indexProgress.message}</span>
             <span className="text-muted-foreground">{indexProgress.percent}%</span>
           </div>
-          <div className="w-full bg-muted rounded-full h-2">
-            <div
-              className="bg-primary h-2 rounded-full transition-all"
-              style={{ width: `${indexProgress.percent}%` }}
-            />
+          <div className="w-full bg-muted rounded-full h-1.5">
+            <div className="bg-primary h-1.5 rounded-full transition-all" style={{ width: `${indexProgress.percent}%` }} />
           </div>
         </div>
       )}
 
-      {/* Status error (from server) */}
-      {status?.error && !indexError && (
-        <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
-          {status.error}
+      {/* Errors */}
+      {(status?.error || indexError) && (
+        <div className="mx-4 md:mx-6 mt-3 rounded-lg border border-destructive/30 bg-destructive/5 p-3 flex items-start gap-2">
+          <AlertTriangle className="h-4 w-4 text-destructive shrink-0 mt-0.5" />
+          <div className="text-sm text-destructive">{indexError || status?.error}</div>
         </div>
       )}
 
-      {/* Status bar */}
-      {status?.indexed && (
-        <div className="flex flex-wrap gap-3 text-xs text-muted-foreground">
-          {status.last_indexed_at && (
-            <span className="flex items-center gap-1">
-              <Clock className="h-3 w-3" />
-              Indexed {formatTimeAgo(status.last_indexed_at)}
-            </span>
-          )}
-          <span>{status.node_count} symbols</span>
-          <span>{status.relationship_count} relationships</span>
-          <span>{status.community_count} communities</span>
-          <span>{status.process_count} execution flows</span>
-        </div>
-      )}
-
-      {/* Not indexed state */}
+      {/* Not indexed */}
       {!status?.indexed && !indexing && (
-        <div className="text-center py-12 text-muted-foreground space-y-2">
+        <div className="text-center py-16 text-muted-foreground space-y-2">
           <Brain className="h-12 w-12 mx-auto opacity-30" />
           <p className="text-sm">No knowledge graph built yet</p>
-          <p className="text-xs">
-            Click "Build Knowledge Graph" to index this codebase.
-            The graph maps every function, class, and their relationships.
+          <p className="text-xs max-w-md mx-auto">
+            Click "Build" to index this codebase. The graph maps every function,
+            class, and their relationships — enabling blast radius analysis,
+            execution flow tracing, and AI-powered code understanding.
           </p>
         </div>
       )}
 
-      {/* Indexing error */}
-      {indexError && (
-        <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-3 flex items-start gap-2">
-          <AlertTriangle className="h-4 w-4 text-destructive shrink-0 mt-0.5" />
-          <div className="text-sm text-destructive">{indexError}</div>
-        </div>
-      )}
+      {/* ── Main content when indexed ────────────────────────────────── */}
+      {status?.indexed && graphData && graphData.nodes.length > 0 && (
+        <>
+          {/* AI Chat hint */}
+          <div className="mx-4 md:mx-6 mt-3 flex items-center gap-2 px-3 py-2 rounded-lg border border-primary/20 bg-primary/5 text-xs">
+            <MessageSquare className="w-4 h-4 text-primary shrink-0" />
+            <span className="text-muted-foreground">
+              Your project agent can explore this knowledge graph.
+              Open the <span className="font-medium text-foreground">Chat</span> and ask about
+              architecture, dependencies, or blast radius using the <code className="font-mono text-primary">code_graph_*</code> tools.
+            </span>
+          </div>
 
-      {/* Main content when indexed */}
-      {status?.indexed && (
-        <div className="space-y-4">
-          {/* Interactive Graph Visualisation */}
-          {graphData && graphData.nodes.length > 0 && (
-            <div className={graphFullscreen ? 'h-[calc(100vh-120px)]' : 'h-[600px]'}>
+          {/* Three-pane layout */}
+          <div className={`flex ${graphFullscreen ? 'flex-1 min-h-0' : 'h-[calc(100vh-220px)] min-h-[500px]'} mt-3`}>
+            {/* Left: File Tree */}
+            <FileTreePanel
+              nodes={graphData.nodes}
+              packagePrefix={selectedPackage}
+              onFileSelect={handleFileTreeSelect}
+              selectedFilePath={selectedGraphNode?.filePath ?? null}
+            />
+
+            {/* Center: Graph Canvas */}
+            <div className="flex-1 min-w-0 relative">
               <CodeGraphCanvas
                 graphData={graphData}
-                onNodeSelect={setSelectedGraphNode}
+                onNodeSelect={handleNodeSelect}
                 isFullscreen={graphFullscreen}
                 onToggleFullscreen={() => setGraphFullscreen(f => !f)}
+                highlightedNodeIds={highlightedNodeIds}
+                blastRadiusMap={blastRadiusMap}
+                onFocusNodeRef={fn => { focusNodeFnRef.current = fn; }}
+                selectedPackage={selectedPackage}
+                onSelectedPackageChange={setSelectedPackage}
               />
-            </div>
-          )}
 
-          {/* Selected node detail bar */}
-          {selectedGraphNode && (
-            <div className="rounded-lg border bg-muted/30 p-3 flex items-center gap-3 text-sm">
-              <Badge variant="outline" className="text-[10px]">{selectedGraphNode.label}</Badge>
-              <span className="font-mono font-medium">{selectedGraphNode.name}</span>
-              <span className="text-muted-foreground truncate text-xs">{selectedGraphNode.filePath}</span>
-              {selectedGraphNode.startLine && (
-                <span className="text-muted-foreground text-xs">:{selectedGraphNode.startLine}</span>
+              {/* Search results overlay */}
+              {searchResults.length > 0 && (
+                <div className="absolute top-12 left-3 z-20 w-72 max-h-64 overflow-y-auto rounded-lg border bg-background/95 backdrop-blur-sm p-2 space-y-0.5">
+                  <div className="flex items-center justify-between px-1 pb-1">
+                    <span className="text-xs font-medium">{searchResults.length} results</span>
+                    <button onClick={() => setSearchResults([])} className="text-[10px] text-muted-foreground hover:text-foreground">Clear</button>
+                  </div>
+                  {searchResults.map((r: any, i: number) => (
+                    <button
+                      key={i}
+                      className="w-full flex items-center gap-1.5 text-xs py-1 px-1.5 rounded hover:bg-muted text-left"
+                      onClick={() => {
+                        handleNodeSelect({ id: r.nodeId || '', name: r.name, label: r.label, filePath: r.filePath, startLine: r.startLine });
+                        if (r.nodeId) focusNodeFnRef.current?.(r.nodeId);
+                        setSearchResults([]);
+                      }}
+                    >
+                      <Badge variant="outline" className="text-[9px] h-3.5 px-1">{r.label}</Badge>
+                      <span className="font-mono truncate">{r.name}</span>
+                    </button>
+                  ))}
+                </div>
               )}
             </div>
-          )}
 
-          {/* Search */}
-          <div className="flex gap-2">
-            <div className="flex-1 relative">
-              <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={e => setSearchQuery(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && handleSearch()}
-                placeholder="Search symbols..."
-                className="w-full pl-9 pr-3 py-2 rounded-md border bg-background text-sm"
-              />
-            </div>
-            <Button size="sm" variant="outline" onClick={handleSearch} disabled={searching}>
-              Search
-            </Button>
-          </div>
+            {/* Right panel: Inspector / Processes */}
+            {showInspector && (
+              <div className="flex flex-col border-l border-border bg-background" style={{ width: 460, minWidth: 380 }}>
+                {/* Tab bar */}
+                <div className="flex items-center gap-1 px-2 py-1.5 border-b border-border bg-muted/20">
+                  <button
+                    onClick={() => setRightPanelTab('inspector')}
+                    className={`flex items-center gap-1 px-2.5 py-1 rounded text-xs font-medium transition-colors ${
+                      rightPanelTab === 'inspector' ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:text-foreground'
+                    }`}
+                  >
+                    <Search className="w-3 h-3" /> Inspector
+                  </button>
+                  <button
+                    onClick={() => setRightPanelTab('processes')}
+                    className={`flex items-center gap-1 px-2.5 py-1 rounded text-xs font-medium transition-colors ${
+                      rightPanelTab === 'processes' ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:text-foreground'
+                    }`}
+                  >
+                    <Workflow className="w-3 h-3" /> Flows
+                    <Badge variant="outline" className="text-[9px] h-3.5 px-1 ml-0.5">
+                      {graphData.processes.length}
+                    </Badge>
+                  </button>
+                  <button
+                    onClick={() => setShowInspector(false)}
+                    className="ml-auto p-1 text-muted-foreground hover:text-foreground rounded"
+                  >
+                    &times;
+                  </button>
+                </div>
 
-          {/* Search Results */}
-          {searchResults.length > 0 && (
-            <div className="rounded-lg border p-3 space-y-2">
-              <h3 className="text-sm font-medium">Search Results</h3>
-              {searchResults.map((r, i) => (
-                <div key={i} className="flex items-center gap-2 text-xs py-1 border-b last:border-0">
-                  <Badge variant="outline" className="text-[10px]">{r.label}</Badge>
-                  <span className="font-mono font-medium">{r.name}</span>
-                  <span className="text-muted-foreground truncate">{r.filePath}</span>
-                  {r.startLine && (
-                    <span className="text-muted-foreground">:{r.startLine}</span>
+                {/* Blast Radius (shown above tabs when active) */}
+                {blastRadiusTarget && (
+                  <div className="p-2 border-b">
+                    <BlastRadiusOverlay
+                      projectId={projectId}
+                      symbolName={blastRadiusTarget}
+                      onClose={() => { setBlastRadiusTarget(null); setBlastRadiusMap(new Map()); }}
+                      onHighlightImpact={handleImpactHighlight}
+                      onNodeSelect={handleNodeSelectById}
+                    />
+                  </div>
+                )}
+
+                {/* Tab content */}
+                <div className="flex-1 min-h-0 overflow-hidden">
+                  {rightPanelTab === 'inspector' && selectedGraphNode && (
+                    <CodeInspectorPanel
+                      projectId={projectId}
+                      node={selectedGraphNode}
+                      onClose={() => { setSelectedGraphNode(null); setShowInspector(false); }}
+                      onFocusNode={(id) => focusNodeFnRef.current?.(id)}
+                      onShowImpact={handleShowImpact}
+                    />
+                  )}
+                  {rightPanelTab === 'inspector' && !selectedGraphNode && (
+                    <div className="flex flex-col items-center justify-center h-full text-center px-4">
+                      <Search className="w-8 h-8 text-muted-foreground/30 mb-3" />
+                      <p className="text-sm text-muted-foreground">Click a node on the graph to inspect its source code</p>
+                    </div>
+                  )}
+                  {rightPanelTab === 'processes' && (
+                    <div className="h-full overflow-y-auto p-3">
+                      <ProcessFlowPanel
+                        graphData={graphData}
+                        highlightedNodeIds={highlightedNodeIds}
+                        onHighlightNodes={setHighlightedNodeIds}
+                        onNodeSelect={handleNodeSelectById}
+                      />
+                    </div>
                   )}
                 </div>
-              ))}
-            </div>
-          )}
-
-          {/* Two-column layout: Communities + Processes */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {/* Communities */}
-            <div className="rounded-lg border p-3 space-y-2">
-              <div className="flex items-center gap-2 mb-2">
-                <GitBranch className="h-4 w-4 text-primary" />
-                <h3 className="text-sm font-medium">Communities</h3>
-                <span className="text-xs text-muted-foreground">({communities.length})</span>
               </div>
-              {communities.length === 0 ? (
-                <p className="text-xs text-muted-foreground">No communities detected</p>
-              ) : (
-                <div className="space-y-1 max-h-80 overflow-y-auto">
-                  {communities.map(c => (
-                    <div key={c.id}>
-                      <button
-                        className="flex items-center gap-2 w-full text-left py-1.5 px-2 rounded hover:bg-muted text-sm"
-                        onClick={() => toggleCommunity(c.id)}
-                      >
-                        {expandedCommunities.has(c.id) ? (
-                          <ChevronDown className="h-3 w-3 shrink-0" />
-                        ) : (
-                          <ChevronRight className="h-3 w-3 shrink-0" />
-                        )}
-                        <span className="font-medium truncate">{c.label}</span>
-                        <span className="text-xs text-muted-foreground ml-auto shrink-0">
-                          {c.symbolCount} symbols
-                        </span>
-                      </button>
-                      {expandedCommunities.has(c.id) && c.members && (
-                        <div className="ml-6 space-y-0.5 pb-1">
-                          {c.members.map((m, i) => (
-                            <div key={i} className="text-xs text-muted-foreground truncate">
-                              <span className="font-mono">{m.name}</span>
-                              <span className="ml-1 opacity-60">{m.filePath}</span>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
+            )}
 
-            {/* Processes */}
-            <div className="rounded-lg border p-3 space-y-2">
-              <div className="flex items-center gap-2 mb-2">
-                <Workflow className="h-4 w-4 text-primary" />
-                <h3 className="text-sm font-medium">Execution Flows</h3>
-                <span className="text-xs text-muted-foreground">({processes.length})</span>
+            {/* Collapsed right panel toggle */}
+            {!showInspector && (
+              <div className="w-10 bg-background border-l border-border flex flex-col items-center py-2 gap-2 shrink-0">
+                <button
+                  onClick={() => setShowInspector(true)}
+                  className="p-1.5 text-muted-foreground hover:text-foreground rounded transition-colors"
+                  title="Open Inspector"
+                >
+                  <Search className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={() => { setShowInspector(true); setRightPanelTab('processes'); }}
+                  className="p-1.5 text-muted-foreground hover:text-foreground rounded transition-colors"
+                  title="Execution Flows"
+                >
+                  <GitBranch className="w-4 h-4" />
+                </button>
               </div>
-              {processes.length === 0 ? (
-                <p className="text-xs text-muted-foreground">No execution flows detected</p>
-              ) : (
-                <div className="space-y-1 max-h-80 overflow-y-auto">
-                  {processes.map(p => (
-                    <div key={p.id}>
-                      <button
-                        className="flex items-center gap-2 w-full text-left py-1.5 px-2 rounded hover:bg-muted text-sm"
-                        onClick={() => toggleProcess(p.id)}
-                      >
-                        {expandedProcesses.has(p.id) ? (
-                          <ChevronDown className="h-3 w-3 shrink-0" />
-                        ) : (
-                          <ChevronRight className="h-3 w-3 shrink-0" />
-                        )}
-                        <span className="font-medium truncate">{p.label}</span>
-                        <Badge
-                          variant="outline"
-                          className="text-[10px] ml-auto shrink-0"
-                        >
-                          {p.stepCount} steps
-                        </Badge>
-                      </button>
-                      {expandedProcesses.has(p.id) && p.steps && (
-                        <div className="ml-6 space-y-0.5 pb-1">
-                          {p.steps.map((s, i) => (
-                            <div key={i} className="text-xs flex items-center gap-1.5">
-                              <span className="text-muted-foreground w-4 text-right">{s.step}.</span>
-                              <span className="font-mono">{s.name}</span>
-                              <span className="text-muted-foreground truncate opacity-60">{s.filePath}</span>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
+            )}
           </div>
-        </div>
+        </>
       )}
     </div>
   );
