@@ -438,7 +438,8 @@ export class WhatsAppBridge {
         return;
       }
       const sessionId = `whatsapp_${safeSender}_${agentId}`;
-      const model = this.senderModelOverrides.get(normalizeE164(sender)) ?? 'default';
+      const sessionModel = csm?.getSession(sessionId)?.model;
+      const model = sessionModel ?? this.senderModelOverrides.get(normalizeE164(sender)) ?? 'unknown';
       const lines = [`*Model:* ${model}`];
       if (csm?.isSessionActive(sessionId)) {
         try {

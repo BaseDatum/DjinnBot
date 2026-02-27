@@ -445,7 +445,8 @@ class TelegramAgentBridge {
 
       try {
         const usage = await csm.getContextUsage(sessionId);
-        const model = this.chatModelOverrides.get(chatId) ?? this.config.defaultConversationModel ?? 'unknown';
+        const sessionModel = csm.getSession(sessionId)?.model;
+        const model = sessionModel ?? this.chatModelOverrides.get(chatId) ?? this.config.defaultConversationModel ?? 'unknown';
         const lines = [`**Model:** ${model}`];
         if (usage) {
           const usedK = Math.round(usage.usedTokens / 1000);

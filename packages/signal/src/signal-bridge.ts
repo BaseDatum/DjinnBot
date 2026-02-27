@@ -746,7 +746,8 @@ export class SignalBridge {
         return;
       }
       const sessionId = `signal_${safeSender}_${agentId}`;
-      const model = this.senderModelOverrides.get(normalizeE164(sender)) ?? 'default';
+      const sessionModel = csm?.getSession(sessionId)?.model;
+      const model = sessionModel ?? this.senderModelOverrides.get(normalizeE164(sender)) ?? 'unknown';
       const lines = [`Model: ${model}`];
       if (csm?.isSessionActive(sessionId)) {
         try {

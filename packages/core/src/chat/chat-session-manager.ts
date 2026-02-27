@@ -1970,20 +1970,22 @@ export class ChatSessionManager {
     }
 
     return new Promise<{ usedTokens: number; contextWindow: number; percent: number; model?: string } | null>((resolve) => {
-      const timeout = setTimeout(() => {
-        cleanup();
-        resolve(null);
-      }, 5000);
-
-      // Listen for the contextUsage event on the session's events channel
       const eventSub = new (require('ioredis').default)(this.redis.options);
       const eventsChannel = `run:${sessionId}:events`;
+      let resolved = false;
 
       const cleanup = () => {
+        if (resolved) return;
+        resolved = true;
         clearTimeout(timeout);
         eventSub.unsubscribe().catch(() => {});
         eventSub.quit().catch(() => {});
       };
+
+      const timeout = setTimeout(() => {
+        cleanup();
+        resolve(null);
+      }, 5000);
 
       eventSub.on('message', (_ch: string, message: string) => {
         try {
@@ -2001,8 +2003,7 @@ export class ChatSessionManager {
       });
 
       eventSub.subscribe(eventsChannel).then(() => {
-        // Now send the command
-        this.commandSender.sendGetContextUsage(sessionId).catch(err => {
+        this.commandSender.sendGetContextUsage(sessionId).catch((err: any) => {
           console.warn(`[ChatSessionManager] getContextUsage: failed to send command:`, err);
           cleanup();
           resolve(null);
@@ -2038,19 +2039,22 @@ export class ChatSessionManager {
     }
 
     return new Promise((resolve) => {
-      const timeout = setTimeout(() => {
-        cleanup();
-        resolve({ success: false, summary: '', tokensBefore: 0, tokensAfter: 0, tailMessageCount: 0, error: 'Compaction timed out (120s)' });
-      }, 120_000);
-
       const eventSub = new (require('ioredis').default)(this.redis.options);
       const eventsChannel = `run:${sessionId}:events`;
+      let resolved = false;
 
       const cleanup = () => {
+        if (resolved) return;
+        resolved = true;
         clearTimeout(timeout);
         eventSub.unsubscribe().catch(() => {});
         eventSub.quit().catch(() => {});
       };
+
+      const timeout = setTimeout(() => {
+        cleanup();
+        resolve({ success: false, summary: '', tokensBefore: 0, tokensAfter: 0, tailMessageCount: 0, error: 'Compaction timed out (120s)' });
+      }, 120_000);
 
       eventSub.on('message', (_ch: string, message: string) => {
         try {
@@ -2069,7 +2073,7 @@ export class ChatSessionManager {
       });
 
       eventSub.subscribe(eventsChannel).then(() => {
-        this.commandSender.sendCompactSession(sessionId, { instructions }).catch(err => {
+        this.commandSender.sendCompactSession(sessionId, { instructions }).catch((err: any) => {
           console.warn(`[ChatSessionManager] compactSession: failed to send command:`, err);
           cleanup();
           resolve({ success: false, summary: '', tokensBefore: 0, tokensAfter: 0, tailMessageCount: 0, error: String(err) });
