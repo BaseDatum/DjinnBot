@@ -12,6 +12,7 @@ Endpoints:
   POST   /v1/projects/{project_id}/knowledge-graph/impact
   GET    /v1/projects/{project_id}/knowledge-graph/changes
   POST   /v1/projects/{project_id}/knowledge-graph/cypher
+  GET    /v1/projects/{project_id}/knowledge-graph/file-content
 """
 
 import asyncio
@@ -527,3 +528,89 @@ async def execute_cypher(
     except Exception as err:
         logger.error(f"Failed to execute cypher: {err}")
         return {"error": str(err)}
+
+
+@router.get("/{project_id}/knowledge-graph/file-content")
+async def get_file_content(
+    project_id: str,
+    path: str,
+    session: AsyncSession = Depends(get_async_session),
+):
+    """Read a source file from the project workspace for the code inspector.
+
+    Returns the file content with language detection.
+    Path must be relative to the workspace root.
+    """
+    await get_project_or_404(session, project_id)
+
+    workspace = _workspace_path(project_id)
+    if not workspace.exists():
+        raise HTTPException(status_code=404, detail="Project workspace not found")
+
+    # Normalize and validate path to prevent directory traversal
+    clean_path = Path(path).as_posix().lstrip("/").lstrip("./")
+    if ".." in clean_path.split("/"):
+        raise HTTPException(status_code=400, detail="Invalid path")
+
+    file_path = workspace / clean_path
+    resolved = file_path.resolve()
+    if not str(resolved).startswith(str(workspace.resolve())):
+        raise HTTPException(status_code=400, detail="Path escapes workspace")
+
+    if not resolved.is_file():
+        raise HTTPException(status_code=404, detail="File not found")
+
+    # Size limit: 1 MB
+    stat = resolved.stat()
+    if stat.st_size > 1_048_576:
+        raise HTTPException(status_code=413, detail="File too large (>1 MB)")
+
+    try:
+        content = resolved.read_text(encoding="utf-8", errors="replace")
+    except Exception:
+        raise HTTPException(status_code=500, detail="Failed to read file")
+
+    # Detect language from extension
+    ext = resolved.suffix.lower()
+    LANG_MAP = {
+        ".py": "python",
+        ".js": "javascript",
+        ".jsx": "javascript",
+        ".ts": "typescript",
+        ".tsx": "typescript",
+        ".go": "go",
+        ".rs": "rust",
+        ".java": "java",
+        ".c": "c",
+        ".cpp": "cpp",
+        ".h": "c",
+        ".hpp": "cpp",
+        ".cs": "csharp",
+        ".rb": "ruby",
+        ".php": "php",
+        ".swift": "swift",
+        ".kt": "kotlin",
+        ".scala": "scala",
+        ".sh": "bash",
+        ".bash": "bash",
+        ".yaml": "yaml",
+        ".yml": "yaml",
+        ".json": "json",
+        ".toml": "toml",
+        ".md": "markdown",
+        ".html": "html",
+        ".css": "css",
+        ".scss": "scss",
+        ".sql": "sql",
+        ".r": "r",
+        ".lua": "lua",
+        ".zig": "zig",
+    }
+
+    return {
+        "content": content,
+        "path": clean_path,
+        "language": LANG_MAP.get(ext, "text"),
+        "lines": content.count("\n") + 1,
+        "size": stat.st_size,
+    }

@@ -116,12 +116,27 @@ interface Props {
   onNodeSelect?: (node: { id: string; name: string; label: string; filePath: string; startLine?: number } | null) => void;
   isFullscreen?: boolean;
   onToggleFullscreen?: () => void;
+  /** Set of node IDs to highlight (process nodes, file connections) */
+  highlightedNodeIds?: Set<string>;
+  /** Map of nodeId → depth for blast radius colouring */
+  blastRadiusMap?: Map<string, number>;
+  /** Expose the focusNode function to parent */
+  onFocusNodeRef?: (fn: (nodeId: string) => void) => void;
+  /** Currently selected package prefix (exposed so siblings can use it) */
+  selectedPackage?: string | null;
+  onSelectedPackageChange?: (pkg: string | null) => void;
 }
 
-export function CodeGraphCanvas({ graphData, onNodeSelect, isFullscreen, onToggleFullscreen }: Props) {
+export function CodeGraphCanvas({
+  graphData, onNodeSelect, isFullscreen, onToggleFullscreen,
+  highlightedNodeIds, blastRadiusMap, onFocusNodeRef,
+  selectedPackage: externalSelectedPackage, onSelectedPackageChange,
+}: Props) {
   // Package detection
   const packages = useMemo(() => detectPackages(graphData.nodes), [graphData]);
-  const [selectedPackage, setSelectedPackage] = useState<string | null>(null);
+  const [internalSelectedPackage, setInternalSelectedPackage] = useState<string | null>(null);
+  const selectedPackage = externalSelectedPackage !== undefined ? externalSelectedPackage : internalSelectedPackage;
+  const setSelectedPackage = onSelectedPackageChange ?? setInternalSelectedPackage;
 
   // Effective graph data (filtered by package if selected)
   const effectiveData = useMemo(() => {
@@ -154,7 +169,14 @@ export function CodeGraphCanvas({ graphData, onNodeSelect, isFullscreen, onToggl
     onNodeClick: handleNodeClick,
     onStageClick: handleStageClick,
     visibleEdgeTypes: visibleEdges,
+    highlightedNodeIds,
+    blastRadiusMap,
   });
+
+  // Expose focusNode to parent
+  useEffect(() => {
+    onFocusNodeRef?.(focusNode);
+  }, [focusNode, onFocusNodeRef]);
 
   // Build + set the graphology graph when effective data changes
   useEffect(() => {

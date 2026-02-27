@@ -48,6 +48,10 @@ export interface UseSigmaOptions {
   onNodeHover?: (nodeId: string | null) => void;
   onStageClick?: () => void;
   visibleEdgeTypes?: Set<string>;
+  /** Set of node IDs to highlight (e.g. process nodes, file tree connections) */
+  highlightedNodeIds?: Set<string>;
+  /** Map of nodeId → depth for blast radius colouring */
+  blastRadiusMap?: Map<string, number>;
 }
 
 export interface UseSigmaReturn {
@@ -74,15 +78,27 @@ export function useSigma(opts: UseSigmaOptions = {}): UseSigmaReturn {
   const timerRef     = useRef<ReturnType<typeof setTimeout> | null>(null);
   const selectedRef  = useRef<string | null>(null);
   const edgeTypesRef = useRef<Set<string> | null>(null);
+  const highlightRef = useRef<Set<string> | null>(null);
+  const blastRef     = useRef<Map<string, number> | null>(null);
 
   const [isLayoutRunning, setIsLayoutRunning] = useState(false);
   const [selectedNode, setSelectedNodeState]  = useState<string | null>(null);
 
-  // Keep mutable ref in sync
+  // Keep mutable refs in sync
   useEffect(() => {
     edgeTypesRef.current = opts.visibleEdgeTypes ?? null;
     sigmaRef.current?.refresh();
   }, [opts.visibleEdgeTypes]);
+
+  useEffect(() => {
+    highlightRef.current = opts.highlightedNodeIds ?? null;
+    sigmaRef.current?.refresh();
+  }, [opts.highlightedNodeIds]);
+
+  useEffect(() => {
+    blastRef.current = opts.blastRadiusMap ?? null;
+    sigmaRef.current?.refresh();
+  }, [opts.blastRadiusMap]);
 
   const setSelectedNode = useCallback((id: string | null) => {
     selectedRef.current = id;
@@ -116,11 +132,42 @@ export function useSigma(opts: UseSigmaOptions = {}): UseSigmaReturn {
       hideEdgesOnMove: true,
       zIndex: true,
 
-      // Node reducer: selection highlighting
+      // Node reducer: selection + highlight + blast radius
       nodeReducer: (node: string, data: any) => {
         const res = { ...data };
         if (data.hidden) { res.hidden = true; return res; }
 
+        // Blast radius colouring (highest priority visual)
+        const blastMap = blastRef.current;
+        if (blastMap && blastMap.size > 0) {
+          const depth = blastMap.get(node);
+          if (depth !== undefined) {
+            const blastColors: Record<number, string> = { 1: '#ef4444', 2: '#f97316', 3: '#eab308' };
+            res.color = blastColors[depth] || '#eab308';
+            res.size = (data.size || 8) * (depth === 1 ? 2.0 : depth === 2 ? 1.6 : 1.3);
+            res.zIndex = 3 - depth;
+            res.highlighted = true;
+            return res;
+          }
+        }
+
+        // Highlight set (process highlight, file tree highlight)
+        const hlSet = highlightRef.current;
+        if (hlSet && hlSet.size > 0) {
+          if (hlSet.has(node)) {
+            res.color = data.communityColor || data.color;
+            res.size = (data.size || 8) * 1.5;
+            res.zIndex = 2;
+            res.highlighted = true;
+          } else {
+            res.color = dimColor(data.color, 0.15);
+            res.size = (data.size || 8) * 0.5;
+            res.zIndex = 0;
+          }
+          return res;
+        }
+
+        // Selection highlighting
         const sel = selectedRef.current;
         if (sel) {
           const gr = graphRef.current;
@@ -144,7 +191,7 @@ export function useSigma(opts: UseSigmaOptions = {}): UseSigmaReturn {
         return res;
       },
 
-      // Edge reducer: selection + type visibility
+      // Edge reducer: selection + type visibility + highlights
       edgeReducer: (edge: string, data: any) => {
         const res = { ...data };
         const visible = edgeTypesRef.current;
@@ -152,19 +199,50 @@ export function useSigma(opts: UseSigmaOptions = {}): UseSigmaReturn {
           res.hidden = true;
           return res;
         }
+
+        const gr = graphRef.current;
+        if (!gr) return res;
+        const [src, tgt] = gr.extremities(edge);
+
+        // Blast radius: highlight edges between blast nodes
+        const blastMap = blastRef.current;
+        if (blastMap && blastMap.size > 0) {
+          const srcD = blastMap.get(src);
+          const tgtD = blastMap.get(tgt);
+          if (srcD !== undefined || tgtD !== undefined) {
+            res.size = Math.max(2, (data.size || 1) * 3);
+            res.color = '#ef4444';
+            res.zIndex = 2;
+          } else {
+            res.color = dimColor(data.color, 0.08);
+            res.size = 0.2;
+          }
+          return res;
+        }
+
+        // Highlight set
+        const hlSet = highlightRef.current;
+        if (hlSet && hlSet.size > 0) {
+          if (hlSet.has(src) && hlSet.has(tgt)) {
+            res.size = Math.max(2, (data.size || 1) * 3);
+            res.zIndex = 2;
+          } else {
+            res.color = dimColor(data.color, 0.08);
+            res.size = 0.2;
+          }
+          return res;
+        }
+
+        // Selection
         const sel = selectedRef.current;
         if (sel) {
-          const gr = graphRef.current;
-          if (gr) {
-            const [src, tgt] = gr.extremities(edge);
-            if (src === sel || tgt === sel) {
-              res.size = Math.max(3, (data.size || 1) * 4);
-              res.zIndex = 2;
-            } else {
-              res.color = dimColor(data.color, 0.1);
-              res.size = 0.3;
-              res.zIndex = 0;
-            }
+          if (src === sel || tgt === sel) {
+            res.size = Math.max(3, (data.size || 1) * 4);
+            res.zIndex = 2;
+          } else {
+            res.color = dimColor(data.color, 0.1);
+            res.size = 0.3;
+            res.zIndex = 0;
           }
         }
         return res;
