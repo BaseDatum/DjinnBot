@@ -19,7 +19,7 @@ enableRobotsTXT: true
 enableGitInfo: true
 
 params:
-  description: "Autonomous AI teams that build software. Open-core agent orchestration platform with swarm execution, persistent memory, and real-time dashboards."
+  description: "Autonomous AI teams that can do anything. Open-core agent orchestration platform with 40x token efficiency, swarm execution, persistent memory, and real-time dashboards."
 
   theme:
     default: system
