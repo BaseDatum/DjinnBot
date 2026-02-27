@@ -2,16 +2,14 @@
 
 # DjinnBot
 
-**Autonomous AI teams that build software while you sleep.**
+**Autonomous AI teams that can do anything.**
 
 [![License: FSL-1.1-ALv2](https://img.shields.io/badge/License-FSL--1.1--ALv2-blue.svg)](LICENSE)
 [![PyPI - djinn-bot-cli](https://img.shields.io/pypi/v/djinn-bot-cli?label=CLI&color=green)](https://pypi.org/project/djinn-bot-cli/)
 [![Docker Compose](https://img.shields.io/badge/Docker_Compose-ready-2496ED?logo=docker&logoColor=white)](docker-compose.yml)
 [![Docs](https://img.shields.io/badge/docs-docs.djinn.bot-8b5cf6)](https://docs.djinn.bot)
 
-Deploy a full team of AI agents — product owner, architect, engineers, QA, SRE, executive assistant — that collaborate to spec, design, implement, review, test, and deploy your software. Each agent has a distinct persona, persistent memory, and its own Slack presence. Define a task, and watch your AI team work.
-
-Self-hosted is free. One command to install, one command to run.
+Deploy a team of AI agents that collaborate autonomously — engineering, research, content, operations, finance, or any workflow you define. Each agent has a distinct persona, persistent memory, a full toolbox inside an isolated container, and its own Slack presence. Self-hosted and free.
 
 [**Join the Waitlist for DjinnBot Cloud**](https://app.djinn.bot) ·
 [**Documentation**](https://docs.djinn.bot) ·
@@ -23,27 +21,29 @@ Self-hosted is free. One command to install, one command to run.
 
 ## Why DjinnBot
 
-Most AI coding tools give you a chatbot with a terminal. DjinnBot gives you an **autonomous engineering organization** — a team of specialized agents that plan, build, review, test, and deploy software together, 24/7, without you sitting at the keyboard.
+Most AI tools give you a chatbot with a terminal. DjinnBot gives you an **autonomous team** — specialized agents that plan, build, review, research, and deliver together, 24/7, without you sitting at the keyboard.
 
 Here's what makes it different:
 
+- **40x token efficiency.** Other tools waste 20,000 tokens reading files to understand a single function. DjinnBot's [Code Knowledge Graph](https://docs.djinn.bot/docs/concepts/code-knowledge-graph/) does it in 500. [Programmatic Tool Calling](https://docs.djinn.bot/docs/concepts/programmatic-tool-calling/) replaces 30 verbose JSON schemas with compact Python signatures. `focused_analysis` delegates to sub-models so the agent's context stays clean. Your agents do more work per dollar of context.
+
+- **Full cost visibility.** Every LLM API call logged with model, tokens, latency, cost, and who triggered it. Per-user and per-agent dashboards. Provider-level breakdowns. You will never wonder where the money went.
+
 - **One command to run.** `curl` the installer. Answer a few questions. Your AI team is running in under 5 minutes. No Kubernetes, no cloud accounts, no 45-minute setup guides.
 
-- **Real team, not a chatbot.** 11 agents with rich personas, opinions, and domain expertise. Eric (Product Owner) pushes back on vague specs. Finn (Architect) rejects PRs that violate architecture. Chieko (QA) finds the edge cases you forgot. Grace (Executive Assistant) tracks your commitments and never lets a follow-up slip.
+- **Real team, not a chatbot.** 11 agents with rich personas, opinions, and domain expertise. Eric (Product Owner) pushes back on vague specs. Finn (Architect) rejects PRs that violate architecture. Grace (Executive Assistant) tracks your commitments and never lets a follow-up slip. Or create your own agents for any domain by adding a directory with a few markdown files.
 
-- **Fully containerized.** Every agent runs in its own isolated Docker container with a complete engineering toolbox — Node 22, Python 3, Go, Rust, git, ripgrep, GitHub CLI, and dozens more. No host access. No security concerns. The container is destroyed after every step.
+- **Fully containerized.** Every agent runs in its own isolated Docker container with a complete toolbox — Node 22, Python 3, Go, Rust, an anti-detection browser (Camoufox), git, ripgrep, GitHub CLI, and dozens more. No host access. The container is destroyed after every step.
 
 - **Persistent memory that actually works.** Agents remember decisions, lessons, and patterns across runs using ClawVault with semantic search. They build a linked knowledge graph over time. Memory scoring automatically surfaces the most relevant context. A 3D interactive graph lets you explore how your team's knowledge connects.
 
 - **Swarm execution.** Run multiple agents in parallel on DAG-aware task graphs. A planning agent decomposes the work, and a swarm of agents executes it concurrently — respecting dependency chains, streaming progress in real-time, and converging on completion.
 
-- **Beautiful, real-time dashboard.** Not a terminal dump. Live SSE-streamed activity feeds, kanban project boards, interactive pipeline visualizations, swarm DAG views, 3D memory graphs, per-user usage tracking, and a full admin panel. File uploads, image attachments, and inline HTML previews in chat.
+- **Beautiful, real-time dashboard.** Not a terminal dump. Live SSE-streamed activity feeds, kanban project boards, interactive pipeline visualizations, swarm DAG views, Sigma.js code graph visualizations, 3D memory graphs, per-user usage tracking, and a full admin panel.
 
-- **Slack-native.** Each agent gets its own Slack bot. Watch your team discuss in threads. Mention an agent to get their perspective. Or skip Slack entirely and use the built-in chat.
+- **Slack-native.** Each agent gets its own Slack bot. Watch your team discuss in threads. Mention an agent to get their perspective. Or skip Slack entirely and use the built-in chat or CLI.
 
-- **Full cost visibility.** Every LLM API call is logged with token counts, latency, cost, and which API key was used. Per-user usage dashboards. Admin-level API usage panels with provider breakdowns. Know exactly what your AI team costs.
-
-- **Enterprise-ready auth.** Multi-user accounts, TOTP two-factor authentication, API keys, OIDC single sign-on, per-user provider key sharing, and automatic SSL via Let's Encrypt. Not an afterthought — built in from the start.
+- **Enterprise-ready auth.** Multi-user accounts, TOTP two-factor authentication, API keys, OIDC single sign-on, per-user provider key sharing, and automatic SSL via Let's Encrypt. Built in from the start.
 
 ---
 
@@ -83,6 +83,7 @@ pip install djinn-bot-cli
 djinn setup          # interactive setup wizard (safe to re-run)
 djinn login          # email/password + optional 2FA
 djinn chat           # interactive agent + model selection
+djinn cookies list   # manage browser cookies for agent browsing
 djinn provider list  # see configured LLM providers
 ```
 
@@ -94,11 +95,11 @@ See the [CLI reference](https://docs.djinn.bot/docs/reference/cli/) for all comm
 
 ```mermaid
 graph LR
-    A["1. Create Project"] --> B["2. Plan It"]
+    A["1. Define Work"] --> B["2. Plan"]
     B --> C["3. Agents Claim Tasks"]
     C --> D["4. Autonomous Work"]
-    D --> E["5. PRs & Review"]
-    E --> F["6. Ship It"]
+    D --> E["5. Review & Iterate"]
+    E --> F["6. Deliver"]
     
     style A fill:#3b82f6,color:#fff,stroke:#2563eb
     style B fill:#8b5cf6,color:#fff,stroke:#7c3aed
@@ -108,16 +109,36 @@ graph LR
     style F fill:#10b981,color:#fff,stroke:#059669
 ```
 
-1. **Create a project** — describe what you want built via the guided onboarding, or import an existing repo
-2. **Plan it** — the planning pipeline decomposes your project into tasks on a kanban board with priorities, dependencies, and hour estimates
-3. **Agents claim tasks** — each agent watches specific board columns matching their role. Yukihiro grabs implementation work. Chieko grabs review tasks.
-4. **Autonomous work** — on pulse cycles, agents wake up, claim a task, spin up an isolated container, write code, run tests, and open a PR
-5. **Review & iterate** — Finn reviews the PR. If changes are needed, the task cycles back. If approved, Chieko runs tests.
-6. **Ship it** — Stas handles deployment. Watch the whole thing happen in real-time via the dashboard, Slack, or the live activity feed.
-
-For structured one-off workflows, run **pipelines** directly — engineering (full SDLC), feature, bugfix, or planning. Or create custom YAML pipelines for any repeatable process.
+1. **Define the work** — describe what you need via the guided onboarding, chat, or API. Software projects, research tasks, content campaigns, operations workflows — anything.
+2. **Plan it** — the planning pipeline decomposes your project into tasks on a kanban board with priorities, dependencies, and hour estimates. Choose structured planning or agentic planning for large projects.
+3. **Agents claim tasks** — each agent watches specific board columns matching their role. Engineers grab implementation work. Reviewers grab review tasks. Any agent can be configured to watch any column.
+4. **Autonomous work** — on pulse cycles, agents wake up, claim a task, spin up an isolated container, and do the work — writing code, researching topics, generating content, browsing the web, or running any tools you've given them.
+5. **Review & iterate** — agents review each other's work. If changes are needed, the task cycles back. They coordinate via inbox messages and can wake each other for urgent blockers.
+6. **Deliver** — watch the whole thing happen in real-time via the dashboard, Slack, CLI, or the live activity feed.
 
 For maximum throughput, use **swarm execution** — a parallel execution engine that runs multiple agents concurrently on DAG-aware task graphs, respecting dependency chains and streaming progress live.
+
+---
+
+## More Done, Less Context
+
+Most agent tools burn through context windows by dumping raw file contents and verbose JSON schemas into every turn. DjinnBot is engineered to minimize token waste:
+
+| Task | Typical Agent Tool | DjinnBot | Reduction |
+|------|-------------------|----------|-----------|
+| Understand a function + all callers/callees | ~20,000 tokens (15+ file reads) | ~500 tokens (1 `code_graph_context` call) | **40x** |
+| "What breaks if I change AuthService?" | ~30,000 tokens (codebase-wide grep + read) | ~800 tokens (1 `code_graph_impact` call) | **37x** |
+| 30 tool schemas in system prompt | ~18,000 tokens (full JSON schemas) | ~1,500 tokens (compact Python signatures) | **12x** |
+| Read 5 files, grep, aggregate | ~12,000 tokens (5 round-trips) | ~500 tokens (1 `exec_code` call) | **24x** |
+| Analyze a 500-line diff | ~4,000 tokens (in agent context) | ~300 tokens (`focused_analysis` sub-model) | **13x** |
+
+Three systems make this possible:
+
+- **[Code Knowledge Graph](https://docs.djinn.bot/docs/concepts/code-knowledge-graph/)** — Tree-sitter parses source files into a graph of functions, classes, call chains, and functional clusters stored in KuzuDB. Agents query the graph instead of reading files. Supports TypeScript, JavaScript, Python, Go, Rust, Java, C, C++, C#, and PHP.
+
+- **[Programmatic Tool Calling](https://docs.djinn.bot/docs/concepts/programmatic-tool-calling/)** — Instead of 30 full JSON schemas in every prompt, agents get compact Python function signatures and write code that calls tools, loops, and aggregates. Only the final result enters the context window.
+
+- **Focused Analysis** — `focused_analysis` delegates analytical questions to a fast sub-model with persona support (analyst, security, reviewer, architect, tester). The agent's context stays clean for high-level reasoning.
 
 ---
 
@@ -146,7 +167,7 @@ DjinnBot ships with 11 agents covering a full product organization:
 | **Luke** | SEO Specialist | Content strategy, keyword research, technical SEO |
 | **Jim** | Finance Lead | Budget, pricing, runway management, financial modeling |
 
-> Agents are not generic LLM wrappers. Each has a 100-200 line personality file with backstory, core beliefs, productive flaws, anti-patterns, and collaboration triggers. Eric cuts scope aggressively (sometimes too aggressively). Finn over-engineers (but catches problems others miss). Yukihiro refuses to ship without tests (even when deadlines are tight).
+> Agents are not generic LLM wrappers. Each has a 100-200 line personality file with backstory, core beliefs, productive flaws, anti-patterns, and collaboration triggers. The default team covers engineering, ops, marketing, SEO, and finance — but you can create agents for any domain by adding a directory with a few markdown files.
 
 ---
 
@@ -157,7 +178,7 @@ graph TB
     Dashboard["Dashboard<br/>(React + Vite)"] -->|SSE| API["API Server<br/>(FastAPI)"]
     CLI["CLI<br/>(Python)"] --> API
     API --> DB["PostgreSQL"]
-    API --> Redis["Redis<br/>(Streams + Pub/Sub)"]
+    API --> Redis["Redis<br/>(Streams + Pub/Sub<br/>+ JuiceFS Metadata)"]
     Engine["Pipeline Engine<br/>(State Machine)"] --> API
     Engine --> Redis
     Engine -->|"Spawn"| Agent1["Agent Container<br/>(Isolated)"]
@@ -168,6 +189,8 @@ graph TB
     Agent1 --> mcpo["mcpo Proxy<br/>(MCP Tools)"]
     Agent2 --> mcpo
     Engine --> Slack["Slack Bridge<br/>(Per-Agent Bots)"]
+    JFS["JuiceFS FUSE Mount"] --> RustFS["RustFS<br/>(S3 Object Store)"]
+    JFS --> Redis
 
     style Dashboard fill:#3b82f6,color:#fff,stroke:#2563eb
     style CLI fill:#3b82f6,color:#fff,stroke:#2563eb
@@ -182,15 +205,38 @@ graph TB
     style Agent4 fill:#f59e0b,color:#000,stroke:#d97706
     style mcpo fill:#6366f1,color:#fff,stroke:#4f46e5
     style Slack fill:#4ade80,color:#000,stroke:#22c55e
+    style JFS fill:#14b8a6,color:#fff,stroke:#0d9488
+    style RustFS fill:#14b8a6,color:#fff,stroke:#0d9488
 ```
 
-**Services:** PostgreSQL (state), Redis (event bus via Streams + Pub/Sub), FastAPI (REST API + SSE), Pipeline Engine (state machine + container orchestration), Dashboard (React SPA), mcpo (MCP tool proxy), Slack Bridge (per-agent Socket Mode bots).
+**Services:** PostgreSQL (state), Redis (event bus via Streams + Pub/Sub, JuiceFS metadata), FastAPI (REST API + SSE), Pipeline Engine (state machine + container orchestration), Dashboard (React SPA), mcpo (MCP tool proxy), Slack Bridge (per-agent Socket Mode bots), JuiceFS + RustFS (shared POSIX filesystem).
 
-**Agent containers** are ephemeral Docker environments with a full engineering toolbox (Node 22, Python 3, Go, Rust, 30+ dev tools). Created per step, destroyed on completion. No host access.
+**Agent containers** are ephemeral Docker environments with a full toolbox (Node 22, Python 3, Go, Rust, Camoufox browser, 30+ dev tools). Created per step, destroyed on completion. No host access. Programmatic Tool Calling reduces context usage by 30-40%+.
 
 ---
 
 ## Key Features
+
+<details>
+<summary><strong>Code Knowledge Graph</strong> — structural codebase understanding for agents</summary>
+
+Tree-sitter parses every source file into a graph of functions, classes, call chains, and functional clusters stored in KuzuDB. Agents query the graph with four tools: `code_graph_query` (search), `code_graph_context` (symbol deep-dive), `code_graph_impact` (change risk analysis), and `code_graph_changes` (pre-commit safety check). Supports 10 languages. Interactive Sigma.js visualization in the dashboard. One tool call replaces 15+ file reads.
+
+</details>
+
+<details>
+<summary><strong>Programmatic Tool Calling</strong> — 12x context reduction on tool schemas</summary>
+
+Instead of sending 30 full JSON tool schemas in every prompt, PTC gives agents a single `exec_code` tool with compact Python function signatures. Agents write code that calls tools, loops, filters, and aggregates — and only the final result enters the context window. Intermediate tool outputs never touch the LLM. Reduces prompt overhead by 12x and total context usage by 30-40%+.
+
+</details>
+
+<details>
+<summary><strong>Camoufox Browser + Cookie Bridge</strong> — authenticated web browsing for agents</summary>
+
+Agent containers include Camoufox, an anti-detection browser based on Firefox. Agents can browse sites that block standard HTTP clients. Upload cookies via the dashboard, CLI (`djinn cookies`), or the Chrome/Firefox Cookie Bridge extension. Grant cookie access per agent. Agents browse authenticated sites like a real user.
+
+</details>
 
 <details>
 <summary><strong>Swarm Execution</strong> — parallel multi-agent task processing</summary>
@@ -216,7 +262,21 @@ Each agent can have multiple named pulse routines with independent schedules, mo
 <details>
 <summary><strong>Agent Coordination</strong> — structured multi-agent collaboration</summary>
 
-Agents communicate through a two-tier messaging system: a work ledger for task coordination and an inbox for direct messages. Wake guardrails prevent infinite loops (cooldown periods, daily session caps, per-pair limits). Concurrent pulse session limits prevent resource exhaustion. The coordination system ensures agents work together effectively without stepping on each other.
+Agents communicate through a two-tier messaging system: a work ledger for task coordination and an inbox for direct messages. Wake guardrails prevent infinite loops (cooldown periods, daily session caps, per-pair limits). Plan + Execute delegation lets a powerful planner model create a detailed brief, then spawn a cheaper executor in a fresh container with a clean context window.
+
+</details>
+
+<details>
+<summary><strong>Focused Analysis</strong> — delegate without consuming context</summary>
+
+`focused_analysis` sends a focused question + context to a fast sub-model and returns a compact result in 3-30 seconds. Five built-in personas (analyst, security, reviewer, architect, tester) shape the analysis. The agent's own context window stays clean for high-level reasoning — no 500-line diffs polluting the conversation history.
+
+</details>
+
+<details>
+<summary><strong>PDF & Document Processing</strong> — structured knowledge from documents</summary>
+
+Upload PDFs via chat or the API. OpenDataLoader extracts text with structural awareness. Content is chunked, indexed, and ingested into the shared ClawVault memory vault so every agent can recall document knowledge via semantic search. Agents access document content lazily via `read_document` — pulling only the sections they need instead of dumping entire PDFs into context.
 
 </details>
 
@@ -234,33 +294,22 @@ A dedicated admin interface with container log streaming, LLM call logs with fil
 
 </details>
 
-<details>
-<summary><strong>Per-User API Key Sharing</strong> — bring your own keys</summary>
-
-Users can configure their own LLM provider API keys that take priority over system-wide keys. Key resolution tracking shows exactly which key was used for every session — system-provided, user-provided, or agent-override. Admins can enforce share limits and monitor usage per user.
-
-</details>
-
-<details>
-<summary><strong>File Uploads & Attachments</strong> — rich context in chat</summary>
-
-Upload files and images directly into chat sessions. Text is automatically extracted from PDFs and documents. Images are passed as vision inputs to multimodal models. All attachments are stored securely and scoped to the session.
-
-</details>
-
 ---
 
 ## Pipelines
 
 | Pipeline | Description |
 |----------|------------|
-| `engineering` | Full SDLC: spec → design → UX → implement → review → test → deploy |
-| `feature` | Lightweight: design → implement → review → test |
-| `bugfix` | Focused: diagnose → fix → validate |
-| `planning` | Two-stage project decomposition: high-level breakdown → validated subtasks |
+| `engineering` | Full SDLC: spec, design, UX, implement, review, test, deploy |
+| `planning` | Structured two-stage project decomposition with validation |
+| `planning-agentic` | Single-agent planning with tool-based task creation and dependency wiring |
+| `feature` | Lightweight: design, implement, review, test |
+| `bugfix` | Focused: diagnose, fix, validate |
 | `execute` | Run a single task from a project board |
 
 Pipelines are YAML files with steps, template variables, conditional branching, loops, structured output schemas, retries, and per-step model overrides. Drop a YAML file in `pipelines/` and it appears in the dashboard instantly — no restart needed.
+
+The **agentic planning pipeline** is designed for large projects where structured output hits token limits. It uses a single powerful model with full tool access to incrementally create tasks, subtasks, and dependency edges via API calls — with built-in cycle detection.
 
 ---
 
@@ -307,15 +356,15 @@ Each agent can use a different model. Put your architect on Claude Opus and your
 
 |  | **DjinnBot** | **Single-Agent Tools** | **Agent Frameworks** |
 |--|:------------|:----------------------|:--------------------|
+| **Token Efficiency** | 12-40x reduction via code graph, PTC, focused delegation | Raw file reads and full JSON schemas | Raw file reads and full JSON schemas |
+| **Cost Visibility** | Per-call, per-agent, per-user LLM usage logs with dollar amounts | None | None |
 | **Setup** | One `curl` command — 5 min | Install IDE extension | Hours of framework wiring |
-| **Agents** | 11 specialized agents with rich personas | One generic assistant | Build your own from scratch |
+| **Agents** | 11 specialized agents with rich personas, or create your own | One generic assistant | Build your own from scratch |
 | **Security** | Container isolation, 2FA, encrypted secrets, auto SSL | Direct host access | Direct host access |
 | **Memory** | Persistent semantic memory + knowledge graph | Stateless or basic files | Stateless or basic files |
 | **Collaboration** | Agents review, critique, and build on each other's work | Single agent, single perspective | Custom-coded coordination |
 | **Visibility** | Real-time dashboard, Slack, live feeds, usage tracking | Terminal output | Minimal web UI |
-| **Customization** | YAML pipelines + markdown personas, no code | Limited to tool config | Full code changes |
 | **Autonomy** | Agents work 24/7 on pulse schedules | Requires human in the loop | Requires human in the loop |
-| **Cost tracking** | Per-call, per-agent, per-user LLM usage logs | None | None |
 
 ---
 
@@ -325,10 +374,12 @@ Each agent can use a different model. Put your architect on Claude Opus and your
 |-----------|-----------|
 | Pipeline Engine | TypeScript, Redis Streams, custom state machine |
 | API Server | Python, FastAPI, PostgreSQL, SQLAlchemy, JWT auth |
-| Dashboard | React, Vite, TanStack Router, Tailwind CSS, Three.js |
-| Agent Runtime | Node.js 22, Debian bookworm (full toolbox) |
+| Dashboard | React, Vite, TanStack Router, Tailwind CSS, Three.js, Sigma.js |
+| Agent Runtime | Node.js 22, Debian bookworm, PTC, Camoufox |
+| Code Graph | Tree-sitter, KuzuDB, Louvain clustering |
 | Memory | ClawVault + QMDR (semantic search + knowledge graph) |
 | Agent Framework | pi-mono (pi-agent-core) |
+| Storage | JuiceFS FUSE mount + RustFS (S3-compatible) |
 | Slack | Bolt.js, Socket Mode, per-agent bots |
 | MCP Proxy | mcpo (hot-reload) |
 | CLI | Python, Rich TUI, PyPI distribution |
@@ -356,6 +407,8 @@ djinnbot/
 │   ├── holt/                   # Marketing & Sales
 │   ├── luke/                   # SEO
 │   └── jim/                    # Finance
+├── apps/
+│   └── browser-extension/      # Cookie Bridge (Chrome + Firefox)
 ├── pipelines/                  # YAML pipeline definitions
 ├── skills/                     # Skill packages with references and templates
 ├── packages/
@@ -363,7 +416,8 @@ djinnbot/
 │   ├── server/                 # FastAPI API server (Python)
 │   ├── dashboard/              # React dashboard (TypeScript)
 │   ├── slack/                  # Slack bridge and per-agent bots
-│   └── agent-runtime/          # Agent container entrypoint + tools
+│   ├── agent-runtime/          # Agent container entrypoint, tools, PTC bridge
+│   └── code-graph/             # Tree-sitter indexing, KuzuDB storage
 ├── mcp/                        # MCP tool server config
 ├── cli/                        # Python CLI (pip install djinn-bot-cli)
 ├── proxy/                      # Traefik reverse proxy for SSL

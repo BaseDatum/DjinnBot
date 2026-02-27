@@ -21,6 +21,7 @@ import { createWorkLedgerTools } from './djinnbot-tools/work-ledger.js';
 import { createRunHistoryTools } from './djinnbot-tools/run-history.js';
 import { createFocusedAnalysisTools } from './djinnbot-tools/focused-analysis.js';
 import { createCodeGraphTools } from './djinnbot-tools/code-graph.js';
+import { createTryApproachesTools } from './djinnbot-tools/try-approaches.js';
 import type { MemoryRetrievalTracker } from './djinnbot-tools/memory-scoring.js';
 
 export interface DjinnBotToolsConfig {
@@ -115,6 +116,9 @@ export function createDjinnBotTools(config: DjinnBotToolsConfig): AgentTool[] {
 
     // Code knowledge graph — search, context, impact analysis, change mapping
     ...createCodeGraphTools({ apiBaseUrl }),
+
+    // Speculative execution — try competing approaches in parallel, auto-select winner
+    ...createTryApproachesTools({ publisher, requestIdRef, agentId, apiBaseUrl }),
 
     // Onboarding tools — only for onboarding sessions (ONBOARDING_SESSION_ID is set)
     ...(isOnboardingSession ? createOnboardingTools({ agentId, apiBaseUrl }) : []),

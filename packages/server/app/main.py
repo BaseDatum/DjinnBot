@@ -58,6 +58,7 @@ from app.routers import user_usage
 from app.routers import slack as slack_router
 from app.routers import spawn_executor as spawn_executor_router
 from app.routers import swarm_executor as swarm_executor_router
+from app.routers import try_approaches as try_approaches_router
 from app.routers import run_history as run_history_router
 from app.routers import ingest as ingest_router
 from app.routers import memory_scores as memory_scores_router
@@ -737,6 +738,9 @@ app.include_router(
 )
 app.include_router(
     swarm_executor_router.router, prefix="/v1/internal", tags=["internal"]
+)
+app.include_router(
+    try_approaches_router.router, prefix="/v1/internal", tags=["internal"]
 )
 app.include_router(run_history_router.router, prefix="/v1/internal", tags=["internal"])
 app.include_router(ingest_router.router, prefix="/v1/ingest", tags=["ingest"])
