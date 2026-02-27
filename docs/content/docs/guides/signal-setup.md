@@ -20,10 +20,14 @@ Signal works differently from Slack, Discord, and Telegram:
 
 ## Prerequisites
 
-- A phone number with an active Signal account on a primary device (your phone)
+- A **dedicated phone number** with an active Signal account — this should **not** be your personal phone number, since all messages sent to this number will be handled by DjinnBot. You can register a Signal account using `signal-cli` directly — no separate phone is needed, just a number that can receive an SMS or voice call for verification (a cheap prepaid SIM or VoIP number works well).
 - DjinnBot must be running
 
-That's it. DjinnBot links as a secondary device — your existing Signal account on your phone continues to work normally.
+That's it. DjinnBot links as a secondary device — the Signal account on the dedicated number continues to work normally.
+
+{{< callout type="warning" >}}
+**Do not use your personal phone number.** Any Signal messages sent to the linked number will be routed to DjinnBot agents.
+{{< /callout >}}
 
 ## Step 1: Link DjinnBot to Signal
 

@@ -20,10 +20,14 @@ WhatsApp works similarly to Signal:
 
 ## Prerequisites
 
-- A phone number with an active WhatsApp account
+- A **dedicated phone number** with an active WhatsApp account — this should **not** be your personal phone number, since all messages sent to this number will be handled by DjinnBot. You can register a WhatsApp account on a number without a separate phone — you just need a number that can receive an SMS or voice call for verification (a cheap prepaid SIM or VoIP number works well).
 - DjinnBot must be running
 
-DjinnBot links as a companion device. Your existing WhatsApp on your phone continues to work normally.
+DjinnBot links as a companion device. The WhatsApp account on the dedicated number continues to work normally.
+
+{{< callout type="warning" >}}
+**Do not use your personal phone number.** Any WhatsApp messages sent to the linked number will be routed to DjinnBot agents.
+{{< /callout >}}
 
 ## Step 1: Link DjinnBot to WhatsApp
 
