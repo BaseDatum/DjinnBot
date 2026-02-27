@@ -36,9 +36,10 @@ import { Redis } from 'ioredis';
 import { TaskRunTracker } from './task/task-run-tracker.js';
 import { SessionPersister } from './sessions/session-persister.js';
 
-// Dynamic import for SlackBridge to avoid circular dependency
-// @djinnbot/slack depends on @djinnbot/core for types
+// Dynamic import for SlackBridge and DiscordBridge to avoid circular dependency
+// @djinnbot/slack and @djinnbot/discord depend on @djinnbot/core for types
 type SlackBridgeType = any;
+type DiscordBridgeType = any;
 
 export interface DjinnBotConfig {
   redisUrl: string;
@@ -64,6 +65,7 @@ export class DjinnBot {
   private pipelines: Map<string, PipelineConfig> = new Map();
   private agentRegistry: AgentRegistry;
   slackBridge?: SlackBridgeType;
+  discordBridge?: DiscordBridgeType;
   private agentMemoryManager?: AgentMemoryManager;
   private lifecycleManager: AgentLifecycleManager;
   private lifecycleTracker?: AgentLifecycleTracker;
@@ -1449,6 +1451,77 @@ Start now.`;
     await this.slackBridge.start();
   }
 
+  /** Start the Discord bridge for agent notifications and interactions */
+  async startDiscordBridge(
+    onDecisionNeeded: (
+      agentId: string,
+      systemPrompt: string,
+      userPrompt: string,
+      model: string,
+    ) => Promise<string>,
+    onHumanGuidance?: (
+      agentId: string,
+      runId: string,
+      stepId: string,
+      guidance: string,
+    ) => Promise<void>,
+    defaultDiscordDecisionModel?: string,
+  ): Promise<void> {
+    // Dynamic import to avoid circular dependency
+    // @ts-ignore - @djinnbot/discord is loaded dynamically to avoid circular dependency
+    const discordModule = await import('@djinnbot/discord');
+    const DiscordBridge = discordModule.DiscordBridge;
+    this.discordBridge = new DiscordBridge({
+      eventBus: this.eventBus as any,
+      agentRegistry: this.agentRegistry as any,
+      onDecisionNeeded,
+      onHumanGuidance,
+      defaultDiscordDecisionModel,
+
+      // Wire up feedback → memory storage
+      onFeedback: async (agentId: string, feedback: 'positive' | 'negative', responseText: string, userName: string) => {
+        try {
+          const memory = await this.getAgentMemory(agentId);
+          if (!memory) return;
+          const truncatedResponse = responseText.length > 500
+            ? responseText.slice(0, 500) + '...'
+            : responseText;
+          if (feedback === 'positive') {
+            await memory.remember('lesson', `Positive feedback from ${userName} (Discord)`, [
+              `${userName} gave a thumbs-up to this response:`,
+              '',
+              `> ${truncatedResponse.replace(/\n/g, '\n> ')}`,
+              '',
+              'This style/approach worked well — keep doing this.',
+            ].join('\n'), { source: 'discord_feedback', feedback: 'positive' });
+          } else {
+            await memory.remember('lesson', `Negative feedback from ${userName} (Discord)`, [
+              `${userName} gave a thumbs-down to this response:`,
+              '',
+              `> ${truncatedResponse.replace(/\n/g, '\n> ')}`,
+              '',
+              'This response missed the mark. Review and adjust approach.',
+            ].join('\n'), { source: 'discord_feedback', feedback: 'negative' });
+          }
+          console.log(`[DjinnBot] Discord feedback memory stored for ${agentId}: ${feedback} from ${userName}`);
+        } catch (err) {
+          console.warn(`[DjinnBot] Failed to store Discord feedback memory for ${agentId}:`, err);
+        }
+      },
+
+      // Wire up persona loader
+      onLoadPersona: async (
+        agentId: string,
+        sessionContext: { sessionType: 'discord' | 'pulse' | 'pipeline'; channelContext?: string; installedTools?: string[] }
+      ) => {
+        const persona = await this.personaLoader.loadPersonaForSession(agentId, sessionContext as any);
+        return persona;
+      },
+    });
+
+    await this.discordBridge.start();
+  }
+
   /**
    * Re-read a single pipeline from disk by scanning the pipelines directory
    * for a YAML file whose parsed id matches. Returns the fresh config or null.
@@ -1583,6 +1656,7 @@ Start now.`;
     this.agentPulse?.stop();
     await this.agentWake?.stop();
     await this.slackBridge?.shutdown();
+    await this.discordBridge?.shutdown();
     await this.executor.shutdown();
     await this.engine.shutdown();
     await this.agentInbox.close();
