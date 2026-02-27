@@ -374,6 +374,87 @@ export class WhatsAppBridge {
       }
       return;
     }
+
+    if (action.type === 'context') {
+      const agentId = action.agentId ?? this.whatsappConfig?.defaultAgentId ?? this.getFirstAgentId();
+      if (!agentId) {
+        await this.sendFormattedMessage(senderJid, 'No active conversation.');
+        return;
+      }
+      const sessionId = `whatsapp_${safeSender}_${agentId}`;
+      if (!csm?.isSessionActive(sessionId)) {
+        await this.sendFormattedMessage(senderJid, 'No active session. Send a message first.');
+        return;
+      }
+      try {
+        const usage = await csm.getContextUsage(sessionId);
+        if (usage) {
+          const usedK = Math.round(usage.usedTokens / 1000);
+          const limitK = Math.round(usage.contextWindow / 1000);
+          await this.sendFormattedMessage(senderJid, `*Context:* ${usage.percent}% — ${usedK}k/${limitK}k tokens\n*Model:* ${usage.model || 'unknown'}`);
+        } else {
+          await this.sendFormattedMessage(senderJid, 'Context usage not yet available.');
+        }
+      } catch (err) {
+        await this.sendFormattedMessage(senderJid, 'Failed to retrieve context usage.');
+      }
+      return;
+    }
+
+    if (action.type === 'compact') {
+      const agentId = action.agentId ?? this.whatsappConfig?.defaultAgentId ?? this.getFirstAgentId();
+      if (!agentId) {
+        await this.sendFormattedMessage(senderJid, 'No active conversation.');
+        return;
+      }
+      const sessionId = `whatsapp_${safeSender}_${agentId}`;
+      if (!csm?.isSessionActive(sessionId)) {
+        await this.sendFormattedMessage(senderJid, 'No active session. Send a message first.');
+        return;
+      }
+      await this.sendFormattedMessage(senderJid, 'Compacting session context...');
+      try {
+        const result = await csm.compactSession(sessionId, action.instructions);
+        if (result?.success) {
+          const beforeK = Math.round(result.tokensBefore / 1000);
+          const afterK = Math.round(result.tokensAfter / 1000);
+          const savedPct = result.tokensBefore > 0
+            ? Math.round(((result.tokensBefore - result.tokensAfter) / result.tokensBefore) * 100)
+            : 0;
+          await this.sendFormattedMessage(senderJid, `*Compacted:* ${beforeK}k → ${afterK}k tokens (saved ${savedPct}%)`);
+        } else {
+          await this.sendFormattedMessage(senderJid, `Compaction failed: ${result?.error || 'unknown error'}`);
+        }
+      } catch (err) {
+        await this.sendFormattedMessage(senderJid, 'Failed to compact session.');
+      }
+      return;
+    }
+
+    if (action.type === 'status') {
+      const agentId = action.agentId ?? this.whatsappConfig?.defaultAgentId ?? this.getFirstAgentId();
+      if (!agentId) {
+        await this.sendFormattedMessage(senderJid, 'No active conversation.');
+        return;
+      }
+      const sessionId = `whatsapp_${safeSender}_${agentId}`;
+      const model = this.senderModelOverrides.get(normalizeE164(sender)) ?? 'default';
+      const lines = [`*Model:* ${model}`];
+      if (csm?.isSessionActive(sessionId)) {
+        try {
+          const usage = await csm.getContextUsage(sessionId);
+          if (usage) {
+            const usedK = Math.round(usage.usedTokens / 1000);
+            const limitK = Math.round(usage.contextWindow / 1000);
+            lines.push(`*Context:* ${usage.percent}% (${usedK}k/${limitK}k)`);
+          }
+        } catch { /* ignore */ }
+      } else {
+        lines.push('*Session:* inactive');
+      }
+      await this.sendFormattedMessage(senderJid, lines.join('\n'));
+      return;
+    }
   }
 
   // ── Agent processing ───────────────────────────────────────────────────

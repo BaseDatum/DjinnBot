@@ -1950,6 +1950,137 @@ export class ChatSessionManager {
     return this.activeSessions.get(sessionId);
   }
 
+  // ── Context management ──────────────────────────────────────────────────
+
+  /**
+   * Get context usage for a session by sending a command to the container
+   * and waiting for the contextUsage event response.
+   *
+   * Returns null if the session is not active or the container doesn't respond.
+   */
+  async getContextUsage(sessionId: string): Promise<{
+    usedTokens: number;
+    contextWindow: number;
+    percent: number;
+    model?: string;
+  } | null> {
+    const session = this.activeSessions.get(sessionId);
+    if (!session || session.status === 'starting' || session.status === 'stopping') {
+      return null;
+    }
+
+    return new Promise<{ usedTokens: number; contextWindow: number; percent: number; model?: string } | null>((resolve) => {
+      const timeout = setTimeout(() => {
+        cleanup();
+        resolve(null);
+      }, 5000);
+
+      // Listen for the contextUsage event on the session's events channel
+      const eventSub = new (require('ioredis').default)(this.redis.options);
+      const eventsChannel = `run:${sessionId}:events`;
+
+      const cleanup = () => {
+        clearTimeout(timeout);
+        eventSub.unsubscribe().catch(() => {});
+        eventSub.quit().catch(() => {});
+      };
+
+      eventSub.on('message', (_ch: string, message: string) => {
+        try {
+          const msg = JSON.parse(message);
+          if (msg.type === 'contextUsage') {
+            cleanup();
+            resolve({
+              usedTokens: msg.usedTokens,
+              contextWindow: msg.contextWindow,
+              percent: msg.percent,
+              model: msg.model,
+            });
+          }
+        } catch { /* ignore parse errors */ }
+      });
+
+      eventSub.subscribe(eventsChannel).then(() => {
+        // Now send the command
+        this.commandSender.sendGetContextUsage(sessionId).catch(err => {
+          console.warn(`[ChatSessionManager] getContextUsage: failed to send command:`, err);
+          cleanup();
+          resolve(null);
+        });
+      }).catch(() => {
+        cleanup();
+        resolve(null);
+      });
+    });
+  }
+
+  /**
+   * Compact a session's context by sending a compaction command to the container
+   * and waiting for the compactionComplete event.
+   *
+   * Returns the compaction result or null if the session is not active.
+   */
+  async compactSession(sessionId: string, instructions?: string): Promise<{
+    success: boolean;
+    summary: string;
+    tokensBefore: number;
+    tokensAfter: number;
+    tailMessageCount: number;
+    error?: string;
+  } | null> {
+    const session = this.activeSessions.get(sessionId);
+    if (!session) {
+      return null;
+    }
+
+    if (session.status !== 'ready') {
+      return { success: false, summary: '', tokensBefore: 0, tokensAfter: 0, tailMessageCount: 0, error: 'Session is busy' };
+    }
+
+    return new Promise((resolve) => {
+      const timeout = setTimeout(() => {
+        cleanup();
+        resolve({ success: false, summary: '', tokensBefore: 0, tokensAfter: 0, tailMessageCount: 0, error: 'Compaction timed out (120s)' });
+      }, 120_000);
+
+      const eventSub = new (require('ioredis').default)(this.redis.options);
+      const eventsChannel = `run:${sessionId}:events`;
+
+      const cleanup = () => {
+        clearTimeout(timeout);
+        eventSub.unsubscribe().catch(() => {});
+        eventSub.quit().catch(() => {});
+      };
+
+      eventSub.on('message', (_ch: string, message: string) => {
+        try {
+          const msg = JSON.parse(message);
+          if (msg.type === 'compactionComplete') {
+            cleanup();
+            resolve({
+              success: msg.tokensAfter < msg.tokensBefore,
+              summary: msg.summary,
+              tokensBefore: msg.tokensBefore,
+              tokensAfter: msg.tokensAfter,
+              tailMessageCount: msg.tailMessageCount,
+            });
+          }
+        } catch { /* ignore parse errors */ }
+      });
+
+      eventSub.subscribe(eventsChannel).then(() => {
+        this.commandSender.sendCompactSession(sessionId, { instructions }).catch(err => {
+          console.warn(`[ChatSessionManager] compactSession: failed to send command:`, err);
+          cleanup();
+          resolve({ success: false, summary: '', tokensBefore: 0, tokensAfter: 0, tailMessageCount: 0, error: String(err) });
+        });
+      }).catch(() => {
+        cleanup();
+        resolve(null);
+      });
+    });
+  }
+
   /**
    * Recover orphaned sessions from before a restart.
    *

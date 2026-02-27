@@ -911,6 +911,18 @@ export class AgentSlackRuntime {
           await this.handleThinkingSubcommand(parts.slice(1), command, respond);
           break;
 
+        case 'context':
+          await this.handleContextSubcommand(command, respond);
+          break;
+
+        case 'compact':
+          await this.handleCompactSubcommand(parts.slice(1), command, respond);
+          break;
+
+        case 'status':
+          await this.handleStatusSubcommand(command, respond);
+          break;
+
         case 'help':
         default:
           await this.handleHelpSubcommand(respond);
@@ -1113,6 +1125,9 @@ export class AgentSlackRuntime {
       `\`/${name} models select\` — Browse all configured providers and models`,
       `\`/${name} config\` — Show agent configuration`,
       `\`/${name} thinking <level>\` — Set thinking level (off, minimal, low, medium, high, xhigh)`,
+      `\`/${name} context\` — Show current context window usage`,
+      `\`/${name} compact [instructions]\` — Compact session context`,
+      `\`/${name} status\` — Show session status`,
       `\`/${name} help\` — Show this help message`,
       '',
       `*Examples:*`,
@@ -1120,6 +1135,121 @@ export class AgentSlackRuntime {
       `\`/${name} model execution openai/gpt-4o\``,
       `\`/${name} model execution openrouter/google/gemini-2.5-pro\``,
     ];
+
+    await respond({
+      response_type: 'ephemeral',
+      text: lines.join('\n'),
+    });
+  }
+
+  // ─── Context / Compact / Status Subcommands ──────────────────────────────
+
+  /** Helper: resolve session ID from Slack channel context via the pool. */
+  private getSlackSessionId(channelId: string): string | undefined {
+    const pool = this.config.sessionPool;
+    if (!pool) return undefined;
+    const source = channelId.startsWith('D') ? 'dm' as const : 'channel_thread' as const;
+    const entry = pool.getSessionEntry(this.agentId, source, channelId);
+    return entry?.sessionId;
+  }
+
+  /** Helper: access ChatSessionManager from the pool config. */
+  private get chatSessionManager(): any {
+    return (this.config.sessionPool as any)?.config?.chatSessionManager;
+  }
+
+  private async handleContextSubcommand(
+    command: { channel_id: string; user_id: string },
+    respond: (msg: string | Record<string, any>) => Promise<void>,
+  ): Promise<void> {
+    const csm = this.chatSessionManager;
+    const sessionId = this.getSlackSessionId(command.channel_id);
+
+    if (!sessionId || !csm?.isSessionActive(sessionId)) {
+      await respond({ response_type: 'ephemeral', text: 'No active session. Send a message first.' });
+      return;
+    }
+
+    try {
+      const usage = await csm.getContextUsage(sessionId);
+      if (usage) {
+        const usedK = Math.round(usage.usedTokens / 1000);
+        const limitK = Math.round(usage.contextWindow / 1000);
+        await respond({
+          response_type: 'ephemeral',
+          text: `*Context:* ${usage.percent}% — ${usedK}k/${limitK}k tokens\n*Model:* \`${usage.model || 'unknown'}\``,
+        });
+      } else {
+        await respond({ response_type: 'ephemeral', text: 'Context usage not yet available. Send a message first.' });
+      }
+    } catch (err) {
+      await respond({ response_type: 'ephemeral', text: `Failed to retrieve context usage: ${(err as Error).message}` });
+    }
+  }
+
+  private async handleCompactSubcommand(
+    args: string[],
+    command: { channel_id: string; user_id: string },
+    respond: (msg: string | Record<string, any>) => Promise<void>,
+  ): Promise<void> {
+    const csm = this.chatSessionManager;
+    const instructions = args.join(' ').trim() || undefined;
+    const sessionId = this.getSlackSessionId(command.channel_id);
+
+    if (!sessionId || !csm?.isSessionActive(sessionId)) {
+      await respond({ response_type: 'ephemeral', text: 'No active session. Send a message first.' });
+      return;
+    }
+
+    await respond({ response_type: 'ephemeral', text: 'Compacting session context...' });
+
+    try {
+      const result = await csm.compactSession(sessionId, instructions);
+      if (result?.success) {
+        const beforeK = Math.round(result.tokensBefore / 1000);
+        const afterK = Math.round(result.tokensAfter / 1000);
+        const savedPct = result.tokensBefore > 0
+          ? Math.round(((result.tokensBefore - result.tokensAfter) / result.tokensBefore) * 100)
+          : 0;
+        await respond({
+          response_type: 'ephemeral',
+          text: `*Compacted:* ${beforeK}k → ${afterK}k tokens (saved ${savedPct}%)`,
+        });
+      } else {
+        await respond({ response_type: 'ephemeral', text: `Compaction failed: ${result?.error || 'unknown error'}` });
+      }
+    } catch (err) {
+      await respond({ response_type: 'ephemeral', text: `Compaction failed: ${(err as Error).message}` });
+    }
+  }
+
+  private async handleStatusSubcommand(
+    command: { channel_id: string; user_id: string },
+    respond: (msg: string | Record<string, any>) => Promise<void>,
+  ): Promise<void> {
+    const pool = this.config.sessionPool;
+    const csm = this.chatSessionManager;
+    const source = command.channel_id.startsWith('D') ? 'dm' as const : 'channel_thread' as const;
+    const activeModel = pool?.getActiveSessionModel(this.agentId, source, command.channel_id);
+    const sessionId = this.getSlackSessionId(command.channel_id);
+
+    const lines: string[] = [
+      `*${this.agent.identity.emoji} ${this.agent.identity.name}*`,
+      `*Model:* \`${activeModel ?? this.agent.config?.model ?? 'unknown'}\``,
+    ];
+
+    if (sessionId && csm?.isSessionActive(sessionId)) {
+      try {
+        const usage = await csm.getContextUsage(sessionId);
+        if (usage) {
+          const usedK = Math.round(usage.usedTokens / 1000);
+          const limitK = Math.round(usage.contextWindow / 1000);
+          lines.push(`*Context:* ${usage.percent}% (${usedK}k/${limitK}k)`);
+        }
+      } catch { /* ignore */ }
+    } else {
+      lines.push('*Session:* inactive');
+    }
 
     await respond({
       response_type: 'ephemeral',

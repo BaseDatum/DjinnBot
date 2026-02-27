@@ -1,6 +1,6 @@
 import { Redis } from 'ioredis';
 import { channels, commandMessageSchema } from '@djinnbot/core';
-import type { AgentStepCommand, ToolCommand, ShutdownCommand, AbortCommand, StructuredOutputCommand, ChangeModelCommand } from '@djinnbot/core';
+import type { AgentStepCommand, ToolCommand, ShutdownCommand, AbortCommand, StructuredOutputCommand, ChangeModelCommand, GetContextUsageCommand, CompactSessionCommand } from '@djinnbot/core';
 
 export interface CommandHandler {
   onAgentStep: (cmd: AgentStepCommand) => Promise<void>;
@@ -10,6 +10,10 @@ export interface CommandHandler {
   onStructuredOutput?: (cmd: StructuredOutputCommand) => Promise<void>;
   /** Called when the engine sends a model change command between turns. */
   onChangeModel?: (cmd: ChangeModelCommand) => Promise<void>;
+  /** Called when the engine requests current context usage. */
+  onGetContextUsage?: (cmd: GetContextUsageCommand) => Promise<void>;
+  /** Called when the engine requests session compaction. */
+  onCompactSession?: (cmd: CompactSessionCommand) => Promise<void>;
 }
 
 export async function startCommandListener(
@@ -51,6 +55,20 @@ export async function startCommandListener(
             await handler.onChangeModel(cmd);
           } else {
             console.warn('[CommandListener] Received changeModel command but no handler registered');
+          }
+          break;
+        case 'getContextUsage':
+          if (handler.onGetContextUsage) {
+            await handler.onGetContextUsage(cmd);
+          } else {
+            console.warn('[CommandListener] Received getContextUsage command but no handler registered');
+          }
+          break;
+        case 'compactSession':
+          if (handler.onCompactSession) {
+            await handler.onCompactSession(cmd);
+          } else {
+            console.warn('[CommandListener] Received compactSession command but no handler registered');
           }
           break;
       }

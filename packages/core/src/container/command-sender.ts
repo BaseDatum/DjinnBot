@@ -10,6 +10,8 @@ import {
   type AbortCommand,
   type StructuredOutputCommand,
   type ChangeModelCommand,
+  type GetContextUsageCommand,
+  type CompactSessionCommand,
 } from '../redis-protocol/index.js';
 
 export class CommandSender {
@@ -206,6 +208,66 @@ export class CommandSender {
     } catch (error) {
       console.error(`[CommandSender] Failed to send structuredOutput to ${runId}:`, error);
       throw new Error(`Failed to publish structuredOutput command to ${runId}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+
+    return requestId;
+  }
+
+  /**
+   * Request context usage from a running container.
+   * The container responds with a contextUsage event on the events channel.
+   */
+  async sendGetContextUsage(
+    runId: string,
+    options: { requestId?: string } = {}
+  ): Promise<string> {
+    const requestId = options.requestId ?? this.generateRequestId();
+
+    const cmd: GetContextUsageCommand = {
+      type: 'getContextUsage',
+      requestId,
+      timestamp: createTimestamp(),
+    };
+
+    const channel = channels.command(runId);
+
+    try {
+      await this.redis.publish(channel, JSON.stringify(cmd));
+      console.log(`[CommandSender] Sent getContextUsage to ${runId}: ${requestId}`);
+    } catch (error) {
+      console.error(`[CommandSender] Failed to send getContextUsage to ${runId}:`, error);
+      throw new Error(`Failed to publish getContextUsage command to ${runId}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+
+    return requestId;
+  }
+
+  /**
+   * Request session compaction from a running container.
+   * The container performs LLM-driven summarization and responds with
+   * a compactionComplete event on the events channel.
+   */
+  async sendCompactSession(
+    runId: string,
+    options: { requestId?: string; instructions?: string } = {}
+  ): Promise<string> {
+    const requestId = options.requestId ?? this.generateRequestId();
+
+    const cmd: CompactSessionCommand = {
+      type: 'compactSession',
+      requestId,
+      timestamp: createTimestamp(),
+      ...(options.instructions ? { instructions: options.instructions } : {}),
+    };
+
+    const channel = channels.command(runId);
+
+    try {
+      await this.redis.publish(channel, JSON.stringify(cmd));
+      console.log(`[CommandSender] Sent compactSession to ${runId}: ${requestId}`);
+    } catch (error) {
+      console.error(`[CommandSender] Failed to send compactSession to ${runId}:`, error);
+      throw new Error(`Failed to publish compactSession command to ${runId}: ${error instanceof Error ? error.message : String(error)}`);
     }
 
     return requestId;

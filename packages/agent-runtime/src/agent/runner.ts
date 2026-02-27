@@ -14,6 +14,10 @@ import { authFetch } from '../api/auth-fetch.js';
 import { MemoryRetrievalTracker } from './djinnbot-tools/memory-scoring.js';
 import { computeOpenRouterCost } from './openrouter-pricing.js';
 import { initPtc, type PtcInstance } from './ptc/index.js';
+import { ShadowMessageLog } from './shadow-message-log.js';
+import { getModelContextWindow } from './model-context-windows.js';
+import { pruneToolOutputs } from './session-pruner.js';
+import { compactSession, type CompactionResult } from './session-compactor.js';
 
 // ── PTC system prompt supplement ──────────────────────────────────────────
 // Appended to the agent's system prompt when Programmatic Tool Calling is enabled.
@@ -206,6 +210,20 @@ export class ContainerAgentRunner {
   /** Tracks which memories were recalled during this step for adaptive scoring. */
   readonly retrievalTracker: MemoryRetrievalTracker;
 
+  // ── Context management ────────────────────────────────────────────────
+  /** Shadow copy of Agent's message history for pruning/compaction. */
+  private shadowLog = new ShadowMessageLog();
+  /** Last known context token usage (from most recent LLM response usage.input). */
+  private lastContextTokens = 0;
+  /** Context window size for the current model (in tokens). */
+  private contextWindowTokens = 0;
+  /** Auto-compaction threshold (fraction of context window). */
+  private autoCompactThreshold = 0.85;
+  /** Whether auto-compaction is enabled. */
+  private autoCompactEnabled = true;
+  /** Lock to prevent concurrent compaction. */
+  private compacting = false;
+
   constructor(private options: ContainerAgentRunnerOptions) {
     ensureInitialized();
     ensureCustomProviderRegistered();
@@ -249,6 +267,10 @@ export class ContainerAgentRunner {
       this.ptcInstance.close().catch(err => console.warn('[AgentRunner] PTC cleanup error:', err));
       this.ptcInstance = null;
     }
+    // Reset context management
+    this.shadowLog = new ShadowMessageLog();
+    this.lastContextTokens = 0;
+    this.contextWindowTokens = 0;
     console.log(`[AgentRunner] Session reset — conversation history cleared`);
   }
 
@@ -300,6 +322,195 @@ export class ContainerAgentRunner {
    */
   getModelString(): string {
     return this.options.model || 'anthropic/claude-sonnet-4';
+  }
+
+  // ── Context usage ────────────────────────────────────────────────────────
+
+  /**
+   * Get current context usage for this session.
+   * Returns tokens used, context window size, and percentage.
+   */
+  getContextUsage(): { usedTokens: number; contextWindow: number; percent: number; model: string } {
+    // Ensure context window is resolved
+    if (this.contextWindowTokens === 0) {
+      const modelStr = this.options.model || 'anthropic/claude-sonnet-4';
+      this.contextWindowTokens = getModelContextWindow(modelStr);
+    }
+
+    const used = this.lastContextTokens || this.shadowLog.estimateTokens();
+    const limit = this.contextWindowTokens;
+    const percent = limit > 0 ? Math.round((used / limit) * 100) : 0;
+
+    return {
+      usedTokens: used,
+      contextWindow: limit,
+      percent,
+      model: this.getModelString(),
+    };
+  }
+
+  /**
+   * Perform session compaction (LLM-driven summarization).
+   *
+   * Rebuilds the Agent with a compaction summary + tail messages.
+   * Can be triggered manually (/compact) or automatically when
+   * the context window is nearly full.
+   */
+  async compactSessionContext(instructions?: string): Promise<CompactionResult> {
+    if (this.compacting) {
+      return {
+        success: false,
+        summary: '',
+        tokensBefore: 0,
+        tokensAfter: 0,
+        tailMessageCount: 0,
+        error: 'Compaction already in progress',
+      };
+    }
+
+    this.compacting = true;
+    try {
+      const result = await compactSession(
+        this.shadowLog,
+        {
+          publisher: this.options.publisher,
+          summarize: async (systemPrompt: string, userPrompt: string) => {
+            return this.runCompactionLlmCall(systemPrompt, userPrompt);
+          },
+        },
+        instructions,
+      );
+
+      if (result.success) {
+        // Rebuild the Agent with compacted messages
+        await this.rebuildAgentFromShadow();
+
+        // Update context tracking
+        this.lastContextTokens = this.shadowLog.estimateTokens();
+        this.contextWindowTokens = getModelContextWindow(this.getModelString());
+      }
+
+      return result;
+    } finally {
+      this.compacting = false;
+    }
+  }
+
+  /**
+   * Make an LLM call for compaction summarization.
+   * Uses the same model resolution as the main agent.
+   */
+  private async runCompactionLlmCall(systemPrompt: string, userPrompt: string): Promise<string> {
+    const { baseUrl, modelId, apiKey } = this.resolveModelForStructuredOutput(
+      this.getModelString()
+    );
+
+    const response = await fetch(`${baseUrl}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`,
+        ...(baseUrl.includes('openrouter') ? {
+          'HTTP-Referer': 'https://djinnbot.dev',
+          'X-Title': 'DjinnBot Compaction',
+        } : {}),
+      },
+      body: JSON.stringify({
+        model: modelId,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt },
+        ],
+        max_tokens: 8192,
+        temperature: 0.3,
+      }),
+      signal: AbortSignal.timeout(120_000),
+    });
+
+    if (!response.ok) {
+      const errorBody = await response.text();
+      throw new Error(`Compaction LLM call failed: ${response.status} ${errorBody}`);
+    }
+
+    const data = await response.json() as any;
+    return data.choices?.[0]?.message?.content || '';
+  }
+
+  /**
+   * Rebuild the persistent Agent from the shadow message log.
+   * Used after compaction or pruning modifies the shadow.
+   */
+  private async rebuildAgentFromShadow(): Promise<void> {
+    console.log(`[AgentRunner] Rebuilding Agent from shadow log (${this.shadowLog.length} messages)`);
+
+    // Tear down old agent + subscription
+    if (this.unsubscribeAgent) {
+      this.unsubscribeAgent();
+      this.unsubscribeAgent = null;
+    }
+    this.persistentAgent = null;
+
+    // Rebuild by seeding history from the shadow log
+    const history = this.shadowLog.toHistoryArray();
+    if (history.length > 0 && this.persistentSystemPrompt) {
+      this.seedHistory(
+        this.persistentSystemPrompt,
+        history.map(m => ({ role: m.role, content: m.content })),
+      );
+    }
+
+    console.log(`[AgentRunner] Agent rebuilt with ${history.length} messages from shadow`);
+  }
+
+  /**
+   * Check if auto-compaction should trigger and perform it if needed.
+   * Called after each turn completes.
+   */
+  private async checkAutoCompaction(): Promise<void> {
+    if (!this.autoCompactEnabled || this.compacting) return;
+
+    const usage = this.getContextUsage();
+    if (usage.percent < this.autoCompactThreshold * 100) return;
+
+    console.log(
+      `[AgentRunner] Context at ${usage.percent}% (${usage.usedTokens}/${usage.contextWindow}), ` +
+      `threshold ${this.autoCompactThreshold * 100}% — attempting auto-prune first`
+    );
+
+    // Try pruning first
+    const pruneResult = pruneToolOutputs(this.shadowLog.getMutableMessages());
+    if (pruneResult.pruned) {
+      // Re-check after pruning
+      const postPruneEstimate = this.shadowLog.estimateTokens();
+      const postPrunePercent = usage.contextWindow > 0
+        ? Math.round((postPruneEstimate / usage.contextWindow) * 100)
+        : 0;
+
+      if (postPrunePercent < this.autoCompactThreshold * 100) {
+        console.log(`[AgentRunner] Pruning sufficient: ${usage.percent}% -> ${postPrunePercent}%`);
+        // Rebuild agent with pruned messages
+        await this.rebuildAgentFromShadow();
+        this.lastContextTokens = postPruneEstimate;
+        return;
+      }
+    }
+
+    // Pruning wasn't enough — full compaction
+    console.log(`[AgentRunner] Pruning insufficient, triggering auto-compaction`);
+    const result = await this.compactSessionContext();
+
+    if (result.success) {
+      // Publish notification so bridges can inform the user
+      this.options.publisher.publishEvent({
+        type: 'compactionComplete',
+        requestId: this.requestIdRef.current || 'auto',
+        summary: result.summary,
+        tokensBefore: result.tokensBefore,
+        tokensAfter: result.tokensAfter,
+        tailMessageCount: result.tailMessageCount,
+        compactionNumber: this.shadowLog.compactionCount,
+      } as any).catch(err => console.error('[AgentRunner] Failed to publish compaction event:', err));
+    }
   }
 
   /**
@@ -545,11 +756,21 @@ export class ContainerAgentRunner {
         const durationMs = startTime ? Date.now() - startTime : 0;
         this.toolCallStartTimes.delete(toolCallId);
 
+        // Track tool result in shadow log
+        const resultStr = typeof result === 'string' ? result : JSON.stringify(result);
+        this.shadowLog.push({
+          role: 'tool_result',
+          content: resultStr,
+          toolName,
+          toolCallId,
+          timestamp: Date.now(),
+        });
+
         this.options.publisher.publishEvent({
           type: 'toolEnd',
           requestId: this.requestIdRef.current,
           toolName,
-          result: typeof result === 'string' ? result : JSON.stringify(result),
+          result: resultStr,
           success: !isError,
           durationMs,
         } as any).catch(err => console.error('[AgentRunner] Failed to publish toolEnd:', err));
@@ -585,6 +806,25 @@ export class ContainerAgentRunner {
           const extracted = extractTextFromMessage(message);
           if (extracted && !this.rawOutput.includes(extracted)) {
             this.rawOutput = extracted;
+          }
+
+          // Track assistant message in shadow log
+          if (extracted) {
+            this.shadowLog.push({
+              role: 'assistant',
+              content: extracted,
+              timestamp: Date.now(),
+            });
+          }
+
+          // Track token usage from the LLM response — usage.input is the
+          // total tokens the model received (full context window usage).
+          const usage = (message as any).usage;
+          if (usage) {
+            const inputTokens = (usage.input || 0) + (usage.cacheRead || 0);
+            if (inputTokens > 0) {
+              this.lastContextTokens = inputTokens;
+            }
           }
 
           // ── Log this LLM call to the API ────────────────────────────────
@@ -777,7 +1017,13 @@ export class ContainerAgentRunner {
       } : {}),
     });
     this.persistentSystemPrompt = systemPrompt;
-    console.log(`[AgentRunner] Seeded persistent agent with ${messages.length} historical messages (thinkingLevel: ${thinkingLevel || 'off'})`);
+
+    // Populate shadow log from historical messages
+    this.shadowLog.seedFromHistory(history);
+    // Resolve context window for the model
+    this.contextWindowTokens = getModelContextWindow(this.options.model || 'anthropic/claude-sonnet-4');
+
+    console.log(`[AgentRunner] Seeded persistent agent with ${messages.length} historical messages (thinkingLevel: ${thinkingLevel || 'off'}), shadow log: ${this.shadowLog.length} messages`);
   }
 
   // ── Structured Output ────────────────────────────────────────────────────
@@ -1100,6 +1346,18 @@ export class ContainerAgentRunner {
     this.toolCallStartTimes.clear();
     this.retrievalTracker.clear();
 
+    // Track user message in shadow log
+    this.shadowLog.push({
+      role: 'user',
+      content: userPrompt,
+      timestamp: Date.now(),
+    });
+
+    // Ensure context window is resolved
+    if (this.contextWindowTokens === 0) {
+      this.contextWindowTokens = getModelContextWindow(this.options.model || 'anthropic/claude-sonnet-4');
+    }
+
     try {
       const model = this.getModel();
 
@@ -1223,12 +1481,20 @@ export class ContainerAgentRunner {
       if (this.stepCompleted) {
         // Flush memory retrieval tracking for analytics (no outcome — scoring is agent-driven)
         this.retrievalTracker.flush().catch(() => {});
+        // Check if auto-compaction is needed (fire-and-forget)
+        this.checkAutoCompaction().catch(err =>
+          console.error('[AgentRunner] Auto-compaction check failed:', err)
+        );
         return this.stepResult;
       }
 
       // Agent didn't call complete/fail — return raw output
       // Flush memory retrieval tracking for analytics (no outcome — scoring is agent-driven)
       this.retrievalTracker.flush().catch(() => {});
+      // Check if auto-compaction is needed (fire-and-forget)
+      this.checkAutoCompaction().catch(err =>
+        console.error('[AgentRunner] Auto-compaction check failed:', err)
+      );
       return {
         output: this.rawOutput,
         success: true,
