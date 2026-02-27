@@ -599,6 +599,18 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Could not auto-import skills from disk: {e}")
 
+    # Pre-load faster-whisper model in background so the first voice note
+    # doesn't pay the download + load cost.  Model is cached on JuiceFS.
+    async def _preload_whisper():
+        try:
+            from app.services.audio_transcription import _get_model
+
+            await asyncio.get_event_loop().run_in_executor(None, _get_model)
+        except Exception as e:
+            logger.warning(f"Whisper model preload failed (non-fatal): {e}")
+
+    asyncio.create_task(_preload_whisper())
+
     # Start background run completion listener
     listener_task = asyncio.create_task(_run_completion_listener())
     logger.info("Started run completion listener")

@@ -15,6 +15,7 @@ Model is loaded lazily on first transcription request and cached in memory.
 import os
 import tempfile
 import subprocess
+from pathlib import Path
 from typing import Optional
 
 from app.logging_config import get_logger
@@ -26,13 +27,39 @@ logger = get_logger(__name__)
 # Can be overridden via WHISPER_MODEL_SIZE env var
 WHISPER_MODEL_SIZE = os.getenv("WHISPER_MODEL_SIZE", "base")
 
+# Model cache directory — persisted on JuiceFS so the model is downloaded
+# once and reused across container restarts.  Falls back to the default
+# huggingface cache dir if JuiceFS is not mounted.
+_JFS_MODEL_DIR = "/jfs/cache/whisper-models"
+_DEFAULT_CACHE = os.path.expanduser("~/.cache/huggingface")
+
 # Lazy-loaded model instance
 _whisper_model = None
 _whisper_load_failed = False
 
 
+def _resolve_model_dir() -> str:
+    """Pick the best model cache directory, preferring JuiceFS for persistence."""
+    jfs_dir = os.getenv("WHISPER_MODEL_DIR", _JFS_MODEL_DIR)
+
+    # Check if JuiceFS is mounted (the /jfs mount point should exist and be writable)
+    jfs_root = Path(jfs_dir).parts[1] if len(Path(jfs_dir).parts) > 1 else "jfs"
+    if os.path.ismount(f"/{jfs_root}") or os.path.isdir(jfs_dir):
+        os.makedirs(jfs_dir, exist_ok=True)
+        return jfs_dir
+
+    # JuiceFS not available — use default cache (ephemeral, re-downloads on restart)
+    return _DEFAULT_CACHE
+
+
 def _get_model():
-    """Lazy-load the faster-whisper model (downloads on first use)."""
+    """Lazy-load the faster-whisper model.
+
+    On first call, downloads the model to JuiceFS (persistent) or the
+    default huggingface cache (ephemeral).  Subsequent calls return the
+    cached in-memory instance.  Subsequent container restarts load from
+    the JuiceFS cache without re-downloading.
+    """
     global _whisper_model, _whisper_load_failed
 
     if _whisper_load_failed:
@@ -44,13 +71,21 @@ def _get_model():
     try:
         from faster_whisper import WhisperModel
 
-        logger.info(f"Loading faster-whisper model '{WHISPER_MODEL_SIZE}'...")
+        model_dir = _resolve_model_dir()
+        logger.info(
+            f"Loading faster-whisper model '{WHISPER_MODEL_SIZE}' "
+            f"(cache: {model_dir})..."
+        )
         _whisper_model = WhisperModel(
             WHISPER_MODEL_SIZE,
             device="cpu",
             compute_type="int8",  # Quantized for fast CPU inference
+            download_root=model_dir,
         )
-        logger.info(f"faster-whisper model '{WHISPER_MODEL_SIZE}' loaded successfully")
+        logger.info(
+            f"faster-whisper model '{WHISPER_MODEL_SIZE}' loaded successfully "
+            f"(cache: {model_dir})"
+        )
         return _whisper_model
     except ImportError:
         logger.warning(
