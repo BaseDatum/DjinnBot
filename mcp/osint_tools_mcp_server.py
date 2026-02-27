@@ -159,7 +159,7 @@ async def handle_blackbird(params: Dict[str, Any]) -> Dict[str, Any]:
         "--timeout",
         str(timeout),
     ]
-    stdout, stderr, rc = await run_command(cmd, timeout=300)
+    stdout, stderr, rc = await run_command(cmd, cwd="/opt/blackbird", timeout=300)
     if rc == 0:
         return {"success": True, "content": stdout}
     return {"success": False, "error": f"Blackbird failed: {stderr}"}

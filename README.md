@@ -68,10 +68,10 @@ docker compose up -d
 
 ### First Visit
 
-| Service | URL |
-|---------|-----|
+| Service   | URL                     |
+| --------- | ----------------------- |
 | Dashboard | `http://localhost:3000` |
-| API | `http://localhost:8000` |
+| API       | `http://localhost:8000` |
 | MCP Tools | `http://localhost:8001` |
 
 > When authentication is enabled (`AUTH_ENABLED=true`), the dashboard redirects you to a setup page on first visit where you create your admin account and optionally enable two-factor authentication.
@@ -100,7 +100,7 @@ graph LR
     C --> D["4. Autonomous Work"]
     D --> E["5. Review & Iterate"]
     E --> F["6. Deliver"]
-    
+
     style A fill:#3b82f6,color:#fff,stroke:#2563eb
     style B fill:#8b5cf6,color:#fff,stroke:#7c3aed
     style C fill:#f59e0b,color:#000,stroke:#d97706
@@ -124,13 +124,13 @@ For maximum throughput, use **swarm execution** — a parallel execution engine 
 
 Most agent tools burn through context windows by dumping raw file contents and verbose JSON schemas into every turn. DjinnBot is engineered to minimize token waste:
 
-| Task | Typical Agent Tool | DjinnBot | Reduction |
-|------|-------------------|----------|-----------|
-| Understand a function + all callers/callees | ~20,000 tokens (15+ file reads) | ~500 tokens (1 `code_graph_context` call) | **40x** |
-| "What breaks if I change AuthService?" | ~30,000 tokens (codebase-wide grep + read) | ~800 tokens (1 `code_graph_impact` call) | **37x** |
-| 30 tool schemas in system prompt | ~18,000 tokens (full JSON schemas) | ~1,500 tokens (compact Python signatures) | **12x** |
-| Read 5 files, grep, aggregate | ~12,000 tokens (5 round-trips) | ~500 tokens (1 `exec_code` call) | **24x** |
-| Analyze a 500-line diff | ~4,000 tokens (in agent context) | ~300 tokens (`focused_analysis` sub-model) | **13x** |
+| Task                                        | Typical Agent Tool                         | DjinnBot                                   | Reduction |
+| ------------------------------------------- | ------------------------------------------ | ------------------------------------------ | --------- |
+| Understand a function + all callers/callees | ~20,000 tokens (15+ file reads)            | ~500 tokens (1 `code_graph_context` call)  | **40x**   |
+| "What breaks if I change AuthService?"      | ~30,000 tokens (codebase-wide grep + read) | ~800 tokens (1 `code_graph_impact` call)   | **37x**   |
+| 30 tool schemas in system prompt            | ~18,000 tokens (full JSON schemas)         | ~1,500 tokens (compact Python signatures)  | **12x**   |
+| Read 5 files, grep, aggregate               | ~12,000 tokens (5 round-trips)             | ~500 tokens (1 `exec_code` call)           | **24x**   |
+| Analyze a 500-line diff                     | ~4,000 tokens (in agent context)           | ~300 tokens (`focused_analysis` sub-model) | **13x**   |
 
 Three systems make this possible:
 
@@ -148,24 +148,24 @@ DjinnBot ships with 11 agents covering a full product organization:
 
 ### Engineering
 
-| Agent | Role | What They Do |
-|-------|------|-------------|
-| **Eric** | Product Owner | Requirements, user stories, acceptance criteria, scope management |
-| **Finn** | Solutions Architect | System architecture, tech decisions, code review, API design |
-| **Shigeo** | UX Specialist | User flows, design systems, component specs, accessibility |
-| **Yukihiro** | Senior SWE | Implementation, bug fixes, writing production code |
-| **Chieko** | Test Engineer | QA strategy, regression detection, test automation |
-| **Stas** | SRE | Infrastructure, deployment, monitoring, incident response |
-| **Yang** | DevEx Specialist | CI/CD pipelines, tooling, developer workflow optimization |
+| Agent        | Role                | What They Do                                                      |
+| ------------ | ------------------- | ----------------------------------------------------------------- |
+| **Eric**     | Product Owner       | Requirements, user stories, acceptance criteria, scope management |
+| **Finn**     | Solutions Architect | System architecture, tech decisions, code review, API design      |
+| **Shigeo**   | UX Specialist       | User flows, design systems, component specs, accessibility        |
+| **Yukihiro** | Senior SWE          | Implementation, bug fixes, writing production code                |
+| **Chieko**   | Test Engineer       | QA strategy, regression detection, test automation                |
+| **Stas**     | SRE                 | Infrastructure, deployment, monitoring, incident response         |
+| **Yang**     | DevEx Specialist    | CI/CD pipelines, tooling, developer workflow optimization         |
 
 ### Business & Operations
 
-| Agent | Role | What They Do |
-|-------|------|-------------|
+| Agent     | Role                | What They Do                                                                                      |
+| --------- | ------------------- | ------------------------------------------------------------------------------------------------- |
 | **Grace** | Executive Assistant | Meeting transcript processing, commitment tracking, relationship management, proactive follow-ups |
-| **Holt** | Marketing & Sales | Sales strategy, outreach, deal management, positioning |
-| **Luke** | SEO Specialist | Content strategy, keyword research, technical SEO |
-| **Jim** | Finance Lead | Budget, pricing, runway management, financial modeling |
+| **Holt**  | Marketing & Sales   | Sales strategy, outreach, deal management, positioning                                            |
+| **Luke**  | SEO Specialist      | Content strategy, keyword research, technical SEO                                                 |
+| **Jim**   | Finance Lead        | Budget, pricing, runway management, financial modeling                                            |
 
 > Agents are not generic LLM wrappers. Each has a 100-200 line personality file with backstory, core beliefs, productive flaws, anti-patterns, and collaboration triggers. The default team covers engineering, ops, marketing, SEO, and finance — but you can create agents for any domain by adding a directory with a few markdown files.
 
@@ -306,14 +306,14 @@ A dedicated admin interface with container log streaming, LLM call logs with fil
 
 ## Pipelines
 
-| Pipeline | Description |
-|----------|------------|
-| `engineering` | Full SDLC: spec, design, UX, implement, review, test, deploy |
-| `planning` | Structured two-stage project decomposition with validation |
+| Pipeline           | Description                                                               |
+| ------------------ | ------------------------------------------------------------------------- |
+| `engineering`      | Full SDLC: spec, design, UX, implement, review, test, deploy              |
+| `planning`         | Structured two-stage project decomposition with validation                |
 | `planning-agentic` | Single-agent planning with tool-based task creation and dependency wiring |
-| `feature` | Lightweight: design, implement, review, test |
-| `bugfix` | Focused: diagnose, fix, validate |
-| `execute` | Run a single task from a project board |
+| `feature`          | Lightweight: design, implement, review, test                              |
+| `bugfix`           | Focused: diagnose, fix, validate                                          |
+| `execute`          | Run a single task from a project board                                    |
 
 Pipelines are YAML files with steps, template variables, conditional branching, loops, structured output schemas, retries, and per-step model overrides. Drop a YAML file in `pipelines/` and it appears in the dashboard instantly — no restart needed.
 
@@ -344,19 +344,19 @@ Create a new agent by adding a directory under `agents/`. Define their personali
 
 DjinnBot supports all major providers through [pi-mono](https://github.com/badlogic/pi-mono):
 
-| Provider | Env Variable | Notes |
-|----------|-------------|-------|
-| **OpenRouter** (recommended) | `OPENROUTER_API_KEY` | One key, every model. Simplest setup. |
-| Anthropic | `ANTHROPIC_API_KEY` | Claude Sonnet, Opus, Haiku |
-| OpenAI | `OPENAI_API_KEY` | GPT-4o, o1, o3 |
-| Google | `GEMINI_API_KEY` | Gemini 2.5 Pro, Flash |
-| xAI | `XAI_API_KEY` | Grok 4 |
-| Groq | `GROQ_API_KEY` | Fast inference |
-| Mistral | `MISTRAL_API_KEY` | Mistral Large, Codestral |
-| Azure OpenAI | `AZURE_OPENAI_API_KEY` | Enterprise Azure deployments |
-| Amazon Bedrock | AWS credentials | Claude, Llama, Titan |
-| Google Vertex | GCP ADC | Gemini, PaLM |
-| Custom (OpenAI-compatible) | Via settings UI | Ollama, vLLM, LM Studio, etc. |
+| Provider                     | Env Variable           | Notes                                 |
+| ---------------------------- | ---------------------- | ------------------------------------- |
+| **OpenRouter** (recommended) | `OPENROUTER_API_KEY`   | One key, every model. Simplest setup. |
+| Anthropic                    | `ANTHROPIC_API_KEY`    | Claude Sonnet, Opus, Haiku            |
+| OpenAI                       | `OPENAI_API_KEY`       | GPT-4o, o1, o3                        |
+| Google                       | `GEMINI_API_KEY`       | Gemini 2.5 Pro, Flash                 |
+| xAI                          | `XAI_API_KEY`          | Grok 4                                |
+| Groq                         | `GROQ_API_KEY`         | Fast inference                        |
+| Mistral                      | `MISTRAL_API_KEY`      | Mistral Large, Codestral              |
+| Azure OpenAI                 | `AZURE_OPENAI_API_KEY` | Enterprise Azure deployments          |
+| Amazon Bedrock               | AWS credentials        | Claude, Llama, Titan                  |
+| Google Vertex                | GCP ADC                | Gemini, PaLM                          |
+| Custom (OpenAI-compatible)   | Via settings UI        | Ollama, vLLM, LM Studio, etc.         |
 
 Each agent can use a different model. Put your architect on Claude Opus and your engineer on Kimi K2.5. Override per-pipeline-step. Users can bring their own API keys.
 
@@ -364,41 +364,41 @@ Each agent can use a different model. Put your architect on Claude Opus and your
 
 ## How DjinnBot Compares
 
-|  | **DjinnBot** | **Single-Agent Tools** | **Agent Frameworks** |
-|--|:------------|:----------------------|:--------------------|
-| **Token Efficiency** | 12-40x reduction via code graph, PTC, focused delegation | Raw file reads and full JSON schemas | Raw file reads and full JSON schemas |
-| **Cost Visibility** | Per-call, per-agent, per-user LLM usage logs with dollar amounts | None | None |
-| **Setup** | One `curl` command — 5 min | Install IDE extension | Hours of framework wiring |
-| **Agents** | 11 specialized agents with rich personas, or create your own | One generic assistant | Build your own from scratch |
-| **Security** | Container isolation, 2FA, encrypted secrets, auto SSL | Direct host access | Direct host access |
-| **Memory** | Persistent semantic memory + knowledge graph | Stateless or basic files | Stateless or basic files |
-| **Collaboration** | Agents review, critique, and build on each other's work | Single agent, single perspective | Custom-coded coordination |
-| **Visibility** | Real-time dashboard, Slack/Discord/Telegram/WhatsApp/Signal, live feeds, usage tracking | Terminal output | Minimal web UI |
-| **Autonomy** | Agents work 24/7 on pulse schedules | Requires human in the loop | Requires human in the loop |
+|                      | **DjinnBot**                                                                            | **Single-Agent Tools**               | **Agent Frameworks**                 |
+| -------------------- | :-------------------------------------------------------------------------------------- | :----------------------------------- | :----------------------------------- |
+| **Token Efficiency** | 12-40x reduction via code graph, PTC, focused delegation                                | Raw file reads and full JSON schemas | Raw file reads and full JSON schemas |
+| **Cost Visibility**  | Per-call, per-agent, per-user LLM usage logs with dollar amounts                        | None                                 | None                                 |
+| **Setup**            | One `curl` command — 5 min                                                              | Install IDE extension                | Hours of framework wiring            |
+| **Agents**           | 11 specialized agents with rich personas, or create your own                            | One generic assistant                | Build your own from scratch          |
+| **Security**         | Container isolation, 2FA, encrypted secrets, auto SSL                                   | Direct host access                   | Direct host access                   |
+| **Memory**           | Persistent semantic memory + knowledge graph                                            | Stateless or basic files             | Stateless or basic files             |
+| **Collaboration**    | Agents review, critique, and build on each other's work                                 | Single agent, single perspective     | Custom-coded coordination            |
+| **Visibility**       | Real-time dashboard, Slack/Discord/Telegram/WhatsApp/Signal, live feeds, usage tracking | Terminal output                      | Minimal web UI                       |
+| **Autonomy**         | Agents work 24/7 on pulse schedules                                                     | Requires human in the loop           | Requires human in the loop           |
 
 ---
 
 ## Tech Stack
 
-| Component | Technology |
-|-----------|-----------|
-| Pipeline Engine | TypeScript, Redis Streams, custom state machine |
-| API Server | Python, FastAPI, PostgreSQL, SQLAlchemy, JWT auth |
-| Dashboard | React, Vite, TanStack Router, Tailwind CSS, Three.js, Sigma.js |
-| Agent Runtime | Node.js 22, Debian bookworm, PTC, Camoufox |
-| Code Graph | Tree-sitter, KuzuDB, Louvain clustering |
-| Memory | ClawVault + QMDR (semantic search + knowledge graph) |
-| Agent Framework | pi-mono (pi-agent-core) |
-| Storage | JuiceFS FUSE mount + RustFS (S3-compatible) |
-| Slack | Bolt.js, Socket Mode, per-agent bots |
-| Discord | discord.js, Gateway API, per-agent bots |
-| Telegram | grammY, long-polling, per-agent bots |
-| Signal | signal-cli daemon, SSE, shared number |
-| WhatsApp | Baileys, in-process socket, shared number |
-| MCP Proxy | mcpo (hot-reload) |
-| CLI | Python, Rich TUI, PyPI distribution |
-| Build | Turborepo monorepo |
-| Orchestration | Docker Compose |
+| Component       | Technology                                                     |
+| --------------- | -------------------------------------------------------------- |
+| Pipeline Engine | TypeScript, Redis Streams, custom state machine                |
+| API Server      | Python, FastAPI, PostgreSQL, SQLAlchemy, JWT auth              |
+| Dashboard       | React, Vite, TanStack Router, Tailwind CSS, Three.js, Sigma.js |
+| Agent Runtime   | Node.js 22, Debian bookworm, PTC, Camoufox                     |
+| Code Graph      | Tree-sitter, KuzuDB, Louvain clustering                        |
+| Memory          | ClawVault + QMDR (semantic search + knowledge graph)           |
+| Agent Framework | pi-mono (pi-agent-core)                                        |
+| Storage         | JuiceFS FUSE mount + RustFS (S3-compatible)                    |
+| Slack           | Bolt.js, Socket Mode, per-agent bots                           |
+| Discord         | discord.js, Gateway API, per-agent bots                        |
+| Telegram        | grammY, long-polling, per-agent bots                           |
+| Signal          | signal-cli daemon, SSE, shared number                          |
+| WhatsApp        | Baileys, in-process socket, shared number                      |
+| MCP Proxy       | mcpo (hot-reload)                                              |
+| CLI             | Python, Rich TUI, PyPI distribution                            |
+| Build           | Turborepo monorepo                                             |
+| Orchestration   | Docker Compose                                                 |
 
 ---
 
@@ -496,7 +496,7 @@ cd packages/dashboard && npm run dev
 
 <div align="center">
 
-**[Join the Waitlist](https://app.djinn.bot)** · **[Documentation](https://docs.djinn.bot)** · **[GitHub](https://github.com/BaseDatum/djinnbot)**
+**[Join Cloud Waitlist](https://app.djinn.bot)** · **[Documentation](https://docs.djinn.bot)** · **[GitHub](https://github.com/BaseDatum/djinnbot)**
 
 Built by [Sky Moore](https://github.com/skymoore) and the DjinnBot team.
 

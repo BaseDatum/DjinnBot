@@ -43,6 +43,9 @@ RUN chown -R app:app /app /home/app /opt/spiderfoot /opt/blackbird
 
 USER app
 
+# Ensure uv tool binaries are on PATH
+ENV PATH="/home/app/.local/bin:${PATH}"
+
 WORKDIR /app
 
 RUN npx -y @modelcontextprotocol/server-memory --version || echo "memory server cached" && \

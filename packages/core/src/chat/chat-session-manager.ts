@@ -1966,11 +1966,14 @@ export class ChatSessionManager {
   } | null> {
     const session = this.activeSessions.get(sessionId);
     if (!session || session.status === 'starting' || session.status === 'stopping') {
+      console.log(`[ChatSessionManager] getContextUsage: session ${sessionId} not eligible (exists=${!!session}, status=${session?.status})`);
       return null;
     }
 
+    console.log(`[ChatSessionManager] getContextUsage: creating Redis subscriber for session ${sessionId}`);
+
     return new Promise<{ usedTokens: number; contextWindow: number; percent: number; model?: string } | null>((resolve) => {
-      const eventSub = new (require('ioredis').default)(this.redis.options);
+      const eventSub = new Redis(this.redis.options);
       const eventsChannel = `run:${sessionId}:events`;
       let resolved = false;
 
@@ -1983,14 +1986,20 @@ export class ChatSessionManager {
       };
 
       const timeout = setTimeout(() => {
+        console.warn(`[ChatSessionManager] getContextUsage: timed out after 5s for session ${sessionId}`);
         cleanup();
         resolve(null);
       }, 5000);
+
+      eventSub.on('error', (err: Error) => {
+        console.error(`[ChatSessionManager] getContextUsage: Redis subscriber error for ${sessionId}:`, err);
+      });
 
       eventSub.on('message', (_ch: string, message: string) => {
         try {
           const msg = JSON.parse(message);
           if (msg.type === 'contextUsage') {
+            console.log(`[ChatSessionManager] getContextUsage: received contextUsage event for ${sessionId}`);
             cleanup();
             resolve({
               usedTokens: msg.usedTokens,
@@ -2003,12 +2012,14 @@ export class ChatSessionManager {
       });
 
       eventSub.subscribe(eventsChannel).then(() => {
+        console.log(`[ChatSessionManager] getContextUsage: subscribed to ${eventsChannel}, sending command`);
         this.commandSender.sendGetContextUsage(sessionId).catch((err: any) => {
           console.warn(`[ChatSessionManager] getContextUsage: failed to send command:`, err);
           cleanup();
           resolve(null);
         });
-      }).catch(() => {
+      }).catch((err) => {
+        console.error(`[ChatSessionManager] getContextUsage: failed to subscribe to ${eventsChannel}:`, err);
         cleanup();
         resolve(null);
       });
@@ -2038,8 +2049,10 @@ export class ChatSessionManager {
       return { success: false, summary: '', tokensBefore: 0, tokensAfter: 0, tailMessageCount: 0, error: 'Session is busy' };
     }
 
+    console.log(`[ChatSessionManager] compactSession: creating Redis subscriber for session ${sessionId}`);
+
     return new Promise((resolve) => {
-      const eventSub = new (require('ioredis').default)(this.redis.options);
+      const eventSub = new Redis(this.redis.options);
       const eventsChannel = `run:${sessionId}:events`;
       let resolved = false;
 
@@ -2052,14 +2065,20 @@ export class ChatSessionManager {
       };
 
       const timeout = setTimeout(() => {
+        console.warn(`[ChatSessionManager] compactSession: timed out after 120s for session ${sessionId}`);
         cleanup();
         resolve({ success: false, summary: '', tokensBefore: 0, tokensAfter: 0, tailMessageCount: 0, error: 'Compaction timed out (120s)' });
       }, 120_000);
+
+      eventSub.on('error', (err: Error) => {
+        console.error(`[ChatSessionManager] compactSession: Redis subscriber error for ${sessionId}:`, err);
+      });
 
       eventSub.on('message', (_ch: string, message: string) => {
         try {
           const msg = JSON.parse(message);
           if (msg.type === 'compactionComplete') {
+            console.log(`[ChatSessionManager] compactSession: received compactionComplete event for ${sessionId}`);
             cleanup();
             resolve({
               success: msg.tokensAfter < msg.tokensBefore,
@@ -2073,12 +2092,14 @@ export class ChatSessionManager {
       });
 
       eventSub.subscribe(eventsChannel).then(() => {
+        console.log(`[ChatSessionManager] compactSession: subscribed to ${eventsChannel}, sending command`);
         this.commandSender.sendCompactSession(sessionId, { instructions }).catch((err: any) => {
           console.warn(`[ChatSessionManager] compactSession: failed to send command:`, err);
           cleanup();
           resolve({ success: false, summary: '', tokensBefore: 0, tokensAfter: 0, tailMessageCount: 0, error: String(err) });
         });
-      }).catch(() => {
+      }).catch((err) => {
+        console.error(`[ChatSessionManager] compactSession: failed to subscribe to ${eventsChannel}:`, err);
         cleanup();
         resolve(null);
       });

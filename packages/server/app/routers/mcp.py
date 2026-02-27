@@ -63,6 +63,25 @@ MCP_LOG_STREAM = "djinnbot:mcp:logs"
 MCP_GRANTS_CHANGED_CHANNEL = "djinnbot:mcp:grants-changed"
 
 
+async def _publish_mcp_restart() -> None:
+    """Signal the engine to rewrite config.json so mcpo hot-reloads."""
+    try:
+        if dependencies.redis_client:
+            from datetime import datetime, timezone
+
+            event = {
+                "type": "MCP_RESTART_REQUESTED",
+                "timestamp": int(datetime.now(timezone.utc).timestamp() * 1000),
+            }
+            await dependencies.redis_client.xadd(
+                "djinnbot:events:global", {"data": json.dumps(event)}
+            )
+            logger.info("Auto-published MCP_RESTART_REQUESTED after config change")
+    except Exception:
+        # Best-effort — user can still click "Reload mcpo" manually
+        pass
+
+
 async def _publish_grants_changed(agent_id: str) -> None:
     """Notify running containers that MCP tool grants changed for this agent."""
     try:
@@ -268,6 +287,8 @@ async def create_mcp_server(
     await db.flush()
     await db.refresh(server)
     logger.info(f"MCP server created: {server_id}")
+    # Auto-trigger mcpo hot-reload so the new server is picked up immediately
+    await _publish_mcp_restart()
     return _row_to_response(server)
 
 
@@ -792,6 +813,8 @@ async def update_mcp_server(
     await db.flush()
     await db.refresh(server)
     logger.info(f"MCP server updated: {server_id}")
+    # Auto-trigger mcpo hot-reload so config changes take effect immediately
+    await _publish_mcp_restart()
     return _row_to_response(server)
 
 
@@ -808,6 +831,8 @@ async def delete_mcp_server(
         )
     await db.delete(server)
     logger.info(f"MCP server deleted: {server_id}")
+    # Auto-trigger mcpo hot-reload so the removed server is dropped immediately
+    await _publish_mcp_restart()
     return {"deleted": server_id}
 
 
