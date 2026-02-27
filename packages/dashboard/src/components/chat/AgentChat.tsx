@@ -23,7 +23,7 @@ import {
   restartChatSession,
   uploadChatAttachment,
 } from '@/lib/api';
-import { FileUploadZone, AttachmentChip, type PendingAttachment } from './FileUploadZone';
+import { FileUploadZone, AttachmentChip, VoiceRecordButton, type PendingAttachment } from './FileUploadZone';
 import {
   Send,
   Loader2,
@@ -77,6 +77,39 @@ export function AgentChat({
   // Bumped on restart to re-trigger the history-loading useEffect (since
   // sessionId stays the same across restarts, we need an extra dep).
   const [restartGeneration, setRestartGeneration] = useState(0);
+
+  // ── Voice recording upload event handlers ────────────────────────────────────
+  useEffect(() => {
+    const handleComplete = (e: Event) => {
+      const { placeholderId, result } = (e as CustomEvent).detail;
+      setPendingAttachments(prev =>
+        prev.map(a => a.id === placeholderId ? {
+          id: result.id,
+          filename: result.filename,
+          mimeType: result.mimeType,
+          sizeBytes: result.sizeBytes,
+          isImage: result.isImage,
+          estimatedTokens: result.estimatedTokens,
+        } : a)
+      );
+    };
+    const handleError = (e: Event) => {
+      const { placeholderId, error } = (e as CustomEvent).detail;
+      setPendingAttachments(prev =>
+        prev.map(a => a.id === placeholderId ? {
+          ...a,
+          uploading: false,
+          error,
+        } : a)
+      );
+    };
+    window.addEventListener('voice-upload-complete', handleComplete);
+    window.addEventListener('voice-upload-error', handleError);
+    return () => {
+      window.removeEventListener('voice-upload-complete', handleComplete);
+      window.removeEventListener('voice-upload-error', handleError);
+    };
+  }, []);
 
   // ── Custom top-edge resize for textarea ────────────────────────────────────
   const [inputHeight, setInputHeight] = useState(44);
@@ -578,12 +611,20 @@ export function AgentChat({
           >
             <Paperclip className="h-4 w-4" />
           </button>
+          <div className="self-end mb-[5px]">
+            <VoiceRecordButton
+              agentId={agentId}
+              sessionId={sessionId}
+              disabled={!isReady}
+              onAttachmentAdded={(att) => setPendingAttachments(prev => [...prev, att])}
+            />
+          </div>
           <input
             ref={fileInputRef2}
             type="file"
             multiple
             className="hidden"
-            accept=".jpg,.jpeg,.png,.gif,.webp,.pdf,.txt,.md,.csv,.json,.py,.js,.ts,.html,.css,.xml,.yaml,.yml"
+            accept=".jpg,.jpeg,.png,.gif,.webp,.pdf,.txt,.md,.csv,.json,.py,.js,.ts,.html,.css,.xml,.yaml,.yml,.ogg,.opus,.mp3,.m4a,.wav,.webm,.aac,.flac,.amr"
             onChange={async e => {
               if (!e.target.files?.length) return;
               const files = Array.from(e.target.files);

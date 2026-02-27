@@ -7,12 +7,13 @@
  * 3. Pending attachment previews are displayed as chips
  * 4. When the user sends a message, attachment IDs are included
  *
- * Supports: images (jpeg/png/gif/webp), PDFs, text, code files.
+ * Supports: images (jpeg/png/gif/webp), PDFs, text, code files,
+ * audio (ogg/mp3/m4a/wav — transcribed server-side via faster-whisper).
  * Client-side image compression for large photos (>4MP).
  */
 
 import { useState, useCallback, useRef, type DragEvent } from 'react';
-import { Paperclip, X, FileText, Image as ImageIcon, Loader2 } from 'lucide-react';
+import { Paperclip, X, FileText, Image as ImageIcon, Loader2, Mic, Square } from 'lucide-react';
 import { uploadChatAttachment } from '@/lib/api';
 import { cn } from '@/lib/utils';
 
@@ -21,6 +22,8 @@ const ALLOWED_EXTENSIONS = new Set([
   '.jpg', '.jpeg', '.png', '.gif', '.webp',
   '.pdf', '.txt', '.md', '.csv', '.json',
   '.py', '.js', '.ts', '.html', '.css', '.xml', '.yaml', '.yml',
+  // Audio formats — transcribed server-side via faster-whisper
+  '.ogg', '.opus', '.mp3', '.m4a', '.wav', '.webm', '.aac', '.flac', '.amr',
 ]);
 
 export interface PendingAttachment {
@@ -242,7 +245,8 @@ export function AttachmentChip({
   attachment: PendingAttachment;
   onRemove: (id: string) => void;
 }) {
-  const Icon = attachment.isImage ? ImageIcon : FileText;
+  const isAudio = attachment.mimeType.startsWith('audio/');
+  const Icon = attachment.isImage ? ImageIcon : isAudio ? Mic : FileText;
   const sizeStr = attachment.sizeBytes < 1024
     ? `${attachment.sizeBytes}B`
     : attachment.sizeBytes < 1024 * 1024
@@ -279,5 +283,137 @@ export function AttachmentChip({
         <X className="h-3 w-3" />
       </button>
     </div>
+  );
+}
+
+/**
+ * Microphone button for recording voice messages in the dashboard chat.
+ *
+ * Uses the browser MediaRecorder API to capture audio, then uploads it
+ * as a regular attachment.  The server transcribes it via faster-whisper
+ * and the agent sees the transcript as text.
+ */
+export function VoiceRecordButton({
+  agentId,
+  sessionId,
+  disabled,
+  onAttachmentAdded,
+}: {
+  agentId: string;
+  sessionId: string;
+  disabled?: boolean;
+  onAttachmentAdded: (attachment: PendingAttachment) => void;
+}) {
+  const [recording, setRecording] = useState(false);
+  const [duration, setDuration] = useState(0);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const startRecording = useCallback(async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+      // Prefer webm/opus (small, good quality) with fallback to wav
+      const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+        ? 'audio/webm;codecs=opus'
+        : MediaRecorder.isTypeSupported('audio/ogg;codecs=opus')
+          ? 'audio/ogg;codecs=opus'
+          : 'audio/wav';
+
+      const recorder = new MediaRecorder(stream, { mimeType });
+      mediaRecorderRef.current = recorder;
+      chunksRef.current = [];
+
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) chunksRef.current.push(e.data);
+      };
+
+      recorder.onstop = async () => {
+        // Stop all tracks to release the microphone
+        stream.getTracks().forEach(t => t.stop());
+
+        const blob = new Blob(chunksRef.current, { type: mimeType });
+        const ext = mimeType.includes('webm') ? 'webm' : mimeType.includes('ogg') ? 'ogg' : 'wav';
+        const filename = `voice_${Date.now()}.${ext}`;
+        const file = new File([blob], filename, { type: mimeType });
+
+        // Upload as attachment
+        const placeholderId = `uploading_voice_${Date.now()}`;
+        onAttachmentAdded({
+          id: placeholderId,
+          filename,
+          mimeType,
+          sizeBytes: file.size,
+          isImage: false,
+          estimatedTokens: null,
+          uploading: true,
+        });
+
+        try {
+          const result = await uploadChatAttachment(agentId, sessionId, file);
+          // The parent needs to replace the placeholder — use a custom event
+          window.dispatchEvent(new CustomEvent('voice-upload-complete', {
+            detail: { placeholderId, result },
+          }));
+        } catch (err) {
+          window.dispatchEvent(new CustomEvent('voice-upload-error', {
+            detail: { placeholderId, error: err instanceof Error ? err.message : 'Upload failed' },
+          }));
+        }
+      };
+
+      recorder.start(100); // collect data every 100ms
+      setRecording(true);
+      setDuration(0);
+      timerRef.current = setInterval(() => {
+        setDuration(d => d + 1);
+      }, 1000);
+    } catch (err) {
+      console.error('Failed to start recording:', err);
+    }
+  }, [agentId, sessionId, onAttachmentAdded]);
+
+  const stopRecording = useCallback(() => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      mediaRecorderRef.current.stop();
+    }
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+    setRecording(false);
+    setDuration(0);
+  }, []);
+
+  const formatDuration = (secs: number) => {
+    const m = Math.floor(secs / 60);
+    const s = secs % 60;
+    return `${m}:${s.toString().padStart(2, '0')}`;
+  };
+
+  return (
+    <button
+      onClick={recording ? stopRecording : startRecording}
+      disabled={disabled && !recording}
+      className={cn(
+        'p-2 rounded transition-colors',
+        recording
+          ? 'bg-destructive text-destructive-foreground hover:bg-destructive/90'
+          : 'hover:bg-accent text-muted-foreground hover:text-foreground',
+        'disabled:opacity-50',
+      )}
+      title={recording ? `Stop recording (${formatDuration(duration)})` : 'Record voice message'}
+      type="button"
+    >
+      {recording ? (
+        <div className="flex items-center gap-1.5">
+          <Square className="h-4 w-4 fill-current" />
+          <span className="text-xs font-mono">{formatDuration(duration)}</span>
+        </div>
+      ) : (
+        <Mic className="h-4 w-4" />
+      )}
+    </button>
   );
 }
