@@ -440,60 +440,36 @@ export class SignalBridge {
     // 5. Start typing indicator
     this.typingManager.startTyping(normalized);
 
-    // 6. Download and re-upload Signal attachments to DjinnBot storage
-    let attachments: Array<{ id: string; filename: string; mimeType: string; sizeBytes: number; isImage: boolean }> | undefined;
+    // 6. Pre-read Signal attachment files from disk (raw buffers).
+    //    Actual upload to DjinnBot storage happens inside processWithAgent()
+    //    AFTER the session is created (avoids FK violation on chat_attachments).
+    let rawFiles: Array<{ name: string; mimeType: string; buffer: Buffer }> | undefined;
     if (signalAttachments && signalAttachments.length > 0) {
-      const { processChannelAttachments } = await import('@djinnbot/core');
-      const apiBaseUrl = process.env.DJINNBOT_API_URL || 'http://api:8000';
-      const safeSender = normalized.replace(/[^a-zA-Z0-9]/g, '');
-      const sessionIdForUpload = `signal_${safeSender}_${route.agentId}`;
-
-      // Signal-cli stores downloaded attachments in the data directory.
-      // The attachment id references a file in {signalDataDir}/attachments/{id}
-      const signalDataDir = this.config.signalDataDir;
-      const files = signalAttachments
-        .filter(a => a.id)
-        .map(a => ({
-          url: `file://${signalDataDir}/attachments/${a.id}`,
-          name: a.filename || `attachment_${a.id}`,
-          mimeType: a.contentType || 'application/octet-stream',
-          // Read the file directly from disk since it's a local path
-          buffer: undefined as Buffer | undefined,
-        }));
-
-      // Read Signal attachment files from disk
       const { readFile } = await import('node:fs/promises');
       const { join } = await import('node:path');
-      const channelFiles = [];
-      for (const f of files) {
+      const signalDataDir = this.config.signalDataDir;
+
+      rawFiles = [];
+      for (const a of signalAttachments) {
+        if (!a.id) continue;
         try {
-          const attachmentPath = join(signalDataDir, 'attachments', signalAttachments.find(a => a.filename === f.name || `attachment_${a.id}` === f.name)?.id || '');
+          const attachmentPath = join(signalDataDir, 'attachments', a.id);
           const buffer = await readFile(attachmentPath);
-          channelFiles.push({
-            url: '',  // Not used when buffer is provided
-            name: f.name,
-            mimeType: f.mimeType,
+          rawFiles.push({
+            name: a.filename || `attachment_${a.id}`,
+            mimeType: a.contentType || 'application/octet-stream',
             buffer,
           });
         } catch (err) {
-          console.warn(`[SignalBridge] Could not read attachment file ${f.name}:`, err);
+          console.warn(`[SignalBridge] Could not read attachment file ${a.id}:`, err);
         }
       }
-
-      if (channelFiles.length > 0) {
-        attachments = await processChannelAttachments(
-          channelFiles,
-          apiBaseUrl,
-          sessionIdForUpload,
-          `[SignalBridge:${route.agentId}]`,
-        );
-        if (attachments.length === 0) attachments = undefined;
-      }
+      if (rawFiles.length === 0) rawFiles = undefined;
     }
 
-    // 7. Process with agent
+    // 7. Process with agent (session created inside, then attachments uploaded)
     try {
-      const response = await this.processWithAgent(route.agentId, normalized, text || '[Voice/media message — see attachments]', attachments);
+      const response = await this.processWithAgent(route.agentId, normalized, text || '[Voice/media message — see attachments]', rawFiles);
       this.typingManager.stopTyping(normalized);
       await this.sendFormattedMessage(normalized, response);
     } catch (err) {
@@ -517,7 +493,7 @@ export class SignalBridge {
     agentId: string,
     sender: string,
     text: string,
-    attachments?: Array<{ id: string; filename: string; mimeType: string; sizeBytes: number; isImage: boolean }>,
+    rawFiles?: Array<{ name: string; mimeType: string; buffer: Buffer }>,
   ): Promise<string> {
     const csm = this.config.chatSessionManager;
     if (!csm) {
@@ -563,12 +539,26 @@ export class SignalBridge {
     try {
       const model = this.config.defaultConversationModel ?? 'openrouter/minimax/minimax-m2.5';
 
-      // Start or resume session
+      // Start or resume session — this creates the DB row for chat_sessions
       await csm.startSession({
         sessionId,
         agentId,
         model,
       });
+
+      // Upload attachments AFTER session exists (avoids FK violation on chat_attachments)
+      let attachments: Array<{ id: string; filename: string; mimeType: string; sizeBytes: number; isImage: boolean }> | undefined;
+      if (rawFiles && rawFiles.length > 0) {
+        const { processChannelAttachments } = await import('@djinnbot/core');
+        const apiBaseUrl = process.env.DJINNBOT_API_URL || 'http://api:8000';
+        attachments = await processChannelAttachments(
+          rawFiles.map(f => ({ url: '', name: f.name, mimeType: f.mimeType, buffer: f.buffer })),
+          apiBaseUrl,
+          sessionId,
+          `[SignalBridge:${agentId}]`,
+        );
+        if (attachments.length === 0) attachments = undefined;
+      }
 
       // Persist user + placeholder assistant message to DB so the response
       // can be completed via currentMessageId at stepEnd.

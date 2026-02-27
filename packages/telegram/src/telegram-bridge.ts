@@ -260,33 +260,10 @@ class TelegramAgentBridge {
     // 2. Start typing indicator
     this.typingManager.startTyping(chatId);
 
-    // 3. Download and re-upload Telegram files to DjinnBot storage
-    let attachments: Array<{ id: string; filename: string; mimeType: string; sizeBytes: number; isImage: boolean }> | undefined;
-    if (telegramFiles && telegramFiles.length > 0) {
-      try {
-        const { processChannelAttachments } = await import('@djinnbot/core');
-        const apiBaseUrl = this.config.apiUrl;
-        const sessionIdForUpload = `telegram_${chatId}_${this.agentId}`;
-
-        attachments = await processChannelAttachments(
-          telegramFiles.map(f => ({
-            url: f.url,
-            name: f.name,
-            mimeType: f.mimeType,
-          })),
-          apiBaseUrl,
-          sessionIdForUpload,
-          `[TelegramBridge:${this.agentId}]`,
-        );
-        if (attachments.length === 0) attachments = undefined;
-      } catch (err) {
-        console.warn(`[TelegramBridge:${this.agentId}] Failed to process attachments:`, err);
-      }
-    }
-
-    // 4. Process with agent
+    // 3. Process with agent — raw files are passed through and uploaded
+    //    AFTER the session is created (avoids FK violation on chat_attachments)
     try {
-      const response = await this.processWithAgent(chatId, userId, text || '[Voice/media message — see attachments]', attachments);
+      const response = await this.processWithAgent(chatId, userId, text || '[Voice/media message — see attachments]', telegramFiles);
       this.typingManager.stopTyping(chatId);
       await this.sendFormattedMessage(chatId, response);
     } catch (err) {
@@ -308,7 +285,7 @@ class TelegramAgentBridge {
     chatId: number,
     userId: number,
     text: string,
-    attachments?: Array<{ id: string; filename: string; mimeType: string; sizeBytes: number; isImage: boolean }>,
+    telegramFiles?: Array<{ url: string; name: string; mimeType: string }>,
   ): Promise<string> {
     const csm = this.config.chatSessionManager;
     if (!csm) {
@@ -352,12 +329,29 @@ class TelegramAgentBridge {
     try {
       const model = this.config.defaultConversationModel ?? 'openrouter/minimax/minimax-m2.5';
 
-      // Start or resume session
+      // Start or resume session — creates the DB row for chat_sessions
       await csm.startSession({
         sessionId,
         agentId: this.agentId,
         model,
       });
+
+      // Upload attachments AFTER session exists (avoids FK violation on chat_attachments)
+      let attachments: Array<{ id: string; filename: string; mimeType: string; sizeBytes: number; isImage: boolean }> | undefined;
+      if (telegramFiles && telegramFiles.length > 0) {
+        try {
+          const { processChannelAttachments } = await import('@djinnbot/core');
+          attachments = await processChannelAttachments(
+            telegramFiles.map(f => ({ url: f.url, name: f.name, mimeType: f.mimeType })),
+            this.config.apiUrl,
+            sessionId,
+            `[TelegramBridge:${this.agentId}]`,
+          );
+          if (attachments.length === 0) attachments = undefined;
+        } catch (err) {
+          console.warn(`[TelegramBridge:${this.agentId}] Failed to upload attachments:`, err);
+        }
+      }
 
       // Persist user + placeholder assistant message to DB so the response
       // can be completed via currentMessageId at stepEnd.

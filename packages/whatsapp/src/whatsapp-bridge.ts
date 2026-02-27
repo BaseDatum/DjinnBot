@@ -251,17 +251,13 @@ export class WhatsAppBridge {
     this.socket?.subscribePresence(msg.senderJid).catch(() => {});
     this.typingManager.startTyping(msg.senderJid);
 
-    // 7. Download and re-upload WhatsApp media to DjinnBot storage
-    let attachments: Array<{ id: string; filename: string; mimeType: string; sizeBytes: number; isImage: boolean }> | undefined;
+    // 7. Pre-download WhatsApp media (raw buffer).
+    //    Actual upload to DjinnBot storage happens inside processWithAgent()
+    //    AFTER the session is created (avoids FK violation on chat_attachments).
+    let rawMedia: { name: string; mimeType: string; buffer: Buffer } | undefined;
     if (msg.media && this.socket) {
       try {
-        const { processChannelAttachments } = await import('@djinnbot/core');
         const { downloadMediaMessage } = await import('@whiskeysockets/baileys');
-        const apiBaseUrl = process.env.DJINNBOT_API_URL || 'http://api:8000';
-        const safeSender = normalized.replace(/[^a-zA-Z0-9]/g, '');
-        const sessionIdForUpload = `whatsapp_${safeSender}_${route.agentId}`;
-
-        // Download media bytes from WhatsApp
         const buffer = await downloadMediaMessage(
           msg.media.rawMessage,
           'buffer',
@@ -271,22 +267,16 @@ export class WhatsAppBridge {
         const filename = msg.media.filename ||
           `${msg.media.type}_${Date.now()}.${msg.media.mimeType.split('/')[1] || 'bin'}`;
 
-        attachments = await processChannelAttachments(
-          [{ url: '', name: filename, mimeType: msg.media.mimeType, buffer }],
-          apiBaseUrl,
-          sessionIdForUpload,
-          '[WhatsAppBridge]',
-        );
-        if (attachments.length === 0) attachments = undefined;
+        rawMedia = { name: filename, mimeType: msg.media.mimeType, buffer };
       } catch (err) {
-        console.warn('[WhatsAppBridge] Failed to process media attachment:', err);
+        console.warn('[WhatsAppBridge] Failed to download media:', err);
       }
     }
 
-    // 8. Process with agent
+    // 8. Process with agent (session created inside, then media uploaded)
     const messageText = msg.text || (msg.media ? `[${msg.media.type} message — see attachments]` : '');
     try {
-      const response = await this.processWithAgent(route.agentId, normalized, messageText, attachments);
+      const response = await this.processWithAgent(route.agentId, normalized, messageText, rawMedia);
       this.typingManager.stopTyping(msg.senderJid);
       await this.sendFormattedMessage(msg.senderJid, response);
     } catch (err) {
@@ -305,7 +295,7 @@ export class WhatsAppBridge {
     agentId: string,
     sender: string,
     text: string,
-    attachments?: Array<{ id: string; filename: string; mimeType: string; sizeBytes: number; isImage: boolean }>,
+    rawMedia?: { name: string; mimeType: string; buffer: Buffer },
   ): Promise<string> {
     const csm = this.config.chatSessionManager;
     if (!csm) {
@@ -352,12 +342,30 @@ export class WhatsAppBridge {
     try {
       const model = this.config.defaultConversationModel ?? 'openrouter/minimax/minimax-m2.5';
 
-      // Start or resume session
+      // Start or resume session — creates the DB row for chat_sessions
       await csm.startSession({
         sessionId,
         agentId,
         model,
       });
+
+      // Upload media AFTER session exists (avoids FK violation on chat_attachments)
+      let attachments: Array<{ id: string; filename: string; mimeType: string; sizeBytes: number; isImage: boolean }> | undefined;
+      if (rawMedia) {
+        try {
+          const { processChannelAttachments } = await import('@djinnbot/core');
+          const apiBaseUrl = process.env.DJINNBOT_API_URL || 'http://api:8000';
+          attachments = await processChannelAttachments(
+            [{ url: '', name: rawMedia.name, mimeType: rawMedia.mimeType, buffer: rawMedia.buffer }],
+            apiBaseUrl,
+            sessionId,
+            '[WhatsAppBridge]',
+          );
+          if (attachments.length === 0) attachments = undefined;
+        } catch (err) {
+          console.warn('[WhatsAppBridge] Failed to upload media:', err);
+        }
+      }
 
       // Persist user + placeholder assistant message to DB so the response
       // can be completed via currentMessageId at stepEnd.
