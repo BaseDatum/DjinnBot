@@ -45,12 +45,14 @@ class UserProfile(BaseModel):
     displayName: Optional[str] = None
     isAdmin: bool
     slackId: Optional[str] = None
+    phoneNumber: Optional[str] = None
     totpEnabled: bool
 
 
 class UpdateProfileRequest(BaseModel):
     displayName: Optional[str] = None
     slackId: Optional[str] = None
+    phoneNumber: Optional[str] = None
 
 
 class UserProviderConfig(BaseModel):
@@ -97,6 +99,7 @@ async def get_profile(
         displayName=db_user.display_name,
         isAdmin=db_user.is_admin,
         slackId=db_user.slack_id,
+        phoneNumber=getattr(db_user, "phone_number", None),
         totpEnabled=db_user.totp_enabled,
     )
 
@@ -116,6 +119,8 @@ async def update_profile(
         db_user.display_name = body.displayName.strip()
     if body.slackId is not None:
         db_user.slack_id = body.slackId.strip() or None
+    if body.phoneNumber is not None:
+        db_user.phone_number = body.phoneNumber.strip() or None
     db_user.updated_at = now_ms()
 
     await session.commit()
@@ -126,6 +131,7 @@ async def update_profile(
         displayName=db_user.display_name,
         isAdmin=db_user.is_admin,
         slackId=db_user.slack_id,
+        phoneNumber=getattr(db_user, "phone_number", None),
         totpEnabled=db_user.totp_enabled,
     )
 

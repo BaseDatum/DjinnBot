@@ -79,6 +79,7 @@ from app.models.memory_score import (
     MemoryScore,
 )
 from app.models.code_graph import CodeGraphIndex
+from app.models.signal import SignalConfig, SignalAllowlistEntry
 
 __all__ = [
     # Pydantic models (backward compatibility)
@@ -166,4 +167,7 @@ __all__ = [
     "MemoryScore",
     # Code knowledge graph
     "CodeGraphIndex",
+    # Signal integration
+    "SignalConfig",
+    "SignalAllowlistEntry",
 ]

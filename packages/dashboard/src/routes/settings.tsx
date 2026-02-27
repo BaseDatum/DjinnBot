@@ -1,9 +1,10 @@
 import { createFileRoute, useNavigate } from '@tanstack/react-router';
-import { Settings, Key, Lock, Github, Zap, Puzzle, Workflow, LayoutTemplate, Cookie } from 'lucide-react';
+import { Settings, Key, Lock, Github, Zap, Puzzle, Workflow, LayoutTemplate, Cookie, Radio } from 'lucide-react';
 import { UserProviderSettings } from '@/components/settings/UserProviderSettings';
 import { SecretsSettings } from '@/components/settings/SecretsSettings';
 import { GitHubAppInstallations } from '@/components/github/GitHubAppInstallations';
 import { TemplateManager } from '@/components/settings/TemplateManager';
+import { SignalSettings } from '@/components/settings/SignalSettings';
 import { NestedSidebar } from '@/components/layout/NestedSidebar';
 import type { NestedSidebarItem } from '@/components/layout/NestedSidebar';
 import { SkillsPage } from '@/routes/skills';
@@ -11,8 +12,8 @@ import { McpPage } from '@/routes/mcp';
 import { PipelinesPage } from '@/routes/pipelines/';
 import { BrowserCookiesPage } from '@/routes/browser-cookies';
 
-type SettingsTab = 'providers' | 'secrets' | 'github' | 'skills' | 'mcp' | 'pipelines' | 'templates' | 'cookies';
-const VALID_TABS: SettingsTab[] = ['providers', 'secrets', 'github', 'skills', 'mcp', 'pipelines', 'templates', 'cookies'];
+type SettingsTab = 'providers' | 'secrets' | 'github' | 'skills' | 'mcp' | 'pipelines' | 'templates' | 'cookies' | 'channels';
+const VALID_TABS: SettingsTab[] = ['providers', 'secrets', 'github', 'skills', 'mcp', 'pipelines', 'templates', 'cookies', 'channels'];
 
 export const Route = createFileRoute('/settings')({
   validateSearch: (search: Record<string, unknown>) => ({
@@ -32,6 +33,7 @@ const NAV_ITEMS: NestedSidebarItem[] = [
   { key: 'pipelines',  label: 'Pipelines',        icon: Workflow },
   { key: 'templates',  label: 'Templates',        icon: LayoutTemplate },
   { key: 'cookies',    label: 'Browser Cookies',  icon: Cookie },
+  { key: 'channels',   label: 'Channels',         icon: Radio },
 ];
 
 function SettingsPage() {
@@ -134,6 +136,23 @@ function SettingsPage() {
         {activeTab === 'cookies' && (
           <div className="-m-4 md:-m-8">
             <BrowserCookiesPage />
+          </div>
+        )}
+
+        {/* ── Channels (Signal) ── */}
+        {activeTab === 'channels' && (
+          <div className="max-w-5xl mx-auto space-y-4">
+            <div>
+              <h2 className="text-lg font-semibold flex items-center gap-2">
+                <Radio className="h-5 w-5" />
+                Channels
+              </h2>
+              <p className="text-sm text-muted-foreground mt-1">
+                Configure messaging channel integrations. Signal uses one shared
+                phone number for the entire platform with multi-agent routing.
+              </p>
+            </div>
+            <SignalSettings />
           </div>
         )}
       </NestedSidebar>

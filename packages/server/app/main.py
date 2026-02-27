@@ -56,6 +56,7 @@ from app.routers import pulse_routines
 from app.routers import llm_calls
 from app.routers import user_usage
 from app.routers import slack as slack_router
+from app.routers import signal as signal_router
 from app.routers import spawn_executor as spawn_executor_router
 from app.routers import swarm_executor as swarm_executor_router
 from app.routers import try_approaches as try_approaches_router
@@ -733,6 +734,7 @@ app.include_router(user_usage.router, prefix="/v1", tags=["user-usage"])
 app.include_router(waitlist_router.router, prefix="/v1/waitlist", tags=["waitlist"])
 app.include_router(updates_router.router, prefix="/v1/system/updates", tags=["updates"])
 app.include_router(slack_router.router, prefix="/v1/slack", tags=["slack"])
+app.include_router(signal_router.router, prefix="/v1/signal", tags=["signal"])
 app.include_router(
     spawn_executor_router.router, prefix="/v1/internal", tags=["internal"]
 )

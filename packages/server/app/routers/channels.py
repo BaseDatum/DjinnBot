@@ -36,6 +36,20 @@ AGENTS_DIR = os.environ.get("AGENTS_DIR", "/data/agents")
 # tokens and any optional extra fields so the UI can render a consistent form.
 
 CHANNEL_CATALOG: Dict[str, dict] = {
+    "signal": {
+        "name": "Signal",
+        "description": "Enable this agent for Signal messaging via the shared platform number.",
+        "primaryTokenLabel": None,
+        "primaryTokenEnvVarSuffix": None,
+        "primaryTokenPlaceholder": None,
+        "primaryTokenHint": None,
+        "secondaryTokenLabel": None,
+        "secondaryTokenEnvVarSuffix": None,
+        "secondaryTokenHint": None,
+        "extraFields": [],
+        "docsUrl": None,
+        "sharedChannel": True,
+    },
     "slack": {
         "name": "Slack",
         "description": "Connect this agent to a Slack workspace as a bot.",
@@ -94,7 +108,13 @@ def _build_response(
     agent_id: str, channel: str, row: Optional[AgentChannelCredential]
 ) -> dict:
     catalog = CHANNEL_CATALOG[channel]
-    configured = bool(row and row.primary_token and row.secondary_token)
+    # Shared channels (Signal) don't need tokens — just enabled flag.
+    is_shared = catalog.get("sharedChannel", False)
+    configured = (
+        bool(row and row.enabled)
+        if is_shared
+        else bool(row and row.primary_token and row.secondary_token)
+    )
     extra = _parse_extra(row) if row else {}
 
     masked_extra: Dict[str, str] = {}
