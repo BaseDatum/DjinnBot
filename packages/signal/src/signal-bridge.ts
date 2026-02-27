@@ -17,6 +17,7 @@ import { Redis } from 'ioredis';
 import {
   type AgentRegistry,
   type EventBus,
+  type CommandAction,
   authFetch,
 } from '@djinnbot/core';
 import type { ChatSessionManager } from '@djinnbot/core/chat';
@@ -61,6 +62,8 @@ export class SignalBridge {
   private account: string | undefined;
   /** Tracks whether we're running in full mode (SSE + routing) vs receive-only. */
   private fullModeActive = false;
+  /** Per-sender model override set by /model command. */
+  private senderModelOverrides = new Map<string, string>();
 
   constructor(config: SignalBridgeFullConfig) {
     this.config = config;
@@ -426,7 +429,9 @@ export class SignalBridge {
     if (text) {
       const cmd = await this.router.handleCommand(normalized, text);
       if (cmd.handled) {
-        if (cmd.response) {
+        if (cmd.action) {
+          await this.handleCommandAction(normalized, cmd.action);
+        } else if (cmd.response) {
           await this.sendFormattedMessage(normalized, cmd.response);
         }
         return;
@@ -480,6 +485,76 @@ export class SignalBridge {
         'Sorry, something went wrong processing your message. Please try again.',
         { account: this.account },
       );
+    }
+  }
+
+  // ── Command action handling ─────────────────────────────────────────────
+
+  /**
+   * Handle an action returned by the ChannelRouter (e.g. /new, /model).
+   * The router detects the command; the bridge performs the actual side-effects
+   * (session stop/delete, model swap) because it has access to the CSM and API.
+   */
+  private async handleCommandAction(sender: string, action: CommandAction): Promise<void> {
+    const csm = this.config.chatSessionManager;
+    const safeSender = normalizeE164(sender).replace(/[^a-zA-Z0-9]/g, '');
+
+    if (action.type === 'reset') {
+      // Determine which agent session to reset. The router resolves the
+      // sticky agent; if there is none we fall back to the default.
+      const agentId = action.agentId ?? this.signalConfig?.defaultAgentId ?? this.getFirstAgentId();
+      if (!agentId) {
+        await this.sendFormattedMessage(sender, 'No active conversation to reset.');
+        return;
+      }
+
+      const sessionId = `signal_${safeSender}_${agentId}`;
+      console.log(`[SignalBridge] /new: resetting session ${sessionId} for ${sender}`);
+
+      // 1. Stop the container if running
+      if (csm?.isSessionActive(sessionId)) {
+        try { await csm.stopSession(sessionId); } catch (err) {
+          console.warn(`[SignalBridge] /new: failed to stop session ${sessionId}:`, err);
+        }
+      }
+
+      // 2. Delete session + messages from DB
+      try {
+        await authFetch(`${this.config.apiUrl}/v1/chat/sessions/${sessionId}`, {
+          method: 'DELETE',
+          signal: AbortSignal.timeout(5000),
+        });
+      } catch (err) {
+        // 404 is fine — session may not exist in DB yet
+        console.warn(`[SignalBridge] /new: failed to delete session ${sessionId} from DB:`, err);
+      }
+
+      await this.sendFormattedMessage(sender, 'Conversation reset. Your next message starts a fresh session.');
+      return;
+    }
+
+    if (action.type === 'model') {
+      const agentId = action.agentId ?? this.signalConfig?.defaultAgentId ?? this.getFirstAgentId();
+      if (!agentId) {
+        await this.sendFormattedMessage(sender, 'No active conversation. Send a message first, then use /model.');
+        return;
+      }
+
+      const sessionId = `signal_${safeSender}_${agentId}`;
+
+      // Update the model on the active session if running
+      if (csm?.isSessionActive(sessionId)) {
+        csm.updateModel(sessionId, action.model);
+        console.log(`[SignalBridge] /model: changed model to ${action.model} for session ${sessionId}`);
+      } else {
+        console.log(`[SignalBridge] /model: session ${sessionId} not active — model will apply on next message`);
+      }
+
+      // Store the model preference so the next processWithAgent picks it up
+      this.senderModelOverrides.set(normalizeE164(sender), action.model);
+
+      await this.sendFormattedMessage(sender, `Model changed to ${action.model}. This will apply to your next message.`);
+      return;
     }
   }
 
@@ -537,7 +612,10 @@ export class SignalBridge {
     });
 
     try {
-      const model = this.config.defaultConversationModel ?? 'openrouter/minimax/minimax-m2.5';
+      // Use per-sender model override (set by /model) if available, else default
+      const model = this.senderModelOverrides.get(normalizeE164(sender))
+        ?? this.config.defaultConversationModel
+        ?? 'openrouter/minimax/minimax-m2.5';
 
       // Start or resume session — this creates the DB row for chat_sessions
       await csm.startSession({

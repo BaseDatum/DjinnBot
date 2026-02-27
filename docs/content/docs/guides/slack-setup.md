@@ -175,6 +175,166 @@ Agents can operate in different thread modes:
 
 Configure via `thread_mode` in the agent's `config.yml`.
 
+## Step 10: Register Slash Commands
+
+Each agent can expose a `/<agent-id>` slash command that lets users inspect and configure the agent directly from Slack. To enable this:
+
+1. In the Slack app settings for the agent, go to **Slash Commands**
+2. Click **Create New Command**
+3. Configure:
+   - **Command**: `/<agent-id>` (e.g., `/eric`)
+   - **Short Description**: `Configure and control this agent`
+   - **Usage Hint**: `[model|config|thinking|help]`
+4. Click **Save**
+5. Reinstall the app to the workspace when prompted
+
+Repeat for each agent's Slack app.
+
+{{< callout type="info" >}}
+The slash command name **must** match the agent's ID exactly. DjinnBot registers a handler for `/<agent-id>` on startup — if the command name doesn't match, Slack won't route it to the correct handler.
+{{< /callout >}}
+
+## Slash Commands Reference
+
+Every agent registers a `/<agent-id>` slash command with several subcommands. All responses are **ephemeral** — only the user who invoked the command can see the output.
+
+### `/<agent> help`
+
+Shows all available subcommands with usage examples.
+
+```
+/<agent> help
+```
+
+**Output:**
+
+```
+🛠 Eric — Available commands:
+
+/eric model                          — Show the current active model
+/eric model execution <provider/model-id> — Switch the execution model
+/eric config                         — Show agent configuration
+/eric thinking <level>               — Set thinking level
+/eric help                           — Show this help message
+
+Examples:
+/eric model execution anthropic/claude-sonnet-4
+/eric model execution openai/gpt-4o
+/eric model execution openrouter/google/gemini-2.5-pro
+```
+
+### `/<agent> model`
+
+Displays the model currently in use for this agent's conversation session in the current channel.
+
+```
+/eric model
+```
+
+If there is an active session (a container is running for this agent in the channel), the response shows the **active model** — the model actually being used for inference right now. If no session is active, it shows the **configured model** from the agent's `config.yml`.
+
+### `/<agent> model execution <provider/model-id>`
+
+Switches the agent's execution model mid-conversation without losing context.
+
+```
+/eric model execution anthropic/claude-sonnet-4
+/eric model execution openai/gpt-4o
+/eric model execution openrouter/google/gemini-2.5-pro
+```
+
+**How it works:**
+
+1. The model string is validated using the same `parseModelString()` logic the engine uses.
+2. If an active session pool container exists for this agent in the current channel, the model is hot-swapped — the running container receives the new model, and the **next message** uses it. Full conversation context is preserved.
+3. If no active session exists (e.g., the agent hasn't been messaged recently, or the idle timeout expired), the model is queued and will be used when the next conversation starts.
+
+**Model string format:** `<provider>/<model-id>`, where provider is one of `anthropic`, `openai`, `openrouter`, `google`, `mistral`, etc. When using OpenRouter, include the full path: `openrouter/<org>/<model>`.
+
+{{< callout type="tip" >}}
+The shorthand `/<agent> model <provider/model-id>` also works — the `execution` keyword is optional. For example, `/<agent> model anthropic/claude-sonnet-4` is equivalent.
+{{< /callout >}}
+
+### `/<agent> config`
+
+Displays the agent's current configuration, including all model slots, thread mode, and installed tools.
+
+```
+/eric config
+```
+
+**Output:**
+
+```
+🛠 Eric — Product Owner
+
+Active model:    anthropic/claude-sonnet-4
+Configured model: anthropic/claude-sonnet-4
+Thinking model:  anthropic/claude-sonnet-4
+Planning model:  same as model
+Executor model:  same as model
+Thread mode:     passive
+Tools:           recall, memorize, read, write, bash, ...
+```
+
+**Fields explained:**
+
+| Field | Description |
+|-------|-------------|
+| **Active model** | The model currently in use for this channel's live session (may differ from configured if switched via slash command) |
+| **Configured model** | The default model from the agent's `config.yml` |
+| **Thinking model** | Model used for reasoning and decision-making (often a stronger/more expensive model) |
+| **Planning model** | Model used for pipeline planning |
+| **Executor model** | Model used for step execution in pipelines |
+| **Thread mode** | `passive` (only responds when mentioned) or `active` (proactively participates) |
+| **Tools** | List of tools available to the agent |
+
+### `/<agent> thinking <level>`
+
+Sets the extended thinking level for the agent's conversation sessions. This controls how much internal reasoning the model does before responding.
+
+```
+/eric thinking medium
+```
+
+**Valid levels:**
+
+| Level | Description |
+|-------|-------------|
+| `off` | No extended thinking — fastest responses |
+| `minimal` | Very brief reasoning |
+| `low` | Light reasoning for straightforward tasks |
+| `medium` | Balanced reasoning (good default) |
+| `high` | Deep reasoning for complex problems |
+| `xhigh` | Maximum reasoning depth — slowest but most thorough |
+
+{{< callout type="warning" >}}
+Thinking level changes take effect on the **next conversation session**. The thinking level is set as an environment variable (`AGENT_THINKING_LEVEL`) when the container starts, so an active session will continue using its current thinking level until it times out and a new container is created.
+{{< /callout >}}
+
+## How Slash Commands Work Internally
+
+### Registration
+
+When DjinnBot starts, each agent's `AgentSlackRuntime` registers a handler for `/<agent-id>` using Slack Bolt's `app.command()` API. This happens automatically — no manual wiring is needed beyond creating the slash command in the Slack app manifest.
+
+### Session Pool Integration
+
+The `model` subcommand interacts directly with the `SlackSessionPool`, which manages persistent container sessions for each conversation:
+
+- **DM sessions** are keyed by `slack_dm:{agentId}:{channelId}` with a **20-minute idle timeout**.
+- **Channel thread sessions** are keyed by `slack_thread:{agentId}:{channelId}:{threadTs}` with a **10-minute idle timeout**.
+
+When you switch models via `/<agent> model execution`, the pool sends a `changeModel` command to the running container. The model switch is seamless — no container restart, no context loss.
+
+### Ephemeral Responses
+
+All slash command responses use `response_type: 'ephemeral'`, meaning only the invoking user sees them. This prevents slash command output from cluttering shared channels.
+
+### Error Handling
+
+If a slash command fails (invalid model string, session pool unavailable, etc.), an ephemeral error message is returned with the specific error. The agent's runtime catches all errors so a bad slash command never crashes the bot.
+
 ## Customizing Bot Appearance
 
 In each Slack app's settings:

@@ -50,6 +50,8 @@ class TelegramAgentBridge {
   private typingManager: TelegramTypingManager;
   private agentConfig: TelegramAgentConfig;
   private stopped = false;
+  /** Per-chat model override set by /model command. */
+  private chatModelOverrides = new Map<number, string>();
 
   constructor(
     agentId: string,
@@ -257,7 +259,13 @@ class TelegramAgentBridge {
       return;
     }
 
-    // 2. Start typing indicator
+    // 2. Check for built-in commands
+    if (text) {
+      const cmdResult = await this.handleCommand(chatId, text);
+      if (cmdResult) return;
+    }
+
+    // 3. Start typing indicator
     this.typingManager.startTyping(chatId);
 
     // 3. Process with agent — raw files are passed through and uploaded
@@ -277,6 +285,75 @@ class TelegramAgentBridge {
         'Sorry, something went wrong processing your message. Please try again.',
       ).catch(() => {});
     }
+  }
+
+  // ── Built-in commands ───────────────────────────────────────────────────
+
+  /**
+   * Handle built-in slash commands. Returns true if a command was handled.
+   */
+  private async handleCommand(chatId: number, text: string): Promise<boolean> {
+    const trimmed = text.trim();
+    const lower = trimmed.toLowerCase();
+
+    if (lower === '/help' || lower === '/start') {
+      await this.sendFormattedMessage(chatId, [
+        `Hi! I'm **${this.agentId}**. Available commands:`,
+        '  /new — Start a fresh conversation (clears history)',
+        '  /model <name> — Switch the AI model',
+        '  /help — Show this help',
+      ].join('\n'));
+      return true;
+    }
+
+    if (lower === '/new') {
+      const csm = this.config.chatSessionManager;
+      const sessionId = `telegram_${chatId}_${this.agentId}`;
+      console.log(`[TelegramBridge:${this.agentId}] /new: resetting session ${sessionId}`);
+
+      // 1. Stop the container if running
+      if (csm?.isSessionActive(sessionId)) {
+        try { await csm.stopSession(sessionId); } catch (err) {
+          console.warn(`[TelegramBridge:${this.agentId}] /new: failed to stop session ${sessionId}:`, err);
+        }
+      }
+
+      // 2. Delete session + messages from DB
+      const apiUrl = this.config.apiUrl ?? process.env.DJINNBOT_API_URL ?? 'http://api:8000';
+      try {
+        await authFetch(`${apiUrl}/v1/chat/sessions/${sessionId}`, {
+          method: 'DELETE',
+          signal: AbortSignal.timeout(5000),
+        });
+      } catch (err) {
+        console.warn(`[TelegramBridge:${this.agentId}] /new: failed to delete session ${sessionId} from DB:`, err);
+      }
+
+      await this.sendFormattedMessage(chatId, 'Conversation reset. Your next message starts a fresh session.');
+      return true;
+    }
+
+    if (lower.startsWith('/model')) {
+      const modelArg = trimmed.slice('/model'.length).trim();
+      if (!modelArg) {
+        await this.sendFormattedMessage(chatId, 'Usage: /model <model-name>\nExample: /model anthropic/claude-sonnet-4');
+        return true;
+      }
+
+      const csm = this.config.chatSessionManager;
+      const sessionId = `telegram_${chatId}_${this.agentId}`;
+
+      if (csm?.isSessionActive(sessionId)) {
+        csm.updateModel(sessionId, modelArg);
+        console.log(`[TelegramBridge:${this.agentId}] /model: changed model to ${modelArg} for session ${sessionId}`);
+      }
+
+      this.chatModelOverrides.set(chatId, modelArg);
+      await this.sendFormattedMessage(chatId, `Model changed to ${modelArg}. This will apply to your next message.`);
+      return true;
+    }
+
+    return false;
   }
 
   // ── Agent processing ───────────────────────────────────────────────────
@@ -327,7 +404,10 @@ class TelegramAgentBridge {
     });
 
     try {
-      const model = this.config.defaultConversationModel ?? 'openrouter/minimax/minimax-m2.5';
+      // Use per-chat model override (set by /model) if available, else default
+      const model = this.chatModelOverrides.get(chatId)
+        ?? this.config.defaultConversationModel
+        ?? 'openrouter/minimax/minimax-m2.5';
 
       // Start or resume session — creates the DB row for chat_sessions
       await csm.startSession({

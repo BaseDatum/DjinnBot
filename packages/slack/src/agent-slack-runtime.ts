@@ -121,6 +121,12 @@ export interface AgentSlackRuntimeConfig {
     responseText: string,
     userName: string,
   ) => Promise<void>;
+  /**
+   * Base URL for the DjinnBot API server.
+   * Used to fetch favorites, providers, and models for the interactive model chooser.
+   * Defaults to process.env.DJINNBOT_API_URL || 'http://api:8000'.
+   */
+  apiBaseUrl?: string;
 }
 
 export class AgentSlackRuntime {
@@ -820,7 +826,48 @@ export class AgentSlackRuntime {
     // All responses are ephemeral (only visible to the invoking user).
     this.app.command(`/${this.agentId}`, async ({ command, ack, respond }) => {
       await ack();
-      await this.handleSlashCommand(command, respond);
+      await this.handleSlashCommand(command as any, respond);
+    });
+
+    // ─── Interactive Model Chooser Handlers ──────────────────────────────
+    // Handle favorites static_select — user picked a model from the favorites dropdown
+    this.app.action(new RegExp(`^model_favorites_select:${this.agentId}$`), async ({ action, body, ack }) => {
+      await ack();
+      const selectedModel = (action as any).selected_option?.value;
+      if (!selectedModel) return;
+      await this.applyModelFromInteraction(selectedModel, body);
+    });
+
+    // Handle provider select inside the modal — fetch models and update the view
+    this.app.action(new RegExp(`^model_provider_select:${this.agentId}$`), async ({ action, body, ack }) => {
+      await ack();
+      const providerId = (action as any).selected_option?.value;
+      if (!providerId || !(body as any).view) return;
+      await this.updateModalWithModels(providerId, (body as any).view);
+    });
+
+    // Handle modal submission — user selected provider + model and hit "Switch Model"
+    this.app.view(new RegExp(`^model_select_modal:${this.agentId}$`), async ({ view, ack }) => {
+      const values = view.state?.values ?? {};
+      const selectedModel = values.model_block?.model_select?.selected_option?.value;
+
+      if (!selectedModel) {
+        await ack({
+          response_action: 'errors',
+          errors: { model_block: 'Please select a model before submitting.' },
+        } as any);
+        return;
+      }
+
+      await ack();
+
+      // Apply the model switch
+      const meta = JSON.parse(view.private_metadata || '{}');
+      const channelId = meta.channelId;
+      if (channelId) {
+        const source = channelId.startsWith('D') ? 'dm' as const : 'channel_thread' as const;
+        await this.doModelSwitchSilent(selectedModel, source, channelId);
+      }
     });
   }
 
@@ -837,7 +884,7 @@ export class AgentSlackRuntime {
    *   help                                 — show available subcommands
    */
   private async handleSlashCommand(
-    command: { text: string; channel_id: string; user_id: string; channel_name?: string },
+    command: { text: string; channel_id: string; user_id: string; channel_name?: string; trigger_id: string },
     respond: (msg: string | Record<string, any>) => Promise<void>,
   ): Promise<void> {
     const rawText = (command.text || '').trim();
@@ -850,6 +897,10 @@ export class AgentSlackRuntime {
       switch (subcommand) {
         case 'model':
           await this.handleModelSubcommand(parts.slice(1), command, respond);
+          break;
+
+        case 'models':
+          await this.handleModelsSubcommand(parts.slice(1), command, respond);
           break;
 
         case 'config':
@@ -1058,6 +1109,8 @@ export class AgentSlackRuntime {
       '',
       `\`/${name} model\` — Show the current active model`,
       `\`/${name} model execution <provider/model-id>\` — Switch the execution model (seamless, preserves context)`,
+      `\`/${name} models\` — Quick-switch from your favorited models`,
+      `\`/${name} models select\` — Browse all configured providers and models`,
       `\`/${name} config\` — Show agent configuration`,
       `\`/${name} thinking <level>\` — Set thinking level (off, minimal, low, medium, high, xhigh)`,
       `\`/${name} help\` — Show this help message`,
@@ -1072,6 +1125,220 @@ export class AgentSlackRuntime {
       response_type: 'ephemeral',
       text: lines.join('\n'),
     });
+  }
+
+  // ─── Models Subcommand (Interactive Model Chooser) ───────────────────────
+
+  /** Resolve the DjinnBot API base URL. */
+  private get apiBaseUrl(): string {
+    return this.config.apiBaseUrl || process.env.DJINNBOT_API_URL || 'http://api:8000';
+  }
+
+  /**
+   * Fetch JSON from the DjinnBot API (internal, no auth needed for service-to-service).
+   */
+  private async apiFetch<T = any>(path: string): Promise<T> {
+    const res = await fetch(`${this.apiBaseUrl}${path}`);
+    if (!res.ok) {
+      throw new Error(`API ${path} returned ${res.status}: ${await res.text().catch(() => '')}`);
+    }
+    return res.json() as Promise<T>;
+  }
+
+  /**
+   * Handle: /<agent-name> models [select]
+   *
+   * No args (or just "models"): respond with a static_select of the user's favorited models.
+   * "select": open a modal with grouped provider → model selects (only configured providers).
+   */
+  private async handleModelsSubcommand(
+    args: string[],
+    command: { text: string; channel_id: string; user_id: string; trigger_id: string },
+    respond: (msg: string | Record<string, any>) => Promise<void>,
+  ): Promise<void> {
+    const subAction = args[0]?.toLowerCase();
+
+    if (subAction === 'select') {
+      await this.openModelSelectModal(command);
+      return;
+    }
+
+    // Default: show favorites as a static_select
+    await this.handleModelsFavorites(command, respond);
+  }
+
+  /**
+   * Respond with an ephemeral message containing a static_select of the user's favorited models.
+   */
+  private async handleModelsFavorites(
+    command: { channel_id: string; user_id: string },
+    respond: (msg: string | Record<string, any>) => Promise<void>,
+  ): Promise<void> {
+    let favorites: Array<{ modelId: string; modelName: string; providerName: string }>;
+    try {
+      const data = await this.apiFetch<{ favorites: typeof favorites }>('/v1/settings/favorites');
+      favorites = data.favorites ?? [];
+    } catch (err) {
+      await respond({
+        response_type: 'ephemeral',
+        text: `Failed to load favorites: ${(err as Error).message}`,
+      });
+      return;
+    }
+
+    if (favorites.length === 0) {
+      await respond({
+        response_type: 'ephemeral',
+        text: [
+          `${this.agent.identity.emoji} *No favorited models yet.*`,
+          '',
+          `Star models in the dashboard model picker (or use \`/${this.agentId} models select\` to browse all providers).`,
+        ].join('\n'),
+      });
+      return;
+    }
+
+    // Determine the currently active model for this channel
+    const pool = this.config.sessionPool;
+    const source = command.channel_id.startsWith('D') ? 'dm' as const : 'channel_thread' as const;
+    const currentModel = pool?.getActiveSessionModel(this.agentId, source, command.channel_id)
+      ?? this.agent.config?.model
+      ?? 'unknown';
+
+    // Build static_select options from favorites
+    const options = favorites.map((fav) => ({
+      text: { type: 'plain_text' as const, text: `${fav.providerName} · ${fav.modelName}`.slice(0, 75) },
+      value: fav.modelId.slice(0, 75), // Slack value max is 75 chars
+    }));
+
+    // Find initial_option matching current model
+    const initialOption = options.find((o) => o.value === currentModel);
+
+    await respond({
+      response_type: 'ephemeral',
+      blocks: [
+        {
+          type: 'section',
+          text: {
+            type: 'mrkdwn',
+            text: `${this.agent.identity.emoji} *Switch model for ${this.agent.identity.name}*\nCurrent: \`${currentModel}\``,
+          },
+          accessory: {
+            type: 'static_select',
+            action_id: `model_favorites_select:${this.agentId}`,
+            placeholder: { type: 'plain_text', text: 'Pick a model...' },
+            options,
+            ...(initialOption ? { initial_option: initialOption } : {}),
+          },
+        },
+        {
+          type: 'context',
+          elements: [
+            {
+              type: 'mrkdwn',
+              text: `Use \`/${this.agentId} models select\` to browse all providers`,
+            },
+          ],
+        },
+      ],
+      text: `Switch model for ${this.agent.identity.name}`, // fallback
+    });
+  }
+
+  /**
+   * Open the full model-select modal: two-stage provider → model picker.
+   * Stage 1: static_select of configured providers.
+   * Stage 2: populated via views.update when user selects a provider.
+   */
+  private async openModelSelectModal(
+    command: { trigger_id: string; channel_id: string; user_id: string },
+  ): Promise<void> {
+    // Fetch providers (only show configured ones)
+    let providers: Array<{
+      providerId: string;
+      name: string;
+      description: string;
+      configured: boolean;
+      models: Array<{ id: string; name: string; description?: string; reasoning?: boolean }>;
+    }>;
+    try {
+      providers = await this.apiFetch<typeof providers>('/v1/settings/providers');
+    } catch (err) {
+      console.error(`[${this.agentId}] Failed to fetch providers for modal:`, err);
+      return;
+    }
+
+    const configuredProviders = providers.filter((p) => p.configured);
+    if (configuredProviders.length === 0) {
+      // Can't open modal without trigger_id in some cases — post ephemeral instead
+      try {
+        await this.client.chat.postEphemeral({
+          channel: command.channel_id,
+          user: command.user_id,
+          text: `${this.agent.identity.emoji} No model providers are configured. Go to *Settings > Model Providers* in the dashboard to add API keys.`,
+        });
+      } catch { /* ignore */ }
+      return;
+    }
+
+    // Sort providers by canonical order
+    const PROVIDER_ORDER = [
+      'opencode', 'xai', 'anthropic', 'openai', 'google',
+      'openrouter', 'groq', 'zai', 'mistral', 'cerebras',
+    ];
+    configuredProviders.sort((a, b) => {
+      const ai = PROVIDER_ORDER.indexOf(a.providerId);
+      const bi = PROVIDER_ORDER.indexOf(b.providerId);
+      return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi);
+    });
+
+    const providerOptions = configuredProviders.map((p) => ({
+      text: { type: 'plain_text' as const, text: p.name.slice(0, 75) },
+      value: p.providerId.slice(0, 75),
+    }));
+
+    // Open modal with provider select (stage 1)
+    try {
+      await this.client.views.open({
+        trigger_id: command.trigger_id,
+        view: {
+          type: 'modal',
+          callback_id: `model_select_modal:${this.agentId}`,
+          title: { type: 'plain_text', text: `${this.agent.identity.emoji} Select Model` },
+          submit: { type: 'plain_text', text: 'Switch Model' },
+          close: { type: 'plain_text', text: 'Cancel' },
+          private_metadata: JSON.stringify({
+            agentId: this.agentId,
+            channelId: command.channel_id,
+          }),
+          blocks: [
+            {
+              type: 'input',
+              block_id: 'provider_block',
+              dispatch_action: true,
+              label: { type: 'plain_text', text: 'Provider' },
+              element: {
+                type: 'static_select',
+                action_id: `model_provider_select:${this.agentId}`,
+                placeholder: { type: 'plain_text', text: 'Choose a provider...' },
+                options: providerOptions,
+              },
+            },
+            {
+              type: 'context',
+              elements: [
+                {
+                  type: 'mrkdwn',
+                  text: 'Select a provider to see its available models.',
+                },
+              ],
+            },
+          ],
+        },
+      });
+    } catch (err) {
+      console.error(`[${this.agentId}] Failed to open model select modal:`, err);
+    }
   }
 
   /**

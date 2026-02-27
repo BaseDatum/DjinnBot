@@ -11,7 +11,7 @@ export interface RuntimeConfig {
    * using JSON tool calls, reducing context usage by 30-40%+.
    */
   ptc: {
-    /** Whether PTC is enabled. Default: false (env: PTC_ENABLED). */
+    /** Whether PTC is enabled. Default: true (env: PTC_ENABLED). */
     enabled: boolean;
     /** Default timeout for exec_code in seconds. Default: 120 (env: PTC_TIMEOUT). */
     timeout: number;
@@ -35,7 +35,7 @@ export function loadConfig(): RuntimeConfig {
     apiBaseUrl: process.env.DJINNBOT_API_URL || 'http://api:8000',
     anthropicApiKey: process.env.ANTHROPIC_API_KEY,
     ptc: {
-      enabled: process.env.PTC_ENABLED === 'true',
+      enabled: process.env.PTC_ENABLED !== 'false',
       timeout: parseInt(process.env.PTC_TIMEOUT || '120', 10),
     },
   };

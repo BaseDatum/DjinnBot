@@ -32,9 +32,16 @@ export interface RouteResult {
   reason: RouteReason;
 }
 
+export type CommandAction =
+  | { type: 'reset'; agentId?: string }
+  | { type: 'model'; model: string; agentId?: string }
+  | { type: 'modelfavs' };
+
 export interface CommandResult {
   handled: boolean;
   response?: string;
+  /** When set, the bridge must perform this action (session reset, model change, etc.). */
+  action?: CommandAction;
 }
 
 export interface ChannelRouterConfig {
@@ -76,7 +83,10 @@ export class ChannelRouter {
           'Available commands:',
           '  /agents  — List available agents',
           '  /switch <name> — Switch to a different agent',
-          '  /end — End current conversation',
+          '  /new — Start a fresh conversation (clears history)',
+          '  /model <name> — Switch the AI model',
+          '  /modelfavs — Show your favorite models',
+          '  /end — End current conversation routing',
           '  /help — Show this help',
           '',
           'You can also start a message with @agentname to route to a specific agent.',
@@ -115,6 +125,39 @@ export class ChannelRouter {
       return {
         handled: true,
         response: `Switched to ${agent.emoji} ${agent.name}. Your messages will now be routed to them.`,
+      };
+    }
+
+    if (lower === '/new') {
+      // Resolve which agent the sender is currently talking to so the bridge
+      // can build the deterministic session ID for cleanup.
+      const agentId = await this.getActiveConversation(normalizeE164(sender));
+      await this.clearConversation(sender);
+      return {
+        handled: true,
+        action: { type: 'reset', agentId: agentId ?? undefined },
+      };
+    }
+
+    if (lower === '/modelfavs') {
+      return {
+        handled: true,
+        action: { type: 'modelfavs' },
+      };
+    }
+
+    if (lower.startsWith('/model ') || lower === '/model') {
+      const modelArg = trimmed.slice('/model'.length).trim();
+      if (!modelArg) {
+        return {
+          handled: true,
+          response: 'Usage: /model <model-name>\nExample: /model anthropic/claude-sonnet-4',
+        };
+      }
+      const agentId = await this.getActiveConversation(normalizeE164(sender));
+      return {
+        handled: true,
+        action: { type: 'model', model: modelArg, agentId: agentId ?? undefined },
       };
     }
 

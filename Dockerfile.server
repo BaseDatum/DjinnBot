@@ -64,12 +64,6 @@ WORKDIR /app
 COPY --from=builder /app/.venv /app/.venv
 ENV PATH="/app/.venv/bin:$PATH"
 
-# ── faster-whisper: Server-side speech-to-text for voice message transcription ─
-# Installed into the venv (not system Python) so it's visible to the app.
-# Uses CTranslate2 backend — ~4x faster than OpenAI's Python whisper on CPU.
-# The 'base' model (~150MB) is auto-downloaded on first transcription request.
-RUN pip install --no-cache-dir faster-whisper
-
 # Copy application code and alembic
 COPY --from=builder /app/app /app/app
 COPY --from=builder /app/alembic /app/alembic

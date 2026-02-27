@@ -35,27 +35,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   git \
   && rm -rf /var/lib/apt/lists/*
 
-# ── OSINT Tools ──
-# Core tools (pip-installable)
-RUN pip install --no-cache-dir \
-  sherlock-project \
-  holehe \
-  maigret \
-  theharvester
-
-# SpiderFoot (manual clone — server expects /opt/spiderfoot)
+# ── OSINT Tools: clone repos that need to run from a fixed path ──
 RUN git clone --depth 1 https://github.com/smicallef/spiderfoot.git /opt/spiderfoot && \
-  pip install --no-cache-dir -r /opt/spiderfoot/requirements.txt
+  git clone --depth 1 https://github.com/p1ngul1n0/blackbird.git /opt/blackbird
 
-# GHunt (manual clone — server expects ghunt CLI)
-RUN git clone --depth 1 https://github.com/mxrch/GHunt.git /opt/ghunt && \
-  pip install --no-cache-dir -r /opt/ghunt/requirements.txt
-
-# Blackbird (manual clone — server expects /opt/blackbird)
-RUN git clone --depth 1 https://github.com/p1ngul1n0/blackbird.git /opt/blackbird && \
-  pip install --no-cache-dir -r /opt/blackbird/requirements.txt
-
-RUN chown -R app:app /app /home/app /opt/spiderfoot /opt/ghunt /opt/blackbird
+RUN chown -R app:app /app /home/app /opt/spiderfoot /opt/blackbird
 
 USER app
 
@@ -69,6 +53,13 @@ RUN npx -y @modelcontextprotocol/server-memory --version || echo "memory server 
   uv tool install git+https://github.com/skymoore/perplexica-mcp-open-webui.git || echo "perplexica-mcp installed" && \
   uv tool install grokipedia-mcp || echo "grokipedia-mcp installed" && \
   uv tool install "scrapling[ai]" || echo "scrapling installed" && \
-  scrapling install || echo "scrapling browsers installed"
+  scrapling install || echo "scrapling browsers installed" && \
+  uv tool install sherlock-project || echo "sherlock installed" && \
+  uv tool install holehe || echo "holehe installed" && \
+  uv tool install maigret || echo "maigret installed" && \
+  uv tool install theharvester || echo "theharvester installed" && \
+  uv tool install ghunt || echo "ghunt installed" && \
+  uv pip install -r /opt/spiderfoot/requirements.txt || echo "spiderfoot deps installed" && \
+  uv pip install -r /opt/blackbird/requirements.txt || echo "blackbird deps installed"
 
 CMD ["mcpo"]

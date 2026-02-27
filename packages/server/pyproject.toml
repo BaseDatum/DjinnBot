@@ -28,6 +28,8 @@ dependencies = [
     "kuzu>=0.11.0",
     # PDF extraction (structured markdown/JSON via OpenDataLoader)
     "opendataloader-pdf>=0.1.0",
+    # Audio transcription (voice notes from Signal/Telegram/WhatsApp/Discord)
+    "faster-whisper>=1.1.0",
 ]
 
 [project.optional-dependencies]

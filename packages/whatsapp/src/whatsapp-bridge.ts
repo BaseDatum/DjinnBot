@@ -18,6 +18,7 @@ import { Redis } from 'ioredis';
 import {
   type AgentRegistry,
   type EventBus,
+  type CommandAction,
   ChannelRouter,
   ChannelTypingManager,
   normalizeE164,
@@ -62,6 +63,8 @@ export class WhatsAppBridge {
   private lockRelease: (() => Promise<void>) | null = null;
   private whatsappConfig: WhatsAppConfig | null = null;
   private latestQrForRpc: string | null = null;
+  /** Per-sender model override set by /model command. */
+  private senderModelOverrides = new Map<string, string>();
 
   constructor(config: WhatsAppBridgeFullConfig) {
     this.config = config;
@@ -237,7 +240,9 @@ export class WhatsAppBridge {
     // 4. Check for built-in commands
     const cmd = await this.router.handleCommand(normalized, msg.text);
     if (cmd.handled) {
-      if (cmd.response) {
+      if (cmd.action) {
+        await this.handleCommandAction(normalized, msg.senderJid, cmd.action);
+      } else if (cmd.response) {
         await this.sendFormattedMessage(msg.senderJid, cmd.response);
       }
       return;
@@ -286,6 +291,68 @@ export class WhatsAppBridge {
         msg.senderJid,
         'Sorry, something went wrong processing your message. Please try again.',
       );
+    }
+  }
+
+  // ── Command action handling ─────────────────────────────────────────────
+
+  /**
+   * Handle an action returned by the ChannelRouter (e.g. /new, /model).
+   */
+  private async handleCommandAction(sender: string, senderJid: string, action: CommandAction): Promise<void> {
+    const csm = this.config.chatSessionManager;
+    const safeSender = normalizeE164(sender).replace(/[^a-zA-Z0-9]/g, '');
+
+    if (action.type === 'reset') {
+      const agentId = action.agentId ?? this.whatsappConfig?.defaultAgentId ?? this.getFirstAgentId();
+      if (!agentId) {
+        await this.sendFormattedMessage(senderJid, 'No active conversation to reset.');
+        return;
+      }
+
+      const sessionId = `whatsapp_${safeSender}_${agentId}`;
+      console.log(`[WhatsAppBridge] /new: resetting session ${sessionId} for ${sender}`);
+
+      // 1. Stop the container if running
+      if (csm?.isSessionActive(sessionId)) {
+        try { await csm.stopSession(sessionId); } catch (err) {
+          console.warn(`[WhatsAppBridge] /new: failed to stop session ${sessionId}:`, err);
+        }
+      }
+
+      // 2. Delete session + messages from DB
+      try {
+        await authFetch(`${this.config.apiUrl}/v1/chat/sessions/${sessionId}`, {
+          method: 'DELETE',
+          signal: AbortSignal.timeout(5000),
+        });
+      } catch (err) {
+        console.warn(`[WhatsAppBridge] /new: failed to delete session ${sessionId} from DB:`, err);
+      }
+
+      await this.sendFormattedMessage(senderJid, 'Conversation reset. Your next message starts a fresh session.');
+      return;
+    }
+
+    if (action.type === 'model') {
+      const agentId = action.agentId ?? this.whatsappConfig?.defaultAgentId ?? this.getFirstAgentId();
+      if (!agentId) {
+        await this.sendFormattedMessage(senderJid, 'No active conversation. Send a message first, then use /model.');
+        return;
+      }
+
+      const sessionId = `whatsapp_${safeSender}_${agentId}`;
+
+      if (csm?.isSessionActive(sessionId)) {
+        csm.updateModel(sessionId, action.model);
+        console.log(`[WhatsAppBridge] /model: changed model to ${action.model} for session ${sessionId}`);
+      } else {
+        console.log(`[WhatsAppBridge] /model: session ${sessionId} not active — model will apply on next message`);
+      }
+
+      this.senderModelOverrides.set(normalizeE164(sender), action.model);
+      await this.sendFormattedMessage(senderJid, `Model changed to ${action.model}. This will apply to your next message.`);
+      return;
     }
   }
 
@@ -340,7 +407,10 @@ export class WhatsAppBridge {
     });
 
     try {
-      const model = this.config.defaultConversationModel ?? 'openrouter/minimax/minimax-m2.5';
+      // Use per-sender model override (set by /model) if available, else default
+      const model = this.senderModelOverrides.get(normalizeE164(sender))
+        ?? this.config.defaultConversationModel
+        ?? 'openrouter/minimax/minimax-m2.5';
 
       // Start or resume session — creates the DB row for chat_sessions
       await csm.startSession({

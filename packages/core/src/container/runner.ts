@@ -149,12 +149,12 @@ export class ContainerRunner implements AgentRunner {
       const res = await authFetch(`${apiBaseUrl}/v1/settings/`);
       if (res.ok) {
         const data = await res.json() as { ptcEnabled?: boolean };
-        return { ptcEnabled: data.ptcEnabled ?? false };
+        return { ptcEnabled: data.ptcEnabled ?? true };
       }
     } catch (err) {
       console.warn('[ContainerRunner] Failed to fetch global flags:', err);
     }
-    return { ptcEnabled: false };
+    return { ptcEnabled: true };
   }
 
   /**
@@ -298,7 +298,7 @@ export class ContainerRunner implements AgentRunner {
           })(),
           // Programmatic Tool Calling — when enabled, agent writes Python to call
           // tools via exec_code, reducing context usage by 30-40%+.
-          ...(globalFlags.ptcEnabled ? { PTC_ENABLED: 'true' } : {}),
+          PTC_ENABLED: globalFlags.ptcEnabled ? 'true' : 'false',
         },
       };
 

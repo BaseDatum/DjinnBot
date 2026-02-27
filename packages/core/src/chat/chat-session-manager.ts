@@ -1143,12 +1143,12 @@ export class ChatSessionManager {
       const res = await authFetch(`${this.apiBaseUrl}/v1/settings/`);
       if (res.ok) {
         const data = await res.json() as { ptcEnabled?: boolean };
-        return { ptcEnabled: data.ptcEnabled ?? false };
+        return { ptcEnabled: data.ptcEnabled ?? true };
       }
     } catch (err) {
       console.warn('[ChatSessionManager] Failed to fetch global flags:', err);
     }
-    return { ptcEnabled: false };
+    return { ptcEnabled: true };
   }
 
   /**
@@ -1348,7 +1348,7 @@ export class ChatSessionManager {
           ...(process.env.MCPO_API_KEY ? { MCPO_API_KEY: process.env.MCPO_API_KEY } : {}),
           // Programmatic Tool Calling — when enabled, agent writes Python to call
           // tools via exec_code, reducing context usage by 30-40%+.
-          ...(globalFlags.ptcEnabled ? { PTC_ENABLED: 'true' } : {}),
+          PTC_ENABLED: globalFlags.ptcEnabled ? 'true' : 'false',
         },
       };
       

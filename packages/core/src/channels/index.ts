@@ -19,6 +19,7 @@ export {
   type RouteResult,
   type RouteReason,
   type CommandResult,
+  type CommandAction,
 } from './channel-router.js';
 export {
   ChannelTypingManager,
