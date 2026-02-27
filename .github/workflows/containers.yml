@@ -14,31 +14,104 @@ concurrency:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.platform == 'linux/arm64' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
     strategy:
       fail-fast: false
       matrix:
+        platform: [linux/amd64, linux/arm64]
+        target: [engine, api, agent-runtime, dashboard, mcpo]
         include:
-          - dockerfile: Dockerfile.engine
+          - target: engine
+            dockerfile: Dockerfile.engine
             image: ghcr.io/basedatum/djinnbot/engine
-          - dockerfile: Dockerfile.server
+          - target: api
+            dockerfile: Dockerfile.server
             image: ghcr.io/basedatum/djinnbot/api
-          - dockerfile: Dockerfile.agent-runtime
+          - target: agent-runtime
+            dockerfile: Dockerfile.agent-runtime
             image: ghcr.io/basedatum/djinnbot/agent-runtime
-          - dockerfile: Dockerfile.dashboard
+          - target: dashboard
+            dockerfile: Dockerfile.dashboard
             image: ghcr.io/basedatum/djinnbot/dashboard
-          - dockerfile: Dockerfile.mcpo
+          - target: mcpo
+            dockerfile: Dockerfile.mcpo
             image: ghcr.io/basedatum/djinnbot/mcpo
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract version from tag
+        id: version
+        run: echo "value=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          platforms: ${{ matrix.platform }}
+          build-args: |
+            BUILD_VERSION=${{ steps.version.outputs.value }}
+          cache-from: type=registry,ref=${{ matrix.image }}:buildcache-${{ matrix.platform == 'linux/amd64' && 'amd64' || 'arm64' }}
+          cache-to: type=registry,ref=${{ matrix.image }}:buildcache-${{ matrix.platform == 'linux/amd64' && 'amd64' || 'arm64' }},mode=max
+          outputs: type=image,name=${{ matrix.image }},push-by-digest=true,name-canonical=true,push=true
+
+      - name: Export digest
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+
+      - name: Upload digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: digest-${{ matrix.target }}-${{ matrix.platform == 'linux/amd64' && 'amd64' || 'arm64' }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  manifest:
+    runs-on: ubuntu-latest
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: engine
+            image: ghcr.io/basedatum/djinnbot/engine
+          - target: api
+            image: ghcr.io/basedatum/djinnbot/api
+          - target: agent-runtime
+            image: ghcr.io/basedatum/djinnbot/agent-runtime
+          - target: dashboard
+            image: ghcr.io/basedatum/djinnbot/dashboard
+          - target: mcpo
+            image: ghcr.io/basedatum/djinnbot/mcpo
+
+    steps:
+      - name: Download amd64 digest
+        uses: actions/download-artifact@v4
+        with:
+          name: digest-${{ matrix.target }}-amd64
+          path: /tmp/digests
+
+      - name: Download arm64 digest
+        uses: actions/download-artifact@v4
+        with:
+          name: digest-${{ matrix.target }}-arm64
+          path: /tmp/digests
 
       - name: Log in to GHCR
         uses: docker/login-action@v3
@@ -58,20 +131,12 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}
             type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
 
-      - name: Extract version from tag
-        id: version
-        run: echo "value=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+      - name: Create manifest list and push
+        working-directory: /tmp/digests
+        run: |
+          docker buildx imagetools create \
+            $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+            $(printf '${{ matrix.image }}@sha256:%s ' *)
 
-      - name: Build and push
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: ${{ matrix.dockerfile }}
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          build-args: |
-            BUILD_VERSION=${{ steps.version.outputs.value }}
-          cache-from: type=registry,ref=${{ matrix.image }}:buildcache
-          cache-to: type=registry,ref=${{ matrix.image }}:buildcache,mode=max
+      - name: Inspect image
+        run: docker buildx imagetools inspect ${{ matrix.image }}:latest
