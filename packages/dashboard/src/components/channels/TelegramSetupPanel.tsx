@@ -19,10 +19,12 @@ import {
   RefreshCw,
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { API_BASE as ROOT_API_BASE } from '@/lib/api';
+import { authFetch } from '@/lib/auth';
 
 // ── API helpers ──────────────────────────────────────────────────────────────
 
-const API_BASE = '/api/v1/telegram';
+const API_BASE = `${ROOT_API_BASE}/telegram`;
 
 interface TelegramConfig {
   agentId: string;
@@ -43,7 +45,7 @@ interface AllowlistEntry {
 }
 
 async function fetchTelegramConfig(agentId: string): Promise<TelegramConfig> {
-  const res = await fetch(`${API_BASE}/${agentId}/config`);
+  const res = await authFetch(`${API_BASE}/${agentId}/config`);
   if (!res.ok) throw new Error(`Failed to fetch config: ${res.status}`);
   return res.json();
 }
@@ -52,7 +54,7 @@ async function updateTelegramConfig(
   agentId: string,
   data: { enabled?: boolean; botToken?: string; allowAll?: boolean },
 ): Promise<TelegramConfig> {
-  const res = await fetch(`${API_BASE}/${agentId}/config`, {
+  const res = await authFetch(`${API_BASE}/${agentId}/config`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
@@ -62,7 +64,7 @@ async function updateTelegramConfig(
 }
 
 async function fetchAllowlist(agentId: string): Promise<AllowlistEntry[]> {
-  const res = await fetch(`${API_BASE}/${agentId}/allowlist`);
+  const res = await authFetch(`${API_BASE}/${agentId}/allowlist`);
   if (!res.ok) throw new Error(`Failed to fetch allowlist: ${res.status}`);
   const data = await res.json();
   return data.entries;
@@ -73,7 +75,7 @@ async function createAllowlistEntry(
   identifier: string,
   label?: string,
 ): Promise<AllowlistEntry> {
-  const res = await fetch(`${API_BASE}/${agentId}/allowlist`, {
+  const res = await authFetch(`${API_BASE}/${agentId}/allowlist`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ identifier, label: label || null }),
@@ -83,14 +85,14 @@ async function createAllowlistEntry(
 }
 
 async function deleteAllowlistEntry(agentId: string, entryId: number): Promise<void> {
-  const res = await fetch(`${API_BASE}/${agentId}/allowlist/${entryId}`, {
+  const res = await authFetch(`${API_BASE}/${agentId}/allowlist/${entryId}`, {
     method: 'DELETE',
   });
   if (!res.ok) throw new Error(`Failed to delete entry: ${res.status}`);
 }
 
 async function fetchBotStatus(agentId: string): Promise<{ active: boolean }> {
-  const res = await fetch(`${API_BASE}/${agentId}/status`);
+  const res = await authFetch(`${API_BASE}/${agentId}/status`);
   if (!res.ok) return { active: false };
   return res.json();
 }

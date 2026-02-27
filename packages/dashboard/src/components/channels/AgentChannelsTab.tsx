@@ -379,16 +379,20 @@ export function AgentChannelsTab({ agentId }: AgentChannelsTabProps) {
     );
   }
 
-  const connectedCount = channels.filter((c) => c.configured && c.enabled).length;
+  // Shared channels (Signal, WhatsApp) are configured at the platform level
+  // in Settings → Channels, not per-agent. Filter them out here.
+  const SHARED_CHANNELS = new Set(['signal', 'whatsapp']);
+  const perAgentChannels = channels.filter((c) => !SHARED_CHANNELS.has(c.channel));
+  const connectedCount = perAgentChannels.filter((c) => c.configured && c.enabled).length;
 
   return (
     <div className="space-y-6">
       <div>
         <h2 className="text-lg font-semibold">Channels</h2>
         <p className="text-sm text-muted-foreground mt-1">
-          Connect this agent to messaging platforms. Tokens are stored in the database and never
-          exposed in full after saving. You can also set them via environment variables — env vars
-          are synced to the database on engine startup.
+          Connect this agent to messaging platforms. Per-agent channels like Slack,
+          Discord, and Telegram are configured here. Shared channels (Signal, WhatsApp)
+          are configured in Settings &rarr; Channels.
         </p>
       </div>
 
@@ -403,13 +407,13 @@ export function AgentChannelsTab({ agentId }: AgentChannelsTabProps) {
         ) : (
           <>
             <XCircle className="h-4 w-4 text-muted-foreground" />
-            <span>No channels connected — connect Slack to enable real-time messaging</span>
+            <span>No channels connected — configure a channel below to enable messaging</span>
           </>
         )}
       </div>
 
       <div className="space-y-3">
-        {channels.map((channel) => (
+        {perAgentChannels.map((channel) => (
           <ChannelCard
             key={channel.channel}
             agentId={agentId}
@@ -419,7 +423,7 @@ export function AgentChannelsTab({ agentId }: AgentChannelsTabProps) {
           />
         ))}
 
-        {/* Telegram — dedicated setup panel with allowlist management */}
+        {/* Telegram — dedicated setup panel with bot token + allowlist management */}
         <TelegramSetupPanel agentId={agentId} />
       </div>
 

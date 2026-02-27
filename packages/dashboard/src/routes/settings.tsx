@@ -1,10 +1,12 @@
 import { createFileRoute, useNavigate } from '@tanstack/react-router';
+import { useState } from 'react';
 import { Settings, Key, Lock, Github, Zap, Puzzle, Workflow, LayoutTemplate, Cookie, Radio } from 'lucide-react';
 import { UserProviderSettings } from '@/components/settings/UserProviderSettings';
 import { SecretsSettings } from '@/components/settings/SecretsSettings';
 import { GitHubAppInstallations } from '@/components/github/GitHubAppInstallations';
 import { TemplateManager } from '@/components/settings/TemplateManager';
 import { SignalSettings } from '@/components/settings/SignalSettings';
+import { WhatsAppSettings } from '@/components/settings/WhatsAppSettings';
 import { NestedSidebar } from '@/components/layout/NestedSidebar';
 import type { NestedSidebarItem } from '@/components/layout/NestedSidebar';
 import { SkillsPage } from '@/routes/skills';
@@ -139,23 +141,61 @@ function SettingsPage() {
           </div>
         )}
 
-        {/* ── Channels (Signal) ── */}
+        {/* ── Channels (shared phone-number integrations) ── */}
         {activeTab === 'channels' && (
-          <div className="max-w-5xl mx-auto space-y-4">
-            <div>
-              <h2 className="text-lg font-semibold flex items-center gap-2">
-                <Radio className="h-5 w-5" />
-                Channels
-              </h2>
-              <p className="text-sm text-muted-foreground mt-1">
-                Configure messaging channel integrations. Signal uses one shared
-                phone number for the entire platform with multi-agent routing.
-              </p>
-            </div>
-            <SignalSettings />
-          </div>
+          <ChannelsPane />
         )}
       </NestedSidebar>
+    </div>
+  );
+}
+
+// ── Channels sub-pane with Signal / WhatsApp tabs ────────────────────────────
+
+type ChannelSubTab = 'signal' | 'whatsapp';
+
+function ChannelsPane() {
+  const [subTab, setSubTab] = useState<ChannelSubTab>('signal');
+
+  return (
+    <div className="max-w-5xl mx-auto space-y-4">
+      <div>
+        <h2 className="text-lg font-semibold flex items-center gap-2">
+          <Radio className="h-5 w-5" />
+          Channels
+        </h2>
+        <p className="text-sm text-muted-foreground mt-1">
+          Configure shared messaging channels. These use one phone number for
+          the entire platform with multi-agent routing.
+        </p>
+      </div>
+
+      {/* Sub-tab selector */}
+      <div className="flex gap-1 border-b border-border">
+        <button
+          onClick={() => setSubTab('signal')}
+          className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+            subTab === 'signal'
+              ? 'border-primary text-foreground'
+              : 'border-transparent text-muted-foreground hover:text-foreground'
+          }`}
+        >
+          Signal
+        </button>
+        <button
+          onClick={() => setSubTab('whatsapp')}
+          className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+            subTab === 'whatsapp'
+              ? 'border-primary text-foreground'
+              : 'border-transparent text-muted-foreground hover:text-foreground'
+          }`}
+        >
+          WhatsApp
+        </button>
+      </div>
+
+      {subTab === 'signal' && <SignalSettings />}
+      {subTab === 'whatsapp' && <WhatsAppSettings />}
     </div>
   );
 }
