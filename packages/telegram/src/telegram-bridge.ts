@@ -105,6 +105,109 @@ class TelegramAgentBridge {
       );
     });
 
+    // Handle photo messages in private chats
+    bot.on('message:photo', async (ctx: any) => {
+      if (this.stopped) return;
+      const msg = ctx.message;
+      if (msg.chat.type !== 'private') return;
+      if (!msg.from || msg.from.is_bot) return;
+
+      // Get the largest photo variant
+      const photo = msg.photo[msg.photo.length - 1];
+      const file = await ctx.getFile();
+      const fileUrl = `https://api.telegram.org/file/bot${this.client.getBot().token}/${file.file_path}`;
+
+      await this.handleIncomingMessage(
+        msg.chat.id,
+        msg.from.id,
+        msg.from.username,
+        msg.from.first_name,
+        msg.caption || '',
+        [{ url: fileUrl, name: `photo_${photo.file_unique_id}.jpg`, mimeType: 'image/jpeg' }],
+      );
+    });
+
+    // Handle document messages (PDFs, code files, etc.)
+    bot.on('message:document', async (ctx: any) => {
+      if (this.stopped) return;
+      const msg = ctx.message;
+      if (msg.chat.type !== 'private') return;
+      if (!msg.from || msg.from.is_bot) return;
+
+      const doc = msg.document;
+      const file = await ctx.getFile();
+      const fileUrl = `https://api.telegram.org/file/bot${this.client.getBot().token}/${file.file_path}`;
+
+      await this.handleIncomingMessage(
+        msg.chat.id,
+        msg.from.id,
+        msg.from.username,
+        msg.from.first_name,
+        msg.caption || '',
+        [{ url: fileUrl, name: doc.file_name || 'document', mimeType: doc.mime_type || 'application/octet-stream' }],
+      );
+    });
+
+    // Handle voice messages (transcribed server-side via faster-whisper)
+    bot.on('message:voice', async (ctx: any) => {
+      if (this.stopped) return;
+      const msg = ctx.message;
+      if (msg.chat.type !== 'private') return;
+      if (!msg.from || msg.from.is_bot) return;
+
+      const file = await ctx.getFile();
+      const fileUrl = `https://api.telegram.org/file/bot${this.client.getBot().token}/${file.file_path}`;
+
+      await this.handleIncomingMessage(
+        msg.chat.id,
+        msg.from.id,
+        msg.from.username,
+        msg.from.first_name,
+        '',
+        [{ url: fileUrl, name: `voice_${msg.voice.file_unique_id}.ogg`, mimeType: msg.voice.mime_type || 'audio/ogg' }],
+      );
+    });
+
+    // Handle video notes (circular videos — treat as video attachment)
+    bot.on('message:video_note', async (ctx: any) => {
+      if (this.stopped) return;
+      const msg = ctx.message;
+      if (msg.chat.type !== 'private') return;
+      if (!msg.from || msg.from.is_bot) return;
+
+      const file = await ctx.getFile();
+      const fileUrl = `https://api.telegram.org/file/bot${this.client.getBot().token}/${file.file_path}`;
+
+      await this.handleIncomingMessage(
+        msg.chat.id,
+        msg.from.id,
+        msg.from.username,
+        msg.from.first_name,
+        '[Video note]',
+        [{ url: fileUrl, name: `videonote_${msg.video_note.file_unique_id}.mp4`, mimeType: 'video/mp4' }],
+      );
+    });
+
+    // Handle audio messages (music files, audio recordings)
+    bot.on('message:audio', async (ctx: any) => {
+      if (this.stopped) return;
+      const msg = ctx.message;
+      if (msg.chat.type !== 'private') return;
+      if (!msg.from || msg.from.is_bot) return;
+
+      const file = await ctx.getFile();
+      const fileUrl = `https://api.telegram.org/file/bot${this.client.getBot().token}/${file.file_path}`;
+
+      await this.handleIncomingMessage(
+        msg.chat.id,
+        msg.from.id,
+        msg.from.username,
+        msg.from.first_name,
+        msg.caption || '',
+        [{ url: fileUrl, name: msg.audio.file_name || `audio_${msg.audio.file_unique_id}.mp3`, mimeType: msg.audio.mime_type || 'audio/mpeg' }],
+      );
+    });
+
     // Catch errors
     bot.catch((err: any) => {
       if (this.stopped) return;
@@ -131,10 +234,12 @@ class TelegramAgentBridge {
     username: string | undefined,
     firstName: string,
     text: string,
+    telegramFiles?: Array<{ url: string; name: string; mimeType: string }>,
   ): Promise<void> {
     const displayName = username ? `@${username}` : firstName;
+    const displayText = text || (telegramFiles?.length ? `[${telegramFiles.length} file(s)]` : '');
     console.log(
-      `[TelegramBridge:${this.agentId}] Incoming from ${displayName} (${userId}): "${text.slice(0, 80)}${text.length > 80 ? '...' : ''}"`,
+      `[TelegramBridge:${this.agentId}] Incoming from ${displayName} (${userId}): "${displayText.slice(0, 80)}${displayText.length > 80 ? '...' : ''}"`,
     );
 
     // 1. Allowlist check
@@ -155,9 +260,33 @@ class TelegramAgentBridge {
     // 2. Start typing indicator
     this.typingManager.startTyping(chatId);
 
-    // 3. Process with agent
+    // 3. Download and re-upload Telegram files to DjinnBot storage
+    let attachments: Array<{ id: string; filename: string; mimeType: string; sizeBytes: number; isImage: boolean }> | undefined;
+    if (telegramFiles && telegramFiles.length > 0) {
+      try {
+        const { processChannelAttachments } = await import('@djinnbot/core');
+        const apiBaseUrl = this.config.apiUrl;
+        const sessionIdForUpload = `telegram_${chatId}_${this.agentId}`;
+
+        attachments = await processChannelAttachments(
+          telegramFiles.map(f => ({
+            url: f.url,
+            name: f.name,
+            mimeType: f.mimeType,
+          })),
+          apiBaseUrl,
+          sessionIdForUpload,
+          `[TelegramBridge:${this.agentId}]`,
+        );
+        if (attachments.length === 0) attachments = undefined;
+      } catch (err) {
+        console.warn(`[TelegramBridge:${this.agentId}] Failed to process attachments:`, err);
+      }
+    }
+
+    // 4. Process with agent
     try {
-      const response = await this.processWithAgent(chatId, userId, text);
+      const response = await this.processWithAgent(chatId, userId, text || '[Voice/media message — see attachments]', attachments);
       this.typingManager.stopTyping(chatId);
       await this.sendFormattedMessage(chatId, response);
     } catch (err) {
@@ -179,6 +308,7 @@ class TelegramAgentBridge {
     chatId: number,
     userId: number,
     text: string,
+    attachments?: Array<{ id: string; filename: string; mimeType: string; sizeBytes: number; isImage: boolean }>,
   ): Promise<string> {
     const csm = this.config.chatSessionManager;
     if (!csm) {
@@ -234,7 +364,7 @@ class TelegramAgentBridge {
       const messageId = await this.persistMessagePair(sessionId, text, model);
 
       // Send the user's message (with messageId so stepEnd persists the response)
-      await csm.sendMessage(sessionId, text, model, messageId);
+      await csm.sendMessage(sessionId, text, model, messageId, attachments);
 
       // Wait for the agent to finish (with timeout)
       const response = await Promise.race([

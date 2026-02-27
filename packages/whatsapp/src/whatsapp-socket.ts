@@ -67,6 +67,15 @@ export interface WhatsAppSocketEvents {
     timestamp: number;
     isGroup: boolean;
     groupJid?: string;
+    /** Media attachment info (images, audio, documents, video) */
+    media?: {
+      /** Raw message object — pass to downloadMediaMessage() to get bytes */
+      rawMessage: any;
+      mimeType: string;
+      filename?: string;
+      /** Media type for logging/routing */
+      type: 'image' | 'audio' | 'video' | 'document';
+    };
   }) => void;
 }
 
@@ -411,15 +420,47 @@ export class WhatsAppSocket {
         // Skip status broadcasts
         if (msg.key.remoteJid === 'status@broadcast') continue;
 
-        // Extract text content
+        // Extract text content (captions count as text)
         const text =
           msg.message?.conversation ||
           msg.message?.extendedTextMessage?.text ||
           msg.message?.imageMessage?.caption ||
           msg.message?.videoMessage?.caption ||
-          msg.message?.documentMessage?.caption;
+          msg.message?.documentMessage?.caption ||
+          '';
 
-        if (!text) continue; // Skip media-only messages for now
+        // Extract media info if present
+        let media: { rawMessage: any; mimeType: string; filename?: string; type: 'image' | 'audio' | 'video' | 'document' } | undefined;
+
+        if (msg.message?.imageMessage) {
+          media = {
+            rawMessage: msg,
+            mimeType: msg.message.imageMessage.mimetype || 'image/jpeg',
+            type: 'image',
+          };
+        } else if (msg.message?.audioMessage) {
+          media = {
+            rawMessage: msg,
+            mimeType: msg.message.audioMessage.mimetype || 'audio/ogg',
+            type: 'audio',
+          };
+        } else if (msg.message?.documentMessage) {
+          media = {
+            rawMessage: msg,
+            mimeType: msg.message.documentMessage.mimetype || 'application/octet-stream',
+            filename: msg.message.documentMessage.fileName || undefined,
+            type: 'document',
+          };
+        } else if (msg.message?.videoMessage) {
+          media = {
+            rawMessage: msg,
+            mimeType: msg.message.videoMessage.mimetype || 'video/mp4',
+            type: 'video',
+          };
+        }
+
+        // Skip messages with no text AND no media
+        if (!text && !media) continue;
 
         const senderJid = msg.key.remoteJid!;
         const isGroup = senderJid.endsWith('@g.us');
@@ -482,6 +523,7 @@ export class WhatsAppSocket {
           timestamp: msg.messageTimestamp as number ?? Math.floor(Date.now() / 1000),
           isGroup,
           groupJid: isGroup ? senderJid : undefined,
+          media,
         });
       }
     });

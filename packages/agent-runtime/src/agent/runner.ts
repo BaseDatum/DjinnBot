@@ -1181,7 +1181,7 @@ export class ContainerAgentRunner {
         if (attachments && attachments.length > 0) {
           const apiBaseUrl = process.env.DJINNBOT_API_URL || 'http://api:8000';
           console.log(`[AgentRunner] Building content blocks for ${attachments.length} attachment(s)`);
-          const attachmentBlocks = await buildAttachmentBlocks(attachments, apiBaseUrl);
+          const attachmentBlocks = await buildAttachmentBlocks(attachments, apiBaseUrl, model.id ? `${model.provider}/${model.id}` : undefined);
 
           // Separate images from text blocks
           const imageBlocks = attachmentBlocks.filter((b): b is ImageContent => b.type === 'image');

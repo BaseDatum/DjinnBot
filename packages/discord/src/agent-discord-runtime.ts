@@ -633,36 +633,22 @@ export class AgentDiscordRuntime {
     // Download and re-upload attachments
     let attachments: Array<{ id: string; filename: string; mimeType: string; sizeBytes: number; isImage: boolean }> | undefined;
     if (originalMessage?.attachments.size) {
+      const { processChannelAttachments } = await import('@djinnbot/core');
       const apiBaseUrl = process.env.DJINNBOT_API_URL || 'http://api:8000';
-      attachments = [];
-      for (const [, attachment] of originalMessage.attachments) {
-        try {
-          const dlRes = await fetch(attachment.url);
-          if (!dlRes.ok) continue;
-          const buffer = Buffer.from(await dlRes.arrayBuffer());
+      const sessionIdForUpload = `discord_${this.agentId}_${channel.id}`;
 
-          const formData = new FormData();
-          formData.append('file', new Blob([buffer]), attachment.name ?? 'file');
-          const sessionIdForUpload = `discord_${this.agentId}_${channel.id}`;
-          const mimeType = attachment.contentType ?? 'application/octet-stream';
-          const uploadRes = await authFetch(
-            `${apiBaseUrl}/v1/internal/chat/attachments/upload-bytes?session_id=${encodeURIComponent(sessionIdForUpload)}&filename=${encodeURIComponent(attachment.name ?? 'file')}&mime_type=${encodeURIComponent(mimeType)}`,
-            { method: 'POST', body: formData },
-          );
-          if (uploadRes.ok) {
-            const result = await uploadRes.json() as { id: string; filename: string; mimeType: string; sizeBytes: number };
-            attachments.push({
-              id: result.id,
-              filename: result.filename,
-              mimeType: result.mimeType,
-              sizeBytes: result.sizeBytes,
-              isImage: result.mimeType.startsWith('image/'),
-            });
-          }
-        } catch (err) {
-          console.warn(`[${this.agentId}] Failed to process attachment ${attachment.name}:`, err);
-        }
-      }
+      const channelFiles = [...originalMessage.attachments.values()].map(att => ({
+        url: att.url,
+        name: att.name ?? 'file',
+        mimeType: att.contentType ?? 'application/octet-stream',
+      }));
+
+      attachments = await processChannelAttachments(
+        channelFiles,
+        apiBaseUrl,
+        sessionIdForUpload,
+        `[${this.agentId}]`,
+      );
       if (attachments.length === 0) attachments = undefined;
     }
 

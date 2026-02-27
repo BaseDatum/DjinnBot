@@ -7,6 +7,11 @@ content for LLM context injection).
 PDF uploads are processed with OpenDataLoader for structured extraction,
 chunked by document structure, and ingested into the shared ClawVault
 so all agents can recall document knowledge via semantic search.
+
+Audio uploads (voice notes from Signal/Telegram/WhatsApp/Discord) are
+transcribed via faster-whisper as a background task.  The transcript is
+stored as extracted_text so agent containers read it via /text like any
+other document.
 """
 
 import json
@@ -24,10 +29,12 @@ from app.models.chat import (
     ChatAttachment,
     ALLOWED_MIME_TYPES,
     ALLOWED_IMAGE_TYPES,
+    ALLOWED_AUDIO_TYPES,
     MAX_ATTACHMENT_SIZE,
 )
 from app.services import file_storage
 from app.services.text_extraction import extract_text, extract_pdf_structured
+from app.services.audio_transcription import transcribe_audio
 from app.services.pdf_chunker import chunk_pdf, extract_toc
 from app.services.pdf_vault_ingest import ingest_pdf_to_shared_vault_async
 from app.logging_config import get_logger
@@ -49,6 +56,11 @@ class AttachmentResponse(BaseModel):
     estimatedTokens: Optional[int] = None
     isImage: bool
     createdAt: int
+    # Vault ingest fields (PDF and large document processing)
+    vaultIngestStatus: Optional[str] = None
+    vaultDocSlug: Optional[str] = None
+    vaultChunkCount: Optional[int] = None
+    pdfPageCount: Optional[int] = None
 
 
 class AttachmentListResponse(BaseModel):
@@ -65,6 +77,10 @@ def _to_response(att: ChatAttachment) -> AttachmentResponse:
         estimatedTokens=att.estimated_tokens,
         isImage=att.mime_type in ALLOWED_IMAGE_TYPES,
         createdAt=att.created_at,
+        vaultIngestStatus=att.vault_ingest_status,
+        vaultDocSlug=att.vault_doc_slug,
+        vaultChunkCount=att.vault_chunk_count,
+        pdfPageCount=att.pdf_page_count,
     )
 
 
@@ -122,6 +138,7 @@ async def upload_attachment(
 
     # Synchronous text extraction for small files, async for large ones
     is_image = mime in ALLOWED_IMAGE_TYPES
+    is_audio = mime in ALLOWED_AUDIO_TYPES
     extracted_text: Optional[str] = None
     estimated_tokens: int = 0
     structured_json: Optional[str] = None
@@ -129,8 +146,14 @@ async def upload_attachment(
     pdf_author: Optional[str] = None
     pdf_page_count: Optional[int] = None
     vault_ingest_status: Optional[str] = None
+    processing_status = "ready"
 
-    if not is_image:
+    if is_audio:
+        # Audio: transcription runs as a background task (same pattern as PDF vault ingest).
+        # Upload returns immediately; transcript lands in extracted_text when done.
+        processing_status = "transcribing"
+        estimated_tokens = 0
+    elif not is_image:
         extracted_text, estimated_tokens = extract_text(data, mime, file.filename)
 
         # For PDFs: also extract structured JSON for chunking + vault ingest
@@ -160,7 +183,7 @@ async def upload_attachment(
         mime_type=mime,
         size_bytes=len(data),
         storage_path=storage_path,
-        processing_status="ready",
+        processing_status=processing_status,
         extracted_text=extracted_text,
         estimated_tokens=estimated_tokens,
         structured_json=structured_json,
@@ -189,6 +212,16 @@ async def upload_attachment(
             pdf_page_count or 0,
             pdf_title,
             pdf_author,
+        )
+
+    # Trigger async transcription for audio files
+    if is_audio:
+        background_tasks.add_task(
+            _transcribe_audio,
+            att_id,
+            data,
+            mime,
+            file.filename,
         )
 
     return _to_response(attachment)
@@ -314,6 +347,7 @@ async def upload_bytes_internal(
     storage_path = file_storage.store_file(session_id, att_id, filename, data)
 
     is_image = mime_type in ALLOWED_IMAGE_TYPES
+    is_audio = mime_type in ALLOWED_AUDIO_TYPES
     extracted_text = None
     estimated_tokens = 1600 if is_image else 0
     structured_json_str: Optional[str] = None
@@ -321,8 +355,12 @@ async def upload_bytes_internal(
     pdf_author: Optional[str] = None
     pdf_page_count: Optional[int] = None
     vault_ingest_status: Optional[str] = None
+    processing_status = "ready"
 
-    if not is_image:
+    if is_audio:
+        processing_status = "transcribing"
+        estimated_tokens = 0
+    elif not is_image:
         extracted_text, estimated_tokens = extract_text(data, mime_type, filename)
 
         # For PDFs: extract structured JSON for vault ingest
@@ -347,7 +385,7 @@ async def upload_bytes_internal(
         mime_type=mime_type,
         size_bytes=len(data),
         storage_path=storage_path,
-        processing_status="ready",
+        processing_status=processing_status,
         extracted_text=extracted_text,
         estimated_tokens=estimated_tokens,
         structured_json=structured_json_str,
@@ -375,6 +413,12 @@ async def upload_bytes_internal(
                 pdf_author,
             )
         )
+
+    # Trigger audio transcription (fire-and-forget)
+    if is_audio:
+        import asyncio
+
+        asyncio.create_task(_transcribe_audio_async(att_id, data, mime_type, filename))
 
     return {
         "id": att_id,
@@ -405,6 +449,16 @@ _EXTENSION_MIME_MAP = {
     ".xml": "text/xml",
     ".yaml": "application/x-yaml",
     ".yml": "application/x-yaml",
+    # Audio formats
+    ".ogg": "audio/ogg",
+    ".opus": "audio/opus",
+    ".mp3": "audio/mpeg",
+    ".m4a": "audio/mp4",
+    ".wav": "audio/wav",
+    ".webm": "audio/webm",
+    ".aac": "audio/aac",
+    ".flac": "audio/flac",
+    ".amr": "audio/amr",
 }
 
 
@@ -479,6 +533,86 @@ async def _ingest_pdf_to_vault(
                 att = att_result.scalar_one_or_none()
                 if att:
                     att.vault_ingest_status = "failed"
+                    await db.commit()
+        except Exception:
+            pass  # Best-effort status update
+
+
+# ── Audio Transcription ──────────────────────────────────────────────────────
+
+
+def _transcribe_audio(
+    attachment_id: str,
+    data: bytes,
+    mime_type: str,
+    filename: str,
+) -> None:
+    """Background task (sync): transcribe audio and update the attachment record.
+
+    Used by the public upload endpoint via FastAPI BackgroundTasks (sync).
+    """
+    import asyncio
+
+    asyncio.run(_transcribe_audio_async(attachment_id, data, mime_type, filename))
+
+
+async def _transcribe_audio_async(
+    attachment_id: str,
+    data: bytes,
+    mime_type: str,
+    filename: str,
+) -> None:
+    """Background task (async): transcribe audio and update the attachment record.
+
+    Used by the internal upload endpoint via asyncio.create_task().
+    Runs faster-whisper in a thread pool to avoid blocking the event loop.
+    """
+    import asyncio
+
+    try:
+        # Run transcription in thread pool (faster-whisper is CPU-bound)
+        loop = asyncio.get_event_loop()
+        transcript, tokens = await loop.run_in_executor(
+            None, transcribe_audio, data, mime_type, filename
+        )
+
+        # Update the attachment record with the transcript
+        async with AsyncSessionLocal() as db:
+            att_result = await db.execute(
+                select(ChatAttachment).where(ChatAttachment.id == attachment_id)
+            )
+            att = att_result.scalar_one_or_none()
+            if att:
+                att.extracted_text = transcript
+                att.estimated_tokens = tokens
+                att.processing_status = "ready"
+                await db.commit()
+
+        if transcript:
+            logger.info(
+                f"Audio transcription complete: {filename} → "
+                f"{len(transcript)} chars, ~{tokens} tokens"
+            )
+        else:
+            logger.warning(f"Audio transcription returned no text for {filename}")
+
+    except Exception as e:
+        logger.error(
+            f"Audio transcription failed for {attachment_id} ({filename}): {e}"
+        )
+        # Mark as failed
+        try:
+            async with AsyncSessionLocal() as db:
+                att_result = await db.execute(
+                    select(ChatAttachment).where(ChatAttachment.id == attachment_id)
+                )
+                att = att_result.scalar_one_or_none()
+                if att:
+                    att.processing_status = "failed"
+                    att.extracted_text = (
+                        f"[Audio transcription failed for {filename}: {e}]"
+                    )
+                    att.estimated_tokens = 15
                     await db.commit()
         except Exception:
             pass  # Best-effort status update

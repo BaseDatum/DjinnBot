@@ -49,6 +49,12 @@ def extract_text(
         # Without decoding the image we can't know dimensions, so use a flat estimate
         return None, 1600
 
+    if mime_type.startswith("audio/"):
+        # Audio files: transcription happens at runtime in the agent container
+        # via whisper.cpp, not at upload time.  Store no extracted text;
+        # token estimate is 0 (transcription cost is zero — it's local CPU).
+        return None, 0
+
     try:
         if mime_type in (
             "text/plain",

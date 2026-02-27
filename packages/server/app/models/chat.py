@@ -27,7 +27,27 @@ ALLOWED_CODE_TYPES = {
     "application/x-yaml",
     "text/yaml",
 }
-ALLOWED_MIME_TYPES = ALLOWED_IMAGE_TYPES | ALLOWED_DOCUMENT_TYPES | ALLOWED_CODE_TYPES
+# Audio types — voice notes from Signal/Telegram/WhatsApp/Discord.
+# Transcribed via whisper.cpp (container-local) or server-side fallback.
+ALLOWED_AUDIO_TYPES = {
+    "audio/ogg",  # Telegram voice notes (opus codec)
+    "audio/opus",  # Raw opus
+    "audio/mpeg",  # MP3
+    "audio/mp4",  # M4A (WhatsApp voice notes)
+    "audio/mp4a-latm",  # Alternative M4A MIME
+    "audio/wav",  # WAV
+    "audio/x-wav",  # Alternative WAV MIME
+    "audio/webm",  # WebM audio (Discord voice messages)
+    "audio/aac",  # AAC
+    "audio/flac",  # FLAC
+    "audio/amr",  # AMR (older WhatsApp voice notes)
+}
+ALLOWED_MIME_TYPES = (
+    ALLOWED_IMAGE_TYPES
+    | ALLOWED_DOCUMENT_TYPES
+    | ALLOWED_CODE_TYPES
+    | ALLOWED_AUDIO_TYPES
+)
 
 # 30 MB — matches Anthropic's per-file limit
 MAX_ATTACHMENT_SIZE = 30 * 1024 * 1024
