@@ -107,6 +107,44 @@ The Traefik proxy also uses `proxy/.env`:
 
 > **User Slack ID** — Your Slack member ID for DM notifications from agents is configured in the dashboard under **Settings > Slack**, not as an environment variable.
 
+### Discord
+
+| Variable | Description |
+|----------|------------|
+| `DISCORD_CHANNEL_ID` | Default channel for pipeline threads |
+| `DISCORD_{AGENT}_BOT_TOKEN` | Per-agent Discord bot token |
+| `DISCORD_{AGENT}_APP_ID` | Per-agent Discord application ID (optional) |
+
+Per-agent credentials go in `agents/<id>/discord.yml`. See [Discord Setup](/docs/guides/discord-setup).
+
+### Telegram
+
+Telegram bot tokens are managed via the dashboard (**Settings > Integrations > Telegram**) or per-agent YAML files.
+
+| Variable | Description |
+|----------|------------|
+| `TELEGRAM_{AGENT}_BOT_TOKEN` | Per-agent Telegram bot token from BotFather |
+
+Per-agent credentials go in `agents/<id>/telegram.yml`. See [Telegram Setup](/docs/guides/telegram-setup).
+
+### Signal
+
+| Variable | Default | Description |
+|----------|---------|------------|
+| `SIGNAL_DATA_DIR` | `/jfs/signal/data` | signal-cli data directory on JuiceFS |
+| `SIGNAL_CLI_PATH` | `signal-cli` | Path to signal-cli binary |
+| `SIGNAL_HTTP_PORT` | `8820` | HTTP API port for signal-cli daemon |
+
+Signal is configured and linked via the dashboard (**Settings > Integrations > Signal**). See [Signal Setup](/docs/guides/signal-setup).
+
+### WhatsApp
+
+| Variable | Default | Description |
+|----------|---------|------------|
+| `WHATSAPP_AUTH_DIR` | `/data/whatsapp/auth` | Baileys auth state directory on JuiceFS |
+
+WhatsApp is configured and linked via the dashboard (**Settings > Integrations > WhatsApp**). See [WhatsApp Setup](/docs/guides/whatsapp-setup).
+
 ### GitHub
 
 | Variable | Description |
@@ -157,7 +195,7 @@ thinking_model_thinking_level: 'off'
 planning_model: openrouter/x-ai/grok-4.1-fast
 executor_model: openrouter/x-ai/grok-4.1-fast
 
-# Slack
+# Slack / Discord
 thread_mode: passive            # passive or active
 
 # Pulse (autonomous mode)

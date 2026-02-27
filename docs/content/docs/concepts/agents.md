@@ -17,6 +17,8 @@ Every agent is defined by a directory under `agents/`:
     {{< filetree/file name="DECISION.md" >}}
     {{< filetree/file name="config.yml" >}}
     {{< filetree/file name="slack.yml" >}}
+    {{< filetree/file name="discord.yml" >}}
+    {{< filetree/file name="telegram.yml" >}}
   {{< /filetree/folder >}}
 {{< /filetree/container >}}
 
@@ -105,14 +107,30 @@ executor_model: openrouter/x-ai/grok-4.1-fast
 
 All configuration can be edited through the dashboard Settings page — no YAML editing required.
 
-### slack.yml
+### Channel YAML Files
 
-Slack bot credentials for this agent (see [Slack Setup](/docs/guides/slack-setup)):
+Each messaging platform has its own credentials file. Create only the ones for the platforms you use:
+
+**slack.yml** — Slack bot credentials (see [Slack Setup](/docs/guides/slack-setup)):
 
 ```yaml
 bot_token: ${SLACK_ERIC_BOT_TOKEN}
 app_token: ${SLACK_ERIC_APP_TOKEN}
 ```
+
+**discord.yml** — Discord bot credentials (see [Discord Setup](/docs/guides/discord-setup)):
+
+```yaml
+bot_token: ${DISCORD_ERIC_BOT_TOKEN}
+```
+
+**telegram.yml** — Telegram bot credentials (see [Telegram Setup](/docs/guides/telegram-setup)):
+
+```yaml
+bot_token: ${TELEGRAM_ERIC_BOT_TOKEN}
+```
+
+Signal and WhatsApp use a shared account model (one number for all agents) and are configured via the dashboard — no per-agent YAML files needed.
 
 ## The Default Team
 

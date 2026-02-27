@@ -118,7 +118,7 @@ The dashboard shows everything in real-time:
 - **Thinking blocks** — expandable reasoning sections
 - **Tool calls** — every file read, write, bash command, and git operation
 - **Swarm DAG** — parallel execution visualization with dependency edges
-- **Slack threads** — if configured, watch agents discuss in your workspace
+- **Messaging threads** — if configured, watch agents discuss in Slack, Discord, or other connected platforms
 
 ## Chat With Agents
 
@@ -149,5 +149,5 @@ djinn provider list   # See configured providers
   {{< card link="../dashboard-tour" title="Dashboard Tour" subtitle="Learn to navigate the full dashboard interface." >}}
   {{< card link="/docs/concepts/pulse" title="Pulse Mode" subtitle="How agents work autonomously on a schedule." >}}
   {{< card link="/docs/advanced/security" title="Security Model" subtitle="Authentication, 2FA, API keys, and SSL setup." >}}
-  {{< card link="/docs/guides/slack-setup" title="Set Up Slack" subtitle="Give each agent its own Slack bot." >}}
+  {{< card link="/docs/guides/slack-setup" title="Connect Messaging" subtitle="Set up Slack, Discord, Telegram, Signal, or WhatsApp." >}}
 {{< /cards >}}

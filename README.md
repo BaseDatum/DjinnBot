@@ -9,7 +9,7 @@
 [![Docker Compose](https://img.shields.io/badge/Docker_Compose-ready-2496ED?logo=docker&logoColor=white)](docker-compose.yml)
 [![Docs](https://img.shields.io/badge/docs-docs.djinn.bot-8b5cf6)](https://docs.djinn.bot)
 
-Deploy a team of AI agents that collaborate autonomously — engineering, research, content, operations, finance, or any workflow you define. Each agent has a distinct persona, persistent memory, a full toolbox inside an isolated container, and its own Slack presence. Self-hosted and free.
+Deploy a team of AI agents that collaborate autonomously — engineering, research, content, operations, finance, or any workflow you define. Each agent has a distinct persona, persistent memory, a full toolbox inside an isolated container, and can be reached from Slack, Discord, Telegram, WhatsApp, Signal, or the built-in chat. Self-hosted and free.
 
 [**Join the Waitlist for DjinnBot Cloud**](https://app.djinn.bot) ·
 [**Documentation**](https://docs.djinn.bot) ·
@@ -41,7 +41,7 @@ Here's what makes it different:
 
 - **Beautiful, real-time dashboard.** Not a terminal dump. Live SSE-streamed activity feeds, kanban project boards, interactive pipeline visualizations, swarm DAG views, Sigma.js code graph visualizations, 3D memory graphs, per-user usage tracking, and a full admin panel.
 
-- **Slack-native.** Each agent gets its own Slack bot. Watch your team discuss in threads. Mention an agent to get their perspective. Or skip Slack entirely and use the built-in chat or CLI.
+- **Message from any app.** Talk to your agents from Slack, Discord, Telegram, WhatsApp, or Signal — whatever your team already uses. Each agent gets its own bot identity on per-agent platforms (Slack, Discord, Telegram), and Signal/WhatsApp use a shared number with smart routing. Or use the built-in dashboard chat and CLI.
 
 - **Enterprise-ready auth.** Multi-user accounts, TOTP two-factor authentication, API keys, OIDC single sign-on, per-user provider key sharing, and automatic SSL via Let's Encrypt. Built in from the start.
 
@@ -114,7 +114,7 @@ graph LR
 3. **Agents claim tasks** — each agent watches specific board columns matching their role. Engineers grab implementation work. Reviewers grab review tasks. Any agent can be configured to watch any column.
 4. **Autonomous work** — on pulse cycles, agents wake up, claim a task, spin up an isolated container, and do the work — writing code, researching topics, generating content, browsing the web, or running any tools you've given them.
 5. **Review & iterate** — agents review each other's work. If changes are needed, the task cycles back. They coordinate via inbox messages and can wake each other for urgent blockers.
-6. **Deliver** — watch the whole thing happen in real-time via the dashboard, Slack, CLI, or the live activity feed.
+6. **Deliver** — watch the whole thing happen in real-time via the dashboard, Slack, Discord, Telegram, WhatsApp, Signal, CLI, or the live activity feed.
 
 For maximum throughput, use **swarm execution** — a parallel execution engine that runs multiple agents concurrently on DAG-aware task graphs, respecting dependency chains and streaming progress live.
 
@@ -188,7 +188,11 @@ graph TB
     Swarm -->|"Spawn"| Agent4["Agent Container"]
     Agent1 --> mcpo["mcpo Proxy<br/>(MCP Tools)"]
     Agent2 --> mcpo
-    Engine --> Slack["Slack Bridge<br/>(Per-Agent Bots)"]
+    Engine --> Slack["Slack Bridge"]
+    Engine --> Discord["Discord Bridge"]
+    Engine --> Telegram["Telegram Bridge"]
+    Engine --> Signal["Signal Bridge"]
+    Engine --> WhatsApp["WhatsApp Bridge"]
     JFS["JuiceFS FUSE Mount"] --> RustFS["RustFS<br/>(S3 Object Store)"]
     JFS --> Redis
 
@@ -205,11 +209,15 @@ graph TB
     style Agent4 fill:#f59e0b,color:#000,stroke:#d97706
     style mcpo fill:#6366f1,color:#fff,stroke:#4f46e5
     style Slack fill:#4ade80,color:#000,stroke:#22c55e
+    style Discord fill:#5865F2,color:#fff,stroke:#4752C4
+    style Telegram fill:#26A5E4,color:#fff,stroke:#1E96D1
+    style Signal fill:#3A76F0,color:#fff,stroke:#2E62CC
+    style WhatsApp fill:#25D366,color:#fff,stroke:#1DA851
     style JFS fill:#14b8a6,color:#fff,stroke:#0d9488
     style RustFS fill:#14b8a6,color:#fff,stroke:#0d9488
 ```
 
-**Services:** PostgreSQL (state), Redis (event bus via Streams + Pub/Sub, JuiceFS metadata), FastAPI (REST API + SSE), Pipeline Engine (state machine + container orchestration), Dashboard (React SPA), mcpo (MCP tool proxy), Slack Bridge (per-agent Socket Mode bots), JuiceFS + RustFS (shared POSIX filesystem).
+**Services:** PostgreSQL (state), Redis (event bus via Streams + Pub/Sub, JuiceFS metadata), FastAPI (REST API + SSE), Pipeline Engine (state machine + container orchestration), Dashboard (React SPA), mcpo (MCP tool proxy), Messaging Bridges (Slack, Discord, Telegram, Signal, WhatsApp), JuiceFS + RustFS (shared POSIX filesystem).
 
 **Agent containers** are ephemeral Docker environments with a full toolbox (Node 22, Python 3, Go, Rust, Camoufox browser, 30+ dev tools). Created per step, destroyed on completion. No host access. Programmatic Tool Calling reduces context usage by 30-40%+.
 
@@ -323,7 +331,9 @@ agents/eric/
 ├── DECISION.md      # Memory-first decision framework
 ├── PULSE.md         # Autonomous wake-up routine
 ├── config.yml       # Model, pulse schedule, thinking, coordination settings
-└── slack.yml        # Slack bot credentials (optional)
+├── slack.yml        # Slack bot credentials (optional)
+├── discord.yml      # Discord bot credentials (optional)
+└── telegram.yml     # Telegram bot credentials (optional)
 ```
 
 Create a new agent by adding a directory under `agents/`. Define their personality in markdown. Set their model and schedule in YAML. Restart the engine. That's it — no code required.
@@ -363,7 +373,7 @@ Each agent can use a different model. Put your architect on Claude Opus and your
 | **Security** | Container isolation, 2FA, encrypted secrets, auto SSL | Direct host access | Direct host access |
 | **Memory** | Persistent semantic memory + knowledge graph | Stateless or basic files | Stateless or basic files |
 | **Collaboration** | Agents review, critique, and build on each other's work | Single agent, single perspective | Custom-coded coordination |
-| **Visibility** | Real-time dashboard, Slack, live feeds, usage tracking | Terminal output | Minimal web UI |
+| **Visibility** | Real-time dashboard, Slack/Discord/Telegram/WhatsApp/Signal, live feeds, usage tracking | Terminal output | Minimal web UI |
 | **Autonomy** | Agents work 24/7 on pulse schedules | Requires human in the loop | Requires human in the loop |
 
 ---
@@ -381,6 +391,10 @@ Each agent can use a different model. Put your architect on Claude Opus and your
 | Agent Framework | pi-mono (pi-agent-core) |
 | Storage | JuiceFS FUSE mount + RustFS (S3-compatible) |
 | Slack | Bolt.js, Socket Mode, per-agent bots |
+| Discord | discord.js, Gateway API, per-agent bots |
+| Telegram | grammY, long-polling, per-agent bots |
+| Signal | signal-cli daemon, SSE, shared number |
+| WhatsApp | Baileys, in-process socket, shared number |
 | MCP Proxy | mcpo (hot-reload) |
 | CLI | Python, Rich TUI, PyPI distribution |
 | Build | Turborepo monorepo |
@@ -416,6 +430,10 @@ djinnbot/
 │   ├── server/                 # FastAPI API server (Python)
 │   ├── dashboard/              # React dashboard (TypeScript)
 │   ├── slack/                  # Slack bridge and per-agent bots
+│   ├── discord/                # Discord bridge, streaming, session pool
+│   ├── telegram/               # Telegram bridge manager, per-agent bots (grammY)
+│   ├── signal/                 # Signal bridge, signal-cli daemon, SSE, routing
+│   ├── whatsapp/               # WhatsApp bridge, Baileys socket, routing
 │   ├── agent-runtime/          # Agent container entrypoint, tools, PTC bridge
 │   └── code-graph/             # Tree-sitter indexing, KuzuDB storage
 ├── mcp/                        # MCP tool server config
@@ -461,7 +479,7 @@ cd packages/dashboard && npm run dev
 
 - **RBAC & team management** — role-based access control with granular permissions
 - **Marketing & sales pipelines** — structured workflows for content, outreach, and deals
-- **Discord & Teams** — bot interfaces beyond Slack
+- **Microsoft Teams** — bot interface for enterprise Teams environments
 - **Pipeline marketplace** — share and discover community pipeline templates
 - **Custom agent builder** — create agents with custom personas through the dashboard UI
 - **SaaS offering** — managed hosting at djinn.bot

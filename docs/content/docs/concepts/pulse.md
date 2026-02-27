@@ -304,7 +304,7 @@ pulse_blackouts:
 Agents can communicate during pulse sessions:
 
 - **`message_agent(agentId, message)`** — send a message to another agent's inbox with priority and type
-- **`slack_dm(message)`** — message the human via Slack DM (use sparingly — only for urgent findings or blockers)
+- **`slack_dm(message)`** — message the human via Slack, Discord, Signal, WhatsApp, or other connected platform (use sparingly — only for urgent findings or blockers)
 
 ## Customizing Pulse Behavior
 

@@ -1596,6 +1596,8 @@ Start now.`;
     this.discordBridge = new DiscordBridge({
       eventBus: this.eventBus as any,
       agentRegistry: this.agentRegistry as any,
+      redisUrl: this.config.redisUrl,
+      apiBaseUrl: process.env.DJINNBOT_API_URL || 'http://api:8000',
       onDecisionNeeded,
       onHumanGuidance,
       defaultDiscordDecisionModel,

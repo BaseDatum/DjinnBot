@@ -12,10 +12,13 @@ import {
   EventBus,
   runChannel,
   AgentRegistry,
+  authFetch,
   type AgentRegistryEntry,
+  type ChannelCredentials,
   type PipelineEvent,
 } from '@djinnbot/core';
 import type { ChatSessionManager } from '@djinnbot/core/chat';
+import { Redis } from 'ioredis';
 import { AgentDiscordRuntime, type DiscordMessageData } from './agent-discord-runtime.js';
 import { ThreadManager } from './thread-manager.js';
 import { DiscordSessionPool } from './discord-session-pool.js';
@@ -32,6 +35,10 @@ export interface DiscordBridgeConfig {
   eventBus: EventBus;
   agentRegistry: AgentRegistry;
   defaultChannelId?: string;
+  /** Redis URL for config change subscription (hot-reload) */
+  redisUrl?: string;
+  /** Base URL of the DjinnBot API server */
+  apiBaseUrl?: string;
   /** Called when an agent needs to make an LLM decision */
   onDecisionNeeded: (
     agentId: string,
@@ -108,6 +115,8 @@ export class DiscordBridge {
   private threadReady = new Map<string, boolean>();
   private toolCallCounters = new Map<string, number>();
   private activeToolCardIds = new Map<string, string[]>();
+  /** Dedicated Redis connection for config change subscription */
+  private configSubRedis: Redis | undefined;
 
   constructor(config: DiscordBridgeConfig) {
     this.config = config;
@@ -137,10 +146,14 @@ export class DiscordBridge {
    * Start all agent Discord runtimes (bot login + gateway connections).
    */
   async start(): Promise<void> {
+    // Always start the config listener so dashboard-added credentials trigger a hot-reload,
+    // even when no agents have Discord credentials at startup.
+    this.startConfigListener();
+
     const discordAgents = this.config.agentRegistry.getAgentsByChannel('discord');
 
     if (discordAgents.length === 0) {
-      console.log('[DiscordBridge] No agents with Discord credentials — bridge inactive');
+      console.log('[DiscordBridge] No agents with Discord credentials — bridge inactive (listening for config changes)');
       return;
     }
 
@@ -653,6 +666,165 @@ export class DiscordBridge {
     console.log('[DiscordBridge] ChatSessionManager injected — conversation streaming enabled');
   }
 
+  // ─── Config hot-reload ─────────────────────────────────────────────────
+
+  /**
+   * Subscribe to Redis for credential changes published by the API server.
+   * When the dashboard updates Discord credentials for an agent, the API
+   * publishes to `djinnbot:channel:credentials-changed` and we reload
+   * the affected agent runtime (stop old → fetch new creds → start new).
+   */
+  private startConfigListener(): void {
+    const redisUrl = this.config.redisUrl
+      || process.env.REDIS_URL;
+    if (!redisUrl) {
+      console.warn('[DiscordBridge] No redisUrl configured — config hot-reload disabled');
+      return;
+    }
+
+    this.configSubRedis = new Redis(redisUrl);
+    this.configSubRedis.on('error', (err) => {
+      console.error('[DiscordBridge] Config subscriber Redis error:', err.message);
+    });
+
+    this.configSubRedis.subscribe('djinnbot:channel:credentials-changed');
+    console.log('[DiscordBridge] Listening for channel credential changes');
+
+    this.configSubRedis.on('message', (_channel: string, raw: string) => {
+      void (async () => {
+        try {
+          const data = JSON.parse(raw) as {
+            agentId: string;
+            channel: string;
+            removed?: boolean;
+          };
+
+          // Only handle Discord credential changes
+          if (data.channel !== 'discord') return;
+
+          console.log(
+            `[DiscordBridge] Credential change for ${data.agentId}/discord` +
+              (data.removed ? ' (removed)' : ' (updated)'),
+          );
+
+          await this.reloadAgent(data.agentId, !!data.removed);
+        } catch (err) {
+          console.error('[DiscordBridge] Failed to process credential change event:', err);
+        }
+      })();
+    });
+  }
+
+  /**
+   * Reload a single agent's Discord runtime.
+   *
+   * 1. Stop the existing runtime (if any)
+   * 2. Fetch fresh credentials from the DB via API
+   * 3. Merge into registry
+   * 4. Start a new runtime
+   */
+  private async reloadAgent(agentId: string, removed: boolean): Promise<void> {
+    // Stop existing runtime
+    const existing = this.agentRuntimes.get(agentId);
+    if (existing) {
+      console.log(`[DiscordBridge] Stopping existing runtime for ${agentId}...`);
+      await existing.stop();
+      this.agentRuntimes.delete(agentId);
+      (this.threadManager as any).config.agentClients.delete(agentId);
+    }
+
+    if (removed) {
+      console.log(`[DiscordBridge] Credentials removed for ${agentId} — runtime stopped`);
+      return;
+    }
+
+    // Fetch fresh credentials from DB
+    const apiBaseUrl = this.config.apiBaseUrl
+      || process.env.DJINNBOT_API_URL
+      || 'http://api:8000';
+
+    try {
+      const res = await authFetch(
+        `${apiBaseUrl}/v1/agents/${agentId}/channels/keys/all`,
+        { signal: AbortSignal.timeout(5000) },
+      );
+      if (!res.ok) {
+        console.warn(`[DiscordBridge] Failed to fetch credentials for ${agentId}: HTTP ${res.status}`);
+        return;
+      }
+
+      const data = await res.json() as {
+        channels: Record<string, { primaryToken?: string; secondaryToken?: string; extra?: Record<string, string> }>;
+      };
+
+      const discordCreds = data.channels?.discord;
+      if (!discordCreds?.primaryToken) {
+        console.log(`[DiscordBridge] No Discord credentials for ${agentId} after reload — skipping`);
+        return;
+      }
+
+      // Merge into registry
+      const creds: ChannelCredentials = {
+        primaryToken: discordCreds.primaryToken,
+        ...(discordCreds.secondaryToken ? { secondaryToken: discordCreds.secondaryToken } : {}),
+        ...(discordCreds.extra && Object.keys(discordCreds.extra).length > 0 ? { extra: discordCreds.extra } : {}),
+      };
+      this.config.agentRegistry.mergeChannelCredentials({
+        [agentId]: { discord: creds },
+      });
+
+      // Start new runtime
+      const agent = this.config.agentRegistry.get(agentId);
+      if (!agent) {
+        console.warn(`[DiscordBridge] Agent ${agentId} not found in registry`);
+        return;
+      }
+
+      const runtime = new AgentDiscordRuntime({
+        agent,
+        defaultChannelId: this.config.defaultChannelId,
+        onDecisionNeeded: this.config.onDecisionNeeded,
+        onHumanGuidance: this.config.onHumanGuidance,
+        onLoadPersona: this.config.onLoadPersona,
+        onFeedback: this.config.onFeedback,
+        defaultDiscordDecisionModel: this.config.defaultDiscordDecisionModel,
+        sessionPool: this.sessionPool,
+        isPipelineThread: (channelId: string, threadId: string) =>
+          this.threadManager.isPipelineThread(channelId, threadId),
+        onDiscordMessage: async (runId: string, message: DiscordMessageData) => {
+          const discordMessageEvent: PipelineEvent = {
+            type: 'DISCORD_MESSAGE',
+            runId,
+            agentId: message.agentId,
+            agentName: message.agentName,
+            agentEmoji: message.agentEmoji,
+            userId: message.userId,
+            userName: message.userName,
+            message: message.message,
+            isAgent: message.isAgent,
+            channelId: message.channelId,
+            messageId: message.messageId,
+            timestamp: Date.now(),
+          } as any;
+          await this.config.eventBus.publish(runChannel(runId), discordMessageEvent);
+        },
+      });
+
+      await runtime.start();
+      this.agentRuntimes.set(agentId, runtime);
+      (this.threadManager as any).config.agentClients.set(agentId, runtime.getClient());
+
+      // Inject session pool if available
+      if (this.sessionPool) {
+        (runtime as any).config.sessionPool = this.sessionPool;
+      }
+
+      console.log(`[DiscordBridge] Agent ${agentId} reloaded successfully`);
+    } catch (err) {
+      console.error(`[DiscordBridge] Failed to reload agent ${agentId}:`, err);
+    }
+  }
+
   /**
    * Stop all agent runtimes and clean up.
    */
@@ -666,6 +838,8 @@ export class DiscordBridge {
       clearTimeout(buffer.timer);
     }
     this.outputBuffers.clear();
+
+    this.configSubRedis?.disconnect();
 
     const stopPromises = Array.from(this.agentRuntimes.values()).map((r) => r.stop());
     await Promise.allSettled(stopPromises);

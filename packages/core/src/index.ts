@@ -17,3 +17,4 @@ export { DjinnBot, type DjinnBotConfig } from './djinnbot.js';
 export * from './skills/index.js';
 export * from './channels/index.js';
 export { createMcpTools } from './mcp/mcp-tools.js';
+export { authFetch, getAuthHeaders } from './api/auth-fetch.js';

@@ -245,6 +245,12 @@ const BUILT_IN_TOOLS: BuiltInTool[] = [
 
   // ── Project tools ─────────────────────────────────────────────────────────
   {
+    name: 'create_project',
+    description: 'Create a new project in DjinnBot from a template or default columns. Optionally link a git repository. Auto-assigns the agent as a member.',
+    category: 'projects',
+    icon: PlusSquare,
+  },
+  {
     name: 'get_my_projects',
     description: 'List all projects the agent is assigned to as owner or member.',
     category: 'projects',

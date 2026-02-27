@@ -87,7 +87,7 @@ Everything under `/data` is on JuiceFS:
 
 ## How Containers Access It
 
-The `juicefs-data` Docker named volume is mounted at `/data` in the engine, API server, and Slack bridge containers. When the engine spawns agent containers dynamically via the Docker API, it mounts the same volume.
+The `juicefs-data` Docker named volume is mounted at `/data` in the engine, API server, and messaging bridge containers. When the engine spawns agent containers dynamically via the Docker API, it mounts the same volume.
 
 Agent containers have their sandbox mounted via JuiceFS `--subdir` at `/home/agent`, which maps to `/data/sandboxes/{agentId}/`. This gives each agent a persistent home directory that survives container destruction.
 

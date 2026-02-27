@@ -276,8 +276,8 @@ layout: hextra-home
     icon="lock-closed"
   >}}
   {{< hextra/feature-card
-    title="Slack-Native"
-    subtitle="Each agent gets its own Slack bot. Watch your team discuss in threads. Mention agents for their perspective. Or skip Slack and use the built-in chat or CLI."
+    title="Message From Any App"
+    subtitle="Talk to your agents from Slack, Discord, Telegram, WhatsApp, or Signal — whatever your team already uses. Each agent gets its own bot identity on every platform. Or use the built-in dashboard chat and CLI."
     icon="chat-alt-2"
   >}}
   {{< hextra/feature-card
@@ -445,7 +445,7 @@ Most agent tools burn through context windows dumping raw files and verbose sche
   </div>
   <div class="info-row">
     <div class="row-label">6. Deliver</div>
-    <div class="row-val">Watch the whole thing happen in real-time via the dashboard, Slack, CLI, or the live activity feed.</div>
+    <div class="row-val">Watch the whole thing happen in real-time via the dashboard, Slack, Discord, Telegram, WhatsApp, Signal, CLI, or the live activity feed.</div>
   </div>
 </div>
 

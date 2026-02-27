@@ -14,9 +14,10 @@
  */
 
 import { Redis } from 'ioredis';
-import type {
-  AgentRegistry,
-  EventBus,
+import {
+  type AgentRegistry,
+  type EventBus,
+  authFetch,
 } from '@djinnbot/core';
 import type { ChatSessionManager } from '@djinnbot/core/chat';
 import { SignalClient } from './signal-client.js';
@@ -494,15 +495,21 @@ export class SignalBridge {
     });
 
     try {
+      const model = this.config.defaultConversationModel ?? 'openrouter/minimax/minimax-m2.5';
+
       // Start or resume session
       await csm.startSession({
         sessionId,
         agentId,
-        model: this.config.defaultConversationModel ?? 'openrouter/minimax/minimax-m2.5',
+        model,
       });
 
-      // Send the user's message
-      await csm.sendMessage(sessionId, text);
+      // Persist user + placeholder assistant message to DB so the response
+      // can be completed via currentMessageId at stepEnd.
+      const messageId = await this.persistMessagePair(sessionId, text, model);
+
+      // Send the user's message (with messageId so stepEnd persists the response)
+      await csm.sendMessage(sessionId, text, model, messageId);
 
       // Wait for the agent to finish
       const response = await Promise.race([
@@ -516,6 +523,52 @@ export class SignalBridge {
     } finally {
       cleanupHooks();
     }
+  }
+
+  // ── DB persistence helpers ──────────────────────────────────────────────
+
+  /**
+   * Create a user message + placeholder assistant message in the DB.
+   * Returns the assistant message ID so it can be passed to sendMessage()
+   * as currentMessageId, enabling stepEnd to persist the response.
+   */
+  private async persistMessagePair(
+    sessionId: string,
+    userText: string,
+    model: string,
+  ): Promise<string | undefined> {
+    try {
+      // Create user message
+      await authFetch(
+        `${this.config.apiUrl}/v1/internal/chat/sessions/${sessionId}/messages`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ role: 'user', content: userText }),
+          signal: AbortSignal.timeout(5000),
+        },
+      );
+
+      // Create placeholder assistant message
+      const res = await authFetch(
+        `${this.config.apiUrl}/v1/internal/chat/sessions/${sessionId}/messages`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ role: 'assistant', content: '', model }),
+          signal: AbortSignal.timeout(5000),
+        },
+      );
+
+      if (res.ok) {
+        const data = (await res.json()) as { message_id: string };
+        return data.message_id;
+      }
+      console.warn(`[SignalBridge] Failed to create assistant message: HTTP ${res.status}`);
+    } catch (err) {
+      console.warn('[SignalBridge] persistMessagePair failed:', err);
+    }
+    return undefined;
   }
 
   // ── Outbound messaging ─────────────────────────────────────────────────
@@ -693,7 +746,7 @@ export class SignalBridge {
 
   private async loadConfig(): Promise<void> {
     try {
-      const res = await fetch(`${this.config.apiUrl}/v1/signal/config`, {
+      const res = await authFetch(`${this.config.apiUrl}/v1/signal/config`, {
         signal: AbortSignal.timeout(5000),
       });
       if (res.ok) {
@@ -724,7 +777,7 @@ export class SignalBridge {
 
   private async loadAllowlist(): Promise<ReturnType<typeof resolveAllowlist>> {
     try {
-      const res = await fetch(`${this.config.apiUrl}/v1/signal/allowlist`, {
+      const res = await authFetch(`${this.config.apiUrl}/v1/signal/allowlist`, {
         signal: AbortSignal.timeout(5000),
       });
       if (res.ok) {

@@ -19,6 +19,7 @@
 
 import type { Client, TextChannel, DMChannel, Message } from 'discord.js';
 import type { ChatSessionManager } from '@djinnbot/core/chat';
+import { authFetch } from '@djinnbot/core';
 import { DiscordUserResolver } from './discord-user-resolver.js';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -97,11 +98,16 @@ export class DiscordSessionPool {
     this.DM_IDLE_MS = config.dmIdleTimeoutMs ?? 20 * 60 * 1000;
     this.THREAD_IDLE_MS = config.threadIdleTimeoutMs ?? 10 * 60 * 1000;
 
-    const apiBaseUrl = config.apiBaseUrl
-      || process.env.DJINNBOT_API_URL
-      || null;
-    if (apiBaseUrl) {
-      this.userResolver = new DiscordUserResolver(apiBaseUrl);
+    // Only enable user resolution when auth is enabled — without auth there
+    // are no DjinnBot user accounts to link Discord IDs to.
+    const authEnabled = (process.env.AUTH_ENABLED ?? 'false').toLowerCase() === 'true';
+    if (authEnabled) {
+      const apiBaseUrl = config.apiBaseUrl
+        || process.env.DJINNBOT_API_URL
+        || null;
+      if (apiBaseUrl) {
+        this.userResolver = new DiscordUserResolver(apiBaseUrl);
+      }
     }
   }
 
@@ -118,11 +124,13 @@ export class DiscordSessionPool {
     if (existing && this.config.chatSessionManager.isSessionActive(existing.sessionId)) {
       // Fast path — container is alive
       this.resetIdleTimer(key, existing);
+      const model = opts.model ?? this.config.defaultModel;
+      const messageId = await this.persistMessagePair(existing.sessionId, opts.message, model);
       await this.config.chatSessionManager.sendMessage(
         existing.sessionId,
         opts.message,
-        opts.model ?? this.config.defaultModel,
-        undefined,
+        model,
+        messageId,
         opts.attachments,
       );
       return existing.sessionId;
@@ -286,6 +294,56 @@ export class DiscordSessionPool {
     this.sessions.clear();
   }
 
+  // ─── DB persistence helpers ──────────────────────────────────────────────────
+
+  /**
+   * Create a user message + placeholder assistant message in the DB.
+   * Returns the assistant message ID so it can be passed to sendMessage()
+   * as currentMessageId, enabling stepEnd to persist the response.
+   */
+  private async persistMessagePair(
+    sessionId: string,
+    userText: string,
+    model: string,
+  ): Promise<string | undefined> {
+    const apiBaseUrl = this.config.apiBaseUrl
+      || process.env.DJINNBOT_API_URL;
+    if (!apiBaseUrl) return undefined;
+
+    try {
+      // Create user message
+      await authFetch(
+        `${apiBaseUrl}/v1/internal/chat/sessions/${sessionId}/messages`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ role: 'user', content: userText }),
+          signal: AbortSignal.timeout(5000),
+        },
+      );
+
+      // Create placeholder assistant message
+      const res = await authFetch(
+        `${apiBaseUrl}/v1/internal/chat/sessions/${sessionId}/messages`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ role: 'assistant', content: '', model }),
+          signal: AbortSignal.timeout(5000),
+        },
+      );
+
+      if (res.ok) {
+        const data = (await res.json()) as { message_id: string };
+        return data.message_id;
+      }
+      console.warn(`[DiscordSessionPool] Failed to create assistant message: HTTP ${res.status}`);
+    } catch (err) {
+      console.warn('[DiscordSessionPool] persistMessagePair failed:', err);
+    }
+    return undefined;
+  }
+
   // ─── Internal ────────────────────────────────────────────────────────────────
 
   private sessionKey(
@@ -344,12 +402,17 @@ export class DiscordSessionPool {
       userId: djinnbotUserId,
     });
 
-    // Send the triggering message
+    // Persist user + placeholder assistant message to DB so the response
+    // can be completed via currentMessageId at stepEnd.
+    const model = opts.model ?? this.config.defaultModel;
+    const messageId = await this.persistMessagePair(sessionId, opts.message, model);
+
+    // Send the triggering message (with messageId so stepEnd persists the response)
     await this.config.chatSessionManager.sendMessage(
       sessionId,
       opts.message,
-      opts.model ?? this.config.defaultModel,
-      undefined,
+      model,
+      messageId,
       opts.attachments,
     );
   }

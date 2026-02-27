@@ -24,6 +24,7 @@ import {
   isSenderAllowed,
   resolveAllowlist,
   type AllowlistDbEntry,
+  authFetch,
 } from '@djinnbot/core';
 import type { ChatSessionManager } from '@djinnbot/core/chat';
 import { WhatsAppSocket, type ConnectionStatus } from './whatsapp-socket.js';
@@ -77,10 +78,17 @@ export class WhatsAppBridge {
   // ── Lifecycle ──────────────────────────────────────────────────────────
 
   async start(): Promise<void> {
-    // 1. Acquire distributed lock
-    const lock = await this.acquireLock();
-    if (!lock.acquired) {
-      console.log('[WhatsAppBridge] Another engine instance holds the WhatsApp lock — skipping');
+    // 1. Acquire distributed lock (retry up to 5 times with backoff —
+    //    after a container restart the old heartbeat may take up to 30s to expire)
+    let lock: { acquired: boolean; release: () => Promise<void> } | null = null;
+    for (let attempt = 1; attempt <= 5; attempt++) {
+      lock = await this.acquireLock();
+      if (lock.acquired) break;
+      console.log(`[WhatsAppBridge] Lock not acquired (attempt ${attempt}/5) — retrying in ${attempt * 5}s...`);
+      await new Promise((r) => setTimeout(r, attempt * 5000));
+    }
+    if (!lock?.acquired) {
+      console.error('[WhatsAppBridge] Could not acquire WhatsApp lock after 5 attempts — skipping');
       return;
     }
     this.lockRelease = lock.release;
@@ -306,15 +314,21 @@ export class WhatsAppBridge {
     });
 
     try {
+      const model = this.config.defaultConversationModel ?? 'openrouter/minimax/minimax-m2.5';
+
       // Start or resume session
       await csm.startSession({
         sessionId,
         agentId,
-        model: this.config.defaultConversationModel ?? 'openrouter/minimax/minimax-m2.5',
+        model,
       });
 
-      // Send the user's message
-      await csm.sendMessage(sessionId, text);
+      // Persist user + placeholder assistant message to DB so the response
+      // can be completed via currentMessageId at stepEnd.
+      const messageId = await this.persistMessagePair(sessionId, text, model);
+
+      // Send the user's message (with messageId so stepEnd persists the response)
+      await csm.sendMessage(sessionId, text, model, messageId);
 
       // Wait for the agent to finish
       const response = await Promise.race([
@@ -328,6 +342,52 @@ export class WhatsAppBridge {
     } finally {
       cleanupHooks();
     }
+  }
+
+  // ── DB persistence helpers ──────────────────────────────────────────────
+
+  /**
+   * Create a user message + placeholder assistant message in the DB.
+   * Returns the assistant message ID so it can be passed to sendMessage()
+   * as currentMessageId, enabling stepEnd to persist the response.
+   */
+  private async persistMessagePair(
+    sessionId: string,
+    userText: string,
+    model: string,
+  ): Promise<string | undefined> {
+    try {
+      // Create user message
+      await authFetch(
+        `${this.config.apiUrl}/v1/internal/chat/sessions/${sessionId}/messages`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ role: 'user', content: userText }),
+          signal: AbortSignal.timeout(5000),
+        },
+      );
+
+      // Create placeholder assistant message
+      const res = await authFetch(
+        `${this.config.apiUrl}/v1/internal/chat/sessions/${sessionId}/messages`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ role: 'assistant', content: '', model }),
+          signal: AbortSignal.timeout(5000),
+        },
+      );
+
+      if (res.ok) {
+        const data = (await res.json()) as { message_id: string };
+        return data.message_id;
+      }
+      console.warn(`[WhatsAppBridge] Failed to create assistant message: HTTP ${res.status}`);
+    } catch (err) {
+      console.warn('[WhatsAppBridge] persistMessagePair failed:', err);
+    }
+    return undefined;
   }
 
   // ── Outbound messaging ─────────────────────────────────────────────────
@@ -364,6 +424,9 @@ export class WhatsAppBridge {
 
   private startRpcHandler(): void {
     const sub = this.rpcRedis.duplicate();
+    sub.on('error', (err) => {
+      console.error('[WhatsAppBridge] RPC subscriber error:', err);
+    });
     sub.subscribe('whatsapp:rpc:request');
     console.log('[WhatsAppBridge] RPC handler listening on whatsapp:rpc:request');
 
@@ -536,7 +599,7 @@ export class WhatsAppBridge {
 
   private async loadConfig(): Promise<void> {
     try {
-      const res = await fetch(`${this.config.apiUrl}/v1/whatsapp/config`, {
+      const res = await authFetch(`${this.config.apiUrl}/v1/whatsapp/config`, {
         signal: AbortSignal.timeout(5000),
       });
       if (res.ok) {
@@ -569,7 +632,7 @@ export class WhatsAppBridge {
 
   private async loadAllowlist(): Promise<ReturnType<typeof resolveAllowlist>> {
     try {
-      const res = await fetch(`${this.config.apiUrl}/v1/whatsapp/allowlist`, {
+      const res = await authFetch(`${this.config.apiUrl}/v1/whatsapp/allowlist`, {
         signal: AbortSignal.timeout(5000),
       });
       if (res.ok) {

@@ -6,7 +6,7 @@ weight: 1
 Each DjinnBot agent can have its own Slack bot, appearing as a distinct team member in your workspace. This guide walks you through creating Slack apps for your agents.
 
 {{< callout type="info" >}}
-Slack integration is **optional**. The built-in dashboard chat works without any Slack configuration. Set this up only if you want agents visible in your Slack workspace.
+Slack integration is **optional**. DjinnBot also supports [Discord](/docs/guides/discord-setup), [Telegram](/docs/guides/telegram-setup), [Signal](/docs/guides/signal-setup), and [WhatsApp](/docs/guides/whatsapp-setup) — or just use the built-in dashboard chat and CLI.
 {{< /callout >}}
 
 ## Overview

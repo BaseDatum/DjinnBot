@@ -203,7 +203,7 @@ Docker Compose built and started the entire stack:
 1. **PostgreSQL** stores pipeline runs, steps, agent state, project boards, user accounts, and settings
 2. **Redis** provides the event bus via Redis Streams — reliable, ordered message delivery between services
 3. **API Server** (FastAPI/Python) exposes REST endpoints for the dashboard, CLI, and external integrations, with optional JWT authentication
-4. **Pipeline Engine** (TypeScript/Node) runs the state machine that coordinates agent execution, spawns agent containers, manages memory, and bridges Slack
+4. **Pipeline Engine** (TypeScript/Node) runs the state machine that coordinates agent execution, spawns agent containers, manages memory, and bridges messaging platforms (Slack, Discord, Telegram, Signal, WhatsApp)
 5. **Dashboard** (React/Vite) serves the web interface with real-time SSE streaming, authentication pages, and project management
 6. **mcpo** proxies MCP tool servers (GitHub, web fetch, etc.) as OpenAPI endpoints for agents
 

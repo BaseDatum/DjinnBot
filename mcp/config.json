@@ -1,5 +1,17 @@
 {
   "mcpServers": {
+    "github": {
+      "command": "/usr/local/bin/github-mcp-server",
+      "args": [
+        "stdio",
+        "--read-only",
+        "--toolsets",
+        "context,repos,issues"
+      ],
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_TOKEN}"
+      }
+    },
     "time": {
       "command": "uvx",
       "args": [
@@ -28,18 +40,6 @@
         "scrapling",
         "mcp"
       ]
-    },
-    "github": {
-      "command": "/usr/local/bin/github-mcp-server",
-      "args": [
-        "stdio",
-        "--read-only",
-        "--toolsets",
-        "context,repos,issues"
-      ],
-      "env": {
-        "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_TOKEN}"
-      }
     }
   }
 }

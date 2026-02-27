@@ -9,6 +9,8 @@
  * Results are cached in memory for 5 minutes.
  */
 
+import { authFetch } from '@djinnbot/core';
+
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
 interface CacheEntry {
@@ -52,7 +54,7 @@ export class DiscordUserResolver {
 
     // Query the DjinnBot API
     try {
-      const res = await fetch(
+      const res = await authFetch(
         `${this.apiBaseUrl}/v1/users/by-discord-id/${encodeURIComponent(discordUserId)}`,
       );
 
@@ -85,7 +87,7 @@ export class DiscordUserResolver {
    */
   async checkUserHasProviderKey(userId: string, model: string): Promise<string | null> {
     try {
-      const res = await fetch(
+      const res = await authFetch(
         `${this.apiBaseUrl}/v1/settings/providers/keys/all?user_id=${encodeURIComponent(userId)}`,
       );
       if (!res.ok) return null;

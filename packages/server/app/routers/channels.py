@@ -130,10 +130,11 @@ CHANNEL_CATALOG: Dict[str, dict] = {
                 "label": "Allowlist",
                 "placeholder": "* or 123456789,role:Admin",
                 "description": (
-                    "Comma-separated list of who can interact with this agent. "
-                    "Use * for everyone, Discord user IDs for specific users, "
-                    "or role:RoleName for role-based access (e.g. role:Admin,role:Moderator). "
-                    "Leave empty to ignore all messages."
+                    "REQUIRED. Comma-separated list of who can interact with this agent. "
+                    "Use * for everyone (recommended for initial setup), Discord user IDs "
+                    "for specific users, or role:RoleName for role-based access "
+                    "(e.g. role:Admin,role:Moderator). "
+                    "WARNING: If left empty, ALL messages are silently blocked."
                 ),
                 "secret": False,
             },
@@ -322,6 +323,19 @@ async def upsert_agent_channel(
 
     await session.commit()
     await session.refresh(row)
+
+    # Notify the engine so it can hot-reload the channel bridge (fire-and-forget).
+    try:
+        import redis.asyncio as aioredis
+
+        redis_url = os.environ.get("REDIS_URL", "redis://localhost:6379")
+        r = aioredis.from_url(redis_url)
+        payload = json.dumps({"agentId": agent_id, "channel": channel})
+        await r.publish("djinnbot:channel:credentials-changed", payload)
+        await r.aclose()
+    except Exception as e:
+        logger.warning(f"Failed to notify engine of channel credential change: {e}")
+
     return _build_response(agent_id, channel, row)
 
 
@@ -339,6 +353,18 @@ async def remove_agent_channel(
     if row:
         await session.delete(row)
         await session.commit()
+
+    # Notify the engine so it can stop the channel bridge (fire-and-forget).
+    try:
+        import redis.asyncio as aioredis
+
+        redis_url = os.environ.get("REDIS_URL", "redis://localhost:6379")
+        r = aioredis.from_url(redis_url)
+        payload = json.dumps({"agentId": agent_id, "channel": channel, "removed": True})
+        await r.publish("djinnbot:channel:credentials-changed", payload)
+        await r.aclose()
+    except Exception as e:
+        logger.warning(f"Failed to notify engine of channel credential removal: {e}")
 
     return {"status": "ok", "agentId": agent_id, "channel": channel}
 

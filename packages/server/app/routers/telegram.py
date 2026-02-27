@@ -136,11 +136,13 @@ def _mask_token(token: Optional[str]) -> Optional[str]:
     return f"{token[:5]}...{token[-4:]}"
 
 
-def _config_to_response(row: TelegramConfig) -> TelegramConfigResponse:
+def _config_to_response(
+    row: TelegramConfig, *, unmask: bool = False
+) -> TelegramConfigResponse:
     return TelegramConfigResponse(
         agentId=row.agent_id,
         enabled=row.enabled,
-        botToken=_mask_token(row.bot_token),
+        botToken=row.bot_token if unmask else _mask_token(row.bot_token),
         botUsername=row.bot_username,
         allowAll=row.allow_all,
         updatedAt=row.updated_at,
@@ -238,6 +240,50 @@ async def update_telegram_config(
         logger.warning(f"Failed to notify engine of Telegram config change: {e}")
 
     return _config_to_response(row)
+
+
+# --- Internal endpoints (engine use — unmasked tokens) ------------------------
+
+
+@router.get("/internal/configs")
+async def list_telegram_configs_internal(
+    session: AsyncSession = Depends(get_async_session),
+) -> dict:
+    """List all agent Telegram configurations with unmasked tokens.
+
+    Used by the engine to start bots — tokens must not be masked.
+    """
+    result = await session.execute(
+        select(TelegramConfig).order_by(TelegramConfig.agent_id)
+    )
+    rows = result.scalars().all()
+    configs = [_config_to_response(r, unmask=True) for r in rows]
+    return {"configs": configs, "total": len(configs)}
+
+
+@router.get("/internal/{agent_id}/config", response_model=TelegramConfigResponse)
+async def get_telegram_config_internal(
+    agent_id: str,
+    session: AsyncSession = Depends(get_async_session),
+) -> TelegramConfigResponse:
+    """Read Telegram configuration for an agent with unmasked token.
+
+    Used by the engine on config reload — token must not be masked.
+    """
+    result = await session.execute(
+        select(TelegramConfig).where(TelegramConfig.agent_id == agent_id)
+    )
+    row = result.scalar_one_or_none()
+    if not row:
+        return TelegramConfigResponse(
+            agentId=agent_id,
+            enabled=False,
+            botToken=None,
+            botUsername=None,
+            allowAll=False,
+            updatedAt=0,
+        )
+    return _config_to_response(row, unmask=True)
 
 
 # --- Status endpoint ----------------------------------------------------------

@@ -20,7 +20,7 @@ import {
   type ThreadChannel,
 } from 'discord.js';
 import type { AgentRegistryEntry } from '@djinnbot/core';
-import { parseModelString } from '@djinnbot/core';
+import { parseModelString, authFetch } from '@djinnbot/core';
 import { DiscordStreamer } from './discord-streamer.js';
 import { DiscordAllowlist, type DiscordAllowlistConfig } from './allowlist.js';
 import type { DiscordSessionPool } from './discord-session-pool.js';
@@ -383,25 +383,42 @@ export class AgentDiscordRuntime {
       // Ignore other bots
       if (message.author.bot) return;
 
-      // ── Allowlist check ──────────────────────────────────────────────
       const isDM = message.channel.type === ChannelType.DM;
+      const authorTag = `${message.author.username}#${message.author.discriminator}`;
+      const locationDesc = isDM
+        ? 'DM'
+        : `guild=${message.guildId} channel=${message.channelId}`;
+
+      console.log(
+        `[${this.agentId}] Discord message received — from=${authorTag} (${message.author.id}) ${locationDesc}: "${message.content.slice(0, 80)}"`,
+      );
+
+      // ── Allowlist check ──────────────────────────────────────────────
       const member = message.member ?? null;
 
       const match = this.allowlist.isAllowed(message.author.id, member, isDM);
       if (!match.allowed) {
-        // Silently ignore messages from non-allowlisted users
+        const reason = this.allowlist.isEmpty
+          ? 'allowlist is empty (no users permitted — set allow_from in Discord channel config)'
+          : `user ${message.author.id} not in allowlist`;
+        console.warn(
+          `[${this.agentId}] Message BLOCKED — ${reason}`,
+        );
         return;
       }
 
       // ── Guild restrictions ────────────────────────────────────────────
       const guildId = this.agent.channels.discord?.extra?.guild_id;
       if (guildId && message.guildId && message.guildId !== guildId) {
-        // Message is from a different guild — ignore
+        console.log(
+          `[${this.agentId}] Message ignored — guild ${message.guildId} does not match configured guild ${guildId}`,
+        );
         return;
       }
 
       // ── Route to handler ──────────────────────────────────────────────
       if (isDM) {
+        console.log(`[${this.agentId}] Routing to DM handler`);
         await this.handleDirectMessage(message);
       } else if (message.channel.isThread()) {
         // Thread reply in a guild channel
@@ -414,6 +431,7 @@ export class AgentDiscordRuntime {
           // Only respond if @mentioned
           const mentionsMe = this.botUserId && message.mentions.has(this.botUserId);
           if (mentionsMe) {
+            console.log(`[${this.agentId}] Routing to pipeline thread handler (mentioned)`);
             await this.handleThreadReply(message);
           }
           return;
@@ -421,11 +439,13 @@ export class AgentDiscordRuntime {
 
         // Regular thread — respond if mentioned or has participated
         if (this.botUserId && message.mentions.has(this.botUserId)) {
+          console.log(`[${this.agentId}] Routing to thread handler (mentioned)`);
           await this.handleThreadReply(message);
         }
       } else {
         // Channel message — only respond if @mentioned
         if (this.botUserId && message.mentions.has(this.botUserId)) {
+          console.log(`[${this.agentId}] Routing to mention handler`);
           await this.handleMention(message);
         }
       }
@@ -625,7 +645,7 @@ export class AgentDiscordRuntime {
           formData.append('file', new Blob([buffer]), attachment.name ?? 'file');
           const sessionIdForUpload = `discord_${this.agentId}_${channel.id}`;
           const mimeType = attachment.contentType ?? 'application/octet-stream';
-          const uploadRes = await fetch(
+          const uploadRes = await authFetch(
             `${apiBaseUrl}/v1/internal/chat/attachments/upload-bytes?session_id=${encodeURIComponent(sessionIdForUpload)}&filename=${encodeURIComponent(attachment.name ?? 'file')}&mime_type=${encodeURIComponent(mimeType)}`,
             { method: 'POST', body: formData },
           );

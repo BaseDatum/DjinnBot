@@ -20,6 +20,7 @@ import type {
   AgentRegistry,
   EventBus,
 } from '@djinnbot/core';
+import { authFetch } from '@djinnbot/core';
 import type { ChatSessionManager } from '@djinnbot/core/chat';
 import { TelegramClient } from './telegram-client.js';
 import { TelegramTypingManager } from './telegram-typing-manager.js';
@@ -219,15 +220,21 @@ class TelegramAgentBridge {
     });
 
     try {
+      const model = this.config.defaultConversationModel ?? 'openrouter/minimax/minimax-m2.5';
+
       // Start or resume session
       await csm.startSession({
         sessionId,
         agentId: this.agentId,
-        model: this.config.defaultConversationModel ?? 'openrouter/minimax/minimax-m2.5',
+        model,
       });
 
-      // Send the user's message
-      await csm.sendMessage(sessionId, text);
+      // Persist user + placeholder assistant message to DB so the response
+      // can be completed via currentMessageId at stepEnd.
+      const messageId = await this.persistMessagePair(sessionId, text, model);
+
+      // Send the user's message (with messageId so stepEnd persists the response)
+      await csm.sendMessage(sessionId, text, model, messageId);
 
       // Wait for the agent to finish (with timeout)
       const response = await Promise.race([
@@ -244,6 +251,52 @@ class TelegramAgentBridge {
     } finally {
       cleanupHooks();
     }
+  }
+
+  // ── DB persistence helpers ──────────────────────────────────────────────
+
+  /**
+   * Create a user message + placeholder assistant message in the DB.
+   * Returns the assistant message ID so it can be passed to sendMessage()
+   * as currentMessageId, enabling stepEnd to persist the response.
+   */
+  private async persistMessagePair(
+    sessionId: string,
+    userText: string,
+    model: string,
+  ): Promise<string | undefined> {
+    try {
+      // Create user message
+      await authFetch(
+        `${this.config.apiUrl}/v1/internal/chat/sessions/${sessionId}/messages`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ role: 'user', content: userText }),
+          signal: AbortSignal.timeout(5000),
+        },
+      );
+
+      // Create placeholder assistant message
+      const res = await authFetch(
+        `${this.config.apiUrl}/v1/internal/chat/sessions/${sessionId}/messages`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ role: 'assistant', content: '', model }),
+          signal: AbortSignal.timeout(5000),
+        },
+      );
+
+      if (res.ok) {
+        const data = (await res.json()) as { message_id: string };
+        return data.message_id;
+      }
+      console.warn(`[TelegramBridge:${this.agentId}] Failed to create assistant message: HTTP ${res.status}`);
+    } catch (err) {
+      console.warn(`[TelegramBridge:${this.agentId}] persistMessagePair failed:`, err);
+    }
+    return undefined;
   }
 
   // ── Outbound messaging ─────────────────────────────────────────────────
@@ -287,7 +340,7 @@ class TelegramAgentBridge {
 
   private async loadAllowlist(): Promise<ReturnType<typeof resolveAllowlist>> {
     try {
-      const res = await fetch(
+      const res = await authFetch(
         `${this.config.apiUrl}/v1/telegram/${this.agentId}/allowlist`,
         { signal: AbortSignal.timeout(5000) },
       );
@@ -506,7 +559,7 @@ export class TelegramBridgeManager {
 
   private async loadAllConfigs(): Promise<TelegramAgentConfig[]> {
     try {
-      const res = await fetch(`${this.config.apiUrl}/v1/telegram/configs`, {
+      const res = await authFetch(`${this.config.apiUrl}/v1/telegram/internal/configs`, {
         signal: AbortSignal.timeout(5000),
       });
       if (res.ok) {
@@ -526,8 +579,8 @@ export class TelegramBridgeManager {
     agentId: string,
   ): Promise<TelegramAgentConfig | null> {
     try {
-      const res = await fetch(
-        `${this.config.apiUrl}/v1/telegram/${agentId}/config`,
+      const res = await authFetch(
+        `${this.config.apiUrl}/v1/telegram/internal/${agentId}/config`,
         { signal: AbortSignal.timeout(5000) },
       );
       if (res.ok) {

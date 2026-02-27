@@ -10,7 +10,8 @@
   },
   "dependencies": {
     "@djinnbot/core": "*",
-    "discord.js": "^14.16.0"
+    "discord.js": "^14.16.0",
+    "ioredis": "^5.4.0"
   },
   "devDependencies": {
     "typescript": "^5.7.0"

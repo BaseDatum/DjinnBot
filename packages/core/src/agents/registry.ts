@@ -126,6 +126,46 @@ export class AgentRegistry {
     return this.agents.has(id);
   }
 
+  /**
+   * Merge channel credentials from an external source (e.g. DB) into the registry.
+   *
+   * For each agent+channel, DB credentials win over file-based credentials when
+   * the DB has a non-empty primaryToken.  This enables the dashboard UI to
+   * configure channel tokens without requiring YAML files or env vars.
+   */
+  mergeChannelCredentials(
+    credentialsByAgent: Record<string, Record<string, ChannelCredentials>>,
+  ): void {
+    let merged = 0;
+    for (const [agentId, channels] of Object.entries(credentialsByAgent)) {
+      const agent = this.agents.get(agentId);
+      if (!agent) continue;
+
+      for (const [channel, creds] of Object.entries(channels)) {
+        if (!creds.primaryToken) continue;
+
+        const existing = agent.channels[channel];
+        if (existing
+          && existing.primaryToken === creds.primaryToken
+          && existing.secondaryToken === creds.secondaryToken
+          && JSON.stringify(existing.extra ?? {}) === JSON.stringify(creds.extra ?? {})) {
+          // Fully identical — skip
+          continue;
+        }
+
+        agent.channels[channel] = creds;
+        merged++;
+        console.log(
+          `[AgentRegistry] Merged DB credentials for ${agentId}/${channel}` +
+            (existing ? ' (overriding file-based)' : ' (new)'),
+        );
+      }
+    }
+    if (merged > 0) {
+      console.log(`[AgentRegistry] Merged ${merged} channel credential(s) from DB`);
+    }
+  }
+
   // ─── Private Loading Methods ───────────────────────────────────────────
 
   private async loadAgent(

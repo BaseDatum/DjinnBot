@@ -24,6 +24,10 @@ graph TB
     Agent1 --> mcpo["mcpo Proxy<br/>(MCP Tools)"]
     Agent2 --> mcpo
     Engine --> Slack["Slack Bridge"]
+    Engine --> Discord["Discord Bridge"]
+    Engine --> Telegram["Telegram Bridge"]
+    Engine --> Signal["Signal Bridge"]
+    Engine --> WhatsApp["WhatsApp Bridge"]
     JFS["JuiceFS FUSE Mount"] --> RustFS["RustFS<br/>(S3 Object Store)"]
     JFS --> Redis
     Engine --> JFS
@@ -43,6 +47,10 @@ graph TB
     style Agent3 fill:#f59e0b,color:#000,stroke:#d97706
     style mcpo fill:#6366f1,color:#fff,stroke:#4f46e5
     style Slack fill:#4ade80,color:#000,stroke:#22c55e
+    style Discord fill:#5865F2,color:#fff,stroke:#4752C4
+    style Telegram fill:#26A5E4,color:#fff,stroke:#1E96D1
+    style Signal fill:#3A76F0,color:#fff,stroke:#2E62CC
+    style WhatsApp fill:#25D366,color:#fff,stroke:#1DA851
     style JFS fill:#14b8a6,color:#fff,stroke:#0d9488
     style RustFS fill:#14b8a6,color:#fff,stroke:#0d9488
 ```
@@ -77,7 +85,7 @@ The engine is the brain of the system:
 - **Memory management** — loads/saves ClawVault memories for each agent session, runs memory consolidation
 - **Pulse scheduler** — fires agent wake-up cycles on configurable schedules with named routines
 - **Agent coordination** — work ledger, two-tier messaging, wake guardrails
-- **Slack bridge** — routes events to Slack threads and processes agent mentions
+- **Messaging bridges** — routes events to Slack, Discord, Telegram, Signal, and WhatsApp; processes agent mentions and DMs across all platforms
 - **MCP manager** — writes tool server config, monitors health, discovers tools
 - **Container log streaming** — relays container logs to the admin panel via Redis
 - **LLM call logging** — captures per-API-call token counts, latency, and cost data
@@ -264,6 +272,18 @@ DjinnBot is a Turborepo monorepo with npm workspaces:
     {{< /filetree/folder >}}
     {{< filetree/folder name="slack" >}}
       {{< filetree/file name="Slack bridge and per-agent bots (TypeScript)" >}}
+    {{< /filetree/folder >}}
+    {{< filetree/folder name="discord" >}}
+      {{< filetree/file name="Discord bridge, per-agent bots, streaming, session pool (TypeScript)" >}}
+    {{< /filetree/folder >}}
+    {{< filetree/folder name="telegram" >}}
+      {{< filetree/file name="Telegram bridge manager, per-agent bots via grammY (TypeScript)" >}}
+    {{< /filetree/folder >}}
+    {{< filetree/folder name="signal" >}}
+      {{< filetree/file name="Signal bridge, signal-cli daemon, SSE listener, routing (TypeScript)" >}}
+    {{< /filetree/folder >}}
+    {{< filetree/folder name="whatsapp" >}}
+      {{< filetree/file name="WhatsApp bridge, Baileys socket, routing (TypeScript)" >}}
     {{< /filetree/folder >}}
     {{< filetree/folder name="agent-runtime" >}}
       {{< filetree/file name="Container entrypoint, tools, and PTC bridge (TypeScript)" >}}

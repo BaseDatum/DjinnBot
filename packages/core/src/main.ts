@@ -1091,6 +1091,56 @@ async function syncChannelCredentialsToDb(): Promise<void> {
   console.log(`[Engine] syncChannelCredentialsToDb: done (${writes.length} agent+channel(s) synced)`);
 }
 
+/**
+ * Load channel credentials from the DB back into the AgentRegistry.
+ *
+ * Credentials set via the dashboard UI are stored in agent_channel_credentials
+ * but the AgentRegistry only reads from YAML files on disk at discover() time.
+ * This function bridges the gap: for each agent, it fetches DB credentials and
+ * merges them into the in-memory registry so that channel bridges (Discord,
+ * Slack, Telegram, etc.) can see dashboard-configured tokens.
+ */
+async function loadChannelCredentialsFromDb(): Promise<void> {
+  const apiBaseUrl = process.env.DJINNBOT_API_URL || 'http://api:8000';
+  if (!djinnBot) return;
+
+  const registry = djinnBot.getAgentRegistry();
+  const agents = registry.getAll();
+
+  const credentialsByAgent: Record<string, Record<string, import('./agents/types.js').ChannelCredentials>> = {};
+
+  for (const agent of agents) {
+    try {
+      const res = await authFetch(`${apiBaseUrl}/v1/agents/${agent.id}/channels/keys/all`);
+      if (!res.ok) continue;
+
+      const data = await res.json() as {
+        channels: Record<string, { primaryToken?: string; secondaryToken?: string; extra?: Record<string, string> }>;
+      };
+
+      if (!data.channels || Object.keys(data.channels).length === 0) continue;
+
+      const agentChannels: Record<string, import('./agents/types.js').ChannelCredentials> = {};
+      for (const [channel, creds] of Object.entries(data.channels)) {
+        if (!creds.primaryToken) continue;
+        agentChannels[channel] = {
+          primaryToken: creds.primaryToken,
+          ...(creds.secondaryToken ? { secondaryToken: creds.secondaryToken } : {}),
+          ...(creds.extra && Object.keys(creds.extra).length > 0 ? { extra: creds.extra } : {}),
+        };
+      }
+
+      if (Object.keys(agentChannels).length > 0) {
+        credentialsByAgent[agent.id] = agentChannels;
+      }
+    } catch (err) {
+      console.warn(`[Engine] loadChannelCredentialsFromDb: failed for ${agent.id}:`, err);
+    }
+  }
+
+  registry.mergeChannelCredentials(credentialsByAgent);
+}
+
 // PROVIDER_ENV_MAP is imported from constants.ts — the single source of truth.
 
 /**
@@ -1314,6 +1364,11 @@ async function main(): Promise<void> {
     // Sync per-agent channel credentials from {channel}.yml env vars into the DB
     // so the Channels tab in the dashboard can show and update them.
     await syncChannelCredentialsToDb();
+
+    // Load channel credentials from DB back into the AgentRegistry so that
+    // tokens configured via the dashboard UI are available to channel bridges
+    // (Discord, Slack, Telegram, etc.) without requiring YAML files or env vars.
+    await loadChannelCredentialsFromDb();
 
     // Load provider config from DB back into process.env so DB-configured
     // values (e.g. qmdr keys set via the Settings UI) are available to the
