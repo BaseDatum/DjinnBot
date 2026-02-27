@@ -372,8 +372,12 @@ final class RecordingCoordinator: ObservableObject {
     /// Captures system audio (remote participants via ScreenCaptureKit).
     let systemAudioCapture = SystemAudioCaptureManager()
     
-    let transcriptionService = StreamingTranscriptionService()
+    /// The active transcription service — swapped when the user changes ASR engine in Settings.
+    private(set) var transcriptionService: any TranscriptionServiceProtocol
     let diarizationService = RealTimeDiarizationService()
+    
+    /// Which ASR engine is currently active.
+    @Published var activeASREngine: ASREngine = ASREngine.current
     
     /// Whether the ML models are loaded and ready for instant recording.
     @Published var modelsReady: Bool = false
@@ -389,7 +393,65 @@ final class RecordingCoordinator: ObservableObject {
     private var recordingStartDate: Date?
     private var isLoadingModels: Bool = false
     
-    private init() {}
+    private init() {
+        self.transcriptionService = Self.makeTranscriptionService(for: ASREngine.current)
+    }
+    
+    // MARK: - Engine Factory
+    
+    /// Create the appropriate transcription service for the given engine.
+    private static func makeTranscriptionService(for engine: ASREngine) -> any TranscriptionServiceProtocol {
+        switch engine {
+        case .fluidAudio:
+            return StreamingTranscriptionService()
+        case .appleSpeech:
+            if #available(macOS 26, *) {
+                return AppleSpeechTranscriptionService()
+            } else {
+                // Fallback if somehow selected on older OS
+                print("[Dialogue] Apple Speech unavailable on this OS, falling back to FluidAudio")
+                return StreamingTranscriptionService()
+            }
+        }
+    }
+    
+    // MARK: - Engine Switching
+    
+    /// Switch to a different ASR engine. Tears down the old service,
+    /// creates the new one, and loads its model.
+    /// Called from SettingsView when the user changes the toggle.
+    func switchASREngine(to engine: ASREngine) async {
+        guard engine != activeASREngine, !isRecording else {
+            if isRecording {
+                print("[Dialogue] Cannot switch ASR engine while recording")
+            }
+            return
+        }
+        
+        print("[Dialogue] Switching ASR engine: \(activeASREngine.displayName) → \(engine.displayName)")
+        
+        // Tear down old service
+        transcriptionService.unloadModel()
+        
+        // Create new service
+        let newService = Self.makeTranscriptionService(for: engine)
+        self.transcriptionService = newService
+        self.activeASREngine = engine
+        self.modelsReady = false
+        
+        // Load the new engine's model
+        modelLoadingStatus = "Loading \(engine.displayName)..."
+        await newService.loadModel()
+        
+        modelsReady = newService.isReady
+        modelLoadingStatus = ""
+        
+        if modelsReady {
+            print("[Dialogue] ASR engine switched to \(engine.displayName) — ready")
+        } else {
+            print("[Dialogue] ASR engine switch to \(engine.displayName) failed: \(newService.errorMessage ?? "unknown error")")
+        }
+    }
     
     // MARK: - Model Loading
     
@@ -401,15 +463,15 @@ final class RecordingCoordinator: ObservableObject {
         isLoadingModels = true
         defer { isLoadingModels = false }
         
-        print("[Dialogue] Pre-loading ML models...")
+        print("[Dialogue] Pre-loading ML models (ASR engine: \(activeASREngine.displayName))...")
         
-        // Load FluidAudio ASR (Parakeet TDT v3)
+        // Load the selected ASR engine
         if !transcriptionService.isReady {
-            modelLoadingStatus = "Loading speech recognition..."
+            modelLoadingStatus = "Loading \(activeASREngine.displayName)..."
             await transcriptionService.loadModel()
         }
         
-        // Load FluidAudio diarization (Sortformer/Pyannote)
+        // Load FluidAudio diarization (always FluidAudio, regardless of ASR engine)
         if !diarizationService.isReady {
             modelLoadingStatus = "Loading speaker diarization..."
             await diarizationService.loadModels()
@@ -419,9 +481,9 @@ final class RecordingCoordinator: ObservableObject {
         modelLoadingStatus = ""
         
         if modelsReady {
-            print("[Dialogue] ML models pre-loaded — ready for instant recording")
+            print("[Dialogue] ML models pre-loaded — ready for instant recording (\(activeASREngine.displayName))")
         } else {
-            print("[Dialogue] Model pre-load incomplete — ASR=\(transcriptionService.isReady), diarization=\(diarizationService.isReady)")
+            print("[Dialogue] Model pre-load incomplete — ASR(\(activeASREngine.displayName))=\(transcriptionService.isReady), diarization=\(diarizationService.isReady)")
         }
     }
     

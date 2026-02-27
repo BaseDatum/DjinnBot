@@ -9,6 +9,8 @@ struct SettingsView: View {
     @State private var testStatus: TestStatus = .idle
     @State private var endpointURL: String = UserDefaults.standard.string(forKey: "aiEndpoint") ?? "https://localhost:8000/v1"
     @State private var agentId: String = UserDefaults.standard.string(forKey: "chatAgentId") ?? "chieko"
+    @State private var selectedASREngine: ASREngine = ASREngine.current
+    @State private var isReloadingASR: Bool = false
 
     @Environment(\.dismiss) private var dismiss
 
@@ -121,6 +123,43 @@ struct SettingsView: View {
 
             Section {
                 VStack(alignment: .leading, spacing: 8) {
+                    Text("Speech Recognition Engine")
+                        .font(.headline)
+
+                    Text("Choose the ASR model used for meeting transcription. Diarization (speaker identification) always uses FluidAudio regardless of this setting.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    Picker("Engine", selection: $selectedASREngine) {
+                        ForEach(availableASREngines) { engine in
+                            VStack(alignment: .leading) {
+                                Text(engine.displayName)
+                                Text(engine.subtitle)
+                                    .font(.caption2)
+                                    .foregroundStyle(.tertiary)
+                            }
+                            .tag(engine)
+                        }
+                    }
+                    .pickerStyle(.radioGroup)
+                    .onChange(of: selectedASREngine) { _, newEngine in
+                        applyASREngineChange(newEngine)
+                    }
+
+                    if isReloadingASR {
+                        HStack(spacing: 6) {
+                            ProgressView()
+                                .scaleEffect(0.7)
+                            Text("Loading speech recognition model...")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            }
+
+            Section {
+                VStack(alignment: .leading, spacing: 8) {
                     Text("Documents Folder")
                         .font(.headline)
 
@@ -166,8 +205,31 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .frame(width: 520, height: 450)
+        .frame(width: 520, height: 580)
         .onAppear(perform: loadExistingKey)
+    }
+
+    // MARK: - ASR Engine
+
+    /// Only show engines that are available on this system.
+    private var availableASREngines: [ASREngine] {
+        ASREngine.allCases.filter { engine in
+            switch engine {
+            case .fluidAudio: return true
+            case .appleSpeech: return ASREngine.isAppleSpeechAvailable
+            }
+        }
+    }
+
+    private func applyASREngineChange(_ engine: ASREngine) {
+        ASREngine.current = engine
+        isReloadingASR = true
+
+        // Notify the coordinator to swap transcription services
+        Task { @MainActor in
+            await RecordingCoordinator.shared.switchASREngine(to: engine)
+            isReloadingASR = false
+        }
     }
 
     // MARK: - Actions
