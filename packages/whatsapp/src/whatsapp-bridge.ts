@@ -204,13 +204,15 @@ export class WhatsAppBridge {
     timestamp: number;
     isGroup: boolean;
     groupJid?: string;
+    media?: { rawMessage: any; mimeType: string; filename?: string; type: 'image' | 'audio' | 'video' | 'document' };
   }): Promise<void> {
     // Skip group messages for now (DM-only in v1)
     if (msg.isGroup) return;
 
     const normalized = normalizeE164(msg.senderPhone);
+    const displayText = msg.text || (msg.media ? `[${msg.media.type}]` : '');
     console.log(
-      `[WhatsAppBridge] Incoming from ${normalized}: "${msg.text.slice(0, 80)}${msg.text.length > 80 ? '...' : ''}"`
+      `[WhatsAppBridge] Incoming from ${normalized}: "${displayText.slice(0, 80)}${displayText.length > 80 ? '...' : ''}"`
     );
 
     // 1. Allowlist check
@@ -249,9 +251,42 @@ export class WhatsAppBridge {
     this.socket?.subscribePresence(msg.senderJid).catch(() => {});
     this.typingManager.startTyping(msg.senderJid);
 
-    // 7. Process with agent
+    // 7. Download and re-upload WhatsApp media to DjinnBot storage
+    let attachments: Array<{ id: string; filename: string; mimeType: string; sizeBytes: number; isImage: boolean }> | undefined;
+    if (msg.media && this.socket) {
+      try {
+        const { processChannelAttachments } = await import('@djinnbot/core');
+        const { downloadMediaMessage } = await import('@whiskeysockets/baileys');
+        const apiBaseUrl = process.env.DJINNBOT_API_URL || 'http://api:8000';
+        const safeSender = normalized.replace(/[^a-zA-Z0-9]/g, '');
+        const sessionIdForUpload = `whatsapp_${safeSender}_${route.agentId}`;
+
+        // Download media bytes from WhatsApp
+        const buffer = await downloadMediaMessage(
+          msg.media.rawMessage,
+          'buffer',
+          {},
+        ) as Buffer;
+
+        const filename = msg.media.filename ||
+          `${msg.media.type}_${Date.now()}.${msg.media.mimeType.split('/')[1] || 'bin'}`;
+
+        attachments = await processChannelAttachments(
+          [{ url: '', name: filename, mimeType: msg.media.mimeType, buffer }],
+          apiBaseUrl,
+          sessionIdForUpload,
+          '[WhatsAppBridge]',
+        );
+        if (attachments.length === 0) attachments = undefined;
+      } catch (err) {
+        console.warn('[WhatsAppBridge] Failed to process media attachment:', err);
+      }
+    }
+
+    // 8. Process with agent
+    const messageText = msg.text || (msg.media ? `[${msg.media.type} message — see attachments]` : '');
     try {
-      const response = await this.processWithAgent(route.agentId, normalized, msg.text);
+      const response = await this.processWithAgent(route.agentId, normalized, messageText, attachments);
       this.typingManager.stopTyping(msg.senderJid);
       await this.sendFormattedMessage(msg.senderJid, response);
     } catch (err) {
@@ -270,6 +305,7 @@ export class WhatsAppBridge {
     agentId: string,
     sender: string,
     text: string,
+    attachments?: Array<{ id: string; filename: string; mimeType: string; sizeBytes: number; isImage: boolean }>,
   ): Promise<string> {
     const csm = this.config.chatSessionManager;
     if (!csm) {
@@ -328,7 +364,7 @@ export class WhatsAppBridge {
       const messageId = await this.persistMessagePair(sessionId, text, model);
 
       // Send the user's message (with messageId so stepEnd persists the response)
-      await csm.sendMessage(sessionId, text, model, messageId);
+      await csm.sendMessage(sessionId, text, model, messageId, attachments);
 
       // Wait for the agent to finish
       const response = await Promise.race([

@@ -375,7 +375,12 @@ export class SignalBridge {
     console.log(`[SignalBridge] SSE event: type=${eventType} from=${envelope.sourceNumber ?? envelope.source ?? '?'}`);
 
     // Only handle data messages (not receipts, typing, sync)
-    if (!envelope.dataMessage?.message) return;
+    if (!envelope.dataMessage) return;
+
+    // Need either text or attachments — skip empty data messages
+    const hasText = !!envelope.dataMessage.message;
+    const hasAttachments = !!(envelope.dataMessage.attachments && envelope.dataMessage.attachments.length > 0);
+    if (!hasText && !hasAttachments) return;
 
     const sender = envelope.sourceNumber ?? envelope.source;
     if (!sender) return;
@@ -383,19 +388,26 @@ export class SignalBridge {
     // Skip group messages for now (DM-only in v1)
     if (envelope.dataMessage.groupInfo) return;
 
-    const messageText = envelope.dataMessage.message;
+    const messageText = envelope.dataMessage.message ?? '';
     const messageTimestamp = envelope.dataMessage.timestamp ?? envelope.timestamp;
 
-    await this.handleIncomingMessage(sender, messageText, messageTimestamp);
+    await this.handleIncomingMessage(
+      sender,
+      messageText,
+      messageTimestamp,
+      envelope.dataMessage.attachments,
+    );
   }
 
   private async handleIncomingMessage(
     sender: string,
     text: string,
     timestamp?: number,
+    signalAttachments?: Array<{ id?: string; contentType?: string; filename?: string; size?: number }>,
   ): Promise<void> {
     const normalized = normalizeE164(sender);
-    console.log(`[SignalBridge] Incoming from ${normalized}: "${text.slice(0, 80)}${text.length > 80 ? '...' : ''}"`);
+    const displayText = text || (signalAttachments?.length ? `[${signalAttachments.length} attachment(s)]` : '');
+    console.log(`[SignalBridge] Incoming from ${normalized}: "${displayText.slice(0, 80)}${displayText.length > 80 ? '...' : ''}"`);
 
     // 1. Allowlist check
     const { entries, senderDefaults } = await this.loadAllowlist();
@@ -410,25 +422,78 @@ export class SignalBridge {
       this.client.sendReadReceipt(normalized, timestamp, { account: this.account }).catch(() => {});
     }
 
-    // 3. Check for built-in commands
-    const cmd = await this.router.handleCommand(normalized, text);
-    if (cmd.handled) {
-      if (cmd.response) {
-        await this.sendFormattedMessage(normalized, cmd.response);
+    // 3. Check for built-in commands (only if there's text)
+    if (text) {
+      const cmd = await this.router.handleCommand(normalized, text);
+      if (cmd.handled) {
+        if (cmd.response) {
+          await this.sendFormattedMessage(normalized, cmd.response);
+        }
+        return;
       }
-      return;
     }
 
     // 4. Route to agent
-    const route = await this.router.route(normalized, text, senderDefaults);
+    const route = await this.router.route(normalized, text || '[attachment]', senderDefaults);
     console.log(`[SignalBridge] Routed to ${route.agentId} (reason: ${route.reason})`);
 
     // 5. Start typing indicator
     this.typingManager.startTyping(normalized);
 
-    // 6. Process with agent
+    // 6. Download and re-upload Signal attachments to DjinnBot storage
+    let attachments: Array<{ id: string; filename: string; mimeType: string; sizeBytes: number; isImage: boolean }> | undefined;
+    if (signalAttachments && signalAttachments.length > 0) {
+      const { processChannelAttachments } = await import('@djinnbot/core');
+      const apiBaseUrl = process.env.DJINNBOT_API_URL || 'http://api:8000';
+      const safeSender = normalized.replace(/[^a-zA-Z0-9]/g, '');
+      const sessionIdForUpload = `signal_${safeSender}_${route.agentId}`;
+
+      // Signal-cli stores downloaded attachments in the data directory.
+      // The attachment id references a file in {signalDataDir}/attachments/{id}
+      const signalDataDir = this.config.signalDataDir;
+      const files = signalAttachments
+        .filter(a => a.id)
+        .map(a => ({
+          url: `file://${signalDataDir}/attachments/${a.id}`,
+          name: a.filename || `attachment_${a.id}`,
+          mimeType: a.contentType || 'application/octet-stream',
+          // Read the file directly from disk since it's a local path
+          buffer: undefined as Buffer | undefined,
+        }));
+
+      // Read Signal attachment files from disk
+      const { readFile } = await import('node:fs/promises');
+      const { join } = await import('node:path');
+      const channelFiles = [];
+      for (const f of files) {
+        try {
+          const attachmentPath = join(signalDataDir, 'attachments', signalAttachments.find(a => a.filename === f.name || `attachment_${a.id}` === f.name)?.id || '');
+          const buffer = await readFile(attachmentPath);
+          channelFiles.push({
+            url: '',  // Not used when buffer is provided
+            name: f.name,
+            mimeType: f.mimeType,
+            buffer,
+          });
+        } catch (err) {
+          console.warn(`[SignalBridge] Could not read attachment file ${f.name}:`, err);
+        }
+      }
+
+      if (channelFiles.length > 0) {
+        attachments = await processChannelAttachments(
+          channelFiles,
+          apiBaseUrl,
+          sessionIdForUpload,
+          `[SignalBridge:${route.agentId}]`,
+        );
+        if (attachments.length === 0) attachments = undefined;
+      }
+    }
+
+    // 7. Process with agent
     try {
-      const response = await this.processWithAgent(route.agentId, normalized, text);
+      const response = await this.processWithAgent(route.agentId, normalized, text || '[Voice/media message — see attachments]', attachments);
       this.typingManager.stopTyping(normalized);
       await this.sendFormattedMessage(normalized, response);
     } catch (err) {
@@ -452,6 +517,7 @@ export class SignalBridge {
     agentId: string,
     sender: string,
     text: string,
+    attachments?: Array<{ id: string; filename: string; mimeType: string; sizeBytes: number; isImage: boolean }>,
   ): Promise<string> {
     const csm = this.config.chatSessionManager;
     if (!csm) {
@@ -509,7 +575,7 @@ export class SignalBridge {
       const messageId = await this.persistMessagePair(sessionId, text, model);
 
       // Send the user's message (with messageId so stepEnd persists the response)
-      await csm.sendMessage(sessionId, text, model, messageId);
+      await csm.sendMessage(sessionId, text, model, messageId, attachments);
 
       // Wait for the agent to finish
       const response = await Promise.race([

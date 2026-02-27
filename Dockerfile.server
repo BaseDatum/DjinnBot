@@ -39,10 +39,22 @@ ENV DJINNBOT_BUILD_VERSION=${BUILD_VERSION}
 
 # Install curl for healthcheck, git for repository operations,
 # JRE for opendataloader-pdf (Java-based PDF extraction engine),
-# and fuse3 for JuiceFS FUSE mounts.
+# fuse3 for JuiceFS FUSE mounts,
+# and ffmpeg for audio format conversion (whisper transcription).
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl git default-jre-headless fuse3 \
+    curl git default-jre-headless fuse3 ffmpeg \
     && rm -rf /var/lib/apt/lists/*
+
+# ── faster-whisper: Server-side speech-to-text for voice message transcription ─
+# Audio attachments from Signal/Telegram/WhatsApp/Discord are transcribed at
+# upload time as a background task.  The transcript is stored as extracted_text
+# on the attachment record, so agent containers read it via the /text endpoint
+# like any other document — no API keys or external services needed.
+#
+# faster-whisper uses CTranslate2 (C++ inference) and runs ~4x faster than
+# OpenAI's Python whisper on CPU.  The 'base' model (~150MB) provides good
+# accuracy for voice notes at ~3-5s per 30s clip.
+RUN pip install --no-cache-dir faster-whisper
 
 # Install JuiceFS CE client — the API server mounts JuiceFS directly so that
 # all persistent data (vaults, workspaces, runs, sandboxes, cookies) is

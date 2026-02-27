@@ -605,45 +605,28 @@ export class AgentSlackRuntime {
     // ── Download Slack files and re-upload to DjinnBot storage ──────────────
     let attachments: Array<{ id: string; filename: string; mimeType: string; sizeBytes: number; isImage: boolean; estimatedTokens?: number }> | undefined;
     if (slackFiles && slackFiles.length > 0) {
+      const { processChannelAttachments } = await import('@djinnbot/core');
       const apiBaseUrl = process.env.DJINNBOT_API_URL || 'http://api:8000';
-      attachments = [];
-      for (const sf of slackFiles) {
-        if (!sf.url_private_download) continue;
-        try {
-          // Download from Slack using bot token
-          const dlRes = await fetch(sf.url_private_download, {
-            headers: { Authorization: `Bearer ${this.client.token}` },
-          });
-          if (!dlRes.ok) {
-            console.warn(`[${this.agentId}] Failed to download Slack file ${sf.name}: ${dlRes.status}`);
-            continue;
-          }
-          const buffer = Buffer.from(await dlRes.arrayBuffer());
+      const sessionIdForUpload = `slack_${this.agentId}_${channelId}`;
 
-          // Re-upload to DjinnBot storage via internal API
-          const formData = new FormData();
-          formData.append('file', new Blob([buffer]), sf.name);
-          const sessionIdForUpload = `slack_${this.agentId}_${channelId}`;
-          const uploadRes = await fetch(
-            `${apiBaseUrl}/v1/internal/chat/attachments/upload-bytes?session_id=${encodeURIComponent(sessionIdForUpload)}&filename=${encodeURIComponent(sf.name)}&mime_type=${encodeURIComponent(sf.mimetype)}`,
-            { method: 'POST', body: formData },
-          );
-          if (uploadRes.ok) {
-            const result = await uploadRes.json() as { id: string; filename: string; mimeType: string; sizeBytes: number };
-            attachments.push({
-              id: result.id,
-              filename: result.filename,
-              mimeType: result.mimeType,
-              sizeBytes: result.sizeBytes,
-              isImage: result.mimeType.startsWith('image/'),
-            });
-            console.log(`[${this.agentId}] Re-uploaded Slack file ${sf.name} as ${result.id}`);
-          }
-        } catch (err) {
-          console.warn(`[${this.agentId}] Failed to process Slack file ${sf.name}:`, err);
-        }
+      const channelFiles = slackFiles
+        .filter((sf: any) => sf.url_private_download)
+        .map((sf: any) => ({
+          url: sf.url_private_download,
+          name: sf.name,
+          mimeType: sf.mimetype,
+          authHeader: `Bearer ${this.client.token}`,
+        }));
+
+      if (channelFiles.length > 0) {
+        attachments = await processChannelAttachments(
+          channelFiles,
+          apiBaseUrl,
+          sessionIdForUpload,
+          `[${this.agentId}]`,
+        );
+        if (attachments.length === 0) attachments = undefined;
       }
-      if (attachments.length === 0) attachments = undefined;
     }
 
     // pool.sendMessage() now returns the sessionId synchronously (pre-registered),
