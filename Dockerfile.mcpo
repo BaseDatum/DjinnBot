@@ -26,14 +26,36 @@ RUN chmod +x /usr/local/bin/github-mcp-server && \
   github-mcp-server --version || echo "GitHub MCP Server installed"
 
 # Camoufox/Firefox system dependencies (needed by Scrapling's stealth browser)
+# + git for cloning OSINT tool repos
 RUN apt-get update && apt-get install -y --no-install-recommends \
   libgtk-3-0 \
   libdbus-glib-1-2 \
   libxt6 \
   libx11-xcb1 \
+  git \
   && rm -rf /var/lib/apt/lists/*
 
-RUN chown -R app:app /app /home/app
+# ── OSINT Tools ──
+# Core tools (pip-installable)
+RUN pip install --no-cache-dir \
+  sherlock-project \
+  holehe \
+  maigret \
+  theharvester
+
+# SpiderFoot (manual clone — server expects /opt/spiderfoot)
+RUN git clone --depth 1 https://github.com/smicallef/spiderfoot.git /opt/spiderfoot && \
+  pip install --no-cache-dir -r /opt/spiderfoot/requirements.txt
+
+# GHunt (manual clone — server expects ghunt CLI)
+RUN git clone --depth 1 https://github.com/mxrch/GHunt.git /opt/ghunt && \
+  pip install --no-cache-dir -r /opt/ghunt/requirements.txt
+
+# Blackbird (manual clone — server expects /opt/blackbird)
+RUN git clone --depth 1 https://github.com/p1ngul1n0/blackbird.git /opt/blackbird && \
+  pip install --no-cache-dir -r /opt/blackbird/requirements.txt
+
+RUN chown -R app:app /app /home/app /opt/spiderfoot /opt/ghunt /opt/blackbird
 
 USER app
 

@@ -40,6 +40,15 @@
         "scrapling",
         "mcp"
       ]
+    },
+    "osint-tools": {
+      "command": "python3",
+      "args": [
+        "/mcp/osint_tools_mcp_server.py"
+      ],
+      "env": {
+        "PYTHONUNBUFFERED": "1"
+      }
     }
   }
 }
