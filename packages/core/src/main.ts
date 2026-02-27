@@ -1403,6 +1403,27 @@ async function main(): Promise<void> {
       console.log('[Engine] Slack bridge started');
     }
 
+    // Start Signal bridge — handles account linking and message routing via Redis RPC.
+    // Starts the RPC handler immediately so the dashboard can initiate linking even
+    // before Signal is fully configured.
+    {
+      const signalDataDir = process.env.SIGNAL_DATA_DIR || '/data/signal/data';
+      const signalCliPath = process.env.SIGNAL_CLI_PATH || 'signal-cli';
+      const signalHttpPort = parseInt(process.env.SIGNAL_HTTP_PORT || '8820', 10);
+
+      try {
+        await djinnBot.startSignalBridge({
+          signalDataDir,
+          signalCliPath,
+          httpPort: signalHttpPort,
+          defaultConversationModel: process.env.SIGNAL_DEFAULT_MODEL,
+        });
+        console.log('[Engine] Signal bridge started');
+      } catch (err) {
+        console.warn('[Engine] Signal bridge failed to start (non-fatal):', err);
+      }
+    }
+
     // Publish engine version to Redis so the API can report it
     {
       const engineVersion = process.env.DJINNBOT_BUILD_VERSION || 'dev';

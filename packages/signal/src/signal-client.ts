@@ -36,6 +36,7 @@ export class SignalClient {
   private async rpc<T = unknown>(
     method: string,
     params?: Record<string, unknown>,
+    timeoutMs?: number,
   ): Promise<T> {
     const id = randomUUID();
     const body = JSON.stringify({
@@ -49,7 +50,7 @@ export class SignalClient {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body,
-      signal: AbortSignal.timeout(this.timeoutMs),
+      signal: AbortSignal.timeout(timeoutMs ?? this.timeoutMs),
     });
 
     if (res.status === 201) {
@@ -110,9 +111,12 @@ export class SignalClient {
 
   /**
    * Finish the linking process (called after the QR code is scanned).
+   * This blocks until the user scans the QR code on their primary device,
+   * so it needs a long timeout (default 5 minutes).
+   * @param deviceLinkUri The URI returned by startLink.
    */
-  async finishLink(): Promise<{ account: string }> {
-    const result = await this.rpc<{ number?: string }>('finishLink');
+  async finishLink(deviceLinkUri: string, timeoutMs = 5 * 60 * 1000): Promise<{ account: string }> {
+    const result = await this.rpc<{ number?: string }>('finishLink', { deviceLinkUri }, timeoutMs);
     return { account: result?.number ?? '' };
   }
 

@@ -74,16 +74,38 @@ export class SignalBridge {
     }
     this.lockRelease = lock.release;
 
-    // 2. Load config from API
-    await this.loadConfig();
-    if (!this.signalConfig?.enabled) {
-      console.log('[SignalBridge] Signal integration is disabled');
-      return;
+    try {
+      // 2. Always start Redis RPC handler so the API can send link/status
+      //    commands even before Signal is fully enabled. This avoids the
+      //    chicken-and-egg problem where linking requires the RPC handler
+      //    but the handler only started after linking succeeded.
+      this.startRpcHandler();
+
+      // 3. Load config from API
+      await this.loadConfig();
+      if (!this.signalConfig?.enabled) {
+        console.log('[SignalBridge] Signal integration is disabled — RPC handler active for linking');
+        return;
+      }
+
+      await this.startDaemon();
+    } catch (err) {
+      console.error('[SignalBridge] start() failed, releasing lock:', err);
+      await this.lockRelease().catch(() => {});
+      this.lockRelease = null;
+      throw err;
     }
+  }
 
-    this.account = this.signalConfig.phoneNumber ?? undefined;
+  /**
+   * Start the signal-cli daemon, SSE listener, and message routing.
+   * Called from start() when Signal is enabled, or from the RPC handler
+   * after a successful link operation enables the integration.
+   */
+  private async startDaemon(): Promise<void> {
+    this.account = this.signalConfig?.phoneNumber ?? undefined;
 
-    // 3. Spawn signal-cli daemon
+    // Spawn signal-cli daemon
     const baseUrl = `http://127.0.0.1:${this.config.httpPort ?? 8820}`;
     this.client = new SignalClient({ baseUrl });
 
@@ -102,7 +124,7 @@ export class SignalBridge {
       }
     });
 
-    // 4. Wait for daemon to be ready
+    // Wait for daemon to be ready
     try {
       await waitForDaemonReady({
         baseUrl,
@@ -112,30 +134,32 @@ export class SignalBridge {
     } catch (err) {
       console.error('[SignalBridge] signal-cli daemon failed to start:', err);
       this.daemonHandle.stop();
-      await this.lockRelease();
+      this.daemonHandle = null;
       return;
     }
 
-    // 5. Initialize router and typing manager
+    // Initialize router and typing manager
     this.router = new SignalRouter({
       agentRegistry: this.config.agentRegistry,
       redis: this.redis,
-      defaultAgentId: this.signalConfig.defaultAgentId ?? this.getFirstAgentId(),
-      stickyTtlMs: (this.signalConfig.stickyTtlMinutes ?? 30) * 60 * 1000,
+      defaultAgentId: this.signalConfig?.defaultAgentId ?? this.getFirstAgentId(),
+      stickyTtlMs: (this.signalConfig?.stickyTtlMinutes ?? 30) * 60 * 1000,
     });
 
     this.typingManager = new SignalTypingManager(this.client, this.account);
 
-    // 6. Start SSE listener (runs in background)
+    // Start SSE listener (runs in background)
     this.startSseLoop();
 
-    // 7. Start Redis RPC handler (API→Engine commands)
-    this.startRpcHandler();
-
     console.log(
-      `[SignalBridge] Started — account=${this.account ?? 'not linked'} ` +
-      `defaultAgent=${this.signalConfig.defaultAgentId ?? 'none'}`
+      `[SignalBridge] Daemon started — account=${this.account ?? 'not linked'} ` +
+      `defaultAgent=${this.signalConfig?.defaultAgentId ?? 'none'}`
     );
+  }
+
+  /** Whether the signal-cli daemon is running and ready for RPC. */
+  private get isDaemonRunning(): boolean {
+    return this.client != null && this.daemonHandle != null;
   }
 
   async shutdown(): Promise<void> {
@@ -357,9 +381,44 @@ export class SignalBridge {
 
   // ── Redis RPC handler (API server → Engine) ────────────────────────────
 
+  /**
+   * Ensure the signal-cli daemon is running. For link/link_status RPCs we
+   * need the daemon even if Signal isn't "enabled" yet (the whole point of
+   * linking is to enable it). This lazily starts the daemon on first need.
+   */
+  private async ensureDaemon(): Promise<void> {
+    if (this.isDaemonRunning) return;
+
+    console.log('[SignalBridge] Starting signal-cli daemon on demand for RPC...');
+    const baseUrl = `http://127.0.0.1:${this.config.httpPort ?? 8820}`;
+    this.client = new SignalClient({ baseUrl });
+
+    this.daemonHandle = spawnSignalDaemon({
+      cliPath: this.config.signalCliPath ?? 'signal-cli',
+      configDir: this.config.signalDataDir,
+      account: this.account,
+      httpPort: this.config.httpPort ?? 8820,
+      sendReadReceipts: true,
+    });
+
+    void this.daemonHandle.exited.then((exit) => {
+      if (!this.abortController.signal.aborted) {
+        console.error(`[SignalBridge] signal-cli daemon exited unexpectedly: code=${exit.code} signal=${exit.signal}`);
+      }
+    });
+
+    await waitForDaemonReady({
+      baseUrl,
+      timeoutMs: 30_000,
+      abortSignal: this.abortController.signal,
+    });
+    console.log('[SignalBridge] signal-cli daemon ready');
+  }
+
   private startRpcHandler(): void {
     const sub = this.rpcRedis.duplicate();
     sub.subscribe('signal:rpc:request');
+    console.log('[SignalBridge] RPC handler listening on signal:rpc:request');
 
     sub.on('message', (_channel: string, raw: string) => {
       void (async () => {
@@ -370,18 +429,34 @@ export class SignalBridge {
           return;
         }
 
+        console.log(`[SignalBridge] RPC request: method=${req.method} id=${req.id}`);
         let result: unknown;
         let error: string | undefined;
 
         try {
           switch (req.method) {
             case 'link': {
+              // Ensure daemon is running — linking needs it even if Signal
+              // integration hasn't been enabled yet.
+              await this.ensureDaemon();
               const deviceName = (req.params.deviceName as string) ?? 'DjinnBot';
+              console.log('[SignalBridge] Calling startLink...');
               const linkResult = await this.client.startLink(deviceName);
+              console.log('[SignalBridge] startLink returned URI, calling finishLink in background...');
               result = linkResult;
+
+              // finishLink blocks until the user scans the QR code on their
+              // primary device, then completes provisioning. Fire it in the
+              // background so we can return the URI to the dashboard immediately.
+              // Uses a 5-minute timeout (default) to give the user time to scan.
+              this.client.finishLink(linkResult.uri).then(
+                (fin) => console.log(`[SignalBridge] finishLink completed — account: ${fin.account}`),
+                (err) => console.error('[SignalBridge] finishLink failed:', err),
+              );
               break;
             }
             case 'link_status': {
+              await this.ensureDaemon();
               const accounts = await this.client.listAccounts();
               const linked = accounts.length > 0;
               result = {
@@ -391,6 +466,9 @@ export class SignalBridge {
               break;
             }
             case 'send': {
+              if (!this.isDaemonRunning) {
+                throw new Error('Signal daemon is not running. Enable Signal integration first.');
+              }
               const to = req.params.to as string;
               const message = req.params.message as string;
               const agentId = req.params.agentId as string | undefined;
@@ -403,7 +481,11 @@ export class SignalBridge {
               break;
             }
             case 'health': {
-              result = await this.client.check();
+              if (!this.isDaemonRunning) {
+                result = { status: 'not_running' };
+              } else {
+                result = await this.client.check();
+              }
               break;
             }
             default:
@@ -411,6 +493,7 @@ export class SignalBridge {
           }
         } catch (err) {
           error = err instanceof Error ? err.message : String(err);
+          console.error(`[SignalBridge] RPC error for ${req.method}:`, error);
         }
 
         // Publish reply

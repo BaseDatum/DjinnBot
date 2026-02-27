@@ -36,9 +36,10 @@ import { Redis } from 'ioredis';
 import { TaskRunTracker } from './task/task-run-tracker.js';
 import { SessionPersister } from './sessions/session-persister.js';
 
-// Dynamic import for SlackBridge to avoid circular dependency
-// @djinnbot/slack depends on @djinnbot/core for types
+// Dynamic imports for channel bridges to avoid circular dependency
+// @djinnbot/slack and @djinnbot/signal depend on @djinnbot/core for types
 type SlackBridgeType = any;
+type SignalBridgeType = any;
 
 export interface DjinnBotConfig {
   redisUrl: string;
@@ -64,6 +65,7 @@ export class DjinnBot {
   private pipelines: Map<string, PipelineConfig> = new Map();
   private agentRegistry: AgentRegistry;
   slackBridge?: SlackBridgeType;
+  signalBridge?: SignalBridgeType;
   private agentMemoryManager?: AgentMemoryManager;
   private lifecycleManager: AgentLifecycleManager;
   private lifecycleTracker?: AgentLifecycleTracker;
@@ -1449,6 +1451,35 @@ Start now.`;
     await this.slackBridge.start();
   }
 
+  /** Start the Signal bridge for account linking and message routing */
+  async startSignalBridge(opts: {
+    signalDataDir: string;
+    signalCliPath?: string;
+    httpPort?: number;
+    defaultConversationModel?: string;
+  }): Promise<void> {
+    const redisUrl = this.config.redisUrl;
+    const apiUrl = this.config.apiUrl || 'http://api:8000';
+
+    // Dynamic import to avoid circular dependency
+    // @ts-ignore - @djinnbot/signal is loaded dynamically to avoid circular dependency
+    const signalModule = await import('@djinnbot/signal');
+    const SignalBridge = signalModule.SignalBridge;
+
+    this.signalBridge = new SignalBridge({
+      redisUrl,
+      apiUrl,
+      signalDataDir: opts.signalDataDir,
+      signalCliPath: opts.signalCliPath,
+      httpPort: opts.httpPort,
+      defaultConversationModel: opts.defaultConversationModel,
+      eventBus: this.eventBus as any,
+      agentRegistry: this.agentRegistry as any,
+    });
+
+    await this.signalBridge.start();
+  }
+
   /**
    * Re-read a single pipeline from disk by scanning the pipelines directory
    * for a YAML file whose parsed id matches. Returns the fresh config or null.
@@ -1583,6 +1614,7 @@ Start now.`;
     this.agentPulse?.stop();
     await this.agentWake?.stop();
     await this.slackBridge?.shutdown();
+    await this.signalBridge?.shutdown();
     await this.executor.shutdown();
     await this.engine.shutdown();
     await this.agentInbox.close();
