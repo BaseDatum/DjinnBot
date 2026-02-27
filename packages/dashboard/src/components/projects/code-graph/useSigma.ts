@@ -76,15 +76,22 @@ export function useSigma(opts: UseSigmaOptions = {}): UseSigmaReturn {
   const graphRef     = useRef<Graph<SigmaNodeAttributes, SigmaEdgeAttributes> | null>(null);
   const layoutRef    = useRef<FA2Layout | null>(null);
   const timerRef     = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const selectedRef  = useRef<string | null>(null);
-  const edgeTypesRef = useRef<Set<string> | null>(null);
-  const highlightRef = useRef<Set<string> | null>(null);
-  const blastRef     = useRef<Map<string, number> | null>(null);
+  const selectedRef    = useRef<string | null>(null);
+  const edgeTypesRef   = useRef<Set<string> | null>(null);
+  const highlightRef   = useRef<Set<string> | null>(null);
+  const blastRef       = useRef<Map<string, number> | null>(null);
+  const onNodeClickRef = useRef(opts.onNodeClick);
+  const onNodeHoverRef = useRef(opts.onNodeHover);
+  const onStageClickRef = useRef(opts.onStageClick);
 
   const [isLayoutRunning, setIsLayoutRunning] = useState(false);
   const [selectedNode, setSelectedNodeState]  = useState<string | null>(null);
 
-  // Keep mutable refs in sync
+  // Keep mutable refs in sync with latest callbacks and data
+  useEffect(() => { onNodeClickRef.current = opts.onNodeClick; }, [opts.onNodeClick]);
+  useEffect(() => { onNodeHoverRef.current = opts.onNodeHover; }, [opts.onNodeHover]);
+  useEffect(() => { onStageClickRef.current = opts.onStageClick; }, [opts.onStageClick]);
+
   useEffect(() => {
     edgeTypesRef.current = opts.visibleEdgeTypes ?? null;
     sigmaRef.current?.refresh();
@@ -156,12 +163,12 @@ export function useSigma(opts: UseSigmaOptions = {}): UseSigmaReturn {
         if (hlSet && hlSet.size > 0) {
           if (hlSet.has(node)) {
             res.color = data.communityColor || data.color;
-            res.size = (data.size || 8) * 1.5;
+            res.size = (data.size || 8) * 1.6;
             res.zIndex = 2;
             res.highlighted = true;
           } else {
-            res.color = dimColor(data.color, 0.15);
-            res.size = (data.size || 8) * 0.5;
+            res.color = dimColor(data.color, 0.4);
+            res.size = (data.size || 8) * 0.75;
             res.zIndex = 0;
           }
           return res;
@@ -226,9 +233,12 @@ export function useSigma(opts: UseSigmaOptions = {}): UseSigmaReturn {
           if (hlSet.has(src) && hlSet.has(tgt)) {
             res.size = Math.max(2, (data.size || 1) * 3);
             res.zIndex = 2;
+          } else if (hlSet.has(src) || hlSet.has(tgt)) {
+            res.color = dimColor(data.color, 0.3);
+            res.size = (data.size || 1) * 0.8;
           } else {
-            res.color = dimColor(data.color, 0.08);
-            res.size = 0.2;
+            res.color = dimColor(data.color, 0.15);
+            res.size = 0.3;
           }
           return res;
         }
@@ -253,18 +263,18 @@ export function useSigma(opts: UseSigmaOptions = {}): UseSigmaReturn {
 
     sigma.on('clickNode', ({ node }: { node: string }) => {
       setSelectedNode(node);
-      opts.onNodeClick?.(node);
+      onNodeClickRef.current?.(node);
     });
     sigma.on('clickStage', () => {
       setSelectedNode(null);
-      opts.onStageClick?.();
+      onStageClickRef.current?.();
     });
     sigma.on('enterNode', ({ node }: { node: string }) => {
-      opts.onNodeHover?.(node);
+      onNodeHoverRef.current?.(node);
       if (containerRef.current) containerRef.current.style.cursor = 'pointer';
     });
     sigma.on('leaveNode', () => {
-      opts.onNodeHover?.(null);
+      onNodeHoverRef.current?.(null);
       if (containerRef.current) containerRef.current.style.cursor = 'grab';
     });
 

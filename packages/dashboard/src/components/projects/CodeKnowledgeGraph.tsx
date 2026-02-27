@@ -13,12 +13,13 @@
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { Group as PanelGroup, Panel, Separator as PanelResizeHandle } from 'react-resizable-panels';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
   RefreshCw, Brain, AlertTriangle, CheckCircle2, Clock,
-  Search, MessageSquare, Workflow, GitBranch,
+  Search, MessageSquare, Workflow, GitBranch, GripVertical,
 } from 'lucide-react';
 import {
   fetchCodeGraphStatus,
@@ -171,6 +172,8 @@ export function CodeKnowledgeGraph({ projectId }: CodeKnowledgeGraphProps) {
     if (node) {
       setShowInspector(true);
       setRightPanelTab('inspector');
+      // Clear file-tree/process highlights when user clicks a different node on the graph
+      setHighlightedNodeIds(new Set());
     }
   }, []);
 
@@ -335,7 +338,7 @@ export function CodeKnowledgeGraph({ projectId }: CodeKnowledgeGraphProps) {
             </span>
           </div>
 
-          {/* Three-pane layout */}
+          {/* Three-pane layout with resizable panels */}
           <div className={`flex ${graphFullscreen ? 'flex-1 min-h-0' : 'h-[calc(100vh-220px)] min-h-[500px]'} mt-3`}>
             {/* Left: File Tree */}
             <FileTreePanel
@@ -345,120 +348,137 @@ export function CodeKnowledgeGraph({ projectId }: CodeKnowledgeGraphProps) {
               selectedFilePath={selectedGraphNode?.filePath ?? null}
             />
 
-            {/* Center: Graph Canvas */}
-            <div className="flex-1 min-w-0 relative">
-              <CodeGraphCanvas
-                graphData={graphData}
-                onNodeSelect={handleNodeSelect}
-                isFullscreen={graphFullscreen}
-                onToggleFullscreen={() => setGraphFullscreen(f => !f)}
-                highlightedNodeIds={highlightedNodeIds}
-                blastRadiusMap={blastRadiusMap}
-                onFocusNodeRef={fn => { focusNodeFnRef.current = fn; }}
-                selectedPackage={selectedPackage}
-                onSelectedPackageChange={setSelectedPackage}
-              />
+            {/* Center + Right: resizable panel group */}
+            <PanelGroup orientation="horizontal" className="flex-1 min-w-0">
+              {/* Center: Graph Canvas */}
+              <Panel defaultSize={showInspector ? 60 : 100} minSize={30}>
+                <div className="w-full h-full relative">
+                  <CodeGraphCanvas
+                    graphData={graphData}
+                    onNodeSelect={handleNodeSelect}
+                    isFullscreen={graphFullscreen}
+                    onToggleFullscreen={() => setGraphFullscreen(f => !f)}
+                    highlightedNodeIds={highlightedNodeIds}
+                    blastRadiusMap={blastRadiusMap}
+                    onFocusNodeRef={fn => { focusNodeFnRef.current = fn; }}
+                    selectedPackage={selectedPackage}
+                    onSelectedPackageChange={setSelectedPackage}
+                    onStageClick={() => {
+                      setHighlightedNodeIds(new Set());
+                      setBlastRadiusMap(new Map());
+                      setBlastRadiusTarget(null);
+                    }}
+                  />
 
-              {/* Search results overlay */}
-              {searchResults.length > 0 && (
-                <div className="absolute top-12 left-3 z-20 w-72 max-h-64 overflow-y-auto rounded-lg border bg-background/95 backdrop-blur-sm p-2 space-y-0.5">
-                  <div className="flex items-center justify-between px-1 pb-1">
-                    <span className="text-xs font-medium">{searchResults.length} results</span>
-                    <button onClick={() => setSearchResults([])} className="text-[10px] text-muted-foreground hover:text-foreground">Clear</button>
-                  </div>
-                  {searchResults.map((r: any, i: number) => (
-                    <button
-                      key={i}
-                      className="w-full flex items-center gap-1.5 text-xs py-1 px-1.5 rounded hover:bg-muted text-left"
-                      onClick={() => {
-                        handleNodeSelect({ id: r.nodeId || '', name: r.name, label: r.label, filePath: r.filePath, startLine: r.startLine });
-                        if (r.nodeId) focusNodeFnRef.current?.(r.nodeId);
-                        setSearchResults([]);
-                      }}
-                    >
-                      <Badge variant="outline" className="text-[9px] h-3.5 px-1">{r.label}</Badge>
-                      <span className="font-mono truncate">{r.name}</span>
-                    </button>
-                  ))}
+                  {/* Search results overlay */}
+                  {searchResults.length > 0 && (
+                    <div className="absolute top-12 left-3 z-20 w-72 max-h-64 overflow-y-auto rounded-lg border bg-background/95 backdrop-blur-sm p-2 space-y-0.5">
+                      <div className="flex items-center justify-between px-1 pb-1">
+                        <span className="text-xs font-medium">{searchResults.length} results</span>
+                        <button onClick={() => setSearchResults([])} className="text-[10px] text-muted-foreground hover:text-foreground">Clear</button>
+                      </div>
+                      {searchResults.map((r: any, i: number) => (
+                        <button
+                          key={i}
+                          className="w-full flex items-center gap-1.5 text-xs py-1 px-1.5 rounded hover:bg-muted text-left"
+                          onClick={() => {
+                            handleNodeSelect({ id: r.nodeId || '', name: r.name, label: r.label, filePath: r.filePath, startLine: r.startLine });
+                            if (r.nodeId) focusNodeFnRef.current?.(r.nodeId);
+                            setSearchResults([]);
+                          }}
+                        >
+                          <Badge variant="outline" className="text-[9px] h-3.5 px-1">{r.label}</Badge>
+                          <span className="font-mono truncate">{r.name}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
+              </Panel>
+
+              {/* Right panel: Inspector / Processes (resizable) */}
+              {showInspector && (
+                <>
+                  <PanelResizeHandle className="w-1.5 bg-border/50 hover:bg-primary/30 active:bg-primary/50 transition-colors cursor-col-resize flex items-center justify-center">
+                    <GripVertical className="w-3 h-3 text-muted-foreground/50" />
+                  </PanelResizeHandle>
+                  <Panel defaultSize={40} minSize={20} maxSize={60}>
+                    <div className="flex flex-col h-full bg-background overflow-hidden">
+                      {/* Tab bar */}
+                      <div className="flex items-center gap-1 px-2 py-1.5 border-b border-border bg-muted/20 shrink-0">
+                        <button
+                          onClick={() => setRightPanelTab('inspector')}
+                          className={`flex items-center gap-1 px-2.5 py-1 rounded text-xs font-medium transition-colors ${
+                            rightPanelTab === 'inspector' ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:text-foreground'
+                          }`}
+                        >
+                          <Search className="w-3 h-3" /> Inspector
+                        </button>
+                        <button
+                          onClick={() => setRightPanelTab('processes')}
+                          className={`flex items-center gap-1 px-2.5 py-1 rounded text-xs font-medium transition-colors ${
+                            rightPanelTab === 'processes' ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:text-foreground'
+                          }`}
+                        >
+                          <Workflow className="w-3 h-3" /> Flows
+                          <Badge variant="outline" className="text-[9px] h-3.5 px-1 ml-0.5">
+                            {graphData.processes.length}
+                          </Badge>
+                        </button>
+                        <button
+                          onClick={() => setShowInspector(false)}
+                          className="ml-auto p-1 text-muted-foreground hover:text-foreground rounded"
+                        >
+                          &times;
+                        </button>
+                      </div>
+
+                      {/* Blast Radius */}
+                      {blastRadiusTarget && (
+                        <div className="p-2 border-b shrink-0">
+                          <BlastRadiusOverlay
+                            projectId={projectId}
+                            symbolName={blastRadiusTarget}
+                            onClose={() => { setBlastRadiusTarget(null); setBlastRadiusMap(new Map()); }}
+                            onHighlightImpact={handleImpactHighlight}
+                            onNodeSelect={handleNodeSelectById}
+                          />
+                        </div>
+                      )}
+
+                      {/* Tab content */}
+                      <div className="flex-1 min-h-0 overflow-hidden">
+                        {rightPanelTab === 'inspector' && selectedGraphNode && (
+                          <CodeInspectorPanel
+                            projectId={projectId}
+                            node={selectedGraphNode}
+                            onClose={() => { setSelectedGraphNode(null); setShowInspector(false); }}
+                            onFocusNode={(id) => focusNodeFnRef.current?.(id)}
+                            onShowImpact={handleShowImpact}
+                          />
+                        )}
+                        {rightPanelTab === 'inspector' && !selectedGraphNode && (
+                          <div className="flex flex-col items-center justify-center h-full text-center px-4">
+                            <Search className="w-8 h-8 text-muted-foreground/30 mb-3" />
+                            <p className="text-sm text-muted-foreground">Click a node on the graph to inspect its source code</p>
+                          </div>
+                        )}
+                        {rightPanelTab === 'processes' && (
+                          <div className="h-full overflow-y-auto p-3">
+                            <ProcessFlowPanel
+                              graphData={graphData}
+                              highlightedNodeIds={highlightedNodeIds}
+                              onHighlightNodes={setHighlightedNodeIds}
+                              onNodeSelect={handleNodeSelectById}
+                            />
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </Panel>
+                </>
               )}
-            </div>
-
-            {/* Right panel: Inspector / Processes */}
-            {showInspector && (
-              <div className="flex flex-col border-l border-border bg-background" style={{ width: 460, minWidth: 380 }}>
-                {/* Tab bar */}
-                <div className="flex items-center gap-1 px-2 py-1.5 border-b border-border bg-muted/20">
-                  <button
-                    onClick={() => setRightPanelTab('inspector')}
-                    className={`flex items-center gap-1 px-2.5 py-1 rounded text-xs font-medium transition-colors ${
-                      rightPanelTab === 'inspector' ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:text-foreground'
-                    }`}
-                  >
-                    <Search className="w-3 h-3" /> Inspector
-                  </button>
-                  <button
-                    onClick={() => setRightPanelTab('processes')}
-                    className={`flex items-center gap-1 px-2.5 py-1 rounded text-xs font-medium transition-colors ${
-                      rightPanelTab === 'processes' ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:text-foreground'
-                    }`}
-                  >
-                    <Workflow className="w-3 h-3" /> Flows
-                    <Badge variant="outline" className="text-[9px] h-3.5 px-1 ml-0.5">
-                      {graphData.processes.length}
-                    </Badge>
-                  </button>
-                  <button
-                    onClick={() => setShowInspector(false)}
-                    className="ml-auto p-1 text-muted-foreground hover:text-foreground rounded"
-                  >
-                    &times;
-                  </button>
-                </div>
-
-                {/* Blast Radius (shown above tabs when active) */}
-                {blastRadiusTarget && (
-                  <div className="p-2 border-b">
-                    <BlastRadiusOverlay
-                      projectId={projectId}
-                      symbolName={blastRadiusTarget}
-                      onClose={() => { setBlastRadiusTarget(null); setBlastRadiusMap(new Map()); }}
-                      onHighlightImpact={handleImpactHighlight}
-                      onNodeSelect={handleNodeSelectById}
-                    />
-                  </div>
-                )}
-
-                {/* Tab content */}
-                <div className="flex-1 min-h-0 overflow-hidden">
-                  {rightPanelTab === 'inspector' && selectedGraphNode && (
-                    <CodeInspectorPanel
-                      projectId={projectId}
-                      node={selectedGraphNode}
-                      onClose={() => { setSelectedGraphNode(null); setShowInspector(false); }}
-                      onFocusNode={(id) => focusNodeFnRef.current?.(id)}
-                      onShowImpact={handleShowImpact}
-                    />
-                  )}
-                  {rightPanelTab === 'inspector' && !selectedGraphNode && (
-                    <div className="flex flex-col items-center justify-center h-full text-center px-4">
-                      <Search className="w-8 h-8 text-muted-foreground/30 mb-3" />
-                      <p className="text-sm text-muted-foreground">Click a node on the graph to inspect its source code</p>
-                    </div>
-                  )}
-                  {rightPanelTab === 'processes' && (
-                    <div className="h-full overflow-y-auto p-3">
-                      <ProcessFlowPanel
-                        graphData={graphData}
-                        highlightedNodeIds={highlightedNodeIds}
-                        onHighlightNodes={setHighlightedNodeIds}
-                        onNodeSelect={handleNodeSelectById}
-                      />
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
+            </PanelGroup>
 
             {/* Collapsed right panel toggle */}
             {!showInspector && (

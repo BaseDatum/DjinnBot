@@ -9,17 +9,29 @@
  *  - "Focus in Graph" button to zoom the graph camera to this node
  */
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import {
   X, Code, Target, ChevronRight, Loader2,
   ArrowDownLeft, ArrowUpRight, GitBranch,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
+import hljs from 'highlight.js';
+import 'highlight.js/styles/github-dark.css';
 import {
   fetchCodeGraphFileContent,
   fetchCodeGraphContext,
 } from '@/lib/api';
 import { NODE_COLORS } from './constants';
+
+/** Map server language names to highlight.js aliases */
+const HLJS_LANG_MAP: Record<string, string> = {
+  typescript: 'typescript', javascript: 'javascript', python: 'python',
+  go: 'go', rust: 'rust', java: 'java', c: 'c', cpp: 'cpp',
+  csharp: 'csharp', ruby: 'ruby', php: 'php', swift: 'swift',
+  kotlin: 'kotlin', scala: 'scala', bash: 'bash', yaml: 'yaml',
+  json: 'json', toml: 'ini', markdown: 'markdown', html: 'xml',
+  css: 'css', scss: 'scss', sql: 'sql', lua: 'lua', zig: 'cpp',
+};
 
 interface SelectedNode {
   id: string;
@@ -67,7 +79,7 @@ export function CodeInspectorPanel({
   onShowImpact,
 }: CodeInspectorPanelProps) {
   const [fileContent, setFileContent] = useState<string | null>(null);
-  const [, setLanguage] = useState('text');
+  const [detectedLanguage, setDetectedLanguage] = useState('text');
   const [totalLines, setTotalLines] = useState(0);
   const [loadingFile, setLoadingFile] = useState(false);
   const [context, setContext] = useState<SymbolContext | null>(null);
@@ -85,7 +97,7 @@ export function CodeInspectorPanel({
     fetchCodeGraphFileContent(projectId, node.filePath)
       .then((data) => {
         setFileContent(data.content);
-        setLanguage(data.language);
+        setDetectedLanguage(data.language);
         setTotalLines(data.lines);
       })
       .catch(() => setFileContent(null))
@@ -135,8 +147,7 @@ export function CodeInspectorPanel({
     : 0;
 
   return (
-    <div className="h-full flex flex-col bg-background border-l border-border overflow-hidden"
-         style={{ minWidth: 380, maxWidth: 600, width: 460 }}>
+    <div className="h-full flex flex-col bg-background overflow-hidden">
       {/* Header */}
       <div className="flex items-center gap-2 px-3 py-2.5 border-b border-border bg-muted/30">
         <Code className="w-4 h-4 text-primary" />
@@ -246,54 +257,109 @@ export function CodeInspectorPanel({
         </div>
       )}
 
-      {/* Source code viewer */}
-      <div ref={codeContainerRef} className="flex-1 min-h-0 overflow-auto font-mono text-[13px] leading-[1.6]">
-        {loadingFile ? (
-          <div className="flex items-center justify-center h-32 text-muted-foreground text-sm">
-            <Loader2 className="w-4 h-4 animate-spin mr-2" /> Loading source...
-          </div>
-        ) : fileContent ? (
-          <table className="w-full border-collapse">
-            <tbody>
-              {fileContent.split('\n').map((line, idx) => {
-                const lineNum = idx + 1;
-                const isHighlighted = startLine > 0 && lineNum >= startLine && lineNum <= endLine;
-                return (
-                  <tr
-                    key={lineNum}
-                    data-line={lineNum}
-                    className={isHighlighted ? 'bg-primary/10' : 'hover:bg-muted/30'}
-                  >
-                    <td
-                      className="sticky left-0 select-none text-right pr-3 pl-2 text-muted-foreground/50 text-[12px] bg-background"
-                      style={{
-                        minWidth: '3em',
-                        borderRight: isHighlighted ? '3px solid hsl(var(--primary))' : '3px solid transparent',
-                      }}
-                    >
-                      {lineNum}
-                    </td>
-                    <td className="pr-4 whitespace-pre text-foreground/90 overflow-hidden">
-                      {line || ' '}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        ) : node.filePath ? (
-          <div className="flex items-center justify-center h-32 text-muted-foreground text-sm">
-            Unable to load file content
-          </div>
-        ) : (
-          <div className="flex items-center justify-center h-32 text-muted-foreground text-sm">
-            Select a node with a file path to view source code
-          </div>
-        )}
-      </div>
+      {/* Source code viewer with syntax highlighting */}
+      <HighlightedCodeViewer
+        ref={codeContainerRef}
+        content={fileContent}
+        language={detectedLanguage}
+        loading={loadingFile}
+        startLine={startLine}
+        endLine={endLine}
+        hasFilePath={!!node.filePath}
+      />
     </div>
   );
 }
+
+/** Syntax-highlighted source code viewer using highlight.js */
+import { forwardRef } from 'react';
+
+interface HighlightedCodeViewerProps {
+  content: string | null;
+  language: string;
+  loading: boolean;
+  startLine: number;
+  endLine: number;
+  hasFilePath: boolean;
+}
+
+const HighlightedCodeViewer = forwardRef<HTMLDivElement, HighlightedCodeViewerProps>(
+  function HighlightedCodeViewer({ content, language, loading, startLine, endLine, hasFilePath }, ref) {
+    // Highlight the code using hljs
+    const highlightedLines = useMemo(() => {
+      if (!content) return [];
+      const hljsLang = HLJS_LANG_MAP[language] || language;
+      let result: string;
+      try {
+        if (hljs.getLanguage(hljsLang)) {
+          result = hljs.highlight(content, { language: hljsLang }).value;
+        } else {
+          result = hljs.highlightAuto(content).value;
+        }
+      } catch {
+        result = content.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      }
+      // Split on newlines, preserving the html spans that may wrap across lines
+      return result.split('\n');
+    }, [content, language]);
+
+    if (loading) {
+      return (
+        <div ref={ref} className="flex-1 min-h-0 flex items-center justify-center h-32 text-muted-foreground text-sm">
+          <Loader2 className="w-4 h-4 animate-spin mr-2" /> Loading source...
+        </div>
+      );
+    }
+    if (!content && hasFilePath) {
+      return (
+        <div ref={ref} className="flex-1 min-h-0 flex items-center justify-center h-32 text-muted-foreground text-sm">
+          Unable to load file content
+        </div>
+      );
+    }
+    if (!content) {
+      return (
+        <div ref={ref} className="flex-1 min-h-0 flex items-center justify-center h-32 text-muted-foreground text-sm">
+          Select a node with a file path to view source code
+        </div>
+      );
+    }
+
+    return (
+      <div ref={ref} className="flex-1 min-h-0 overflow-auto font-mono text-[13px] leading-[1.6]">
+        <table className="w-full border-collapse">
+          <tbody>
+            {highlightedLines.map((lineHtml, idx) => {
+              const lineNum = idx + 1;
+              const isHighlighted = startLine > 0 && lineNum >= startLine && lineNum <= endLine;
+              return (
+                <tr
+                  key={lineNum}
+                  data-line={lineNum}
+                  className={isHighlighted ? 'bg-primary/10' : 'hover:bg-muted/30'}
+                >
+                  <td
+                    className="sticky left-0 select-none text-right pr-3 pl-2 text-muted-foreground/50 text-[12px] bg-background"
+                    style={{
+                      minWidth: '3em',
+                      borderRight: isHighlighted ? '3px solid hsl(var(--primary))' : '3px solid transparent',
+                    }}
+                  >
+                    {lineNum}
+                  </td>
+                  <td
+                    className="pr-4 whitespace-pre overflow-hidden hljs"
+                    dangerouslySetInnerHTML={{ __html: lineHtml || '&nbsp;' }}
+                  />
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    );
+  }
+);
 
 function ConnectionRow({ direction, type, name, filePath }: {
   direction: 'in' | 'out';

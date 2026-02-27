@@ -125,12 +125,15 @@ interface Props {
   /** Currently selected package prefix (exposed so siblings can use it) */
   selectedPackage?: string | null;
   onSelectedPackageChange?: (pkg: string | null) => void;
+  /** Called when user clicks empty graph area */
+  onStageClick?: () => void;
 }
 
 export function CodeGraphCanvas({
   graphData, onNodeSelect, isFullscreen, onToggleFullscreen,
   highlightedNodeIds, blastRadiusMap, onFocusNodeRef,
   selectedPackage: externalSelectedPackage, onSelectedPackageChange,
+  onStageClick: externalStageClick,
 }: Props) {
   // Package detection
   const packages = useMemo(() => detectPackages(graphData.nodes), [graphData]);
@@ -158,7 +161,8 @@ export function CodeGraphCanvas({
 
   const handleStageClick = useCallback(() => {
     onNodeSelect?.(null);
-  }, [onNodeSelect]);
+    externalStageClick?.();
+  }, [onNodeSelect, externalStageClick]);
 
   const {
     containerRef, sigmaRef, graphRef,
