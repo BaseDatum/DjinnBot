@@ -108,11 +108,11 @@ This is critical: **if the allowlist is empty, the bot silently ignores all mess
 | Value | Effect |
 |-------|--------|
 | `*` | Allow everyone in the server |
-| `219582519241211904` | Allow only this specific Discord user ID |
-| `219582519241211904,987654321` | Allow multiple specific users |
+| `123456789012345678` | Allow only this specific Discord user ID |
+| `123456789012345678,987654321` | Allow multiple specific users |
 | `role:Admin` | Allow anyone with the "Admin" role |
 | `role:Admin,role:Moderator` | Allow multiple roles |
-| `role:Admin,219582519241211904` | Mix roles and user IDs |
+| `role:Admin,123456789012345678` | Mix roles and user IDs |
 | _(empty)_ | **Block all messages** -- the bot receives them but does nothing |
 
 For initial testing, set the allowlist to `*` so all users can interact. You can restrict it later.
@@ -158,7 +158,7 @@ You should see:
 2. Check the engine logs -- you should see the message arrive:
 
 ```
-[yukihiro] Discord message received -- from=yourname#0 (219582519241211904) DM: "hello"
+[yukihiro] Discord message received -- from=yourname#0 (123456789012345678) DM: "hello"
 [yukihiro] Routing to DM handler
 ```
 
