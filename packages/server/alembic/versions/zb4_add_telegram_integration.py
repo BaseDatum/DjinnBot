@@ -7,7 +7,7 @@ Add Telegram channel integration tables:
 Unlike Signal (one shared phone number), Telegram uses one bot per agent.
 
 Revision ID: zb4_telegram
-Revises: zb3_signal
+Revises: zb4_whatsapp
 Create Date: 2026-02-27 14:00:00.000000
 """
 
@@ -19,7 +19,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = "zb4_telegram"
-down_revision: Union[str, Sequence[str], None] = "zb3_signal"
+down_revision: Union[str, Sequence[str], None] = "zb4_whatsapp"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
