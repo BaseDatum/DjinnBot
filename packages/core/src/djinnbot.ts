@@ -40,6 +40,7 @@ import { SessionPersister } from './sessions/session-persister.js';
 // @djinnbot/slack and @djinnbot/signal depend on @djinnbot/core for types
 type SlackBridgeType = any;
 type SignalBridgeType = any;
+type WhatsAppBridgeType = any;
 
 export interface DjinnBotConfig {
   redisUrl: string;
@@ -66,6 +67,7 @@ export class DjinnBot {
   private agentRegistry: AgentRegistry;
   slackBridge?: SlackBridgeType;
   signalBridge?: SignalBridgeType;
+  whatsappBridge?: WhatsAppBridgeType;
   private agentMemoryManager?: AgentMemoryManager;
   private lifecycleManager: AgentLifecycleManager;
   private lifecycleTracker?: AgentLifecycleTracker;
@@ -468,6 +470,20 @@ export class DjinnBot {
             return `Failed to send Slack DM: ${(err as Error).message}`;
           }
         },
+        onWhatsAppSend: async (agentId: string, _runId: string, _stepId: string, phoneNumber: string, message: string, urgent: boolean) => {
+          if (!this.whatsappBridge) {
+            return 'WhatsApp bridge not started - cannot send message.';
+          }
+          try {
+            const prefix = urgent ? 'URGENT: ' : '';
+            await this.whatsappBridge.sendToUser(agentId, phoneNumber, `${prefix}${message}`);
+            console.log(`[DjinnBot] Container agent ${agentId} sent WhatsApp message to ${phoneNumber}: "${message.slice(0, 80)}..."`);
+            return `Message sent to ${phoneNumber} via WhatsApp${urgent ? ' (marked urgent)' : ''}.`;
+          } catch (err) {
+            console.error(`[DjinnBot] Failed to send WhatsApp message from container:`, err);
+            return `Failed to send WhatsApp message: ${(err as Error).message}`;
+          }
+        },
         onContainerEvent: (runId, event) => {
           this.eventBus.publish(runChannel(runId), {
             type: event.type as any,
@@ -650,6 +666,20 @@ export class DjinnBot {
         } catch (err) {
           console.error(`[DjinnBot] Failed to send Slack DM to user:`, err);
           return `Failed to send Slack DM: ${(err as Error).message}`;
+        }
+      },
+      onWhatsAppSend: async (agentId: string, _runId: string, _stepId: string, phoneNumber: string, message: string, urgent: boolean) => {
+        if (!this.whatsappBridge) {
+          return 'WhatsApp bridge not started - cannot send message.';
+        }
+        try {
+          const prefix = urgent ? 'URGENT: ' : '';
+          await this.whatsappBridge.sendToUser(agentId, phoneNumber, `${prefix}${message}`);
+          console.log(`[DjinnBot] Agent ${agentId} sent WhatsApp message to ${phoneNumber}: "${message.slice(0, 80)}..."`);
+          return `Message sent to ${phoneNumber} via WhatsApp${urgent ? ' (marked urgent)' : ''}.`;
+        } catch (err) {
+          console.error(`[DjinnBot] Failed to send WhatsApp message:`, err);
+          return `Failed to send WhatsApp message: ${(err as Error).message}`;
         }
       },
       onResearch: async (_agentId, _runId, _stepId, query, focus, model) => {
@@ -1498,6 +1528,48 @@ Start now.`;
     await this.signalBridge.start();
   }
 
+  private _pendingWhatsAppCsm: any = null;
+
+  /** Inject CSM into the WhatsApp bridge if both are ready. */
+  setWhatsAppChatSessionManager(csm: any): void {
+    this._pendingWhatsAppCsm = csm;
+    if (this.whatsappBridge) {
+      this.whatsappBridge.setChatSessionManager(csm);
+      console.log('[DjinnBot] WhatsAppBridge wired to ChatSessionManager');
+    }
+  }
+
+  /** Start the WhatsApp bridge for account linking and message routing */
+  async startWhatsAppBridge(opts: {
+    authDir: string;
+    defaultConversationModel?: string;
+  }): Promise<void> {
+    const redisUrl = this.config.redisUrl;
+    const apiUrl = this.config.apiUrl || 'http://api:8000';
+
+    // Dynamic import to avoid circular dependency
+    // @ts-ignore - @djinnbot/whatsapp is loaded dynamically to avoid circular dependency
+    const whatsappModule = await import('@djinnbot/whatsapp');
+    const WhatsAppBridge = whatsappModule.WhatsAppBridge;
+
+    this.whatsappBridge = new WhatsAppBridge({
+      redisUrl,
+      apiUrl,
+      authDir: opts.authDir,
+      defaultConversationModel: opts.defaultConversationModel,
+      eventBus: this.eventBus as any,
+      agentRegistry: this.agentRegistry as any,
+    });
+
+    // If CSM was already created before the bridge started, inject it now.
+    if (this._pendingWhatsAppCsm) {
+      this.whatsappBridge.setChatSessionManager(this._pendingWhatsAppCsm);
+      console.log('[DjinnBot] WhatsAppBridge wired to ChatSessionManager (deferred)');
+    }
+
+    await this.whatsappBridge.start();
+  }
+
   /**
    * Re-read a single pipeline from disk by scanning the pipelines directory
    * for a YAML file whose parsed id matches. Returns the fresh config or null.
@@ -1633,6 +1705,7 @@ Start now.`;
     await this.agentWake?.stop();
     await this.slackBridge?.shutdown();
     await this.signalBridge?.shutdown();
+    await this.whatsappBridge?.shutdown();
     await this.executor.shutdown();
     await this.engine.shutdown();
     await this.agentInbox.close();

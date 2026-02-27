@@ -1,0 +1,19 @@
+{
+  "name": "@djinnbot/whatsapp",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch"
+  },
+  "dependencies": {
+    "@djinnbot/core": "*",
+    "@whiskeysockets/baileys": "^6.7.0",
+    "ioredis": "^5.4.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0"
+  }
+}

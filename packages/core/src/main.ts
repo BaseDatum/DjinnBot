@@ -1429,6 +1429,22 @@ async function main(): Promise<void> {
       });
     }
 
+    // Start WhatsApp bridge — handles account linking and message routing via Redis RPC.
+    // Uses Baileys (WhatsApp Web multi-device protocol) running in-process.
+    {
+      const whatsappAuthDir = process.env.WHATSAPP_AUTH_DIR || '/data/whatsapp/auth';
+
+      try {
+        await djinnBot.startWhatsAppBridge({
+          authDir: whatsappAuthDir,
+          defaultConversationModel: process.env.WHATSAPP_DEFAULT_MODEL,
+        });
+        console.log('[Engine] WhatsApp bridge started');
+      } catch (err) {
+        console.warn('[Engine] WhatsApp bridge failed to start (non-fatal):', err);
+      }
+    }
+
     // Publish engine version to Redis so the API can report it
     {
       const engineVersion = process.env.DJINNBOT_BUILD_VERSION || 'dev';
@@ -1573,6 +1589,15 @@ async function main(): Promise<void> {
         } catch (err) {
           console.warn('[Engine] Failed to wire memory consolidation:', err);
         }
+      }
+
+      // Inject ChatSessionManager into WhatsAppBridge for message processing.
+      // Uses setWhatsAppChatSessionManager which handles the race: if the bridge
+      // hasn't started yet, the CSM is stored and injected once the bridge is ready.
+      try {
+        djinnBot.setWhatsAppChatSessionManager(chatSessionManager);
+      } catch (err) {
+        console.warn('[Engine] Failed to inject ChatSessionManager into WhatsAppBridge:', err);
       }
     }
     

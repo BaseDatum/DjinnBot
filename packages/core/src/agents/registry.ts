@@ -24,7 +24,7 @@ import { DEFAULT_AGENT_CONFIG } from './types.js';
  * Each maps to a channel key in AgentRegistryEntry.channels.
  * Adding a new channel integration = adding an entry here.
  */
-const KNOWN_CHANNELS = ['slack', 'discord', 'telegram', 'signal'] as const;
+const KNOWN_CHANNELS = ['slack', 'discord', 'telegram', 'signal', 'whatsapp'] as const;
 
 export class AgentRegistry {
   private agents = new Map<string, AgentRegistryEntry>();

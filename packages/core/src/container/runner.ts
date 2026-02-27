@@ -23,6 +23,8 @@ export interface ContainerRunnerConfig {
   onMessageAgent?: (agentId: string, runId: string, stepId: string, to: string, message: string, priority: string, messageType: string) => Promise<string>;
   /** Called when an agent sends a Slack DM to the user via the slack_dm tool. */
   onSlackDm?: (agentId: string, runId: string, stepId: string, message: string, urgent: boolean) => Promise<string>;
+  /** Called when an agent sends a WhatsApp message via the send_whatsapp tool. */
+  onWhatsAppSend?: (agentId: string, runId: string, stepId: string, phoneNumber: string, message: string, urgent: boolean) => Promise<string>;
   /** Called when an agent uses wake_agent to immediately wake another agent. */
   onWakeAgent?: (agentId: string, runId: string, stepId: string, to: string, message: string, reason: string) => Promise<void>;
   /** Called on container lifecycle and status events (created, started, ready, destroyed, etc.). */
