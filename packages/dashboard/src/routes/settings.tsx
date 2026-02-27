@@ -1,6 +1,6 @@
 import { createFileRoute, useNavigate } from '@tanstack/react-router';
 import { useState } from 'react';
-import { Settings, Key, Lock, Github, Zap, Puzzle, Workflow, LayoutTemplate, Cookie, Radio } from 'lucide-react';
+import { Settings, Key, Lock, Github, Zap, Puzzle, Workflow, LayoutTemplate, Cookie, Plug } from 'lucide-react';
 import { UserProviderSettings } from '@/components/settings/UserProviderSettings';
 import { SecretsSettings } from '@/components/settings/SecretsSettings';
 import { GitHubAppInstallations } from '@/components/github/GitHubAppInstallations';
@@ -35,7 +35,7 @@ const NAV_ITEMS: NestedSidebarItem[] = [
   { key: 'pipelines',  label: 'Pipelines',        icon: Workflow },
   { key: 'templates',  label: 'Templates',        icon: LayoutTemplate },
   { key: 'cookies',    label: 'Browser Cookies',  icon: Cookie },
-  { key: 'channels',   label: 'Channels',         icon: Radio },
+  { key: 'channels',   label: 'Channels',         icon: Plug },
 ];
 
 function SettingsPage() {
@@ -161,7 +161,7 @@ function ChannelsPane() {
     <div className="max-w-5xl mx-auto space-y-4">
       <div>
         <h2 className="text-lg font-semibold flex items-center gap-2">
-          <Radio className="h-5 w-5" />
+          <Plug className="h-5 w-5" />
           Channels
         </h2>
         <p className="text-sm text-muted-foreground mt-1">
