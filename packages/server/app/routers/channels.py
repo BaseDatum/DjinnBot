@@ -36,6 +36,20 @@ AGENTS_DIR = os.environ.get("AGENTS_DIR", "/data/agents")
 # tokens and any optional extra fields so the UI can render a consistent form.
 
 CHANNEL_CATALOG: Dict[str, dict] = {
+    "whatsapp": {
+        "name": "WhatsApp",
+        "description": "Enable this agent for WhatsApp messaging via the shared platform number.",
+        "primaryTokenLabel": None,
+        "primaryTokenEnvVarSuffix": None,
+        "primaryTokenPlaceholder": None,
+        "primaryTokenHint": None,
+        "secondaryTokenLabel": None,
+        "secondaryTokenEnvVarSuffix": None,
+        "secondaryTokenHint": None,
+        "extraFields": [],
+        "docsUrl": None,
+        "sharedChannel": True,
+    },
     "signal": {
         "name": "Signal",
         "description": "Enable this agent for Signal messaging via the shared platform number.",

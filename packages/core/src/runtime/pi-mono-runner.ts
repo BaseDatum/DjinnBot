@@ -92,6 +92,8 @@ export interface PiMonoRunnerConfig {
   onMessageAgent?: (agentId: string, runId: string, stepId: string, to: string, message: string, priority: string, type: string) => Promise<string>;
   /** Called when agent sends a Slack DM to the user */
   onSlackDm?: (agentId: string, runId: string, stepId: string, message: string, urgent: boolean) => Promise<string>;
+  /** Called when agent sends a WhatsApp message via the send_whatsapp tool */
+  onWhatsAppSend?: (agentId: string, runId: string, stepId: string, phoneNumber: string, message: string, urgent: boolean) => Promise<string>;
   /** Called when agent calls the research tool (Perplexity via OpenRouter) */
   onResearch?: (agentId: string, runId: string, stepId: string, query: string, focus: string, model: string) => Promise<string>;
   /** Called when an onboarding agent triggers a handoff to the next agent */
