@@ -135,6 +135,7 @@ Features:
 - HTML-formatted responses (markdown converted to Telegram HTML)
 - Long messages automatically chunked to fit Telegram's limits
 - Allowlist support (restrict by Telegram user ID or username)
+- Built-in commands: `/new` to reset conversation, `/model` to change models, `/modelfavs` to list favorites, `/help`
 - Hot reload — change bot tokens or enable/disable agents via the dashboard without restarting
 - Redis pub/sub config listener for instant updates
 
@@ -157,7 +158,7 @@ Features:
 - Signal text styles (bold, italic, monospace) converted from markdown
 - Read receipts
 - Allowlist support (restrict by phone number)
-- Built-in commands: `/agent <name>` to switch agents, `/agents` to list, `/help`
+- Built-in commands: `/agent <name>` to switch agents, `/agents` to list, `/new` to reset conversation, `/model` to change models, `/modelfavs` to list favorites, `/help`
 - Sticky routing — once you start a conversation with an agent, replies stay with that agent until timeout or explicit switch
 - Dashboard linking flow (QR code via signal-cli)
 - Distributed lock ensures only one engine instance runs the signal-cli daemon
@@ -187,7 +188,7 @@ Features:
 - Read receipts and acknowledgment reactions
 - Long messages automatically chunked
 - Allowlist support (restrict by phone number)
-- Built-in commands: `/agent <name>`, `/agents`, `/help`
+- Built-in commands: `/agent <name>`, `/agents`, `/new`, `/model`, `/modelfavs`, `/help`
 - Sticky routing with configurable TTL
 - Dashboard linking flow (QR code or pairing code)
 - Distributed lock for single-writer safety

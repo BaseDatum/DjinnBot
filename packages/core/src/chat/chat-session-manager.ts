@@ -1567,12 +1567,36 @@ export class ChatSessionManager {
     // The server transcribes audio as a background task and publishes a
     // Redis event when done.  We wait here so the container gets the
     // transcript via /text immediately — no polling needed in the runtime.
+    let effectiveMessage = message;
     if (attachments?.length) {
       const audioAttachments = attachments.filter(
         a => a.mimeType.startsWith('audio/'),
       );
       if (audioAttachments.length > 0) {
         await this.waitForTranscriptions(audioAttachments);
+
+        // Fetch transcripts and use as the actual message text.
+        // This replaces placeholders like "[Voice/media message — see attachments]"
+        // with the real transcript so the dashboard shows what the user actually said.
+        const transcripts = await this.fetchAudioTranscripts(audioAttachments);
+        if (transcripts) {
+          // If the user also typed text, prepend it; otherwise just use the transcript
+          const isPlaceholder = !message || message.startsWith('[') || message.trim() === '';
+          effectiveMessage = isPlaceholder ? transcripts : `${message}\n\n${transcripts}`;
+
+          // Update the persisted user message in the DB so the dashboard shows the transcript
+          if (messageId) {
+            this.updateMessageContent(sessionId, messageId, effectiveMessage).catch(err => {
+              console.warn(`[ChatSessionManager] Failed to update message with transcript:`, err);
+            });
+          }
+
+          // Update conversation history entry we just pushed
+          const lastEntry = session.conversationHistory[session.conversationHistory.length - 1];
+          if (lastEntry && lastEntry.role === 'user') {
+            lastEntry.content = effectiveMessage;
+          }
+        }
       }
     }
 
@@ -1585,7 +1609,7 @@ export class ChatSessionManager {
     // The `model` field enables seamless mid-session model hot-swapping:
     // the runner calls agent.setModel() which preserves full conversation
     // context without recreating the Agent.
-    await this.commandSender.sendAgentStep(sessionId, message, {
+    await this.commandSender.sendAgentStep(sessionId, effectiveMessage, {
       ...(attachments?.length ? { attachments } : {}),
       ...(model ? { model } : {}),
     });
@@ -1643,6 +1667,61 @@ export class ChatSessionManager {
     }
 
     console.log('[ChatSessionManager] All audio transcriptions ready');
+  }
+
+  /**
+   * Fetch transcribed text from audio attachments after transcription completes.
+   * Returns the combined transcript, or null if none available.
+   */
+  private async fetchAudioTranscripts(
+    audioAttachments: Array<{ id: string; filename: string; mimeType: string }>,
+  ): Promise<string | null> {
+    const transcripts: string[] = [];
+
+    for (const att of audioAttachments) {
+      try {
+        const res = await authFetch(
+          `${this.apiBaseUrl}/v1/chat/attachments/${att.id}/text`,
+        );
+        if (res.ok) {
+          const data = (await res.json()) as { extractedText?: string };
+          if (data.extractedText) {
+            transcripts.push(data.extractedText);
+          }
+        }
+      } catch {
+        // Best-effort — if fetch fails, the agent still gets the transcript
+        // via attachment blocks in the runtime
+      }
+    }
+
+    return transcripts.length > 0 ? transcripts.join('\n') : null;
+  }
+
+  /**
+   * Update a persisted user message's content in the DB.
+   * Used to replace placeholder text with audio transcripts.
+   */
+  private async updateMessageContent(
+    sessionId: string,
+    messageId: string,
+    content: string,
+  ): Promise<void> {
+    // The messageId from persistMessagePair is the *assistant* placeholder.
+    // We need to update the *user* message — which is the one before it.
+    // Use the session messages endpoint to find and update the user message.
+    try {
+      await authFetch(
+        `${this.apiBaseUrl}/v1/internal/chat/sessions/${sessionId}/messages/latest-user`,
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ content }),
+        },
+      );
+    } catch {
+      // Best-effort — dashboard may show stale placeholder until refresh
+    }
   }
 
   /**

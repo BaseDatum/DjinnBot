@@ -92,6 +92,19 @@ By default, Telegram bots are open to anyone who finds them. To restrict access:
 
 To find a user's Telegram ID, have them message [@userinfobot](https://t.me/userinfobot).
 
+## Built-in Commands
+
+Each Telegram bot supports these commands:
+
+| Command | Description |
+|---------|-------------|
+| `/new` | Start a fresh conversation (clears chat history) |
+| `/model <name>` | Switch the AI model for your session |
+| `/modelfavs` | Show your favorite models |
+| `/help` | Show available commands |
+
+You can also register these with BotFather using `/setcommands` so they appear in Telegram's command autocomplete menu.
+
 ## How Telegram Integration Works
 
 ### Message Flow

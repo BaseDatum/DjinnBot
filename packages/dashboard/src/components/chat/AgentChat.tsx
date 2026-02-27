@@ -271,10 +271,14 @@ export function AgentChat({
     setMessages(prev => prev.filter(m => !m.id.startsWith('queued_')));
     setIsResponding(true);
 
+    // For voice-only messages (no text, just audio attachments), show a
+    // temporary placeholder.  The CSM will update the DB message with the
+    // real transcript after transcription completes.
+    const displayMessage = userMessage || (attachmentIds.length > 0 ? 'Voice message — transcribing...' : '');
     setMessages(prev => [...prev, {
       id: `user_${Date.now()}`,
       type: 'user',
-      content: userMessage,
+      content: displayMessage,
       timestamp: Date.now(),
       attachments: attachmentIds.length > 0 ? attachmentIds : undefined,
     }]);
@@ -350,8 +354,9 @@ export function AgentChat({
 
   /** Primary send handler — routes to direct send, queue, or no-op based on state. */
   const sendMessage = async () => {
-    if (!inputValue.trim() || sessionStatus !== 'running') return;
-    const userMessage = inputValue.trim();
+    const hasReadyAttachments = pendingAttachments.filter(a => !a.uploading && !a.error).length > 0;
+    if ((!inputValue.trim() && !hasReadyAttachments) || sessionStatus !== 'running') return;
+    const userMessage = inputValue.trim() || (hasReadyAttachments ? '' : '');
     setInputValue('');
 
     if (!isResponding) {
@@ -697,7 +702,7 @@ export function AgentChat({
           ) : (
             <Button
               onClick={sendMessage}
-              disabled={!isReady || !inputValue.trim()}
+              disabled={!isReady || (!inputValue.trim() && pendingAttachments.filter(a => !a.uploading && !a.error).length === 0)}
               size="sm"
               className="h-[44px] w-[44px] shrink-0"
             >

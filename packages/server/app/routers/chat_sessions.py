@@ -10,7 +10,7 @@ This module handles: list, get, update, delete operations.
 
 import json
 from typing import Optional, List
-from fastapi import APIRouter, HTTPException, Depends, Query
+from fastapi import APIRouter, HTTPException, Depends, Query, Request
 from pydantic import BaseModel
 from sqlalchemy import select, func, and_
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -545,6 +545,34 @@ async def add_chat_message(
     await db.refresh(message)
 
     return {"ok": True, "message_id": message.id}
+
+
+@router.patch("/internal/chat/sessions/{session_id}/messages/latest-user")
+async def update_latest_user_message(
+    session_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_async_session),
+):
+    """Update the most recent user message's content (e.g. replace voice placeholder with transcript)."""
+    body = await request.json()
+    content = body.get("content")
+    if not content:
+        raise HTTPException(400, "Missing content")
+
+    result = await db.execute(
+        select(ChatMessage)
+        .where(ChatMessage.session_id == session_id, ChatMessage.role == "user")
+        .order_by(ChatMessage.created_at.desc())
+        .limit(1)
+    )
+    msg = result.scalar_one_or_none()
+    if not msg:
+        raise HTTPException(404, "No user message found")
+
+    msg.content = content
+    await db.commit()
+
+    return {"ok": True, "message_id": msg.id}
 
 
 @router.patch("/internal/chat/messages/{message_id}/complete")

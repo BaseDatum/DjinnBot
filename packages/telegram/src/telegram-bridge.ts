@@ -301,6 +301,7 @@ class TelegramAgentBridge {
         `Hi! I'm **${this.agentId}**. Available commands:`,
         '  /new — Start a fresh conversation (clears history)',
         '  /model <name> — Switch the AI model',
+        '  /modelfavs — Show your favorite models',
         '  /help — Show this help',
       ].join('\n'));
       return true;
@@ -350,6 +351,27 @@ class TelegramAgentBridge {
 
       this.chatModelOverrides.set(chatId, modelArg);
       await this.sendFormattedMessage(chatId, `Model changed to ${modelArg}. This will apply to your next message.`);
+      return true;
+    }
+
+    if (lower === '/modelfavs') {
+      const apiUrl = this.config.apiUrl ?? process.env.DJINNBOT_API_URL ?? 'http://api:8000';
+      try {
+        const res = await authFetch(`${apiUrl}/v1/settings/favorites`, {
+          signal: AbortSignal.timeout(5000),
+        });
+        const data = await res.json() as { favorites?: string[] };
+        const favs = data.favorites ?? [];
+        if (favs.length === 0) {
+          await this.sendFormattedMessage(chatId, 'No favorite models set. Add favorites in the dashboard under Settings > Models.');
+        } else {
+          const list = favs.map((m: string, i: number) => `  ${i + 1}. ${m}`).join('\n');
+          await this.sendFormattedMessage(chatId, `Your favorite models:\n${list}\n\nUse /model <name> to switch.`);
+        }
+      } catch (err) {
+        console.warn(`[TelegramBridge:${this.agentId}] /modelfavs: failed to fetch favorites:`, err);
+        await this.sendFormattedMessage(chatId, 'Failed to load favorite models. Please try again.');
+      }
       return true;
     }
 

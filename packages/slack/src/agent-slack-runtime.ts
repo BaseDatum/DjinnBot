@@ -1342,6 +1342,158 @@ export class AgentSlackRuntime {
   }
 
   /**
+   * Apply a model switch from a block_actions interaction (favorites select).
+   * Posts an ephemeral confirmation in the channel.
+   */
+  private async applyModelFromInteraction(
+    modelString: string,
+    body: any,
+  ): Promise<void> {
+    // Validate
+    try {
+      parseModelString(modelString);
+    } catch (err) {
+      console.warn(`[${this.agentId}] Invalid model from interaction: ${modelString}`, err);
+      return;
+    }
+
+    const channelId = body.channel?.id ?? body.container?.channel_id;
+    if (!channelId) return;
+
+    const source = channelId.startsWith('D') ? 'dm' as const : 'channel_thread' as const;
+    const pool = this.config.sessionPool;
+    let applied = false;
+
+    if (pool) {
+      applied = await pool.updateSessionModel(this.agentId, source, channelId, modelString);
+    }
+
+    // Post ephemeral confirmation
+    const userId = body.user?.id;
+    if (userId) {
+      try {
+        const statusText = applied
+          ? `${this.agent.identity.emoji} Model switched to \`${modelString}\` — takes effect on the next message.`
+          : `${this.agent.identity.emoji} Model set to \`${modelString}\` — will be used when you next message ${this.agent.identity.name}.`;
+        await this.client.chat.postEphemeral({
+          channel: channelId,
+          user: userId,
+          text: statusText,
+        });
+      } catch { /* ignore */ }
+    }
+  }
+
+  /**
+   * Update the model-select modal with models for the chosen provider.
+   * Called when the user picks a provider in the modal's static_select.
+   */
+  private async updateModalWithModels(
+    providerId: string,
+    view: any,
+  ): Promise<void> {
+    // Fetch models for this provider
+    let models: Array<{ id: string; name: string; description?: string; reasoning?: boolean }>;
+    try {
+      const data = await this.apiFetch<{ models: typeof models }>(`/v1/settings/providers/${encodeURIComponent(providerId)}/models`);
+      models = data.models ?? [];
+    } catch (err) {
+      console.error(`[${this.agentId}] Failed to fetch models for ${providerId}:`, err);
+      return;
+    }
+
+    if (models.length === 0) {
+      // Update view to show "no models"
+      try {
+        await this.client.views.update({
+          view_id: view.id,
+          hash: view.hash,
+          view: {
+            type: 'modal',
+            callback_id: `model_select_modal:${this.agentId}`,
+            title: view.title,
+            submit: view.submit,
+            close: view.close,
+            private_metadata: view.private_metadata,
+            blocks: [
+              view.blocks[0], // Keep the provider select
+              {
+                type: 'section',
+                text: { type: 'mrkdwn', text: `No models found for this provider.` },
+              },
+            ],
+          },
+        });
+      } catch { /* ignore */ }
+      return;
+    }
+
+    // Build model options grouped — Slack static_select supports option_groups
+    // but it's simpler to just list them as flat options with name + description
+    const modelOptions = models.map((m) => ({
+      text: { type: 'plain_text' as const, text: (m.name || m.id).slice(0, 75) },
+      description: m.description
+        ? { type: 'plain_text' as const, text: m.description.slice(0, 75) }
+        : undefined,
+      value: m.id.slice(0, 75),
+    }));
+
+    // Update the modal to include the model select
+    try {
+      await this.client.views.update({
+        view_id: view.id,
+        hash: view.hash,
+        view: {
+          type: 'modal',
+          callback_id: `model_select_modal:${this.agentId}`,
+          title: view.title,
+          submit: view.submit,
+          close: view.close,
+          private_metadata: view.private_metadata,
+          blocks: [
+            view.blocks[0], // Keep the provider select (preserves user's selection)
+            {
+              type: 'input',
+              block_id: 'model_block',
+              label: { type: 'plain_text', text: 'Model' },
+              element: {
+                type: 'static_select',
+                action_id: 'model_select',
+                placeholder: { type: 'plain_text', text: 'Choose a model...' },
+                options: modelOptions,
+              },
+            },
+          ],
+        },
+      });
+    } catch (err) {
+      console.error(`[${this.agentId}] Failed to update modal with models:`, err);
+    }
+  }
+
+  /**
+   * Apply a model switch silently (from modal submission — no response needed,
+   * the modal closes automatically).
+   */
+  private async doModelSwitchSilent(
+    modelString: string,
+    source: 'dm' | 'channel_thread',
+    channelId: string,
+  ): Promise<void> {
+    try {
+      parseModelString(modelString);
+    } catch {
+      return; // Invalid model — silently ignore
+    }
+
+    const pool = this.config.sessionPool;
+    if (pool) {
+      await pool.updateSessionModel(this.agentId, source, channelId, modelString);
+    }
+    console.log(`[${this.agentId}] Model switched via modal: ${modelString} (channel: ${channelId})`);
+  }
+
+  /**
    * Handle an @mention of this agent.
    */
   private async handleMention(event: {

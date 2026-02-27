@@ -354,6 +354,26 @@ export class WhatsAppBridge {
       await this.sendFormattedMessage(senderJid, `Model changed to ${action.model}. This will apply to your next message.`);
       return;
     }
+
+    if (action.type === 'modelfavs') {
+      try {
+        const res = await authFetch(`${this.config.apiUrl}/v1/settings/favorites`, {
+          signal: AbortSignal.timeout(5000),
+        });
+        const data = await res.json() as { favorites?: string[] };
+        const favs = data.favorites ?? [];
+        if (favs.length === 0) {
+          await this.sendFormattedMessage(senderJid, 'No favorite models set. Add favorites in the dashboard under Settings > Models.');
+        } else {
+          const list = favs.map((m: string, i: number) => `  ${i + 1}. ${m}`).join('\n');
+          await this.sendFormattedMessage(senderJid, `Your favorite models:\n${list}\n\nUse /model <name> to switch.`);
+        }
+      } catch (err) {
+        console.warn('[WhatsAppBridge] /modelfavs: failed to fetch favorites:', err);
+        await this.sendFormattedMessage(senderJid, 'Failed to load favorite models. Please try again.');
+      }
+      return;
+    }
   }
 
   // ── Agent processing ───────────────────────────────────────────────────

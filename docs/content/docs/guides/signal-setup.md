@@ -95,6 +95,9 @@ Since Signal uses a shared phone number, the SignalRouter determines which agent
 |---------|-------------|
 | `/agent <name>` | Switch to a specific agent |
 | `/agents` | List all available agents |
+| `/new` | Start a fresh conversation (clears history) |
+| `/model <name>` | Switch the AI model for your session |
+| `/modelfavs` | Show your favorite models |
 | `/help` | Show available commands |
 
 ## Signal Architecture

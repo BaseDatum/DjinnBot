@@ -184,14 +184,20 @@ Each agent can expose a `/<agent-id>` slash command that lets users inspect and 
 3. Configure:
    - **Command**: `/<agent-id>` (e.g., `/eric`)
    - **Short Description**: `Configure and control this agent`
-   - **Usage Hint**: `[model|config|thinking|help]`
+   - **Usage Hint**: `[model|models|config|thinking|help]`
 4. Click **Save**
 5. Reinstall the app to the workspace when prompted
 
 Repeat for each agent's Slack app.
 
+Additionally, ensure **Interactivity** is enabled (required for the interactive model chooser modal):
+
+1. In the app settings, go to **Interactivity & Shortcuts**
+2. Toggle **Interactivity** to ON
+3. Click **Save Changes**
+
 {{< callout type="info" >}}
-The slash command name **must** match the agent's ID exactly. DjinnBot registers a handler for `/<agent-id>` on startup — if the command name doesn't match, Slack won't route it to the correct handler.
+The slash command name **must** match the agent's ID exactly. DjinnBot registers a handler for `/<agent-id>` on startup — if the command name doesn't match, Slack won't route it to the correct handler. When using Socket Mode, no Request URL is needed for interactivity — all events are routed through the WebSocket connection.
 {{< /callout >}}
 
 ## Slash Commands Reference
@@ -213,6 +219,8 @@ Shows all available subcommands with usage examples.
 
 /eric model                          — Show the current active model
 /eric model execution <provider/model-id> — Switch the execution model
+/eric models                         — Quick-switch from your favorited models
+/eric models select                  — Browse all configured providers and models
 /eric config                         — Show agent configuration
 /eric thinking <level>               — Set thinking level
 /eric help                           — Show this help message
@@ -253,6 +261,38 @@ Switches the agent's execution model mid-conversation without losing context.
 
 {{< callout type="tip" >}}
 The shorthand `/<agent> model <provider/model-id>` also works — the `execution` keyword is optional. For example, `/<agent> model anthropic/claude-sonnet-4` is equivalent.
+{{< /callout >}}
+
+### `/<agent> models`
+
+Displays an interactive dropdown of your **favorited models** for quick switching. Favorites are the same models you've starred in the dashboard's model picker — they sync via the DjinnBot API.
+
+```
+/eric models
+```
+
+The response is an ephemeral message with a `static_select` dropdown. Pick a model and it's applied immediately — the agent's next response will use the new model. The dropdown also shows the currently active model as the default selection.
+
+If you have no favorites yet, the command tells you how to add them (star models in the dashboard, or use `/<agent> models select` to browse).
+
+### `/<agent> models select`
+
+Opens a **full interactive modal** for browsing all configured providers and their models. This mirrors the two-stage model picker in the dashboard:
+
+```
+/eric models select
+```
+
+**Stage 1 — Provider select:**
+A modal opens with a dropdown of all providers that have an API key configured (unconfigured providers are hidden). Providers are sorted in the same canonical order as the dashboard: OpenCode, xAI, Anthropic, OpenAI, Google, OpenRouter, Groq, etc.
+
+**Stage 2 — Model select:**
+After choosing a provider, the modal updates to show a second dropdown with that provider's available models (fetched live from the DjinnBot API, same source as the dashboard). Each option shows the model's display name and description.
+
+Click **Switch Model** to apply. The modal closes and the model switch takes effect on the agent's next response. Full conversation context is preserved.
+
+{{< callout type="info" >}}
+The modal requires Slack's **Interactivity** to be enabled on the app. This is already configured if you followed the Socket Mode setup above. The `trigger_id` from the slash command is used to open the modal — no additional scopes are needed.
 {{< /callout >}}
 
 ### `/<agent> config`
@@ -327,9 +367,19 @@ The `model` subcommand interacts directly with the `SlackSessionPool`, which man
 
 When you switch models via `/<agent> model execution`, the pool sends a `changeModel` command to the running container. The model switch is seamless — no container restart, no context loss.
 
+### Interactive Model Chooser
+
+The `models` and `models select` commands use Slack's Block Kit interactive elements:
+
+- **`models` (favorites)** — Responds with an ephemeral message containing a `static_select` element. When the user picks a model, a `block_actions` event fires with `action_id: model_favorites_select:<agentId>`. The handler validates the model string, applies it to the session pool, and posts an ephemeral confirmation.
+
+- **`models select` (full modal)** — Opens a modal via `views.open` with a provider `static_select`. When the provider is selected, a `block_actions` event triggers `views.update` to populate a second `static_select` with that provider's models (fetched from `GET /v1/settings/providers/{providerId}/models`). On `view_submission`, the selected model is applied to the session pool.
+
+Both paths call the same `SlackSessionPool.updateSessionModel()` method as the text-based `model execution` command. The model validation uses `parseModelString()` to ensure the model string is valid before applying.
+
 ### Ephemeral Responses
 
-All slash command responses use `response_type: 'ephemeral'`, meaning only the invoking user sees them. This prevents slash command output from cluttering shared channels.
+All slash command responses use `response_type: 'ephemeral'`, meaning only the invoking user sees them. This prevents slash command output from cluttering shared channels. Interactive element responses (block_actions from `static_select`, modal submissions) also only affect the invoking user.
 
 ### Error Handling
 

@@ -64,6 +64,14 @@ export class SignalBridge {
   private fullModeActive = false;
   /** Per-sender model override set by /model command. */
   private senderModelOverrides = new Map<string, string>();
+  /** Tracks consecutive restart attempts for backoff. */
+  private daemonRestartAttempts = 0;
+  /** Whether a restart is currently in progress. */
+  private daemonRestarting = false;
+  /** Max consecutive restart attempts before giving up. */
+  private static readonly MAX_RESTART_ATTEMPTS = 10;
+  /** Base delay for exponential backoff (ms). */
+  private static readonly RESTART_BASE_DELAY_MS = 2_000;
 
   constructor(config: SignalBridgeFullConfig) {
     this.config = config;
@@ -148,12 +156,8 @@ export class SignalBridge {
       sendReadReceipts: true,
     });
 
-    // Watch for unexpected daemon exit
-    void this.daemonHandle.exited.then((exit) => {
-      if (!this.abortController.signal.aborted) {
-        console.error(`[SignalBridge] signal-cli daemon exited unexpectedly: code=${exit.code} signal=${exit.signal}`);
-      }
-    });
+    // Watch for unexpected daemon exit and auto-restart
+    this.watchDaemonExit('full');
 
     // Wait for daemon to be ready
     try {
@@ -208,11 +212,8 @@ export class SignalBridge {
       sendReadReceipts: true,
     });
 
-    void this.daemonHandle.exited.then((exit) => {
-      if (!this.abortController.signal.aborted) {
-        console.error(`[SignalBridge] signal-cli daemon (receive-only) exited: code=${exit.code} signal=${exit.signal}`);
-      }
-    });
+    // Watch for unexpected daemon exit and auto-restart
+    this.watchDaemonExit('receive-only');
 
     try {
       await waitForDaemonReady({
@@ -231,6 +232,111 @@ export class SignalBridge {
   /** Whether the signal-cli daemon is running and ready for RPC. */
   private get isDaemonRunning(): boolean {
     return this.client != null && this.daemonHandle != null;
+  }
+
+  // ── Daemon auto-restart ────────────────────────────────────────────────
+
+  /**
+   * Watch the daemon's exit promise and automatically restart it if it
+   * exits unexpectedly (i.e. not during an intentional shutdown).
+   *
+   * @param mode - 'full' restarts with SSE + routing; 'receive-only' restarts without routing.
+   */
+  private watchDaemonExit(mode: 'full' | 'receive-only'): void {
+    if (!this.daemonHandle) return;
+
+    void this.daemonHandle.exited.then(async (exit) => {
+      // If we're shutting down, don't restart
+      if (this.abortController.signal.aborted) return;
+
+      console.error(
+        `[SignalBridge] signal-cli daemon exited unexpectedly (${mode}): code=${exit.code} signal=${exit.signal}`,
+      );
+
+      // Clean up the dead handle
+      this.daemonHandle = null;
+
+      // If SSE was active, stop it so it doesn't spin on a dead daemon
+      if (mode === 'full' && this.fullModeActive) {
+        this.sseAbortController?.abort();
+        this.sseAbortController = null;
+        this.typingManager?.stopAll();
+        this.fullModeActive = false;
+      }
+
+      await this.restartDaemon(mode);
+    });
+  }
+
+  /**
+   * Restart the daemon with exponential backoff.
+   * Resets the attempt counter on a successful start.
+   */
+  private async restartDaemon(mode: 'full' | 'receive-only'): Promise<void> {
+    if (this.abortController.signal.aborted) return;
+    if (this.daemonRestarting) return; // Prevent concurrent restarts
+
+    this.daemonRestarting = true;
+    this.daemonRestartAttempts++;
+
+    if (this.daemonRestartAttempts > SignalBridge.MAX_RESTART_ATTEMPTS) {
+      console.error(
+        `[SignalBridge] Daemon has crashed ${this.daemonRestartAttempts - 1} consecutive times — giving up. ` +
+        `Manual intervention required.`,
+      );
+      this.daemonRestarting = false;
+      return;
+    }
+
+    // Exponential backoff: 2s, 4s, 8s, 16s, … capped at 60s
+    const delay = Math.min(
+      SignalBridge.RESTART_BASE_DELAY_MS * Math.pow(2, this.daemonRestartAttempts - 1),
+      60_000,
+    );
+    console.log(
+      `[SignalBridge] Restarting daemon (attempt ${this.daemonRestartAttempts}/${SignalBridge.MAX_RESTART_ATTEMPTS}) ` +
+      `in ${(delay / 1000).toFixed(1)}s...`,
+    );
+
+    await new Promise((r) => setTimeout(r, delay));
+
+    // Check again after delay — might have been shut down
+    if (this.abortController.signal.aborted) {
+      this.daemonRestarting = false;
+      return;
+    }
+
+    try {
+      if (mode === 'full') {
+        await this.startDaemon();
+      } else {
+        await this.startDaemonReceiveOnly();
+      }
+
+      // startDaemon/startDaemonReceiveOnly may silently fail (catch internally,
+      // stop the daemon, and return). Check if the daemon is actually running.
+      if (this.isDaemonRunning) {
+        console.log(`[SignalBridge] Daemon restarted successfully (${mode} mode)`);
+        this.daemonRestartAttempts = 0; // Reset on success
+      } else {
+        console.warn(`[SignalBridge] Daemon restart attempt ${this.daemonRestartAttempts} did not produce a running daemon`);
+        // Schedule another attempt (the watcher won't fire since handle is null)
+        this.daemonRestarting = false;
+        await this.restartDaemon(mode);
+        return;
+      }
+    } catch (err) {
+      console.error(`[SignalBridge] Daemon restart failed (${mode}):`, err);
+      // watchDaemonExit won't fire if startDaemon threw before setting up
+      // the handle, so schedule another attempt.
+      if (!this.daemonHandle) {
+        this.daemonRestarting = false;
+        await this.restartDaemon(mode);
+        return;
+      }
+    } finally {
+      this.daemonRestarting = false;
+    }
   }
 
   async shutdown(): Promise<void> {
@@ -556,6 +662,26 @@ export class SignalBridge {
       await this.sendFormattedMessage(sender, `Model changed to ${action.model}. This will apply to your next message.`);
       return;
     }
+
+    if (action.type === 'modelfavs') {
+      try {
+        const res = await authFetch(`${this.config.apiUrl}/v1/settings/favorites`, {
+          signal: AbortSignal.timeout(5000),
+        });
+        const data = await res.json() as { favorites?: string[] };
+        const favs = data.favorites ?? [];
+        if (favs.length === 0) {
+          await this.sendFormattedMessage(sender, 'No favorite models set. Add favorites in the dashboard under Settings > Models.');
+        } else {
+          const list = favs.map((m: string, i: number) => `  ${i + 1}. ${m}`).join('\n');
+          await this.sendFormattedMessage(sender, `Your favorite models:\n${list}\n\nUse /model <name> to switch.`);
+        }
+      } catch (err) {
+        console.warn('[SignalBridge] /modelfavs: failed to fetch favorites:', err);
+        await this.sendFormattedMessage(sender, 'Failed to load favorite models. Please try again.');
+      }
+      return;
+    }
   }
 
   // ── Agent processing ───────────────────────────────────────────────────
@@ -752,11 +878,9 @@ export class SignalBridge {
       sendReadReceipts: true,
     });
 
-    void this.daemonHandle.exited.then((exit) => {
-      if (!this.abortController.signal.aborted) {
-        console.error(`[SignalBridge] signal-cli daemon exited unexpectedly: code=${exit.code} signal=${exit.signal}`);
-      }
-    });
+    // Watch for unexpected daemon exit and auto-restart (receive-only since
+    // ensureDaemon is used for RPC operations, not full message routing)
+    this.watchDaemonExit('receive-only');
 
     await waitForDaemonReady({
       baseUrl,
