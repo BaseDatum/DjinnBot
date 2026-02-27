@@ -1699,7 +1699,8 @@ export class ChatSessionManager {
   }
 
   /**
-   * Update a persisted user message's content in the DB.
+   * Update a persisted user message's content in the DB and push a live
+   * update to the dashboard via SSE so the chat bubble updates in real-time.
    * Used to replace placeholder text with audio transcripts.
    */
   private async updateMessageContent(
@@ -1707,11 +1708,8 @@ export class ChatSessionManager {
     messageId: string,
     content: string,
   ): Promise<void> {
-    // The messageId from persistMessagePair is the *assistant* placeholder.
-    // We need to update the *user* message — which is the one before it.
-    // Use the session messages endpoint to find and update the user message.
     try {
-      await authFetch(
+      const res = await authFetch(
         `${this.apiBaseUrl}/v1/internal/chat/sessions/${sessionId}/messages/latest-user`,
         {
           method: 'PATCH',
@@ -1719,6 +1717,19 @@ export class ChatSessionManager {
           body: JSON.stringify({ content }),
         },
       );
+      if (res.ok) {
+        const data = (await res.json()) as { message_id?: string };
+        // Push real-time update to dashboard via SSE
+        this.publishRaw(sessionId, 'user_message_update', JSON.stringify({
+          type: 'user_message_update',
+          timestamp: Date.now(),
+          data: {
+            messageId: data.message_id,
+            content,
+          },
+        }));
+        console.log(`[ChatSessionManager] Updated user message with transcript (${content.length} chars)`);
+      }
     } catch {
       // Best-effort — dashboard may show stale placeholder until refresh
     }
@@ -2128,6 +2139,7 @@ export class ChatSessionManager {
     'container_ready', 'container_busy', 'container_idle', 'container_exiting',
     'response_aborted', 'session_complete',
     'session_status', 'session_error',
+    'user_message_update',
   ]);
 
   /**

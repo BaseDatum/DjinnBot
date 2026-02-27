@@ -758,6 +758,37 @@ export function useChatStream({
           onSessionErrorRef.current?.(errorMsg);
           break;
         }
+
+        case 'user_message_update': {
+          // Real-time update from the CSM — replaces a user message's content
+          // (e.g. voice placeholder → transcript). Matches by messageId from
+          // the DB, or falls back to the most recent user message.
+          const updateContent = (eventData as any).content;
+          const updateMsgId = (eventData as any).messageId;
+          if (updateContent) {
+            setMessages(prev => {
+              // Try to find by DB message ID first
+              if (updateMsgId) {
+                const idx = prev.findIndex(m => m.id === updateMsgId);
+                if (idx >= 0) {
+                  const next = [...prev];
+                  next[idx] = { ...next[idx], content: updateContent };
+                  return next;
+                }
+              }
+              // Fallback: update the most recent user message
+              for (let i = prev.length - 1; i >= 0; i--) {
+                if (prev[i].type === 'user') {
+                  const next = [...prev];
+                  next[i] = { ...next[i], content: updateContent };
+                  return next;
+                }
+              }
+              return prev;
+            });
+          }
+          break;
+        }
       }
     },
     [scheduleFlush, commitStreaming],

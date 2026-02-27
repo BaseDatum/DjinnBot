@@ -217,13 +217,9 @@ async def upload_attachment(
 
     # Trigger async transcription for audio files
     if is_audio:
-        background_tasks.add_task(
-            _transcribe_audio,
-            att_id,
-            data,
-            mime,
-            file.filename,
-        )
+        import asyncio
+
+        asyncio.create_task(_transcribe_audio_async(att_id, data, mime, file.filename))
 
     return _to_response(attachment)
 
@@ -549,21 +545,6 @@ async def _ingest_pdf_to_vault(
 
 
 # ── Audio Transcription ──────────────────────────────────────────────────────
-
-
-def _transcribe_audio(
-    attachment_id: str,
-    data: bytes,
-    mime_type: str,
-    filename: str,
-) -> None:
-    """Background task (sync): transcribe audio and update the attachment record.
-
-    Used by the public upload endpoint via FastAPI BackgroundTasks (sync).
-    """
-    import asyncio
-
-    asyncio.run(_transcribe_audio_async(attachment_id, data, mime_type, filename))
 
 
 async def _transcribe_audio_async(
