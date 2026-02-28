@@ -28,6 +28,7 @@ import { ensureAgentKeys } from './api/agent-key-manager.js';
 import { SwarmSessionManager, type SwarmSessionDeps } from './runtime/swarm-session.js';
 import { type SwarmRequest, type SwarmProgressEvent, swarmChannel, swarmStateKey } from './runtime/swarm-types.js';
 import { mountJuiceFS, ensureJfsDirs } from './container/juicefs.js';
+import { type RuntimeSettings, DEFAULT_RUNTIME_SETTINGS } from './container/runner.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -1342,8 +1343,24 @@ async function main(): Promise<void> {
       settingsClient.disconnect();
     }
 
+    // Fetch runtime settings from the settings API for engine subsystems.
+    // Non-fatal: falls back to defaults if the API is unreachable.
+    let runtimeSettings: RuntimeSettings = { ...DEFAULT_RUNTIME_SETTINGS };
+    try {
+      const apiBase = CONFIG.apiUrl || 'http://api:8000';
+      const settingsRes = await authFetch(`${apiBase}/v1/settings/`);
+      if (settingsRes.ok) {
+        const data = await settingsRes.json() as Partial<RuntimeSettings>;
+        runtimeSettings = { ...DEFAULT_RUNTIME_SETTINGS, ...data };
+        console.log('[Engine] Loaded runtime settings from API');
+      }
+    } catch (err) {
+      console.warn('[Engine] Failed to fetch runtime settings from API, using defaults:', err);
+    }
+
     // Initialize DjinnBot
     console.log('[Engine] Initializing DjinnBot...');
+    CONFIG.runtimeSettings = runtimeSettings;
     djinnBot = new DjinnBot(CONFIG);
 
     // Initialize agent registry (discovers agents from agents/ directory)
@@ -1620,6 +1637,8 @@ async function main(): Promise<void> {
         dataPath: CONFIG.dataDir,
         agentsDir: CONFIG.agentsDir,
         containerImage: process.env.AGENT_RUNTIME_IMAGE,
+        idleTimeoutMs: runtimeSettings.chatIdleTimeoutMin * 60 * 1000,
+        reaperIntervalMs: runtimeSettings.reaperIntervalSec * 1000,
         lifecycleTracker: chatLifecycleTracker,
       });
       

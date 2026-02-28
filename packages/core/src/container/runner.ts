@@ -8,6 +8,50 @@ import type { AgentRunner, RunAgentOptions, AgentRunResult } from '../runtime/ag
 import type { OutputMessage, EventMessage, StatusMessage } from '../redis-protocol/types.js';
 import { PROVIDER_ENV_MAP } from '../constants.js';
 import { enrichNetworkError } from '../runtime/model-resolver.js';
+
+/** Runtime settings fetched from the global settings API.
+ *  Used to configure container resources, timeouts, and feature flags. */
+export interface RuntimeSettings {
+  ptcEnabled: boolean;
+  // Container resources
+  containerMemoryLimitMb: number;
+  containerCpuLimit: number;
+  containerShmSizeMb: number;
+  jfsAgentCacheSizeMb: number;
+  containerReadyTimeoutSec: number;
+  // Pipeline execution
+  defaultStepTimeoutSec: number;
+  // Chat session reaper
+  chatIdleTimeoutMin: number;
+  reaperIntervalSec: number;
+  // Wake system guardrails
+  wakeEnabled: boolean;
+  wakeCooldownSec: number;
+  maxWakesPerDay: number;
+  maxWakesPerPairPerDay: number;
+  // Pulse execution
+  maxConcurrentPulseSessions: number;
+  defaultPulseTimeoutSec: number;
+}
+
+export const DEFAULT_RUNTIME_SETTINGS: RuntimeSettings = {
+  ptcEnabled: false,
+  containerMemoryLimitMb: 2048,
+  containerCpuLimit: 2,
+  containerShmSizeMb: 256,
+  jfsAgentCacheSizeMb: 2048,
+  containerReadyTimeoutSec: 30,
+  defaultStepTimeoutSec: 300,
+  chatIdleTimeoutMin: 30,
+  reaperIntervalSec: 60,
+  wakeEnabled: true,
+  wakeCooldownSec: 300,
+  maxWakesPerDay: 12,
+  maxWakesPerPairPerDay: 5,
+  maxConcurrentPulseSessions: 2,
+  defaultPulseTimeoutSec: 120,
+};
+
 export interface ContainerRunnerConfig {
   redisUrl: string;
   dataPath?: string;  // Base path for volumes (default: /data)
@@ -138,23 +182,23 @@ export class ContainerRunner implements AgentRunner {
   }
 
   /**
-   * Fetch boolean feature flags from global settings.
+   * Fetch global runtime settings from the settings API.
    * Non-fatal: returns safe defaults on failure.
    */
-  private async fetchGlobalFlags(): Promise<{ ptcEnabled: boolean }> {
+  private async fetchGlobalFlags(): Promise<RuntimeSettings> {
     const apiBaseUrl = this.config.apiBaseUrl
       || process.env.DJINNBOT_API_URL
       || 'http://api:8000';
     try {
       const res = await authFetch(`${apiBaseUrl}/v1/settings/`);
       if (res.ok) {
-        const data = await res.json() as { ptcEnabled?: boolean };
-        return { ptcEnabled: data.ptcEnabled ?? true };
+        const data = await res.json() as Partial<RuntimeSettings>;
+        return { ...DEFAULT_RUNTIME_SETTINGS, ...data };
       }
     } catch (err) {
       console.warn('[ContainerRunner] Failed to fetch global flags:', err);
     }
-    return { ptcEnabled: true };
+    return { ...DEFAULT_RUNTIME_SETTINGS };
   }
 
   /**
@@ -267,6 +311,12 @@ export class ContainerRunner implements AgentRunner {
         // The project's main repo — only present for project-associated runs.
         projectWorkspacePath,
         image: runtimeImage,
+        // Container resource limits from admin settings
+        memoryLimit: globalFlags.containerMemoryLimitMb * 1024 * 1024,
+        cpuLimit: globalFlags.containerCpuLimit,
+        shmSizeMb: globalFlags.containerShmSizeMb,
+        jfsCacheSizeMb: globalFlags.jfsAgentCacheSizeMb,
+        readyTimeoutMs: globalFlags.containerReadyTimeoutSec * 1000,
         env: {
           AGENT_MODEL: model,
           // Executor model for spawn_executor tool — defaults to AGENT_MODEL if not set.

@@ -13,6 +13,7 @@ import { EventReceiver } from '../container/event-receiver.js';
 import { PersonaLoader } from '../runtime/persona-loader.js';
 import { PROVIDER_ENV_MAP } from '../constants.js';
 import { AgentLifecycleTracker } from '../lifecycle/agent-lifecycle-tracker.js';
+import { type RuntimeSettings, DEFAULT_RUNTIME_SETTINGS } from '../container/runner.js';
 
 export interface ChatSessionConfig {
   sessionId: string;
@@ -1147,20 +1148,20 @@ export class ChatSessionManager {
   }
 
   /**
-   * Fetch boolean feature flags from global settings.
+   * Fetch runtime settings from global settings API.
    * Non-fatal: returns safe defaults on failure.
    */
-  private async fetchGlobalFlags(): Promise<{ ptcEnabled: boolean }> {
+  private async fetchGlobalFlags(): Promise<RuntimeSettings> {
     try {
       const res = await authFetch(`${this.apiBaseUrl}/v1/settings/`);
       if (res.ok) {
-        const data = await res.json() as { ptcEnabled?: boolean };
-        return { ptcEnabled: data.ptcEnabled ?? true };
+        const data = await res.json() as Partial<RuntimeSettings>;
+        return { ...DEFAULT_RUNTIME_SETTINGS, ...data };
       }
     } catch (err) {
       console.warn('[ChatSessionManager] Failed to fetch global flags:', err);
     }
-    return { ptcEnabled: true };
+    return { ...DEFAULT_RUNTIME_SETTINGS };
   }
 
   /**
@@ -1328,6 +1329,12 @@ export class ChatSessionManager {
         agentId,
         workspacePath: `${this.dataPath}/workspaces/${agentId}`,
         image: runtimeImage,
+        // Container resource limits from admin settings
+        memoryLimit: globalFlags.containerMemoryLimitMb * 1024 * 1024,
+        cpuLimit: globalFlags.containerCpuLimit,
+        shmSizeMb: globalFlags.containerShmSizeMb,
+        jfsCacheSizeMb: globalFlags.jfsAgentCacheSizeMb,
+        readyTimeoutMs: globalFlags.containerReadyTimeoutSec * 1000,
         env: {
           AGENT_MODEL: model,
           // Inject all configured provider API keys as their canonical env var names

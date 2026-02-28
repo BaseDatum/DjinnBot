@@ -199,6 +199,25 @@ function AdminPage() {
     userSlackId: string;
     agentRuntimeImage: string;
     ptcEnabled: boolean;
+    // Container Resources
+    containerMemoryLimitMb: number;
+    containerCpuLimit: number;
+    containerShmSizeMb: number;
+    jfsAgentCacheSizeMb: number;
+    containerReadyTimeoutSec: number;
+    // Pipeline Execution
+    defaultStepTimeoutSec: number;
+    // Chat Session Reaper
+    chatIdleTimeoutMin: number;
+    reaperIntervalSec: number;
+    // Wake System Guardrails
+    wakeEnabled: boolean;
+    wakeCooldownSec: number;
+    maxWakesPerDay: number;
+    maxWakesPerPairPerDay: number;
+    // Pulse Execution
+    maxConcurrentPulseSessions: number;
+    defaultPulseTimeoutSec: number;
   }
   const [globalSettings, setGlobalSettings] = useState<GlobalSettings | null>(null);
   const [globalSettingsEdited, setGlobalSettingsEdited] = useState(false);
@@ -1468,19 +1487,17 @@ function AdminPage() {
                 Agent Runtime
               </h2>
               <p className="text-sm text-muted-foreground mt-1">
-                Configure the Docker image used to spawn agent sandbox containers.
-                This is a system-wide setting.
+                Configure container resources, timeouts, and runtime behavior for all agent sessions.
+                Changes take effect on the next agent execution.
               </p>
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="adminRuntimeImage" className="flex items-center gap-2">
-                Agent Runtime Image
-              </Label>
-              <p className="text-xs text-muted-foreground mb-2">
-                Docker image reference for agent containers (e.g.{' '}
-                <code className="bg-muted px-1 py-0.5 rounded text-xs">ghcr.io/basedatum/djinnbot/agent-runtime:latest</code>).
+
+            {/* Runtime Image */}
+            <div className="border rounded-lg p-4 space-y-3">
+              <h3 className="font-medium text-sm">Runtime Image</h3>
+              <p className="text-xs text-muted-foreground">
+                Docker image reference for agent containers.
                 When empty, the engine uses the default GHCR image.
-                Changes take effect on the next agent execution.
               </p>
               <div className="flex gap-2 max-w-lg">
                 <Input
@@ -1488,7 +1505,7 @@ function AdminPage() {
                   value={runtimeImage}
                   onChange={(e) => setRuntimeImage(e.target.value)}
                   placeholder="ghcr.io/basedatum/djinnbot/agent-runtime:latest"
-                  className="font-mono"
+                  className="font-mono text-sm"
                 />
                 <Button
                   disabled={runtimeSaving}
@@ -1515,7 +1532,7 @@ function AdminPage() {
             </div>
 
             {/* Programmatic Tool Calling */}
-            <div className="border rounded-lg p-4 space-y-3 mt-6">
+            <div className="border rounded-lg p-4 space-y-3">
               <div className="flex items-center justify-between">
                 <div className="space-y-1">
                   <div className="flex items-center gap-2">
@@ -1531,18 +1548,14 @@ function AdminPage() {
                   </div>
                   <p className="text-xs text-muted-foreground max-w-lg">
                     When enabled, agents write Python code to call tools instead of using JSON tool calls.
-                    Reduces context usage by 30-40% by keeping intermediate tool results out of the LLM's
-                    context window. Tool schemas are replaced with compact function signatures.
+                    Reduces context usage by 30-40%.
                   </p>
                 </div>
-                <button
-                  type="button"
-                  role="switch"
-                  aria-checked={globalSettings?.ptcEnabled ?? false}
-                  onClick={async () => {
+                <Switch
+                  checked={globalSettings?.ptcEnabled ?? false}
+                  onCheckedChange={async (checked) => {
                     if (!globalSettings) return;
-                    const newValue = !globalSettings.ptcEnabled;
-                    const updated = { ...globalSettings, ptcEnabled: newValue };
+                    const updated = { ...globalSettings, ptcEnabled: checked };
                     setGlobalSettings(updated);
                     setGlobalSettingsEdited(true);
                     try {
@@ -1552,22 +1565,13 @@ function AdminPage() {
                         body: JSON.stringify(updated),
                       });
                       if (!res.ok) throw new Error('Failed to save');
-                      toast.success(newValue ? 'PTC enabled — takes effect on next session' : 'PTC disabled');
+                      toast.success(checked ? 'PTC enabled' : 'PTC disabled');
                     } catch {
                       setGlobalSettings(globalSettings);
                       toast.error('Failed to update PTC setting');
                     }
                   }}
-                  className={`relative inline-flex h-7 w-12 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ${
-                    globalSettings?.ptcEnabled ? 'bg-green-500' : 'bg-zinc-600'
-                  }`}
-                >
-                  <span
-                    className={`pointer-events-none block h-6 w-6 rounded-full bg-background shadow-lg ring-0 transition-transform ${
-                      globalSettings?.ptcEnabled ? 'translate-x-5' : 'translate-x-0'
-                    }`}
-                  />
-                </button>
+                />
               </div>
               {globalSettings?.ptcEnabled && (
                 <div className="flex items-start gap-2 p-3 bg-blue-950/20 border border-blue-900/30 rounded-md mt-3">
@@ -1580,6 +1584,221 @@ function AdminPage() {
                 </div>
               )}
             </div>
+
+            {/* Container Resources */}
+            {globalSettings && (
+              <div className="border rounded-lg p-4 space-y-4">
+                <h3 className="font-medium text-sm">Container Resources</h3>
+                <p className="text-xs text-muted-foreground">
+                  Resource limits applied to every agent sandbox container.
+                </p>
+                <div className="grid grid-cols-2 gap-4 max-w-lg">
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">Memory Limit (MB)</Label>
+                    <Input
+                      type="number"
+                      min={512}
+                      max={32768}
+                      value={globalSettings.containerMemoryLimitMb}
+                      onChange={(e) => handleGlobalSettingsChange({ ...globalSettings, containerMemoryLimitMb: parseInt(e.target.value) || 2048 })}
+                      className="h-8 text-sm"
+                    />
+                    <p className="text-[10px] text-muted-foreground">Min 512 MB. Default: 2048</p>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">CPU Limit (cores)</Label>
+                    <Input
+                      type="number"
+                      min={0.5}
+                      max={16}
+                      step={0.5}
+                      value={globalSettings.containerCpuLimit}
+                      onChange={(e) => handleGlobalSettingsChange({ ...globalSettings, containerCpuLimit: parseFloat(e.target.value) || 2 })}
+                      className="h-8 text-sm"
+                    />
+                    <p className="text-[10px] text-muted-foreground">Min 0.5. Default: 2</p>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">Shared Memory (MB)</Label>
+                    <Input
+                      type="number"
+                      min={64}
+                      max={4096}
+                      value={globalSettings.containerShmSizeMb}
+                      onChange={(e) => handleGlobalSettingsChange({ ...globalSettings, containerShmSizeMb: parseInt(e.target.value) || 256 })}
+                      className="h-8 text-sm"
+                    />
+                    <p className="text-[10px] text-muted-foreground">/dev/shm for Chromium. Min 64. Default: 256</p>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">JuiceFS Cache (MB)</Label>
+                    <Input
+                      type="number"
+                      min={256}
+                      max={16384}
+                      value={globalSettings.jfsAgentCacheSizeMb}
+                      onChange={(e) => handleGlobalSettingsChange({ ...globalSettings, jfsAgentCacheSizeMb: parseInt(e.target.value) || 2048 })}
+                      className="h-8 text-sm"
+                    />
+                    <p className="text-[10px] text-muted-foreground">Per-container JuiceFS cache. Default: 2048</p>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">Container Ready Timeout (sec)</Label>
+                    <Input
+                      type="number"
+                      min={10}
+                      max={300}
+                      value={globalSettings.containerReadyTimeoutSec}
+                      onChange={(e) => handleGlobalSettingsChange({ ...globalSettings, containerReadyTimeoutSec: parseInt(e.target.value) || 30 })}
+                      className="h-8 text-sm"
+                    />
+                    <p className="text-[10px] text-muted-foreground">How long to wait for container to boot. Default: 30</p>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">Default Step Timeout (sec)</Label>
+                    <Input
+                      type="number"
+                      min={30}
+                      max={3600}
+                      value={globalSettings.defaultStepTimeoutSec}
+                      onChange={(e) => handleGlobalSettingsChange({ ...globalSettings, defaultStepTimeoutSec: parseInt(e.target.value) || 300 })}
+                      className="h-8 text-sm"
+                    />
+                    <p className="text-[10px] text-muted-foreground">Max execution time per pipeline step. Default: 300</p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Chat Session Reaper */}
+            {globalSettings && (
+              <div className="border rounded-lg p-4 space-y-4">
+                <h3 className="font-medium text-sm">Chat Session Reaper</h3>
+                <p className="text-xs text-muted-foreground">
+                  Automatically stops idle chat sessions to free container resources.
+                </p>
+                <div className="grid grid-cols-2 gap-4 max-w-lg">
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">Idle Timeout (minutes)</Label>
+                    <Input
+                      type="number"
+                      min={5}
+                      max={480}
+                      value={globalSettings.chatIdleTimeoutMin}
+                      onChange={(e) => handleGlobalSettingsChange({ ...globalSettings, chatIdleTimeoutMin: parseInt(e.target.value) || 30 })}
+                      className="h-8 text-sm"
+                    />
+                    <p className="text-[10px] text-muted-foreground">Stop sessions after this idle time. Default: 30</p>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">Reaper Check Interval (sec)</Label>
+                    <Input
+                      type="number"
+                      min={10}
+                      max={600}
+                      value={globalSettings.reaperIntervalSec}
+                      onChange={(e) => handleGlobalSettingsChange({ ...globalSettings, reaperIntervalSec: parseInt(e.target.value) || 60 })}
+                      className="h-8 text-sm"
+                    />
+                    <p className="text-[10px] text-muted-foreground">How often to check for idle sessions. Default: 60</p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Wake System Guardrails */}
+            {globalSettings && (
+              <div className="border rounded-lg p-4 space-y-4">
+                <div className="flex items-center justify-between">
+                  <div className="space-y-1">
+                    <h3 className="font-medium text-sm">Wake System</h3>
+                    <p className="text-xs text-muted-foreground max-w-lg">
+                      Controls inter-agent wake-ups. When one agent wakes another, these guardrails prevent runaway loops.
+                    </p>
+                  </div>
+                  <Switch
+                    checked={globalSettings.wakeEnabled}
+                    onCheckedChange={(checked) => handleGlobalSettingsChange({ ...globalSettings, wakeEnabled: checked })}
+                  />
+                </div>
+                {globalSettings.wakeEnabled && (
+                  <div className="grid grid-cols-3 gap-4 max-w-lg">
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">Cooldown (sec)</Label>
+                      <Input
+                        type="number"
+                        min={0}
+                        max={3600}
+                        value={globalSettings.wakeCooldownSec}
+                        onChange={(e) => handleGlobalSettingsChange({ ...globalSettings, wakeCooldownSec: parseInt(e.target.value) || 300 })}
+                        className="h-8 text-sm"
+                      />
+                      <p className="text-[10px] text-muted-foreground">Min time between wakes. Default: 300</p>
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">Max Wakes / Day</Label>
+                      <Input
+                        type="number"
+                        min={1}
+                        max={100}
+                        value={globalSettings.maxWakesPerDay}
+                        onChange={(e) => handleGlobalSettingsChange({ ...globalSettings, maxWakesPerDay: parseInt(e.target.value) || 12 })}
+                        className="h-8 text-sm"
+                      />
+                      <p className="text-[10px] text-muted-foreground">Per agent per day. Default: 12</p>
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">Max Wakes / Pair / Day</Label>
+                      <Input
+                        type="number"
+                        min={1}
+                        max={50}
+                        value={globalSettings.maxWakesPerPairPerDay}
+                        onChange={(e) => handleGlobalSettingsChange({ ...globalSettings, maxWakesPerPairPerDay: parseInt(e.target.value) || 5 })}
+                        className="h-8 text-sm"
+                      />
+                      <p className="text-[10px] text-muted-foreground">Prevents A-to-B loops. Default: 5</p>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Pulse Execution */}
+            {globalSettings && (
+              <div className="border rounded-lg p-4 space-y-4">
+                <h3 className="font-medium text-sm">Pulse Execution</h3>
+                <p className="text-xs text-muted-foreground">
+                  Controls how pulse (scheduled) sessions run. Per-agent and per-routine overrides take priority.
+                </p>
+                <div className="grid grid-cols-2 gap-4 max-w-lg">
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">Max Concurrent Sessions</Label>
+                    <Input
+                      type="number"
+                      min={1}
+                      max={10}
+                      value={globalSettings.maxConcurrentPulseSessions}
+                      onChange={(e) => handleGlobalSettingsChange({ ...globalSettings, maxConcurrentPulseSessions: parseInt(e.target.value) || 2 })}
+                      className="h-8 text-sm"
+                    />
+                    <p className="text-[10px] text-muted-foreground">Per agent. Default: 2</p>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">Default Pulse Timeout (sec)</Label>
+                    <Input
+                      type="number"
+                      min={30}
+                      max={3600}
+                      value={globalSettings.defaultPulseTimeoutSec}
+                      onChange={(e) => handleGlobalSettingsChange({ ...globalSettings, defaultPulseTimeoutSec: parseInt(e.target.value) || 120 })}
+                      className="h-8 text-sm"
+                    />
+                    <p className="text-[10px] text-muted-foreground">Container timeout for pulses. Default: 120</p>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         )}
 

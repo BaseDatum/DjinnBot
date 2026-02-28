@@ -18,6 +18,12 @@ export interface ContainerConfig {
   env?: Record<string, string>;
   memoryLimit?: number; // bytes
   cpuLimit?: number; // cores
+  /** /dev/shm size in MB (default: 256). Needed for Chromium/Playwright. */
+  shmSizeMb?: number;
+  /** JuiceFS agent cache size in MB (default: 2048). */
+  jfsCacheSizeMb?: number;
+  /** How long to wait for the container to become ready, in ms (default: 30000). */
+  readyTimeoutMs?: number;
 }
 
 export interface ContainerInfo {
@@ -171,6 +177,12 @@ export class ContainerManager {
       memoryLimit,
       cpuLimit,
     } = config;
+    // @ts-ignore — TS loses type resolution when @types/dockerode is missing
+    const shmSizeMb: number | undefined = config.shmSizeMb;
+    // @ts-ignore
+    const jfsCacheSizeMb: number | undefined = config.jfsCacheSizeMb;
+    // @ts-ignore
+    const readyTimeoutMs: number | undefined = config.readyTimeoutMs;
 
     try {
       console.log(`[ContainerManager] Creating container for run ${runId} (agent: ${agentId})`);
@@ -275,9 +287,9 @@ export class ContainerManager {
 
       // JuiceFS cache tuning for agent containers — smaller than the central
       // mount since each container has its own cache.
-      const jfsCacheSize = process.env.JFS_AGENT_CACHE_SIZE || '2048'; // 2GB default
+      const jfsCacheSize = String(jfsCacheSizeMb ?? parseInt(process.env.JFS_AGENT_CACHE_SIZE || '2048', 10));
 
-      const apiUrl = config.env?.DJINNBOT_API_URL || process.env.DJINNBOT_API_URL || 'http://api:8000';
+      const apiUrl = env?.DJINNBOT_API_URL || process.env.DJINNBOT_API_URL || 'http://api:8000';
 
       const containerOpts: Docker.ContainerCreateOptions = {
         Image: image,
@@ -338,7 +350,7 @@ export class ContainerManager {
           // Chromium (Playwright) uses /dev/shm heavily for rendering.
           // Docker defaults /dev/shm to 64MB which causes SIGBUS crashes on
           // non-trivial pages. 256MB is sufficient for typical headless usage.
-          ShmSize: 256 * 1024 * 1024,
+          ShmSize: (shmSizeMb ?? 256) * 1024 * 1024,
           AutoRemove: true,
         },
         // Boot script: mount JuiceFS subdirectories, set up git credentials, start agent.
@@ -486,7 +498,8 @@ export class ContainerManager {
       console.log(`[ContainerManager] Started container ${info.containerId}`);
 
       // Wait for ready status from container
-      await this.waitForReady(runId);
+      // @ts-ignore — config is typed but TS loses resolution without @types/dockerode
+      await this.waitForReady(runId, readyTimeoutMs);
       info.status = 'ready';
     } catch (error) {
       const err = error as Error;
@@ -520,7 +533,7 @@ export class ContainerManager {
     }
   }
 
-  private async waitForReady(runId: string): Promise<void> {
+  private async waitForReady(runId: string, readyTimeoutMs?: number): Promise<void> {
     const channel = channels.status(runId);
     const subscriber = this.redis.duplicate();
 
@@ -534,10 +547,11 @@ export class ContainerManager {
         subscriber.quit().catch(err => console.error('[ContainerManager] Quit error:', err));
       };
 
+      const effectiveTimeout = readyTimeoutMs ?? READY_TIMEOUT_MS;
       const timeout = setTimeout(() => {
         cleanup();
-        reject(new Error(`Container for run ${runId} did not become ready within ${READY_TIMEOUT_MS}ms`));
-      }, READY_TIMEOUT_MS);
+        reject(new Error(`Container for run ${runId} did not become ready within ${effectiveTimeout}ms`));
+      }, effectiveTimeout);
 
       subscriber.on('error', (err) => {
         clearTimeout(timeout);
