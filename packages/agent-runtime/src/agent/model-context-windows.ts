@@ -47,6 +47,10 @@ const MODEL_CONTEXT_WINDOWS: Record<string, number> = {
   'gemini-3-pro': 2_000_000,
 
   // xAI
+  'grok-4': 2_000_000,
+  'grok-4-fast': 2_000_000,
+  'grok-4.1': 2_000_000,
+  'grok-4.1-fast': 2_000_000,
   'grok-3': 131_072,
   'grok-3-mini': 131_072,
   'grok-beta': 131_072,
