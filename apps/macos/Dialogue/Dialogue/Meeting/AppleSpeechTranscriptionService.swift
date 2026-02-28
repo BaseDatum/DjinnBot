@@ -185,7 +185,6 @@ final class AppleSpeechTranscriptionService: ObservableObject, TranscriptionServ
                     guard let self, let transcriber = self.micTranscriber else { return }
                     do {
                         for try await result in transcriber.results {
-                            guard let self else { break }
                             self.handleResult(result, source: .mic)
                         }
                     } catch {
@@ -198,7 +197,6 @@ final class AppleSpeechTranscriptionService: ObservableObject, TranscriptionServ
                     guard let self, let transcriber = self.sysTranscriber else { return }
                     do {
                         for try await result in transcriber.results {
-                            guard let self else { break }
                             self.handleResult(result, source: .system)
                         }
                     } catch {
