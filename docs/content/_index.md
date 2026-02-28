@@ -225,90 +225,67 @@ subtitle="Other tools waste 20,000 tokens reading files to understand a single f
 class="hx-aspect-auto md:hx-aspect-[1.1/1] max-md:hx-min-h-[340px]"
 icon="lightning-bolt"
 style="background: radial-gradient(ellipse at 50% 80%,rgba(16,185,129,0.15),hsla(0,0%,100%,0));"
-
-> }}
-> {{< hextra/feature-card
-
+>}}
+{{< hextra/feature-card
     title="Full Cost Visibility"
     subtitle="Every LLM API call logged with model, tokens, latency, cost, and who triggered it. Per-user and per-agent dashboards. Provider-level breakdowns. You will never wonder where the money went."
     class="hx-aspect-auto md:hx-aspect-[1.1/1] max-md:hx-min-h-[340px]"
     icon="chart-bar"
     style="background: radial-gradient(ellipse at 50% 80%,rgba(142,53,234,0.15),hsla(0,0%,100%,0));"
-
-> }}
-> {{< hextra/feature-card
-
+>}}
+{{< hextra/feature-card
     title="5-Minute Setup"
     subtitle="One curl command. The setup wizard handles secrets, API keys, Docker, and optional SSL. No Kubernetes, no cloud accounts, no YAML wrangling. Your AI team is running before your coffee gets cold."
     class="hx-aspect-auto md:hx-aspect-[1.1/1] max-md:hx-min-h-[340px]"
     icon="play"
     style="background: radial-gradient(ellipse at 50% 80%,rgba(45,112,234,0.15),hsla(0,0%,100%,0));"
-
-> }}
-> {{< hextra/feature-card
-
+>}}
+{{< hextra/feature-card
     title="11 Agents, Any Workflow"
     subtitle="Not generic chatbots — real characters with backstories, opinions, and domain expertise. Ships with a full engineering team, an executive assistant, marketing, SEO, and finance leads. Customize the team or build your own agents for any domain."
     icon="user-group"
-
-> }}
-> {{< hextra/feature-card
-
+>}}
+{{< hextra/feature-card
     title="Container Isolation"
     subtitle="Every agent runs in its own ephemeral Docker container with a full toolbox — Node 22, Python, Go, Rust, an anti-detection browser, and 30+ tools. No host access. Destroyed after every step."
     icon="shield-check"
-
-> }}
-> {{< hextra/feature-card
-
+>}}
+{{< hextra/feature-card
     title="Swarm Execution"
     subtitle="Run multiple agents in parallel on DAG-aware task graphs. A planning agent decomposes the work, and a swarm executes it concurrently — respecting dependencies, streaming progress live."
     icon="beaker"
-
-> }}
-> {{< hextra/feature-card
-
+>}}
+{{< hextra/feature-card
     title="Persistent Memory"
     subtitle="Agents remember decisions, lessons, and patterns across runs via ClawVault with semantic search. Memory scoring surfaces the most relevant context. Explore connections in an interactive 3D knowledge graph."
     icon="database"
-
-> }}
-> {{< hextra/feature-card
-
+>}}
+{{< hextra/feature-card
     title="Real-Time Dashboard"
     subtitle="Live activity feeds, kanban boards, pipeline visualization, swarm DAG views, 3D memory graphs, file uploads, and a full admin panel. Not a terminal dump."
     icon="desktop-computer"
-
-> }}
-> {{< hextra/feature-card
-
+>}}
+{{< hextra/feature-card
     title="YAML Pipelines"
     subtitle="Define any multi-agent workflow as simple YAML — steps, agents, branching, loops, retries, structured output, and per-step model overrides. Drop a file in pipelines/ and it's live."
     icon="document-text"
-
-> }}
-> {{< hextra/feature-card
-
+>}}
+{{< hextra/feature-card
     title="Enterprise Auth"
     subtitle="Multi-user accounts, TOTP 2FA, API keys, OIDC SSO, per-user provider key sharing, and automatic SSL via Let's Encrypt. Built into the core from day one."
     icon="lock-closed"
-
-> }}
-> {{< hextra/feature-card
-
+>}}
+{{< hextra/feature-card
     title="Message From Any App"
     subtitle="Talk to your agents from Slack, Discord, Telegram, WhatsApp, or Signal — whatever your team already uses. Each agent gets its own bot identity on every platform. Or use the built-in dashboard chat and CLI."
     icon="chat-alt-2"
-
-> }}
-> {{< hextra/feature-card
-
+>}}
+{{< hextra/feature-card
     title="Open Core"
     subtitle="Self-hosted is completely free. FSL-1.1-ALv2 license converts to Apache 2.0 after 2 years. No vendor lock-in, no usage limits, no phone-home."
     icon="code"
-
-> }}
-> {{< /hextra/feature-grid >}}
+>}}
+{{< /hextra/feature-grid >}}
 
 ---
 

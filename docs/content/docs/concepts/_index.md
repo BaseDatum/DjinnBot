@@ -20,4 +20,5 @@ Understand how DjinnBot works under the hood. These concepts form the foundation
   {{< card link="storage" title="Storage Layer" subtitle="JuiceFS + RustFS distributed filesystem shared across all containers." icon="chip" >}}
   {{< card link="workspaces" title="Workspaces" subtitle="Git worktree isolation, persistent directories, and pipeline vs pulse strategies." icon="folder-open" >}}
   {{< card link="secrets" title="Secrets Management" subtitle="AES-256-GCM encrypted credentials with per-agent access control." icon="lock-closed" >}}
+  {{< card link="voice" title="Voice — STT & TTS" subtitle="Speech-to-text via faster-whisper, text-to-speech via Fish Audio and Voicebox." icon="microphone" >}}
 {{< /cards >}}
