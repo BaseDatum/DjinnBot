@@ -1,0 +1,156 @@
+# Resolve Pipeline — GitHub issue to pull request
+# Takes a GitHub issue, analyzes it, implements a fix, validates, and opens a PR.
+
+id: resolve
+name: Resolve Issue
+version: 1.0.0
+description: Resolve a GitHub issue end-to-end — analyze, implement, test, PR
+
+defaults:
+  model: openrouter/moonshotai/kimi-k2.5
+  tools:
+    - read
+    - write
+    - edit
+    - bash
+    - grep
+    - find
+    - ls
+  maxRetries: 2
+  timeout: 1200
+
+agents:
+  - id: yukihiro
+    name: Yukihiro (Senior SWE)
+    persona: docs/personas/yukihiro.md
+
+  - id: chieko
+    name: Chieko (Senior Test Engineer)
+    persona: docs/personas/chieko.md
+
+steps:
+  # 1. Analyze the issue and plan the fix
+  - id: ANALYZE
+    agent: yukihiro
+    input: |
+      You are a Senior Software Engineer. Analyze this GitHub issue and plan a fix.
+
+      GitHub Issue #{{issue_number}}: {{issue_title}}
+      Repository: {{repo_full_name}}
+      Author: {{issue_author}}
+      Labels: {{issue_labels}}
+      Created: {{issue_created_at}}
+
+      Issue Body:
+      {{issue_body}}
+
+      {% if issue_comments %}
+      Comments:
+      {{issue_comments}}
+      {% endif %}
+
+      Steps:
+      1. Read the relevant code in the repository to understand the codebase
+      2. Identify which files are involved in this issue
+      3. Determine root cause (if it's a bug) or design approach (if it's a feature)
+      4. Write a clear plan: what files to change, what to add, what to test
+
+      Output a detailed analysis and implementation plan.
+    outputs:
+      - analysis
+      - implementation_plan
+    onComplete: IMPLEMENT
+
+  # 2. Implement the fix
+  - id: IMPLEMENT
+    agent: yukihiro
+    input: |
+      You are a Senior Software Engineer. Implement the fix for this GitHub issue.
+
+      GitHub Issue #{{issue_number}}: {{issue_title}}
+      Repository: {{repo_full_name}}
+
+      Issue Body:
+      {{issue_body}}
+
+      Your Analysis:
+      {{analysis}}
+
+      Implementation Plan:
+      {{implementation_plan}}
+
+      Steps:
+      1. Implement the changes according to your plan
+      2. Write or update tests to cover the changes
+      3. Run the existing test suite to check for regressions
+      4. If tests fail, fix the issues before proceeding
+      5. Run any linters or formatters the project uses
+      6. Commit with message: "fix: resolve #{{issue_number}} — {{issue_title}}"
+
+      When done, summarize what you changed and what tests you added/updated.
+    outputs:
+      - summary
+      - files_changed
+    onComplete: VALIDATE
+
+  # 3. Validate the implementation
+  - id: VALIDATE
+    agent: chieko
+    input: |
+      You are a Senior Test Engineer. Validate the implementation for this GitHub issue.
+      DO NOT modify production code — only add or fix tests if needed.
+
+      GitHub Issue #{{issue_number}}: {{issue_title}}
+      Repository: {{repo_full_name}}
+
+      Issue Body:
+      {{issue_body}}
+
+      Implementation Summary:
+      {{summary}}
+      Files Changed: {{files_changed}}
+
+      Steps:
+      1. Run the full test suite — confirm all tests pass
+      2. Review the changes for correctness and edge cases
+      3. Check that the issue's requirements are actually met
+      4. Verify no regressions in related areas
+      5. If tests fail, note exactly what fails and why
+
+      Output VALIDATE_RESULT: PASS or FAIL
+
+      Write your outputs:
+      - VALIDATE_RESULT.txt — PASS or FAIL
+      - TEST_REPORT.md — What was tested and results
+    outputs:
+      - validate_result
+      - test_report
+    onResult:
+      FAIL:
+        goto: IMPLEMENT
+
+  # 4. Open a pull request
+  - id: PR
+    agent: yukihiro
+    input: |
+      You are a Senior Software Engineer. Open a pull request for this resolved issue.
+
+      GitHub Issue #{{issue_number}}: {{issue_title}}
+      Repository: {{repo_full_name}}
+
+      Implementation Summary:
+      {{summary}}
+      Files Changed: {{files_changed}}
+      Test Report: {{test_report}}
+
+      Steps:
+      1. Make sure all changes are committed and pushed
+      2. Open a pull request with:
+         - Title: "fix: resolve #{{issue_number}} — {{issue_title}}"
+         - Body: Include the issue reference, summary of changes, and test results
+         - Reference: "Closes #{{issue_number}}" in the PR body
+      3. The PR should be clear enough for a reviewer to understand without additional context
+
+      Use `gh pr create` or `open_pull_request` tool to create the PR.
+    outputs:
+      - pr_url
