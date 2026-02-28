@@ -5,7 +5,8 @@
   "description": "Export browser cookies to DjinnBot for authenticated agent browsing via Camofox",
   "permissions": [
     "cookies",
-    "storage"
+    "storage",
+    "alarms"
   ],
   "host_permissions": [
     "<all_urls>"

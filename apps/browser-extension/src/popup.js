@@ -13,6 +13,9 @@ const $extractOnly = document.getElementById('extractOnly');
 const $status = document.getElementById('status');
 const $preview = document.getElementById('preview');
 const $saved = document.getElementById('saved');
+const $trackedList = document.getElementById('trackedList');
+const $syncAllBtn = document.getElementById('syncAllBtn');
+const $syncInfo = document.getElementById('syncInfo');
 
 // ── Persist settings ──────────────────────────────────────────────────────
 
@@ -40,19 +43,16 @@ document.querySelectorAll('.quick-domain').forEach(btn => {
   btn.addEventListener('click', () => {
     const domain = btn.dataset.domain;
     $domain.value = domain;
-    // Auto-fill name from button text
     if (!$name.value.trim()) {
       $name.value = btn.textContent;
     }
   });
 });
 
-// Auto-fill name when domain changes
 $domain.addEventListener('input', () => {
   if ($name.value.trim()) return;
   const domain = $domain.value.trim();
   if (domain) {
-    // Capitalize first letter of domain without TLD
     const base = domain.replace(/^\./, '').split('.')[0];
     $name.value = base.charAt(0).toUpperCase() + base.slice(1);
   }
@@ -80,6 +80,17 @@ function setLoading(btn, loading) {
   }
 }
 
+// ── Time formatting ───────────────────────────────────────────────────────
+
+function timeAgo(ms) {
+  if (!ms) return 'never';
+  const sec = Math.floor((Date.now() - ms) / 1000);
+  if (sec < 60) return 'just now';
+  if (sec < 3600) return `${Math.floor(sec / 60)}m ago`;
+  if (sec < 86400) return `${Math.floor(sec / 3600)}h ago`;
+  return `${Math.floor(sec / 86400)}d ago`;
+}
+
 // ── Extract & Upload ──────────────────────────────────────────────────────
 
 $extractAndUpload.addEventListener('click', async () => {
@@ -105,8 +116,10 @@ $extractAndUpload.addEventListener('click', async () => {
     if (response.success) {
       showStatus('success',
         `Sent ${response.count} cookies to DjinnBot (${response.result.domain}). ` +
-        `Cookie set ID: ${response.result.id}`
+        `Now tracking for auto-sync.`
       );
+      // Refresh tracked list
+      await loadTrackedSites();
     } else {
       showStatus('error', response.error || 'Unknown error');
     }
@@ -135,7 +148,6 @@ $extractOnly.addEventListener('click', async () => {
     if (response.success) {
       showStatus('info', `Found ${response.count} cookies for ${domain}`);
       if (response.count > 0) {
-        // Show first few lines as preview
         const lines = response.netscape.split('\n');
         const preview = lines.slice(0, 12).join('\n') +
           (lines.length > 12 ? `\n... (${lines.length - 2} total cookies)` : '');
@@ -152,6 +164,114 @@ $extractOnly.addEventListener('click', async () => {
   }
 });
 
+// ── Tracked sites ─────────────────────────────────────────────────────────
+
+async function loadTrackedSites() {
+  try {
+    const response = await api.runtime.sendMessage({ type: 'GET_TRACKED_SITES' });
+    if (!response.success) return;
+    renderTrackedSites(response.sites);
+  } catch (err) {
+    console.error('Failed to load tracked sites:', err);
+  }
+}
+
+function renderTrackedSites(sites) {
+  if (!sites || sites.length === 0) {
+    $trackedList.innerHTML = '<div class="tracked-empty">No tracked sites. Send cookies to DjinnBot to start auto-syncing.</div>';
+    $syncAllBtn.style.display = 'none';
+    $syncInfo.textContent = '';
+    return;
+  }
+
+  $syncAllBtn.style.display = '';
+  const okCount = sites.filter(s => s.status === 'ok').length;
+  $syncInfo.textContent = `${okCount}/${sites.length} synced`;
+
+  $trackedList.innerHTML = sites.map(site => `
+    <div class="tracked-site" data-id="${site.cookieSetId}">
+      <div class="status-dot ${site.status}" title="${site.status}${site.lastError ? ': ' + site.lastError : ''}"></div>
+      <div class="tracked-info">
+        <div class="tracked-name">${escapeHtml(site.name)}</div>
+        <div class="tracked-meta">
+          ${escapeHtml(site.domain)}
+          &middot; synced ${timeAgo(site.lastSyncedAt)}
+          ${site.status === 'disconnected' ? ' &middot; <span style="color:#f87171">deleted on server</span>' : ''}
+          ${site.status === 'error' && site.lastError ? ' &middot; <span style="color:#f87171">error</span>' : ''}
+        </div>
+      </div>
+      <div class="tracked-actions">
+        ${site.status !== 'disconnected' ? `<button class="btn btn-secondary btn-sm sync-one-btn" data-id="${site.cookieSetId}" title="Sync now">Sync</button>` : ''}
+        <button class="btn btn-danger btn-sm remove-btn" data-id="${site.cookieSetId}" title="Stop tracking">Remove</button>
+      </div>
+    </div>
+  `).join('');
+
+  // Attach event listeners
+  $trackedList.querySelectorAll('.sync-one-btn').forEach(btn => {
+    btn.addEventListener('click', () => syncOneSite(btn.dataset.id, btn));
+  });
+  $trackedList.querySelectorAll('.remove-btn').forEach(btn => {
+    btn.addEventListener('click', () => removeSite(btn.dataset.id));
+  });
+}
+
+async function syncOneSite(cookieSetId, btn) {
+  if (btn) setLoading(btn, true);
+  try {
+    const response = await api.runtime.sendMessage({
+      type: 'SYNC_SITE',
+      cookieSetId,
+    });
+    if (response.success) {
+      await loadTrackedSites();
+    } else {
+      showStatus('error', response.error || 'Sync failed');
+    }
+  } catch (err) {
+    showStatus('error', `Sync failed: ${err.message}`);
+  } finally {
+    if (btn) setLoading(btn, false);
+  }
+}
+
+async function removeSite(cookieSetId) {
+  try {
+    const response = await api.runtime.sendMessage({
+      type: 'REMOVE_TRACKED_SITE',
+      cookieSetId,
+    });
+    if (response.success) {
+      renderTrackedSites(response.sites);
+    }
+  } catch (err) {
+    showStatus('error', `Remove failed: ${err.message}`);
+  }
+}
+
+$syncAllBtn.addEventListener('click', async () => {
+  setLoading($syncAllBtn, true);
+  try {
+    const response = await api.runtime.sendMessage({ type: 'SYNC_ALL' });
+    if (response.success) {
+      renderTrackedSites(response.sites);
+    } else {
+      showStatus('error', response.error || 'Sync failed');
+    }
+  } catch (err) {
+    showStatus('error', `Sync failed: ${err.message}`);
+  } finally {
+    setLoading($syncAllBtn, false);
+  }
+});
+
+function escapeHtml(str) {
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+
 // ── Init ──────────────────────────────────────────────────────────────────
 
 loadSettings();
+loadTrackedSites();
