@@ -6,7 +6,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
   Cookie, Plus, Trash2, Upload, Loader2, Shield, ShieldCheck,
-  Globe, Clock, Users,
+  Globe, Clock, Users, RefreshCw,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import {
@@ -208,6 +208,12 @@ export function BrowserCookiesPage() {
                         <Clock className="h-3 w-3" />
                         {new Date(cs.created_at).toLocaleDateString()}
                       </span>
+                      {cs.updated_at !== cs.created_at && (
+                        <span className="flex items-center gap-1">
+                          <RefreshCw className="h-3 w-3" />
+                          Synced: {new Date(cs.updated_at).toLocaleString()}
+                        </span>
+                      )}
                       {cs.expires_at && (
                         <span>
                           Expires: {new Date(cs.expires_at * 1000).toLocaleDateString()}

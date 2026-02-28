@@ -10,6 +10,7 @@ Endpoints:
     GET    /v1/browser/cookies                              list cookie sets
     POST   /v1/browser/cookies                              upload cookie file
     GET    /v1/browser/cookies/{cookie_set_id}              get cookie set
+    PUT    /v1/browser/cookies/{cookie_set_id}/content      update cookie file content
     DELETE /v1/browser/cookies/{cookie_set_id}              delete cookie set + file
 
   Agent grants:
@@ -21,6 +22,7 @@ Endpoints:
 import json
 import os
 import shutil
+import tempfile
 import uuid
 from typing import Optional
 
@@ -44,6 +46,9 @@ COOKIES_CHANGED_CHANNEL = "djinnbot:browser:cookies-changed"
 
 # JuiceFS data path — cookie files are stored at /jfs/cookies/{agent_id}/
 DATA_PATH = os.environ.get("DJINN_DATA_PATH", "/jfs")
+
+
+# ── Helpers ────────────────────────────────────────────────────────────────
 
 
 async def _publish_cookies_changed(agent_id: str) -> None:
@@ -98,11 +103,62 @@ def _cookie_file_path(agent_id: str, filename: str) -> str:
     return os.path.join(DATA_PATH, "cookies", agent_id, filename)
 
 
+def _staging_file_path(filename: str) -> str:
+    """Absolute path to a cookie staging file on JuiceFS."""
+    return os.path.join(DATA_PATH, "cookies", "_staging", filename)
+
+
 def _ensure_cookie_dir(agent_id: str) -> str:
     """Ensure the cookies directory exists for an agent."""
     dirpath = os.path.join(DATA_PATH, "cookies", agent_id)
     os.makedirs(dirpath, exist_ok=True)
     return dirpath
+
+
+def _atomic_write(dest_path: str, content: str) -> None:
+    """Write content to dest_path atomically via temp file + rename.
+
+    This prevents readers (e.g. agent containers on JuiceFS) from seeing
+    a half-written file.  Both the temp file and the final path must be
+    on the same filesystem (guaranteed since both are under DATA_PATH).
+    """
+    dest_dir = os.path.dirname(dest_path)
+    os.makedirs(dest_dir, exist_ok=True)
+    fd, tmp_path = tempfile.mkstemp(dir=dest_dir, suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(content)
+        os.rename(tmp_path, dest_path)
+    except Exception:
+        # Clean up temp file on failure
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
+
+
+def _fan_out_to_agents(
+    filename: str,
+    content: str,
+    agent_ids: list[str],
+) -> dict[str, str]:
+    """Copy a cookie file to every granted agent's directory.
+
+    Uses atomic writes so running containers never see partial files.
+    Returns a dict mapping agent_id -> "ok" | error message.
+    """
+    results: dict[str, str] = {}
+    for agent_id in agent_ids:
+        try:
+            _ensure_cookie_dir(agent_id)
+            dst = _cookie_file_path(agent_id, filename)
+            _atomic_write(dst, content)
+            results[agent_id] = "ok"
+        except Exception as e:
+            logger.error("Failed to write cookie file for agent %s: %s", agent_id, e)
+            results[agent_id] = str(e)
+    return results
 
 
 # ── Pydantic schemas ───────────────────────────────────────────────────────
@@ -184,6 +240,36 @@ async def upload_cookie_set(
     expiries = [c["expires"] for c in cookies if c["expires"] > 0]
     expires_at = min(expiries) if expiries else None
 
+    # Write staging file BEFORE DB commit so we never have a DB record
+    # pointing at a non-existent file.
+    staging_path = _staging_file_path(filename)
+    try:
+        _atomic_write(staging_path, content)
+    except Exception as e:
+        logger.error(
+            "Failed to write cookie staging file %s: %s (DATA_PATH=%s)",
+            staging_path,
+            e,
+            DATA_PATH,
+        )
+        raise HTTPException(
+            500,
+            f"Failed to save cookie file to storage: {e}. "
+            f"Check that the storage backend (JuiceFS) is mounted and writable.",
+        )
+
+    if not os.path.exists(staging_path):
+        logger.error(
+            "Cookie staging file not found after write: %s (JuiceFS may not be mounted at %s)",
+            staging_path,
+            DATA_PATH,
+        )
+        raise HTTPException(
+            500,
+            "Cookie file was written but could not be verified on disk. "
+            "The storage backend may not be properly mounted.",
+        )
+
     ts = now_ms()
     cookie_set = BrowserCookieSet(
         id=cookie_id,
@@ -199,14 +285,12 @@ async def upload_cookie_set(
     db.add(cookie_set)
     await db.commit()
 
-    # Write file to a staging area — it gets copied to agent dirs on grant
-    staging_dir = os.path.join(DATA_PATH, "cookies", "_staging")
-    os.makedirs(staging_dir, exist_ok=True)
-    with open(os.path.join(staging_dir, filename), "w") as f:
-        f.write(content)
-
     logger.info(
-        "Cookie set uploaded: %s (%s, %d cookies)", cookie_id, domain, len(cookies)
+        "Cookie set uploaded: %s (%s, %d cookies, staging=%s)",
+        cookie_id,
+        domain,
+        len(cookies),
+        staging_path,
     )
 
     return CookieSetResponse(
@@ -262,6 +346,104 @@ async def get_cookie_set(
     )
 
 
+@router.put("/cookies/{cookie_set_id}/content")
+async def update_cookie_content(
+    cookie_set_id: str,
+    cookie_file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_async_session),
+):
+    """Update the cookie file for an existing cookie set.
+
+    Overwrites the staging file and atomically pushes the new content to
+    every agent that has been granted access.  Running agent containers
+    see the updated file within ~1 second (JuiceFS cache TTL).
+
+    This is the endpoint the browser extension calls on periodic sync.
+    """
+    # Look up cookie set
+    result = await db.execute(
+        select(BrowserCookieSet).where(BrowserCookieSet.id == cookie_set_id)
+    )
+    cs = result.scalar_one_or_none()
+    if not cs:
+        raise HTTPException(404, "Cookie set not found")
+
+    content = (await cookie_file.read()).decode("utf-8", errors="replace")
+
+    cookies = _parse_netscape_cookies(content)
+    if not cookies:
+        raise HTTPException(400, "No valid cookies found in file")
+
+    if len(cookies) > 500:
+        raise HTTPException(400, f"Too many cookies ({len(cookies)}). Maximum 500.")
+
+    # Update domain detection in case the cookies changed domains
+    domain = _detect_domain(cookies)
+    expiries = [c["expires"] for c in cookies if c["expires"] > 0]
+    expires_at = min(expiries) if expiries else None
+
+    # Atomically overwrite staging file
+    staging_path = _staging_file_path(cs.filename)
+    try:
+        _atomic_write(staging_path, content)
+    except Exception as e:
+        logger.error(
+            "Failed to update cookie staging file %s: %s",
+            staging_path,
+            e,
+        )
+        raise HTTPException(500, f"Failed to write cookie file to storage: {e}")
+
+    # Fan out to all granted agents
+    grants_result = await db.execute(
+        select(AgentCookieGrant).where(AgentCookieGrant.cookie_set_id == cookie_set_id)
+    )
+    grants = grants_result.scalars().all()
+    agent_ids = [g.agent_id for g in grants]
+
+    fan_out_results = {}
+    if agent_ids:
+        fan_out_results = _fan_out_to_agents(cs.filename, content, agent_ids)
+
+    # Update DB metadata
+    ts = now_ms()
+    cs.cookie_count = len(cookies)
+    cs.domain = domain
+    cs.expires_at = expires_at
+    cs.updated_at = ts
+    await db.commit()
+
+    # Notify all affected agents
+    for agent_id in agent_ids:
+        await _publish_cookies_changed(agent_id)
+
+    failed = [a for a, r in fan_out_results.items() if r != "ok"]
+    if failed:
+        logger.warning(
+            "Cookie update %s: fan-out failed for agents: %s",
+            cookie_set_id,
+            failed,
+        )
+
+    logger.info(
+        "Cookie set updated: %s (%s, %d cookies, %d agents)",
+        cookie_set_id,
+        domain,
+        len(cookies),
+        len(agent_ids),
+    )
+
+    return {
+        "ok": True,
+        "cookie_set_id": cookie_set_id,
+        "cookie_count": len(cookies),
+        "domain": domain,
+        "agents_updated": len(agent_ids),
+        "agents_failed": failed,
+        "updated_at": ts,
+    }
+
+
 @router.delete("/cookies/{cookie_set_id}")
 async def delete_cookie_set(
     cookie_set_id: str,
@@ -287,7 +469,7 @@ async def delete_cookie_set(
     await db.commit()
 
     # Clean up files
-    staging_path = os.path.join(DATA_PATH, "cookies", "_staging", cs.filename)
+    staging_path = _staging_file_path(cs.filename)
     if os.path.exists(staging_path):
         os.remove(staging_path)
 
@@ -358,29 +540,74 @@ async def grant_cookies_to_agent(
             AgentCookieGrant.cookie_set_id == cookie_set_id,
         )
     )
-    if existing.scalar_one_or_none():
-        return {"ok": True, "message": "Already granted"}
+    already_granted = existing.scalar_one_or_none() is not None
 
-    # Create grant
-    grant = AgentCookieGrant(
-        agent_id=agent_id,
-        cookie_set_id=cookie_set_id,
-        granted_by="ui",
-        granted_at=now_ms(),
-    )
-    db.add(grant)
-    await db.commit()
+    if not already_granted:
+        grant = AgentCookieGrant(
+            agent_id=agent_id,
+            cookie_set_id=cookie_set_id,
+            granted_by="ui",
+            granted_at=now_ms(),
+        )
+        db.add(grant)
+        await db.commit()
 
-    # Copy cookie file to agent's directory on JuiceFS
-    src = os.path.join(DATA_PATH, "cookies", "_staging", cs.filename)
-    if os.path.exists(src):
+    # Always copy the file — even for "already granted" — so that
+    # re-granting repairs a missing file after transient errors.
+    src = _staging_file_path(cs.filename)
+    if not os.path.exists(src):
+        logger.error(
+            "Staging cookie file missing: %s (cookie_set=%s, agent=%s). "
+            "JuiceFS may not be mounted at %s.",
+            src,
+            cookie_set_id,
+            agent_id,
+            DATA_PATH,
+        )
+        raise HTTPException(
+            500,
+            f"Cookie file not found on disk ({cs.filename}). "
+            f"Try re-uploading the cookie set.",
+        )
+
+    try:
+        content = open(src, "r").read()
         _ensure_cookie_dir(agent_id)
         dst = _cookie_file_path(agent_id, cs.filename)
-        shutil.copy2(src, dst)
+        _atomic_write(dst, content)
+        logger.info(
+            "Cookie file placed: %s -> %s (%d bytes)",
+            src,
+            dst,
+            os.path.getsize(dst),
+        )
+    except Exception as e:
+        logger.error(
+            "Failed to copy cookie file %s -> agent %s: %s",
+            cs.filename,
+            agent_id,
+            e,
+        )
+        raise HTTPException(
+            500,
+            f"Failed to place cookie file in agent directory: {e}",
+        )
+
+    # Verify the file actually landed
+    if not os.path.exists(dst):
+        logger.error(
+            "Cookie file copy succeeded but file not found at %s (JuiceFS sync issue?)",
+            dst,
+        )
+        raise HTTPException(
+            500,
+            "Cookie file was copied but could not be verified on disk. "
+            "Try again in a few seconds.",
+        )
 
     await _publish_cookies_changed(agent_id)
     logger.info("Cookie grant: %s -> %s (%s)", cookie_set_id, agent_id, cs.domain)
-    return {"ok": True}
+    return {"ok": True, "file_copied": True, "filename": cs.filename}
 
 
 @router.delete("/cookies/agents/{agent_id}/{cookie_set_id}")

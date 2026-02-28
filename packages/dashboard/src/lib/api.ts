@@ -3032,6 +3032,24 @@ export async function revokeCookiesFromAgent(agentId: string, cookieSetId: strin
   return handleResponse(res, 'Failed to revoke cookies');
 }
 
+export async function updateBrowserCookieContent(cookieSetId: string, file: File): Promise<{
+  ok: boolean;
+  cookie_set_id: string;
+  cookie_count: number;
+  domain: string;
+  agents_updated: number;
+  agents_failed: string[];
+  updated_at: number;
+}> {
+  const formData = new FormData();
+  formData.append('cookie_file', file);
+  const res = await authFetch(`${API_BASE}/browser/cookies/${cookieSetId}/content`, {
+    method: 'PUT',
+    body: formData,
+  });
+  return handleResponse(res, 'Failed to update cookie content');
+}
+
 
 // ═══════════════════════════════════════════════════════════════════════════
 // AGENT MESSAGING PERMISSIONS
