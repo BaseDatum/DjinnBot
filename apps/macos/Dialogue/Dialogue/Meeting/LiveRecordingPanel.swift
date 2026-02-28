@@ -90,6 +90,23 @@ struct LiveRecordingPanelView: View {
                 
                 Divider()
                 
+                // Diarization error banner (if any)
+                if let error = coordinator.diarizationError {
+                    HStack(spacing: 6) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.orange)
+                            .font(.caption)
+                        Text(error)
+                            .font(.caption2)
+                            .foregroundStyle(.orange)
+                            .lineLimit(2)
+                        Spacer()
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 4)
+                    .background(Color.orange.opacity(0.1))
+                }
+                
                 // Scrolling transcript
                 transcriptSection
                 
@@ -364,6 +381,9 @@ final class RecordingCoordinator: ObservableObject {
     @Published var availableDevices: [AudioDeviceInfo] = []
     @Published var selectedDeviceID: AudioDeviceID?
     
+    /// Diarization processing error, surfaced from RealTimeDiarizationService.
+    @Published var diarizationError: String?
+    
     // MARK: - Services
     
     /// Captures microphone audio (the primary user's voice).
@@ -551,6 +571,17 @@ final class RecordingCoordinator: ObservableObject {
             self?.handleSpeakerSegment(label: label, clusterID: clusterID, startTime: startTime, endTime: endTime, embedding: embedding)
         }
         
+        // Surface diarization errors to the coordinator for UI display.
+        diarizationService.onProcessingError = { [weak self] errorMsg in
+            self?.diarizationError = errorMsg
+            // Auto-clear after 10 seconds
+            DispatchQueue.main.asyncAfter(deadline: .now() + 10) { [weak self] in
+                if self?.diarizationError == errorMsg {
+                    self?.diarizationError = nil
+                }
+            }
+        }
+        
         // Start services
         let audioURL = meeting.makeAudioFileURL()
         meeting.audioFileURL = audioURL
@@ -609,7 +640,13 @@ final class RecordingCoordinator: ObservableObject {
             await transcriptionService.stopStreaming()
         }
         
+        // Final reconciliation sweep for any remaining orphan segments.
+        reconcileOrphanSegments()
+        
         let detectedSpeakers = diarizationService.stopSession()
+        
+        // Persist any EMA embedding updates accumulated during this session.
+        VoiceProfileManager.shared.persistPendingUpdates()
         
         if let meeting = recording {
             meeting.isRecording = false
@@ -652,7 +689,10 @@ final class RecordingCoordinator: ObservableObject {
         audioLevel = 0
         isPaused = false
         speakerCount = 0
+        diarizationError = nil
         recentSpeakerLabels.removeAll()
+        orphanSegments.removeAll()
+        nextOrphanIndex = 1
         speakerColorMap.removeAll()
         nextColorIndex = 0
     }
@@ -662,11 +702,46 @@ final class RecordingCoordinator: ObservableObject {
     /// Handle a final transcript segment from ASR.
     /// Merges with the most recent diarization speaker label and links it
     /// to the diarization service's speaker-segment map.
+    
+    /// Temporary cluster prefix for segments that arrive before diarization has
+    /// results. These are reconciled against the full speaker timeline at stop time.
+    private static let orphanClusterPrefix = "orphan-"
+    private var nextOrphanIndex: Int = 1
+    
+    /// Orphan segments: ASR segments that had no diarization match at creation time.
+    /// Stored with their timestamps so we can retroactively match them when the
+    /// diarizer catches up.
+    private struct OrphanSegment {
+        let segmentID: UUID
+        let displaySegmentIndex: Int
+        let orphanClusterID: String
+        let startTime: TimeInterval
+        let endTime: TimeInterval
+    }
+    private var orphanSegments: [OrphanSegment] = []
+    
     private func handleFinalSegment(text: String, startTime: TimeInterval, endTime: TimeInterval) {
         // Find the most recent speaker entry active around this time
         let speakerEntry = currentSpeakerEntry(at: startTime)
-        let speakerLabel = speakerEntry?.label ?? "Speaker ?"
-        let speakerClusterID = speakerEntry?.clusterID
+        
+        let speakerLabel: String
+        let speakerClusterID: String
+        var isOrphan = false
+        
+        if let entry = speakerEntry {
+            speakerLabel = entry.label
+            speakerClusterID = entry.clusterID
+        } else {
+            // No diarization result overlaps this segment yet. Assign a temporary
+            // per-orphan cluster ID. These will be reconciled against the full
+            // diarization timeline when the recording stops.
+            let orphanID = Self.orphanClusterPrefix + "\(nextOrphanIndex)"
+            nextOrphanIndex += 1
+            speakerLabel = "Speaker ?"
+            speakerClusterID = orphanID
+            isOrphan = true
+        }
+        
         let colorIndex = speakerColorIndex(for: speakerLabel)
         
         var segment = TranscriptSegment(
@@ -679,12 +754,21 @@ final class RecordingCoordinator: ObservableObject {
         )
         segment.speakerColorIndex = colorIndex
         
+        let segmentIndex = displaySegments.count
         displaySegments.append(segment)
         recording?.upsertSegment(segment)
         
         // Link segment ID to the speaker in the diarization service
-        if let clusterID = speakerClusterID {
-            diarizationService.linkSegment(id: segment.id, toSpeaker: clusterID)
+        diarizationService.linkSegment(id: segment.id, toSpeaker: speakerClusterID)
+        
+        if isOrphan {
+            orphanSegments.append(OrphanSegment(
+                segmentID: segment.id,
+                displaySegmentIndex: segmentIndex,
+                orphanClusterID: speakerClusterID,
+                startTime: startTime,
+                endTime: endTime
+            ))
         }
         
         partialText = ""
@@ -698,19 +782,31 @@ final class RecordingCoordinator: ObservableObject {
         let endTime: TimeInterval
     }
     
+    /// Capped recent entries for fast real-time lookup during recording.
     private var recentSpeakerLabels: [SpeakerEntry] = []
     
     private func handleSpeakerSegment(label: String, clusterID: String, startTime: TimeInterval, endTime: TimeInterval, embedding: [Float]) {
-        recentSpeakerLabels.append(SpeakerEntry(
+        let entry = SpeakerEntry(
             label: label,
             clusterID: clusterID,
             startTime: startTime,
             endTime: endTime
-        ))
+        )
         
-        // Keep only the last 200 entries
+        recentSpeakerLabels.append(entry)
+        
+        // Cap the real-time lookup list
         if recentSpeakerLabels.count > 200 {
             recentSpeakerLabels.removeFirst(recentSpeakerLabels.count - 200)
+        }
+        
+        // Each time new diarization results arrive, try to resolve any pending
+        // orphan segments. The diarization service's voice-identified speaker
+        // timeline now has new entries, so orphans from the first ~10s (before
+        // the diarizer's first chunk completed) can be matched to proper
+        // voice clusters.
+        if !orphanSegments.isEmpty {
+            reconcileOrphanSegments()
         }
     }
     
@@ -724,6 +820,66 @@ final class RecordingCoordinator: ObservableObject {
         }
         // Fall back to the most recent speaker
         return recentSpeakerLabels.last
+    }
+    
+    // MARK: - Orphan Reconciliation
+    
+    /// Try to match orphan segments against the diarization service's
+    /// voice-identified speaker timeline.
+    ///
+    /// The diarization service maintains the authoritative record of which
+    /// voice cluster was active at each point in time (determined by voice
+    /// embedding analysis, not just timestamps). This method queries that
+    /// record to resolve orphans to their correct speaker.
+    ///
+    /// Called incrementally from `handleSpeakerSegment` as new diarization
+    /// results arrive, and as a final sweep from `stopRecording`.
+    private func reconcileOrphanSegments() {
+        guard !orphanSegments.isEmpty else { return }
+        
+        var resolved: [Int] = []
+        
+        for (idx, orphan) in orphanSegments.enumerated() {
+            // Ask the diarization service which voice-identified speaker cluster
+            // was active during this orphan's time range.
+            guard let match = diarizationService.findSpeaker(
+                startTime: orphan.startTime,
+                endTime: orphan.endTime
+            ) else {
+                continue  // No diarization coverage yet — try again later
+            }
+            
+            // Relink the segment from its temporary orphan cluster to the
+            // voice-identified cluster
+            diarizationService.relinkSegment(
+                id: orphan.segmentID,
+                from: orphan.orphanClusterID,
+                to: match.speakerID
+            )
+            
+            // Update the display segment's speaker info
+            let colorIndex = speakerColorIndex(for: match.label)
+            if orphan.displaySegmentIndex < displaySegments.count,
+               displaySegments[orphan.displaySegmentIndex].id == orphan.segmentID {
+                displaySegments[orphan.displaySegmentIndex].speakerLabel = match.label
+                displaySegments[orphan.displaySegmentIndex].speakerProfileID = match.speakerID
+                displaySegments[orphan.displaySegmentIndex].speakerColorIndex = colorIndex
+            }
+            
+            // Also update in the recording's segment list
+            if let seg = displaySegments.first(where: { $0.id == orphan.segmentID }) {
+                recording?.upsertSegment(seg)
+            }
+            
+            resolved.append(idx)
+        }
+        
+        if !resolved.isEmpty {
+            for idx in resolved.reversed() {
+                orphanSegments.remove(at: idx)
+            }
+            print("[Dialogue] Reconciled \(resolved.count) orphan segment(s), \(orphanSegments.count) remaining")
+        }
     }
     
     /// Map speaker labels to consistent color indices.

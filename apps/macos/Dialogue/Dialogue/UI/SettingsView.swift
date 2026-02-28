@@ -226,28 +226,127 @@ struct SettingsView: View {
                                 .font(.caption2)
                                 .foregroundStyle(.tertiary)
                             Spacer()
+                            Text(String(format: "%.2f", diarizationSettings.clusteringThreshold))
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .monospacedDigit()
+                            Spacer()
                             Text("Fewer Speakers")
                                 .font(.caption2)
                                 .foregroundStyle(.tertiary)
                         }
                     }
 
+                    Divider()
+                    
+                    Text("Minimum Speech Duration")
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+                    
+                    Text("Segments shorter than this are discarded. Lower values capture brief interjections (\"yeah\", \"uh-huh\"); higher values reduce false positives from background noise.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    
+                    VStack(spacing: 4) {
+                        Slider(
+                            value: $diarizationSettings.minSpeechDuration,
+                            in: DiarizationSettings.minSpeechDurationRange,
+                            step: 0.1
+                        )
+                        
+                        HStack {
+                            Text("0.3s")
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                            Spacer()
+                            Text(String(format: "%.1fs", diarizationSettings.minSpeechDuration))
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .monospacedDigit()
+                            Spacer()
+                            Text("3.0s")
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                        }
+                    }
+                    
+                    Divider()
+                    
+                    Text("Chunk Duration")
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+                    
+                    Text("How much audio the diarizer processes at a time. Longer chunks give more context for accurate speaker identification but increase the delay before results appear. The default of 10s balances accuracy and responsiveness.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    
+                    VStack(spacing: 4) {
+                        Slider(
+                            value: $diarizationSettings.chunkDuration,
+                            in: DiarizationSettings.chunkDurationRange,
+                            step: 1.0
+                        )
+                        
+                        HStack {
+                            Text("5s (faster)")
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                            Spacer()
+                            Text(String(format: "%.0fs", diarizationSettings.chunkDuration))
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .monospacedDigit()
+                            Spacer()
+                            Text("30s (more accurate)")
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                        }
+                    }
+
+                    Divider()
+                    
                     HStack {
                         Spacer()
-                        Button("Reset to Default") {
+                        Button("Reset All to Defaults") {
                             diarizationSettings.clusteringThreshold = DiarizationSettings.defaultThreshold
+                            diarizationSettings.minSpeechDuration = DiarizationSettings.defaultMinSpeechDuration
+                            diarizationSettings.chunkDuration = DiarizationSettings.defaultChunkDuration
                         }
                         .buttonStyle(.bordered)
                         .controlSize(.small)
-                        .disabled(diarizationSettings.clusteringThreshold == DiarizationSettings.defaultThreshold)
                     }
+
+                    Divider()
+
+                    Text("Diarization Pipeline")
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+
+                    Picker("Pipeline", selection: $diarizationSettings.pipeline) {
+                        ForEach(DiarizationPipeline.allCases) { pipeline in
+                            VStack(alignment: .leading) {
+                                Text(pipeline.displayName)
+                                Text(pipeline.subtitle)
+                                    .font(.caption2)
+                                    .foregroundStyle(.tertiary)
+                            }
+                            .tag(pipeline)
+                        }
+                    }
+                    .pickerStyle(.radioGroup)
 
                     Text("Changes take effect on the next recording session.")
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
                 }
                 .onChange(of: diarizationSettings.clusteringThreshold) { _, _ in
-                    RecordingCoordinator.shared.diarizationService.applyThresholdSetting()
+                    RecordingCoordinator.shared.diarizationService.applySettings()
+                }
+                .onChange(of: diarizationSettings.minSpeechDuration) { _, _ in
+                    RecordingCoordinator.shared.diarizationService.applySettings()
+                }
+                .onChange(of: diarizationSettings.chunkDuration) { _, _ in
+                    RecordingCoordinator.shared.diarizationService.applySettings()
                 }
             }
 
@@ -299,7 +398,7 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .frame(width: 520, height: 940)
+        .frame(width: 546, height: 1280)
         .onAppear(perform: loadExistingKey)
     }
 

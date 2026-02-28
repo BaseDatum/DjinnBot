@@ -31,13 +31,19 @@ struct ContentView: View {
     /// Mouse proximity detector for the floating chat toolbar.
     @StateObject private var bottomEdgeDetector = BottomEdgeDetector()
     
+    /// Mouse proximity detector for auto-revealing the sidebar.
+    @StateObject private var sidebarEdgeDetector = SidebarEdgeDetector()
+    
+    /// Controls sidebar visibility for NavigationSplitView.
+    @State private var columnVisibility: NavigationSplitViewVisibility = .all
+    
     /// Whether the floating chat toolbar is visible.
     @State private var chatToolbarVisible = false
 
     var body: some View {
         ZStack {
             VStack(spacing: 0) {
-                NavigationSplitView {
+                NavigationSplitView(columnVisibility: $columnVisibility) {
                     SidebarView(
                         documentManager: documentManager,
                         onSelectDocument: { url in
@@ -73,7 +79,7 @@ struct ContentView: View {
             }
             
             // Phase 3: Mouse tracking layer (invisible, covers the whole window)
-            MouseTrackingView(detector: bottomEdgeDetector)
+            MouseTrackingView(detector: bottomEdgeDetector, sidebarDetector: sidebarEdgeDetector)
                 .allowsHitTesting(false)
             
             // Phase 3: Floating chat toolbar (overlays at bottom)
@@ -102,6 +108,26 @@ struct ContentView: View {
         }
         .onChange(of: bottomEdgeDetector.isNearBottom) { _, isNear in
             chatToolbarVisible = isNear
+        }
+        .onChange(of: sidebarEdgeDetector.isNearLeftEdge) { _, isNear in
+            withAnimation(.easeInOut(duration: 0.2)) {
+                if isNear {
+                    columnVisibility = .all
+                } else {
+                    columnVisibility = .detailOnly
+                }
+            }
+        }
+        .onChange(of: columnVisibility) { oldValue, newValue in
+            // Track when the user manually collapses or expands the sidebar
+            // (not triggered by our auto-reveal logic).
+            if !sidebarEdgeDetector.isNearLeftEdge {
+                if newValue == .detailOnly {
+                    sidebarEdgeDetector.userCollapsedSidebar()
+                } else if newValue == .all {
+                    sidebarEdgeDetector.userExpandedSidebar()
+                }
+            }
         }
         .onAppear {
             // Start on the Home screen; pre-load the most recent document

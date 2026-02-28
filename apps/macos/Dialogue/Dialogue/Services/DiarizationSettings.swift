@@ -1,6 +1,36 @@
 import Foundation
 import Combine
 
+// MARK: - DiarizationPipeline
+
+/// Which diarization pipeline to use.
+enum DiarizationPipeline: String, CaseIterable, Identifiable {
+    /// Traditional segmentation + embedding extraction + clustering pipeline.
+    /// Best for: offline/batch processing, unlimited speakers.
+    case segmentationClustering = "segmentation_clustering"
+    
+    /// End-to-end neural Sortformer pipeline (NVIDIA).
+    /// Best for: real-time streaming, low latency, up to 4 speakers.
+    /// Requires Sortformer model download.
+    case sortformer = "sortformer"
+    
+    var id: String { rawValue }
+    
+    var displayName: String {
+        switch self {
+        case .segmentationClustering: return "Segmentation + Clustering"
+        case .sortformer: return "Sortformer (Neural)"
+        }
+    }
+    
+    var subtitle: String {
+        switch self {
+        case .segmentationClustering: return "Traditional pipeline, unlimited speakers"
+        case .sortformer: return "End-to-end neural, up to 4 speakers, lower latency"
+        }
+    }
+}
+
 // MARK: - DiarizationSettings
 
 /// User preferences for speaker diarization (who-spoke-when detection).
@@ -15,16 +45,41 @@ final class DiarizationSettings: ObservableObject {
 
     private enum Key {
         static let clusteringThreshold = "dialogue.diarization.clusteringThreshold"
+        static let minSpeechDuration = "dialogue.diarization.minSpeechDuration"
+        static let chunkDuration = "dialogue.diarization.chunkDuration"
+        static let pipeline = "dialogue.diarization.pipeline"
     }
 
-    // MARK: - Defaults
+    // MARK: - Defaults (match FluidAudio DiarizerConfig.default)
 
-    /// Default clustering threshold (matches FluidAudio's recommended value).
+    /// Default clustering threshold (matches FluidAudio DiarizerConfig.default).
+    /// The SpeakerManager derives:
+    ///   speakerThreshold = clusteringThreshold * 1.2 (speaker assignment)
+    ///   embeddingThreshold = clusteringThreshold * 0.8 (embedding updates)
+    ///
+    /// This threshold controls DIARIZATION (clustering unknown speakers), not
+    /// identification (matching enrolled profiles). Identification uses
+    /// VoiceProfileManager's strict cosine similarity > 0.75 threshold.
     static let defaultThreshold: Double = 0.7
 
-    /// Allowed range for the slider. Lower = more aggressive splitting,
-    /// higher = more aggressive merging.
+    /// Allowed range for the clustering threshold slider.
+    /// Lower = more aggressive splitting, higher = more aggressive merging.
     static let thresholdRange: ClosedRange<Double> = 0.4...0.95
+
+    /// Default minimum speech duration in seconds.
+    /// FluidAudio reference: 1.0s — segments shorter than this are discarded.
+    static let defaultMinSpeechDuration: Double = 1.0
+
+    /// Allowed range for minimum speech duration.
+    static let minSpeechDurationRange: ClosedRange<Double> = 0.3...3.0
+    
+    /// Default chunk duration in seconds.
+    /// FluidAudio reference: 10.0s — longer chunks give more context for
+    /// accurate embedding extraction; shorter chunks reduce latency.
+    static let defaultChunkDuration: Double = 10.0
+    
+    /// Allowed range for chunk duration.
+    static let chunkDurationRange: ClosedRange<Double> = 5.0...30.0
 
     // MARK: - Published Properties
 
@@ -35,14 +90,44 @@ final class DiarizationSettings: ObservableObject {
     @Published var clusteringThreshold: Double {
         didSet { defaults.set(clusteringThreshold, forKey: Key.clusteringThreshold) }
     }
+    
+    /// Minimum speech segment duration in seconds.
+    /// Segments shorter than this are discarded as noise/artifacts.
+    /// Lower values capture brief interjections; higher values reduce false positives.
+    @Published var minSpeechDuration: Double {
+        didSet { defaults.set(minSpeechDuration, forKey: Key.minSpeechDuration) }
+    }
+    
+    /// Audio chunk duration in seconds for the diarization pipeline.
+    /// Longer chunks provide more context for accurate speaker embedding
+    /// extraction but increase latency. Shorter chunks give faster results
+    /// but may reduce accuracy for similar-sounding speakers.
+    @Published var chunkDuration: Double {
+        didSet { defaults.set(chunkDuration, forKey: Key.chunkDuration) }
+    }
+    
+    /// Which diarization pipeline to use.
+    /// Sortformer provides lower latency and end-to-end neural diarization but
+    /// is limited to 4 speakers. The traditional pipeline supports unlimited speakers.
+    @Published var pipeline: DiarizationPipeline {
+        didSet { defaults.set(pipeline.rawValue, forKey: Key.pipeline) }
+    }
 
     // MARK: - Init
 
     private init() {
         defaults.register(defaults: [
             Key.clusteringThreshold: Self.defaultThreshold,
+            Key.minSpeechDuration: Self.defaultMinSpeechDuration,
+            Key.chunkDuration: Self.defaultChunkDuration,
+            Key.pipeline: DiarizationPipeline.segmentationClustering.rawValue,
         ])
 
         self.clusteringThreshold = defaults.double(forKey: Key.clusteringThreshold)
+        self.minSpeechDuration = defaults.double(forKey: Key.minSpeechDuration)
+        self.chunkDuration = defaults.double(forKey: Key.chunkDuration)
+        
+        let pipelineRaw = defaults.string(forKey: Key.pipeline) ?? DiarizationPipeline.segmentationClustering.rawValue
+        self.pipeline = DiarizationPipeline(rawValue: pipelineRaw) ?? .segmentationClustering
     }
 }

@@ -1,5 +1,6 @@
 import SwiftUI
 import AVFoundation
+import CoreAudio
 import FluidAudio
 
 // MARK: - VoiceEnrollmentView
@@ -18,17 +19,17 @@ struct VoiceEnrollmentView: View {
                 .font(.system(size: 48))
                 .foregroundStyle(.tint)
             
-            Text("Voice Enrollment")
+            Text("Welcome to Dialogue")
                 .font(.title2)
                 .fontWeight(.semibold)
             
-            Text("Record a short voice sample so Dialogue can recognize you in meetings. Read the passage below out loud in your normal speaking voice.")
+            Text("Press Record and read the paragraph below out loud in your normal speaking voice.")
                 .font(.body)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 400)
             
-            // Reading script
+            // Reading script — doubles as Dialogue marketing copy
             GroupBox {
                 Text(Self.enrollmentScript)
                     .font(.system(.body, design: .serif))
@@ -100,6 +101,24 @@ struct VoiceEnrollmentView: View {
                     .frame(maxWidth: 360)
             }
             
+            // Microphone selector (shown before and during recording)
+            if !viewModel.enrollmentComplete && !viewModel.isProcessing {
+                HStack(spacing: 8) {
+                    Image(systemName: "mic")
+                        .foregroundStyle(.secondary)
+                    
+                    Picker("Microphone", selection: $viewModel.selectedDeviceID) {
+                        Text("System Default").tag(AudioDeviceID?.none)
+                        ForEach(viewModel.availableDevices) { device in
+                            Text(device.name).tag(AudioDeviceID?.some(device.id))
+                        }
+                    }
+                    .labelsHidden()
+                    .frame(maxWidth: 240)
+                    .disabled(viewModel.isRecording)
+                }
+            }
+            
             // Controls
             HStack(spacing: 16) {
                 if viewModel.enrollmentComplete {
@@ -132,21 +151,23 @@ struct VoiceEnrollmentView: View {
             }
         }
         .padding(32)
-        .frame(width: 480, height: 580)
+        .frame(width: 480)
+        .frame(minHeight: 580, maxHeight: 700)
     }
     
     // MARK: - Enrollment Script
     
-    /// A ~30-second reading passage designed to capture a wide range of
-    /// phonemes, pitch variation, and natural cadence for robust voice enrollment.
+    /// A ~30-second reading passage that introduces Dialogue's features while
+    /// capturing a wide range of phonemes, pitch variation, and natural cadence
+    /// for robust voice enrollment.
     private static let enrollmentScript = """
-    The quick summary of today's meeting is that we agreed on three key \
-    priorities for the quarter. First, we'll focus on improving the onboarding \
-    experience. Second, the team will research potential partnerships with \
-    organizations in Europe and Asia. Third, we should finalize the budget \
-    proposal by next Friday. Does anyone have questions or objections before \
-    we move forward? Great, let's schedule a follow-up for Thursday at two \
-    o'clock.
+    Dialogue makes meetings effortless. It records and transcribes your \
+    calls in real time, automatically captures action items, and keeps your \
+    calendar up to date. Whether you're joining a quick check-in or a \
+    major project review, Dialogue handles the busywork so you can focus \
+    on the conversation. Never worry about forgetting a follow-up or \
+    losing track of who said what -- everything is organized and \
+    searchable the moment your meeting ends.
     """
     
     private func formatDuration(_ seconds: TimeInterval) -> String {
@@ -167,6 +188,11 @@ final class VoiceEnrollmentViewModel: ObservableObject {
     @Published var audioLevel: Float = 0
     @Published var errorMessage: String?
     
+    /// Available input (microphone) devices.
+    @Published var availableDevices: [AudioDeviceInfo] = []
+    /// Currently selected device ID. `nil` means system default.
+    @Published var selectedDeviceID: AudioDeviceID?
+    
     private var audioEngine: AVAudioEngine?
     private var recordedSamples: [Float] = []
     private var recordingTimer: Timer?
@@ -174,6 +200,10 @@ final class VoiceEnrollmentViewModel: ObservableObject {
     
     /// Target format: 16 kHz mono Float32.
     private let sampleRate: Double = 16000
+    
+    init() {
+        availableDevices = AudioEngineManager.enumerateInputDevices()
+    }
     
     // MARK: - Recording
     
@@ -183,7 +213,20 @@ final class VoiceEnrollmentViewModel: ObservableObject {
         
         let engine = AVAudioEngine()
         let input = engine.inputNode
+        
+        // Apply selected input device AFTER accessing inputNode but BEFORE
+        // querying the format — matches AudioEngineManager.startCapture() ordering.
+        // The node must exist first, then the device switch updates its hardware format.
+        if let deviceID = selectedDeviceID {
+            setInputDevice(deviceID, on: engine)
+        }
+        
         let inputFormat = input.outputFormat(forBus: 0)
+        
+        guard inputFormat.sampleRate > 0, inputFormat.channelCount > 0 else {
+            errorMessage = "Microphone not available — check System Settings > Privacy & Security > Microphone"
+            return
+        }
         
         guard let targetFormat = AVAudioFormat(
             commonFormat: .pcmFormatFloat32,
@@ -311,6 +354,27 @@ final class VoiceEnrollmentViewModel: ObservableObject {
                 errorMessage = "Enrollment failed: \(error.localizedDescription)"
                 isProcessing = false
             }
+        }
+    }
+    
+    // MARK: - Device Selection
+    
+    /// Set the audio input device on an AVAudioEngine.
+    /// Must be called AFTER accessing `engine.inputNode` (to initialize the node)
+    /// but BEFORE `engine.start()`.
+    private func setInputDevice(_ deviceID: AudioDeviceID, on engine: AVAudioEngine) {
+        var deviceIDVar = deviceID
+        let status = AudioUnitSetProperty(
+            engine.inputNode.audioUnit!,
+            kAudioOutputUnitProperty_CurrentDevice,
+            kAudioUnitScope_Global,
+            0,
+            &deviceIDVar,
+            UInt32(MemoryLayout<AudioDeviceID>.size)
+        )
+        if status != noErr {
+            print("[Dialogue] Failed to set enrollment input device: \(status)")
+            errorMessage = "Failed to select microphone (error \(status))"
         }
     }
     

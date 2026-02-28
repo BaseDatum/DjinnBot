@@ -2,6 +2,7 @@ import Foundation
 import ScreenCaptureKit
 import AVFoundation
 import CoreMedia
+import Accelerate
 
 // MARK: - SystemAudioCaptureManager
 
@@ -209,15 +210,43 @@ extension SystemAudioCaptureManager: SCStreamOutput {
         onAudioBuffer?(floatSamples, timestamp)
     }
     
-    /// Simple linear interpolation resampler.
+    /// High-quality resampler using vDSP polyphase decimation.
+    /// Falls back to linear interpolation for non-integer ratios.
+    /// Speaker embeddings are sensitive to spectral artifacts, so we use
+    /// vDSP_desamp when possible (integer decimation factor) for clean downsampling.
     nonisolated private func resample(_ samples: [Float], from sourceSR: Double, to targetSR: Double) -> [Float] {
-        let ratio = targetSR / sourceSR
-        let outputCount = Int(Double(samples.count) * ratio)
+        guard !samples.isEmpty else { return [] }
+        let ratio = sourceSR / targetSR  // e.g. 48000/16000 = 3.0
+        let outputCount = Int(Double(samples.count) / ratio)
         guard outputCount > 0 else { return [] }
         
+        let intRatio = Int(ratio)
+        
+        // For exact integer decimation factors (e.g. 48kHz -> 16kHz = 3x),
+        // use vDSP_desamp which applies a proper FIR filter before decimation.
+        if Double(intRatio) == ratio && intRatio > 1 {
+            // Simple averaging anti-alias filter of length = intRatio
+            // This is a rectangular (boxcar) low-pass filter.
+            let filterLength = intRatio
+            var filter = [Float](repeating: 1.0 / Float(filterLength), count: filterLength)
+            var output = [Float](repeating: 0, count: outputCount)
+            
+            vDSP_desamp(
+                samples,                           // input
+                vDSP_Stride(intRatio),             // decimation factor
+                &filter,                           // FIR filter coefficients
+                &output,                           // output
+                vDSP_Length(outputCount),           // output count
+                vDSP_Length(filterLength)           // filter length
+            )
+            return output
+        }
+        
+        // Fallback: fractional ratio -- use linear interpolation
+        let invRatio = targetSR / sourceSR
         var output = [Float](repeating: 0, count: outputCount)
         for i in 0..<outputCount {
-            let srcIdx = Double(i) / ratio
+            let srcIdx = Double(i) / invRatio
             let srcIdxFloor = Int(srcIdx)
             let frac = Float(srcIdx - Double(srcIdxFloor))
             

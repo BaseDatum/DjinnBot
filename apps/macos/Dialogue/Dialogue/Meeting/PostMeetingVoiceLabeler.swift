@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import AVFoundation
+import UniformTypeIdentifiers
 
 // MARK: - PostMeetingVoiceLabeler
 
@@ -57,12 +58,21 @@ final class VoiceLabelerViewModel: ObservableObject {
     @Published var isSaving: Bool = false
     @Published var saveMessage: String?
     
+    /// Suggested speaker merges from the diarization service.
+    @Published var mergeablePairs: [(sourceID: String, destinationID: String)] = []
+    
+    /// The speaker currently being hovered over during a drag operation (for drop highlight).
+    @Published var dropTargetSpeakerID: String?
+    
     /// Audio player for segment playback.
     private var audioPlayer: AVAudioPlayer?
     
     init(recording: MeetingRecording) {
         self.recording = recording
         self.detectedSpeakers = recording.detectedSpeakers
+        
+        // Check for mergeable speaker pairs
+        self.mergeablePairs = RecordingCoordinator.shared.diarizationService.findMergeableSpeakerPairs()
     }
     
     /// Segments for the currently selected speaker.
@@ -105,7 +115,48 @@ final class VoiceLabelerViewModel: ObservableObject {
         audioPlayer = nil
     }
     
-    /// Save a name for the selected speaker, creating a permanent voice profile.
+    /// Merge two speaker clusters that the diarization service identified as similar.
+    func mergeSpeakers(sourceID: String, destinationID: String) {
+        guard let sourceIdx = detectedSpeakers.firstIndex(where: { $0.id == sourceID }),
+              let destIdx = detectedSpeakers.firstIndex(where: { $0.id == destinationID }) else { return }
+        
+        let source = detectedSpeakers[sourceIdx]
+        let dest = detectedSpeakers[destIdx]
+        
+        // Merge segments
+        recording.relabelSpeaker(clusterID: sourceID, newLabel: dest.label, profileID: dest.profileID)
+        
+        // Move segment IDs from source to destination
+        var updatedDest = detectedSpeakers[destIdx]
+        updatedDest.segmentIDs.append(contentsOf: source.segmentIDs)
+        detectedSpeakers[destIdx] = updatedDest
+        
+        // Remove source speaker
+        detectedSpeakers.remove(at: sourceIdx)
+        
+        // Also merge in the diarization service
+        RecordingCoordinator.shared.diarizationService.mergeSpeakers(sourceID: sourceID, into: destinationID)
+        
+        // Remove this pair from suggestions
+        mergeablePairs.removeAll { $0.sourceID == sourceID && $0.destinationID == destinationID }
+        
+        saveMessage = "Merged \(source.label) into \(dest.label)"
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+            self?.saveMessage = nil
+        }
+    }
+    
+    /// Whether the selected speaker has a usable embedding for voice profile creation.
+    var selectedSpeakerHasEmbedding: Bool {
+        guard let speakerID = selectedSpeakerID,
+              let speaker = detectedSpeakers.first(where: { $0.id == speakerID }) else {
+            return false
+        }
+        return !speaker.representativeEmbedding.isEmpty
+    }
+    
+    /// Save a name for the selected speaker, creating a permanent voice profile
+    /// when an embedding is available, or just relabeling the segments otherwise.
     func saveVoiceProfile() {
         guard let speakerID = selectedSpeakerID,
               let speaker = detectedSpeakers.first(where: { $0.id == speakerID }),
@@ -117,29 +168,45 @@ final class VoiceLabelerViewModel: ObservableObject {
         isSaving = true
         
         Task {
-            do {
-                let profile = try VoiceProfileManager.shared.createProfile(
-                    displayName: name,
-                    embedding: speaker.representativeEmbedding
-                )
+            if speaker.representativeEmbedding.isEmpty {
+                // No embedding available (e.g. unmatched segments) — just relabel.
+                recording.relabelSpeaker(clusterID: speakerID, newLabel: name, profileID: nil)
                 
-                // Update the recording's segments with the new name
-                recording.relabelSpeaker(clusterID: speakerID, newLabel: name, profileID: profile.id)
-                
-                // Update local state
                 if let idx = detectedSpeakers.firstIndex(where: { $0.id == speakerID }) {
                     detectedSpeakers[idx].label = name
-                    detectedSpeakers[idx].profileID = profile.id
                     detectedSpeakers[idx].isIdentified = true
                 }
                 
-                saveMessage = "Saved voice profile for \(name)"
+                saveMessage = "Renamed to \(name) (no voice profile — merge with a known speaker for future recognition)"
                 
-                DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
                     self?.saveMessage = nil
                 }
-            } catch {
-                saveMessage = "Error: \(error.localizedDescription)"
+            } else {
+                do {
+                    let profile = try VoiceProfileManager.shared.createProfile(
+                        displayName: name,
+                        embedding: speaker.representativeEmbedding
+                    )
+                    
+                    // Update the recording's segments with the new name
+                    recording.relabelSpeaker(clusterID: speakerID, newLabel: name, profileID: profile.id)
+                    
+                    // Update local state
+                    if let idx = detectedSpeakers.firstIndex(where: { $0.id == speakerID }) {
+                        detectedSpeakers[idx].label = name
+                        detectedSpeakers[idx].profileID = profile.id
+                        detectedSpeakers[idx].isIdentified = true
+                    }
+                    
+                    saveMessage = "Saved voice profile for \(name)"
+                    
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+                        self?.saveMessage = nil
+                    }
+                } catch {
+                    saveMessage = "Error: \(error.localizedDescription)"
+                }
             }
             
             isSaving = false
@@ -182,29 +249,17 @@ struct PostMeetingVoiceLabelerView: View {
                     .tag(String?.none)
                 
                 ForEach(viewModel.detectedSpeakers) { speaker in
-                    HStack {
-                        Circle()
-                            .fill(speakerColor(for: speaker.colorIndex))
-                            .frame(width: 8, height: 8)
-                        
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(speaker.label)
-                                .fontWeight(.medium)
-                            
-                            Text("\(speaker.segmentIDs.count) segments")
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
+                    speakerRow(speaker)
+                        .tag(Optional(speaker.id))
+                        .draggable(speaker.id)
+                        .dropDestination(for: String.self) { droppedIDs, _ in
+                            guard let sourceID = droppedIDs.first,
+                                  sourceID != speaker.id else { return false }
+                            viewModel.mergeSpeakers(sourceID: sourceID, destinationID: speaker.id)
+                            return true
+                        } isTargeted: { isTargeted in
+                            viewModel.dropTargetSpeakerID = isTargeted ? speaker.id : nil
                         }
-                        
-                        Spacer()
-                        
-                        if speaker.isIdentified {
-                            Image(systemName: "checkmark.circle.fill")
-                                .foregroundStyle(.green)
-                                .font(.caption)
-                        }
-                    }
-                    .tag(Optional(speaker.id))
                 }
             }
             .listStyle(.sidebar)
@@ -213,7 +268,89 @@ struct PostMeetingVoiceLabelerView: View {
                     viewModel.selectSpeaker(id)
                 }
             }
+            
+            // Drag hint
+            Text("Drag a speaker onto another to merge them")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 4)
+            
+            // Merge suggestions
+            if !viewModel.mergeablePairs.isEmpty {
+                Divider()
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Merge Suggestions")
+                        .font(.caption)
+                        .fontWeight(.semibold)
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 12)
+                    
+                    ForEach(Array(viewModel.mergeablePairs.enumerated()), id: \.offset) { _, pair in
+                        let srcLabel = viewModel.detectedSpeakers.first(where: { $0.id == pair.sourceID })?.label ?? pair.sourceID
+                        let dstLabel = viewModel.detectedSpeakers.first(where: { $0.id == pair.destinationID })?.label ?? pair.destinationID
+                        
+                        HStack(spacing: 4) {
+                            Text("\(srcLabel)")
+                                .font(.caption2)
+                            Image(systemName: "arrow.right")
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                            Text("\(dstLabel)")
+                                .font(.caption2)
+                            Spacer()
+                            Button("Merge") {
+                                viewModel.mergeSpeakers(sourceID: pair.sourceID, destinationID: pair.destinationID)
+                            }
+                            .controlSize(.mini)
+                            .buttonStyle(.bordered)
+                        }
+                        .padding(.horizontal, 12)
+                    }
+                }
+                .padding(.vertical, 6)
+            }
         }
+    }
+    
+    // MARK: - Speaker Row
+    
+    private func speakerRow(_ speaker: DetectedSpeaker) -> some View {
+        let isDropTarget = viewModel.dropTargetSpeakerID == speaker.id
+        
+        return HStack {
+            Circle()
+                .fill(speakerColor(for: speaker.colorIndex))
+                .frame(width: 8, height: 8)
+            
+            VStack(alignment: .leading, spacing: 2) {
+                Text(speaker.label)
+                    .fontWeight(.medium)
+                
+                Text("\(speaker.segmentIDs.count) segments")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            
+            Spacer()
+            
+            if speaker.isIdentified {
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(.green)
+                    .font(.caption)
+            }
+        }
+        .padding(.vertical, 2)
+        .background(
+            RoundedRectangle(cornerRadius: 6)
+                .fill(isDropTarget ? Color.accentColor.opacity(0.2) : Color.clear)
+                .padding(.horizontal, -4)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 6)
+                .strokeBorder(isDropTarget ? Color.accentColor : Color.clear, lineWidth: 2)
+                .padding(.horizontal, -4)
+        )
     }
     
     // MARK: - Transcript Panel
@@ -301,11 +438,17 @@ struct PostMeetingVoiceLabelerView: View {
                     .textFieldStyle(.roundedBorder)
                     .frame(maxWidth: 200)
                 
-                Button("Save Voice Profile") {
+                Button(viewModel.selectedSpeakerHasEmbedding ? "Save Voice Profile" : "Rename Speaker") {
                     viewModel.saveVoiceProfile()
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(viewModel.editingName.trimmingCharacters(in: .whitespaces).isEmpty || viewModel.isSaving)
+                
+                if !viewModel.selectedSpeakerHasEmbedding {
+                    Text("No voice data — merge with another speaker for recognition")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
             }
             
             Spacer()

@@ -3,7 +3,7 @@ import Foundation
 // MARK: - MeetingSourceType
 
 /// How the meeting/call was detected and initiated.
-enum MeetingSourceType: String, Codable, CaseIterable {
+enum MeetingSourceType: String, Codable, CaseIterable, Sendable {
     /// User manually pressed the record button.
     case manual
     /// Auto-detected voice/video call (Slack, FaceTime, Signal, WhatsApp, Teams).
@@ -15,7 +15,7 @@ enum MeetingSourceType: String, Codable, CaseIterable {
 // MARK: - DetectedSpeakerSummary
 
 /// Lightweight speaker info for persisted metadata (no embeddings).
-struct DetectedSpeakerSummary: Codable, Identifiable {
+struct DetectedSpeakerSummary: Codable, Identifiable, Sendable {
     let id: String
     var label: String
     var segmentCount: Int
@@ -25,7 +25,7 @@ struct DetectedSpeakerSummary: Codable, Identifiable {
 // MARK: - MeetingMetadata
 
 /// Persisted metadata for a recorded meeting.
-struct MeetingMetadata: Codable, Identifiable, Equatable {
+struct MeetingMetadata: Codable, Identifiable, Equatable, Sendable {
     let id: UUID
     let createdAt: Date
     var duration: TimeInterval

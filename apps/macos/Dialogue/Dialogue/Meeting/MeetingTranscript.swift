@@ -3,7 +3,7 @@ import Foundation
 // MARK: - TranscriptSegment
 
 /// A single segment of transcribed speech with speaker attribution.
-struct TranscriptSegment: Identifiable, Equatable, Codable {
+struct TranscriptSegment: Identifiable, Equatable, Codable, Sendable {
     let id: UUID
     var speakerLabel: String        // "You", "Speaker 1", or a named profile
     var speakerProfileID: String?   // VoiceProfile.id if matched, nil if unknown
@@ -59,7 +59,7 @@ struct TranscriptSegment: Identifiable, Equatable, Codable {
 // MARK: - DetectedSpeaker
 
 /// A speaker detected during a meeting, used in the post-meeting labeling flow.
-struct DetectedSpeaker: Identifiable, Equatable {
+struct DetectedSpeaker: Identifiable, Equatable, Sendable {
     let id: String               // Cluster ID (e.g. "speaker-0", "speaker-1")
     var label: String            // Current display label ("You", "Speaker 1", etc.)
     var profileID: String?       // Matched VoiceProfile.id, nil if unknown
