@@ -1,4 +1,5 @@
 import SwiftUI
+import MarkdownUI
 
 /// The floating chat toolbar that warps up from the bottom edge of the window.
 /// - Collapsed: input bar with inline response preview — messages are sent and
@@ -28,6 +29,14 @@ struct FloatingChatToolbar: View {
     /// Whether the inline response area is showing in collapsed mode.
     @State private var showInlineResponse: Bool = false
     
+    /// Whether the mouse is hovering over the toolbar area. While true, the
+    /// toolbar stays visible regardless of the bottom-edge detector state.
+    @State private var isHoveringToolbar: Bool = false
+    
+    /// Whether the user has scrolled up in the warp-up mini chat.
+    /// When true, auto-scroll is suppressed to respect user intent.
+    @State private var warpUserScrolledUp: Bool = false
+    
     /// Track panel height for drag resizing.
     @State private var panelHeight: CGFloat = 400
     
@@ -38,7 +47,8 @@ struct FloatingChatToolbar: View {
     private let maxPanelRatio: CGFloat = 0.85
     
     /// Maximum height for the inline response area in collapsed mode.
-    private let maxInlineResponseHeight: CGFloat = 200
+    /// ~5 lines of caption-sized text (~14pt line height × 5 + padding).
+    private let maxInlineResponseHeight: CGFloat = 90
     
     var body: some View {
         GeometryReader { geo in
@@ -47,7 +57,7 @@ struct FloatingChatToolbar: View {
             VStack(spacing: 0) {
                 Spacer()
                 
-                if isVisible || isExpanded {
+                if isVisible || isExpanded || isHoveringToolbar {
                     VStack(spacing: 0) {
                         if isExpanded {
                             // Drag handle
@@ -70,8 +80,16 @@ struct FloatingChatToolbar: View {
                             .shadow(color: .black.opacity(0.15), radius: 12, y: -4)
                     )
                     .clipShape(RoundedRectangle(cornerRadius: isExpanded ? 16 : 12, style: .continuous))
-                    .padding(.horizontal, isExpanded ? 8 : 16)
+                    .frame(maxWidth: geo.size.width * 0.6)
+                    .frame(maxWidth: .infinity) // center within parent
                     .padding(.bottom, 8)
+                    .onHover { hovering in
+                        isHoveringToolbar = hovering
+                        if hovering {
+                            // Keep detector pinned while hovering over toolbar
+                            detector.forceShow()
+                        }
+                    }
                     .transition(
                         .asymmetric(
                             insertion: .move(edge: .bottom).combined(with: .opacity),
@@ -97,10 +115,17 @@ struct FloatingChatToolbar: View {
     
     // MARK: - Collapsed Bar
     
+    /// Whether the inline chat history area should be visible.
+    private var hasActiveChat: Bool {
+        if showInlineResponse { return true }
+        guard let session = chatManager.activeSession else { return false }
+        return !session.messages.isEmpty
+    }
+    
     private var collapsedBar: some View {
         VStack(spacing: 0) {
-            // Inline response area (shown after sending a message)
-            if showInlineResponse, let session = chatManager.activeSession {
+            // Inline response area (shown once a chat has been started)
+            if hasActiveChat, let session = chatManager.activeSession {
                 inlineResponseArea(session: session)
                 
                 Divider()
@@ -159,62 +184,153 @@ struct FloatingChatToolbar: View {
         }
     }
     
-    // MARK: - Inline Response Area
+    // MARK: - Inline Chat History Area
     
-    /// Compact response area shown in the collapsed bar after sending a message.
-    /// Shows streaming dots while generating, then the assistant's response text.
+    /// Mini chat log shown in the collapsed warp-up bar. Displays the full
+    /// scrollable message history (user messages, assistant markdown, thinking
+    /// indicators, tool call indicators) in a compact format.
+    /// Thinking and completed tool call messages are hidden once generation ends.
+    /// Auto-scrolls to bottom unless the user has intentionally scrolled up.
     private func inlineResponseArea(session: ChatSession) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            // Show the latest assistant response or streaming state
-            if session.isGenerating {
-                // Check if there's a thinking message for this turn
-                if let thinkingMsg = session.messages.last(where: { $0.role == .thinking }),
-                   !thinkingMsg.content.isEmpty {
-                    HStack(spacing: 6) {
-                        ThinkingPulseView()
-                        Text("Thinking...")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+        let visibleMessages = session.messages.filter { msg in
+            // Hide thinking messages once the turn is done
+            if msg.role == .thinking && !session.isGenerating { return false }
+            // Hide completed/failed tool calls once the turn is done
+            if msg.role == .toolCall && (msg.toolStatus == .completed || msg.toolStatus == .failed) && !session.isGenerating { return false }
+            return true
+        }
+        
+        return ScrollViewReader { proxy in
+            ScrollView(.vertical, showsIndicators: true) {
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(visibleMessages) { msg in
+                        miniMessageRow(msg)
+                    }
+                    
+                    // Live generation indicators
+                    if session.isGenerating {
+                        miniGeneratingIndicator(session: session)
+                    }
+                    
+                    // Bottom anchor + scroll position detector
+                    GeometryReader { geo in
+                        Color.clear.preference(
+                            key: WarpScrollBottomKey.self,
+                            value: geo.frame(in: .named("warpScroll")).maxY
+                        )
+                    }
+                    .frame(height: 1)
+                    .id("warp_bottom")
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+            }
+            .coordinateSpace(name: "warpScroll")
+            .onPreferenceChange(WarpScrollBottomKey.self) { bottomY in
+                warpUserScrolledUp = bottomY > 30
+            }
+            .frame(maxHeight: maxInlineResponseHeight)
+            .onChange(of: session.messages.count) { _, _ in
+                if !warpUserScrolledUp {
+                    withAnimation(.easeOut(duration: 0.15)) {
+                        proxy.scrollTo("warp_bottom", anchor: .bottom)
                     }
                 }
-                
-                // Show streaming assistant text if any
-                if let assistantMsg = session.messages.last(where: { $0.role == .assistant && $0.isStreaming }),
-                   !assistantMsg.content.isEmpty {
-                    Text(assistantMsg.content)
-                        .font(.caption)
-                        .foregroundStyle(.primary)
-                        .lineLimit(6)
-                        .textSelection(.enabled)
-                } else {
-                    // No text yet — show streaming dots
-                    StreamingDotsView()
+            }
+            .onChange(of: session.messages.last?.content ?? "") { _, _ in
+                if !warpUserScrolledUp {
+                    proxy.scrollTo("warp_bottom", anchor: .bottom)
                 }
-            } else if let lastAssistant = session.messages.last(where: { $0.role == .assistant }) {
-                // Completed response
-                Text(lastAssistant.content)
-                    .font(.caption)
-                    .foregroundStyle(.primary)
-                    .lineLimit(6)
-                    .textSelection(.enabled)
+            }
+            .onAppear {
+                proxy.scrollTo("warp_bottom", anchor: .bottom)
+            }
+        }
+        .contentShape(Rectangle())
+        .onTapGesture {
+            expand()
+        }
+    }
+    
+    /// A single message row in the mini chat log.
+    @ViewBuilder
+    private func miniMessageRow(_ msg: ChatMessage) -> some View {
+        switch msg.role {
+        case .user:
+            // User messages — right-aligned, small accent bubble
+            HStack {
+                Spacer(minLength: 40)
+                Text(msg.content)
+                    .font(.caption2)
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(Color.accentColor)
+                    )
+                    .lineLimit(3)
             }
             
-            // "Open full chat" link
-            HStack {
-                Spacer()
-                Button {
-                    expand()
-                } label: {
-                    Text("Open full chat")
+        case .assistant:
+            // Assistant messages — left-aligned, markdown rendered small
+            if !msg.content.isEmpty {
+                HStack(alignment: .top) {
+                    Markdown(msg.content)
+                        .markdownTextStyle {
+                            FontSize(11)
+                        }
+                    Spacer(minLength: 40)
+                }
+            }
+            
+        case .thinking:
+            // Thinking — compact indicator
+            HStack(spacing: 4) {
+                ThinkingPulseView()
+                Text("Thinking...")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            
+        case .toolCall:
+            // Tool calls — show spinner while running, nothing when done
+            if msg.toolStatus == .running || msg.toolStatus == .idle {
+                HStack(spacing: 4) {
+                    ProgressView()
+                        .controlSize(.mini)
+                    Text("Calling tools...")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
-                .buttonStyle(.borderless)
+            }
+            // Completed tool calls render nothing — they disappear
+            
+        case .error:
+            HStack(spacing: 4) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.caption2)
+                    .foregroundStyle(.red)
+                Text(msg.content)
+                    .font(.caption2)
+                    .foregroundStyle(.red)
+                    .lineLimit(2)
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 8)
-        .frame(maxHeight: maxInlineResponseHeight)
+    }
+    
+    /// Live generation indicator shown at the bottom while streaming.
+    @ViewBuilder
+    private func miniGeneratingIndicator(session: ChatSession) -> some View {
+        // Only show streaming dots if there's no streaming assistant message yet
+        // and no tool calls running (those have their own indicators above)
+        let hasStreamingText = session.messages.contains(where: { $0.role == .assistant && $0.isStreaming && !$0.content.isEmpty })
+        let hasRunningTools = session.messages.contains(where: { $0.role == .toolCall && ($0.toolStatus == .running || $0.toolStatus == .idle) })
+        let hasThinking = session.messages.contains(where: { $0.role == .thinking && !$0.content.isEmpty })
+        
+        if !hasStreamingText && !hasRunningTools && !hasThinking {
+            StreamingDotsView()
+        }
     }
     
     // MARK: - Drag Handle
@@ -301,5 +417,13 @@ extension View {
                 NSCursor.pop()
             }
         }
+    }
+}
+
+/// Preference key for detecting scroll position in the warp-up mini chat.
+private struct WarpScrollBottomKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
     }
 }

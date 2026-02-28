@@ -1,4 +1,5 @@
 import SwiftUI
+import MarkdownUI
 
 /// Renders a single chat message with role-appropriate styling.
 struct ChatMessageView: View {
@@ -13,7 +14,7 @@ struct ChatMessageView: View {
         case .thinking:
             thinkingIndicator
         case .toolCall:
-            toolCallCard
+            toolCallIndicator
         case .error:
             errorBanner
         }
@@ -23,14 +24,14 @@ struct ChatMessageView: View {
     
     private var userBubble: some View {
         HStack {
-            Spacer(minLength: 60)
+            Spacer(minLength: 40)
             Text(message.content)
-                .font(.body)
+                .font(.subheadline)
                 .foregroundStyle(.white)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 7)
                 .background(
-                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
                         .fill(Color.accentColor)
                 )
                 .textSelection(.enabled)
@@ -42,15 +43,17 @@ struct ChatMessageView: View {
     
     private var assistantBubble: some View {
         HStack(alignment: .top) {
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: 4) {
                 // Show thinking content if present (collapsible)
                 if let thinking = message.thinkingContent, !thinking.isEmpty {
                     ThinkingDisclosure(content: thinking)
                 }
                 
                 if !message.content.isEmpty {
-                    Text(message.content)
-                        .font(.body)
+                    Markdown(message.content)
+                        .markdownTextStyle {
+                            FontSize(13)
+                        }
                         .textSelection(.enabled)
                 }
                 
@@ -60,14 +63,14 @@ struct ChatMessageView: View {
                         .padding(.top, 2)
                 }
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
             .background(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .fill(Color(.controlBackgroundColor))
             )
             
-            Spacer(minLength: 60)
+            Spacer(minLength: 40)
         }
         .padding(.leading, 4)
     }
@@ -98,54 +101,27 @@ struct ChatMessageView: View {
         .padding(.vertical, 8)
     }
     
-    // MARK: - Tool Call Card
+    // MARK: - Tool Call Indicator
     
-    private var toolCallCard: some View {
-        HStack(alignment: .top) {
-            DisclosureGroup {
-                if let result = message.toolResult {
-                    Text(result)
+    /// Simple "Calling tools..." indicator with a spinner.
+    /// Shown while tools are running, disappears when they complete.
+    /// No expandable details — keeps the chat clean.
+    private var toolCallIndicator: some View {
+        Group {
+            if message.toolStatus == .running || message.toolStatus == .idle {
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("Calling tools...")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                        .textSelection(.enabled)
-                        .padding(.top, 4)
+                    Spacer()
                 }
-            } label: {
-                HStack(spacing: 8) {
-                    // Status icon
-                    switch message.toolStatus {
-                    case .idle, .running:
-                        ProgressView()
-                            .controlSize(.small)
-                    case .completed:
-                        Image(systemName: "checkmark.circle.fill")
-                            .foregroundStyle(.green)
-                            .font(.caption)
-                    case .failed:
-                        Image(systemName: "xmark.circle.fill")
-                            .foregroundStyle(.red)
-                            .font(.caption)
-                    }
-                    
-                    Text("Tool: \(message.toolName ?? "unknown")")
-                        .font(.caption)
-                        .fontWeight(.medium)
-                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 6)
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .background(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(Color(.windowBackgroundColor).opacity(0.6))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .strokeBorder(Color(.separatorColor), lineWidth: 0.5)
-                    )
-            )
-            
-            Spacer(minLength: 40)
+            // When completed/failed, render nothing — the indicator disappears.
         }
-        .padding(.leading, 4)
     }
     
     // MARK: - Error Banner

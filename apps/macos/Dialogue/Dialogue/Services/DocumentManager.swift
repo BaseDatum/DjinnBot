@@ -15,9 +15,9 @@ final class DocumentManager: ObservableObject {
     private let fileManager = FileManager.default
     
     private init() {
-        // Default root: ~/Documents/Dialogue
+        // Default root: ~/Documents/Dialogue/Notes
         let docs = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first!
-        let defaultRoot = docs.appendingPathComponent("Dialogue", isDirectory: true)
+        let defaultRoot = docs.appendingPathComponent("Dialogue/Notes", isDirectory: true)
         
         // Ensure the folder exists
         try? fileManager.createDirectory(at: defaultRoot, withIntermediateDirectories: true)
@@ -78,7 +78,7 @@ final class DocumentManager: ObservableObject {
     
     /// Returns all folder URLs (flat list) for use in a folder picker.
     func allFolders() -> [(name: String, url: URL)] {
-        var result: [(name: String, url: URL)] = [("Documents (root)", rootFolder)]
+        var result: [(name: String, url: URL)] = [("Notes (root)", rootFolder)]
         collectFolders(in: rootFolder, relativeTo: rootFolder, into: &result)
         return result
     }

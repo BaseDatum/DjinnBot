@@ -413,8 +413,23 @@ final class ChatSessionManager: ObservableObject {
     /// Append thinking text as a dedicated .thinking message.
     /// Created on-demand so it appears in the correct chronological position
     /// (before tool calls and assistant text).
+    ///
+    /// Scoped to the current turn: only appends to a thinking message that
+    /// appears AFTER the last user message. This ensures each turn gets its
+    /// own thinking block instead of all thinking tokens accumulating in the
+    /// first thinking message across the entire conversation.
     private func appendThinking(_ text: String, in session: ChatSession) {
-        if let msg = session.messages.last(where: { $0.role == .thinking }) {
+        // Find the boundary of the current turn (after the last user message)
+        let turnStart: Int
+        if let lastUserIdx = session.messages.lastIndex(where: { $0.role == .user }) {
+            turnStart = lastUserIdx + 1
+        } else {
+            turnStart = 0
+        }
+        
+        // Look for an existing thinking message in the current turn only
+        let currentTurnMessages = session.messages[turnStart...]
+        if let msg = currentTurnMessages.last(where: { $0.role == .thinking }) {
             msg.content += text
         } else {
             let thinkingMsg = ChatMessage(role: .thinking, content: text)

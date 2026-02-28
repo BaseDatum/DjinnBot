@@ -32,6 +32,7 @@
 		CC000009 /* VoiceEnrollmentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC000019 /* VoiceEnrollmentView.swift */; };
 		CC00000A /* StatusFooterView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC00001A /* StatusFooterView.swift */; };
 		CC00000C /* FluidAudio in Frameworks */ = {isa = PBXBuildFile; productRef = CC000082 /* FluidAudio */; };
+		DD000090 /* MarkdownUI in Frameworks */ = {isa = PBXBuildFile; productRef = DD000091 /* MarkdownUI */; };
 		CC00000D /* SystemAudioCaptureManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC00001B /* SystemAudioCaptureManager.swift */; };
 		CC00000E /* TranscriptionServiceProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC00001C /* TranscriptionServiceProtocol.swift */; };
 		CC00000F /* AppleSpeechTranscriptionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC00001D /* AppleSpeechTranscriptionService.swift */; };
@@ -91,6 +92,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				CC00000C /* FluidAudio in Frameworks */,
+				DD000090 /* MarkdownUI in Frameworks */,
 				CC000090 /* Speech.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -239,6 +241,7 @@
 			name = Dialogue;
 			packageProductDependencies = (
 				CC000082 /* FluidAudio */,
+				DD000091 /* MarkdownUI */,
 			);
 			productName = Dialogue;
 			productReference = AA000010 /* Dialogue.app */;
@@ -270,6 +273,7 @@
 			mainGroup = AA000030;
 			packageReferences = (
 				CC000071 /* XCRemoteSwiftPackageReference "FluidAudio" */,
+				DD000080 /* XCRemoteSwiftPackageReference "swift-markdown-ui" */,
 			);
 			productRefGroup = AA000032 /* Products */;
 			projectDirPath = "";
@@ -565,6 +569,14 @@
 				minimumVersion = 0.7.9;
 			};
 		};
+		DD000080 /* XCRemoteSwiftPackageReference "swift-markdown-ui" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/gonzalezreal/swift-markdown-ui.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.4.1;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -572,6 +584,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = CC000071 /* XCRemoteSwiftPackageReference "FluidAudio" */;
 			productName = FluidAudio;
+		};
+		DD000091 /* MarkdownUI */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = DD000080 /* XCRemoteSwiftPackageReference "swift-markdown-ui" */;
+			productName = MarkdownUI;
 		};
 /* End XCSwiftPackageProductDependency section */
 

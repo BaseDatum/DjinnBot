@@ -103,7 +103,7 @@ struct SidebarView: View {
 
     private var headerView: some View {
         HStack {
-            Text("Documents")
+            Text("Notes")
                 .font(.headline)
                 .foregroundStyle(.secondary)
             Spacer()

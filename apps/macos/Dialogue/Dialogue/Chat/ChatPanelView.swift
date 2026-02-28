@@ -169,17 +169,28 @@ struct ChatPanelView: View {
     
     // MARK: - Message List
     
+    /// Whether the user has scrolled up (away from the bottom). When true,
+    /// auto-scroll is suppressed to respect the user's intent.
+    @State private var userHasScrolledUp: Bool = false
+    
     private func messageList(session: ChatSession) -> some View {
-        ScrollViewReader { proxy in
+        // Filter: hide thinking messages once the turn is done (not generating),
+        // and hide completed tool calls.
+        let visibleMessages = session.messages.filter { msg in
+            if msg.role == .thinking && !session.isGenerating { return false }
+            if msg.role == .toolCall && (msg.toolStatus == .completed || msg.toolStatus == .failed) && !session.isGenerating { return false }
+            return true
+        }
+        
+        return ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(spacing: 12) {
-                    ForEach(session.messages) { message in
+                    ForEach(visibleMessages) { message in
                         ChatMessageView(message: message)
                             .id(message.id)
                     }
                     
                     // Streaming indicator when generating but no assistant message exists yet.
-                    // This covers the gap between sending a message and the first token arriving.
                     if session.isGenerating,
                        !session.messages.contains(where: { ($0.role == .assistant && $0.isStreaming) || $0.role == .thinking }) {
                         HStack(spacing: 8) {
@@ -208,21 +219,38 @@ struct ChatPanelView: View {
                         .padding(.vertical, 6)
                     }
                     
-                    // Bottom spacer for scroll anchor
-                    Color.clear
-                        .frame(height: 1)
-                        .id("bottom")
+                    // Bottom anchor — also used to detect if we're at the bottom
+                    GeometryReader { geo in
+                        Color.clear.preference(
+                            key: ScrollAtBottomKey.self,
+                            value: geo.frame(in: .named("chatScroll")).maxY
+                        )
+                    }
+                    .frame(height: 1)
+                    .id("bottom")
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 8)
             }
+            .coordinateSpace(name: "chatScroll")
+            .onPreferenceChange(ScrollAtBottomKey.self) { bottomY in
+                // If the bottom anchor is within ~30pt of the scroll view's
+                // visible bottom, the user is "at the bottom".
+                userHasScrolledUp = bottomY > 30
+            }
             .onChange(of: session.messages.count) { _, _ in
-                withAnimation(.easeOut(duration: 0.2)) {
+                if !userHasScrolledUp {
+                    withAnimation(.easeOut(duration: 0.2)) {
+                        proxy.scrollTo("bottom", anchor: .bottom)
+                    }
+                }
+            }
+            .onChange(of: session.messages.last?.content ?? "") { _, _ in
+                if !userHasScrolledUp {
                     proxy.scrollTo("bottom", anchor: .bottom)
                 }
             }
-            // Also scroll when streaming content updates
-            .onChange(of: session.messages.last?.content ?? "") { _, _ in
+            .onAppear {
                 proxy.scrollTo("bottom", anchor: .bottom)
             }
         }
@@ -365,5 +393,16 @@ struct ChatPanelView: View {
         case .idle:
             return .gray
         }
+    }
+}
+
+// MARK: - Scroll Position Detection
+
+/// Preference key used to detect whether the scroll view is at the bottom.
+/// The value is the bottom anchor's maxY in the scroll view's coordinate space.
+private struct ScrollAtBottomKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
     }
 }
