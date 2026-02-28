@@ -176,6 +176,12 @@ services:
       - AUTH_TOTP_ISSUER=${AUTH_TOTP_ISSUER:-DjinnBot}
       - SECRET_ENCRYPTION_KEY=${SECRET_ENCRYPTION_KEY:-}
       - CORS_ORIGINS=${CORS_ORIGINS:-*}
+      # ── QMDR / ClawVault (shared vault search & context) ──
+      - QMD_OPENAI_API_KEY=${OPENROUTER_API_KEY}
+      - QMD_OPENAI_BASE_URL=https://openrouter.ai/api/v1
+      - QMD_EMBED_PROVIDER=openai
+      - QMD_OPENAI_EMBED_MODEL=openai/text-embedding-3-small
+      - QMD_ALLOW_SQLITE_EXTENSIONS=1
       # ── JuiceFS direct-mount ──
       # The API mounts JuiceFS at /jfs on startup via the entrypoint script.
       - JFS_META_URL=redis://redis:6379/2

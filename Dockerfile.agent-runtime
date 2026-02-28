@@ -286,6 +286,23 @@ ENV CAMOFOX_URL=http://127.0.0.1:9377
 # Use --system (/etc/gitconfig) so the setting applies globally.
 RUN git config --system --add safe.directory '*'
 
+# ── Git credential helper (baked into image) ────────────────────────────────
+# Reads DJINNBOT_API_URL and AGENT_ID from env vars at runtime so no
+# boot-time script generation is needed.
+RUN printf '#!/bin/sh\n\
+[ "$1" = "get" ] || exit 0\n\
+INPUT=$(cat)\n\
+HOST=$(printf "%%s" "$INPUT" | grep "^host=" | cut -d= -f2-)\n\
+[ "$HOST" = "github.com" ] || exit 0\n\
+RESP=$(curl -sf "$DJINNBOT_API_URL/v1/github/git-credential?agent_id=$AGENT_ID" 2>/dev/null || true)\n\
+[ -n "$RESP" ] || exit 1\n\
+TOKEN=$(printf "%%s" "$RESP" | sed '"'"'s/.*"token":"\\([^"]*\\)".*/\\1/'"'"')\n\
+[ -n "$TOKEN" ] || exit 1\n\
+printf "username=x-access-token\\npassword=%%s\\n" "$TOKEN"\n' \
+    > /usr/local/bin/djinnbot-git-credential && \
+    chmod +x /usr/local/bin/djinnbot-git-credential && \
+    git config --system credential.helper /usr/local/bin/djinnbot-git-credential
+
 # Verify tools
 RUN echo "=== Agent Runtime Tools ===" && \
     node --version && python3 --version && go version && \

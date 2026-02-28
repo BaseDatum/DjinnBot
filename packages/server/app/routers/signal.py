@@ -281,6 +281,30 @@ async def unlink_signal(
     return {"unlinked": True}
 
 
+# ─── Internal endpoints (engine → API) ────────────────────────────────────────
+
+
+@router.post("/mark-unlinked", include_in_schema=False)
+async def mark_signal_unlinked(
+    session: AsyncSession = Depends(get_async_session),
+) -> dict:
+    """Mark the Signal account as unlinked.
+
+    Called by the engine when it detects the linked device has been removed
+    externally (e.g. user unlinked from their Signal primary app and signal-cli
+    exits with "User ... is not registered").
+    """
+    row = await session.get(SignalConfig, 1)
+    if row:
+        row.linked = False
+        row.phone_number = None
+        row.enabled = False
+        row.updated_at = now_ms()
+        await session.commit()
+        logger.warning("Signal account marked as unlinked (device removed externally)")
+    return {"unlinked": True}
+
+
 # ─── Allowlist endpoints ──────────────────────────────────────────────────────
 
 

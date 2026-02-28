@@ -29,6 +29,76 @@ VAULTS_DIR = os.getenv("VAULTS_DIR", "/jfs/vaults")
 
 EXCLUDED_DIRS = {"templates", ".clawvault", ".git", "node_modules"}
 
+# Path to qmd collection registration — shared between search helpers.
+_SHARED_VAULT_COLLECTION = "djinnbot-shared"
+
+import logging as _logging
+
+_log = _logging.getLogger(__name__)
+
+
+def _ensure_shared_qmd_collection() -> None:
+    """Register the shared vault qmd collection if not already registered.
+
+    The engine normally does this, but the API container has its own qmd
+    SQLite database.  This is idempotent — re-adding an existing collection
+    is a no-op.
+    """
+    shared_dir = os.path.join(VAULTS_DIR, "shared")
+    if not os.path.isdir(shared_dir):
+        return
+    try:
+        subprocess.run(
+            [
+                "qmd",
+                "collection",
+                "add",
+                shared_dir,
+                "--name",
+                _SHARED_VAULT_COLLECTION,
+                "--mask",
+                "**/*.md",
+            ],
+            capture_output=True,
+            timeout=10,
+        )
+    except Exception:
+        pass  # qmd not available or already registered
+
+
+def _run_clawvault(args: list[str], vault_path: str, timeout: int = 30) -> str | None:
+    """Run a clawvault CLI command and return stdout, or None on failure."""
+    env = {
+        **os.environ,
+        "PATH": f"/root/.bun/bin:/usr/local/bin:{os.environ.get('PATH', '')}",
+    }
+    try:
+        result = subprocess.run(
+            ["clawvault", *args, "--vault", vault_path],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            env=env,
+        )
+        if result.returncode == 0:
+            return result.stdout
+        _log.warning(
+            "clawvault %s failed (exit %d): %s",
+            args[0],
+            result.returncode,
+            result.stderr[:500],
+        )
+        return None
+    except FileNotFoundError:
+        _log.warning("clawvault CLI not found — falling back to Python search")
+        return None
+    except subprocess.TimeoutExpired:
+        _log.warning("clawvault %s timed out after %ds", args[0], timeout)
+        return None
+    except Exception as exc:
+        _log.warning("clawvault %s error: %s", args[0], exc)
+        return None
+
 
 def _get_vault_stats(vault_path: str) -> tuple[int, int]:
     """Return (file_count, total_size_bytes) for a vault directory."""
@@ -706,7 +776,10 @@ class SharedContextRequest(BaseModel):
 
 @router.get("/vaults/shared/search")
 async def search_shared_vault(q: str, limit: int = 10):
-    """Search the shared vault. Used by agent containers for recall with scope=shared."""
+    """Search the shared vault via clawvault CLI (BM25 via qmd).
+
+    Falls back to naive Python substring search if clawvault/qmd is unavailable.
+    """
     shared_dir = os.path.join(VAULTS_DIR, "shared")
     if not os.path.isdir(shared_dir):
         return []
@@ -714,6 +787,31 @@ async def search_shared_vault(q: str, limit: int = 10):
     if not q or not q.strip():
         raise HTTPException(status_code=400, detail="Query parameter 'q' is required")
 
+    # ── Try clawvault CLI (BM25 via qmd) ────────────────────────────────────
+    _ensure_shared_qmd_collection()
+    raw = _run_clawvault(["search", q, "--limit", str(limit), "--json"], shared_dir)
+    if raw is not None:
+        try:
+            hits = json.loads(raw)
+            results = []
+            for h in hits:
+                doc = h.get("document", {})
+                results.append(
+                    {
+                        "filename": doc.get("id", "") + ".md"
+                        if doc.get("id")
+                        else h.get("path", ""),
+                        "snippet": h.get("snippet", ""),
+                        "score": h.get("score", 0),
+                        "title": doc.get("title"),
+                        "category": doc.get("category"),
+                    }
+                )
+            return results[:limit]
+        except (json.JSONDecodeError, KeyError) as exc:
+            _log.warning("Failed to parse clawvault search output: %s", exc)
+
+    # ── Fallback: naive Python substring search ─────────────────────────────
     query = q.lower()
     results = []
 
@@ -786,8 +884,18 @@ async def store_shared_memory(req: SharedStoreRequest):
     for k, v in fm.items():
         if isinstance(v, list):
             fm_lines.append(f"{k}: [{', '.join(str(i) for i in v)}]")
-        else:
+        elif isinstance(v, bool):
+            fm_lines.append(f"{k}: {'true' if v else 'false'}")
+        elif isinstance(v, (int, float)):
             fm_lines.append(f"{k}: {v}")
+        else:
+            # Quote strings that contain YAML-special characters to prevent
+            # parse errors (e.g. "Project: Foo" has a bare colon).
+            sv = str(v)
+            if any(c in sv for c in ":#{}[]|>&*!%@`"):
+                fm_lines.append(f"{k}: '{sv}'")
+            else:
+                fm_lines.append(f"{k}: {sv}")
     fm_lines.append("---")
     fm_lines.append("")
     fm_lines.append(req.content)
@@ -825,17 +933,123 @@ async def store_shared_memory(req: SharedStoreRequest):
 
 @router.post("/vaults/shared/context")
 async def shared_vault_context(req: SharedContextRequest):
-    """Build context from the shared vault. Used by agent containers for context_query(scope=shared)."""
+    """Build context from the shared vault via clawvault CLI.
+
+    Uses clawvault's ``context`` command which combines BM25 search, semantic
+    vector search, knowledge-graph traversal, and profile-based ranking — the
+    same pipeline that personal context_query uses.
+
+    Falls back to keyword search if clawvault CLI is unavailable.
+    """
     shared_dir = os.path.join(VAULTS_DIR, "shared")
     if not os.path.isdir(shared_dir):
         return {"context": "", "entries": 0, "profile": req.profile}
 
-    # Use the existing search to find relevant files, then return formatted context.
-    # This is a simplified version — we do keyword search + return formatted markdown.
-    query = req.task.lower()
-    scored_files: list[
-        tuple[float, str, str, dict]
-    ] = []  # (score, path, content, meta)
+    # ── Try clawvault CLI ───────────────────────────────────────────────────
+    _ensure_shared_qmd_collection()
+    args = [
+        "context",
+        req.task,
+        "--format",
+        "json",
+        "--limit",
+        str(req.limit),
+        "--profile",
+        req.profile or "auto",
+        "--max-hops",
+        str(req.maxHops),
+    ]
+    if req.budget:
+        args.extend(["--budget", str(req.budget)])
+
+    raw = _run_clawvault(args, shared_dir, timeout=60)
+    if raw is not None:
+        try:
+            data = json.loads(raw)
+            entries = data.get("context", [])
+            profile = data.get("profile", req.profile)
+
+            if not entries:
+                return {"context": "", "entries": 0, "profile": profile}
+
+            # Format context entries as markdown (same format the agent expects)
+            sections = []
+            for entry in entries:
+                title = entry.get("title", entry.get("id", "Untitled"))
+                category = entry.get("category", "")
+                prefix = f"[{category}] " if category else ""
+                body = entry.get("content", entry.get("snippet", ""))
+                sections.append(f"### {prefix}{title}\n{body}")
+
+            context_text = "\n\n".join(sections)
+            return {
+                "context": context_text,
+                "entries": len(entries),
+                "profile": profile,
+            }
+        except (json.JSONDecodeError, KeyError) as exc:
+            _log.warning("Failed to parse clawvault context output: %s", exc)
+
+    # ── Fallback: keyword search ────────────────────────────────────────────
+    query_lower = req.task.lower()
+    _stop = {
+        "the",
+        "a",
+        "an",
+        "and",
+        "or",
+        "but",
+        "in",
+        "on",
+        "at",
+        "to",
+        "for",
+        "of",
+        "is",
+        "it",
+        "by",
+        "with",
+        "as",
+        "this",
+        "that",
+        "from",
+        "all",
+        "are",
+        "was",
+        "were",
+        "been",
+        "be",
+        "have",
+        "has",
+        "had",
+        "do",
+        "does",
+        "did",
+        "will",
+        "would",
+        "could",
+        "should",
+        "may",
+        "might",
+        "can",
+        "not",
+        "no",
+        "so",
+        "if",
+        "then",
+        "than",
+        "when",
+        "what",
+        "which",
+        "who",
+        "how",
+        "including",
+    }
+    keywords = [
+        w for w in re.split(r"\W+", query_lower) if len(w) >= 3 and w not in _stop
+    ]
+
+    scored_files: list[tuple[float, str, str, dict]] = []
 
     for root, dirs, files in os.walk(shared_dir):
         dirs[:] = [d for d in dirs if d not in EXCLUDED_DIRS]
@@ -849,31 +1063,29 @@ async def shared_vault_context(req: SharedContextRequest):
 
             meta, body = _parse_frontmatter(file_content)
             content_lower = body.lower() if body else ""
+            title_lower = meta.get("title", "").lower()
 
-            # Simple relevance scoring: keyword frequency + title match bonus
-            score = content_lower.count(query)
-            title = meta.get("title", "")
-            if title and query in title.lower():
-                score += 5
+            score = 0.0
+            for kw in keywords:
+                score += content_lower.count(kw)
+                if kw in title_lower:
+                    score += 5
 
             if score > 0:
                 rel_path = os.path.relpath(filepath, shared_dir)
                 scored_files.append((score, rel_path, body or "", meta))
 
-    # Sort by score, take top N
     scored_files.sort(key=lambda x: x[0], reverse=True)
     top = scored_files[: req.limit]
 
     if not top:
         return {"context": "", "entries": 0, "profile": req.profile}
 
-    # Format as markdown context
     sections = []
-    for score, path, body, meta in top:
-        title = meta.get("title", path)
+    for _score, rel_path, body, meta in top:
+        title = meta.get("title", rel_path)
         category = meta.get("category", "")
         prefix = f"[{category}] " if category else ""
-        # Truncate body to fit budget (rough estimate: 4 chars per token)
         max_chars = max(200, (req.budget // max(1, len(top))) * 4)
         truncated = body[:max_chars] + ("..." if len(body) > max_chars else "")
         sections.append(f"### {prefix}{title}\n{truncated}")

@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react';
 import { Brain } from 'lucide-react';
-import { fetchMemoryFile } from '@/lib/api';
+import { toast } from 'sonner';
+import { fetchMemoryFile, deleteMemoryFile } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
+import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { MemoryEditor } from './MemoryEditor';
 
 interface MemoryFileContent {
@@ -15,6 +17,7 @@ interface MemoryFileContent {
 interface MemoryViewerProps {
   agentId: string;
   filename: string | null;
+  onDelete?: () => void;
 }
 
 function EmptyState({ icon: Icon, message }: { icon: typeof Brain; message: string }) {
@@ -68,10 +71,12 @@ function MarkdownRenderer({ content }: { content: string }) {
   );
 }
 
-export function MemoryViewer({ agentId, filename }: MemoryViewerProps) {
+export function MemoryViewer({ agentId, filename, onDelete }: MemoryViewerProps) {
   const [content, setContent] = useState<string | null>(null);
   const [metadata, setMetadata] = useState<Record<string, any>>({});
   const [loading, setLoading] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
   const [mode, setMode] = useState<'read' | 'edit'>('read');
   
   // Check if file is a template (templates are read-only)
@@ -125,7 +130,35 @@ export function MemoryViewer({ agentId, filename }: MemoryViewerProps) {
               </button>
             </div>
           )}
-          <Button size="sm" variant="destructive">Delete</Button>
+          <Button
+            size="sm"
+            variant="destructive"
+            disabled={deleting}
+            onClick={() => setConfirmOpen(true)}
+          >
+            {deleting ? 'Deleting...' : 'Delete'}
+          </Button>
+          <ConfirmDialog
+            open={confirmOpen}
+            onOpenChange={setConfirmOpen}
+            title="Delete memory file?"
+            description={`This will permanently delete "${filename}". This action cannot be undone.`}
+            confirmLabel="Delete"
+            variant="destructive"
+            onConfirm={async () => {
+              if (!filename) return;
+              setDeleting(true);
+              try {
+                await deleteMemoryFile(agentId, filename);
+                toast.success(`Deleted ${filename}`);
+                onDelete?.();
+              } catch (err) {
+                toast.error(`Failed to delete: ${err instanceof Error ? err.message : 'Unknown error'}`);
+              } finally {
+                setDeleting(false);
+              }
+            }}
+          />
         </div>
       </div>
       

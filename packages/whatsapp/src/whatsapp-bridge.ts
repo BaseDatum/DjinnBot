@@ -147,6 +147,15 @@ export class WhatsAppBridge {
             this.redis.setex('whatsapp:connected:phone', 3600, phoneNumber).catch(() => {});
           }
         },
+        onLoggedOut: () => {
+          console.error(
+            '[WhatsAppBridge] Device was logged out (unlinked externally). ' +
+            'Marking account as unlinked.',
+          );
+          this.socket = null;
+          this.typingManager?.stopAll();
+          void this.notifyAccountUnlinked();
+        },
         onMessage: (msg) => {
           void this.handleIncomingMessage(msg).catch((err) => {
             console.error('[WhatsAppBridge] Message handler error:', err);
@@ -845,6 +854,15 @@ export class WhatsAppBridge {
         onConnectionUpdate: (status, phoneNumber) => {
           console.log(`[WhatsAppBridge] Connection: ${status}${phoneNumber ? ` (${phoneNumber})` : ''}`);
         },
+        onLoggedOut: () => {
+          console.error(
+            '[WhatsAppBridge] Device was logged out (unlinked externally). ' +
+            'Marking account as unlinked.',
+          );
+          this.socket = null;
+          this.typingManager?.stopAll();
+          void this.notifyAccountUnlinked();
+        },
         onMessage: (msg) => {
           void this.handleIncomingMessage(msg).catch((err) => {
             console.error('[WhatsAppBridge] Message handler error:', err);
@@ -873,6 +891,37 @@ export class WhatsAppBridge {
 
     await this.socket.connect();
     console.log('[WhatsAppBridge] Baileys socket ready');
+  }
+
+  // ── Account unlinked notification ────────────────────────────────────────
+
+  /**
+   * Notify the API that the WhatsApp account has been unlinked externally
+   * (e.g. the user removed the linked device from their WhatsApp primary app).
+   * This updates the DB so the dashboard shows the correct state.
+   */
+  private async notifyAccountUnlinked(): Promise<void> {
+    try {
+      const res = await authFetch(`${this.config.apiUrl}/v1/whatsapp/mark-unlinked`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        signal: AbortSignal.timeout(10_000),
+      });
+      if (res.ok) {
+        console.log('[WhatsAppBridge] API notified: account marked as unlinked');
+      } else {
+        console.warn(`[WhatsAppBridge] Failed to notify API of unlink: HTTP ${res.status}`);
+      }
+    } catch (err) {
+      console.warn('[WhatsAppBridge] Failed to notify API of unlink:', err);
+    }
+
+    // Update local config state
+    if (this.whatsappConfig) {
+      this.whatsappConfig.linked = false;
+      this.whatsappConfig.enabled = false;
+      this.whatsappConfig.phoneNumber = null;
+    }
   }
 
   // ── Config/allowlist loading ───────────────────────────────────────────

@@ -241,12 +241,14 @@ export class ContainerManager {
       const jfsMetaUrl = process.env.JFS_META_URL || 'redis://redis:6379/2';
 
       // Resolve which path maps to run-workspace inside the container.
-      // Prefer the explicit runWorkspacePath; fall back to the legacy workspacePath field.
-      const effectiveRunPath = runWorkspacePath ?? workspacePath;
+      // Only mount run-workspace when an explicit runWorkspacePath is provided
+      // (i.e. pipeline runs). Chat sessions don't need a run workspace — the
+      // agent's sandbox at /home/agent is sufficient.
+      const effectiveRunPath = runWorkspacePath ?? null;
 
       // Extract relative path from /jfs/... to use as JuiceFS subdir.
       // e.g. "/jfs/runs/run_xxx" → "runs/run_xxx"
-      const runRelative = effectiveRunPath.replace('/jfs/', '');
+      const runRelative = effectiveRunPath ? effectiveRunPath.replace('/jfs/', '') : null;
 
       // Project workspace relative path (only used when projectWorkspacePath is provided).
       // e.g. "/jfs/workspaces/proj_xxx" → "workspaces/proj_xxx"
@@ -261,7 +263,7 @@ export class ContainerManager {
       const jfsDirsToEnsure = [
         `/sandboxes/${agentId}`,
         `/vaults/${agentId}`,
-        `/${runRelative}`,
+        ...(runRelative ? [`/${runRelative}`] : []),
         `/cookies/${agentId}`,
         ...(projectRelative ? [`/${projectRelative}`] : []),
       ];
@@ -272,12 +274,15 @@ export class ContainerManager {
       const jfsMounts: Array<[string, string, boolean]> = [
         [`/sandboxes/${agentId}`, '/home/agent', false],
         [`/vaults/${agentId}`, '/home/agent/clawvault', false],
-        [`/${runRelative}`, '/home/agent/run-workspace', false],
         // Browser cookies — read-only mount so agents can import cookie files
         // uploaded by users via the dashboard/CLI. Files appear as Netscape-format
         // .txt files that camofox_import_cookies reads and injects into the browser.
         [`/cookies/${agentId}`, '/home/agent/cookies', true],
       ];
+      // Run workspace — only for pipeline runs (not chat sessions)
+      if (runRelative) {
+        jfsMounts.push([`/${runRelative}`, '/home/agent/run-workspace', false]);
+      }
       if (projectRelative) {
         jfsMounts.push([`/${projectRelative}`, '/home/agent/project-workspace', false]);
       }
@@ -301,7 +306,7 @@ export class ContainerManager {
           `RUN_ID=${runId}`,
           `AGENT_ID=${agentId}`,
           `REDIS_URL=${process.env.REDIS_URL || 'redis://redis:6379'}`,
-          `WORKSPACE_PATH=/home/agent/run-workspace`,
+          `WORKSPACE_PATH=${runRelative ? '/home/agent/run-workspace' : '/home/agent'}`,
           // ClawVault path — personal vault only (mounted via JuiceFS).
           // The shared vault is accessed via the DjinnBot API, not mounted.
           `CLAWVAULT_PATH=/home/agent/clawvault`,
@@ -361,25 +366,24 @@ export class ContainerManager {
           'sh', '-c',
           // Exit immediately if any command fails
           `set -e && ` +
-          // ── Mount JuiceFS subdirectories (parallel) ──────────────────────────
-          // Parse JFS_MOUNT_SPEC (semicolon-delimited entries of subdir:target:mode)
-          // and mount ALL entries in parallel. Each `juicefs mount --background`
-          // is independent (separate subdir, separate FUSE mount point), so we
-          // launch them concurrently and `wait` for all to finish. This cuts
-          // startup time from O(N * mount_latency) to O(mount_latency).
-          `echo "[boot] Mounting JuiceFS subdirectories (parallel)..." && ` +
-          `MOUNT_PIDS="" && ` +
-          `MOUNT_TARGETS="" && ` +
-          `OLD_IFS="$IFS" && IFS=';' && for entry in $JFS_MOUNT_SPEC; do ` +
-          `  subdir=$(echo "$entry" | cut -d: -f1) && ` +
-          `  target=$(echo "$entry" | cut -d: -f2) && ` +
-          `  mode=$(echo "$entry" | cut -d: -f3) && ` +
-          `  ro_flag="" && ` +
-          `  if [ "$mode" = "ro" ]; then ro_flag="--read-only"; fi && ` +
-          `  echo "[boot]   $subdir -> $target ($mode)" && ` +
-          `  mkdir -p "$target" && ` +
-          // Launch each mount in a background subshell
-          `  ( juicefs mount ` +
+          // ── Mount JuiceFS subdirectories (two-phase) ─────────────────────────
+          // Phase 1: Mount /home/agent (the parent FUSE mount) first and wait for
+          //          it to be ready.  Child mountpoints like /home/agent/clawvault
+          //          and /home/agent/cookies live *under* this FUSE filesystem, so
+          //          mkdir-ing them before the parent mount is live creates dirs on
+          //          the underlying rootfs that get hidden once FUSE takes over.
+          // Phase 2: Mount all remaining (child) entries in parallel.
+          //
+          // Format of JFS_MOUNT_SPEC: "subdir:target:mode;..." (semicolon-delimited)
+          `echo "[boot] Mounting JuiceFS subdirectories (two-phase)..." && ` +
+          // ── Helper function: mount a single JuiceFS subdir ──
+          // Note: uses semicolons inside the function body (not &&) because
+          // set -e doesn't propagate into functions in POSIX sh.
+          `jfs_mount_one() { ` +
+          `  local subdir="$1"; local target="$2"; local mode="$3"; local ro_flag=""; ` +
+          `  if [ "$mode" = "ro" ]; then ro_flag="--read-only"; fi; ` +
+          `  mkdir -p "$target" || return 1; ` +
+          `  juicefs mount ` +
           `    --subdir "$subdir" ` +
           `    --cache-dir /tmp/jfscache ` +
           `    --cache-size "$JFS_CACHE_SIZE" ` +
@@ -390,78 +394,74 @@ export class ContainerManager {
           `    --background ` +
           `    $ro_flag ` +
           `    "$JFS_META_URL" ` +
-          `    "$target" ) & ` +
+          `    "$target" || return 1; ` +
+          `  mountpoint -q "$target" || return 1; ` +
+          `  echo "[boot]   mounted $target"; ` +
+          `} && ` +
+          // ── Phase 1: mount the root sandbox (/home/agent) synchronously ──
+          `PHASE1_ENTRY="" && ` +
+          `PHASE2_ENTRIES="" && ` +
+          `OLD_IFS="$IFS" && IFS=';' && for entry in $JFS_MOUNT_SPEC; do ` +
+          `  target=$(echo "$entry" | cut -d: -f2) && ` +
+          `  if [ "$target" = "/home/agent" ]; then ` +
+          `    PHASE1_ENTRY="$entry"; ` +
+          `  else ` +
+          `    PHASE2_ENTRIES="$PHASE2_ENTRIES$entry;"; ` +
+          `  fi; ` +
+          `done && IFS="$OLD_IFS" && ` +
+          // Mount the parent first
+          `if [ -n "$PHASE1_ENTRY" ]; then ` +
+          `  subdir=$(echo "$PHASE1_ENTRY" | cut -d: -f1) && ` +
+          `  target=$(echo "$PHASE1_ENTRY" | cut -d: -f2) && ` +
+          `  mode=$(echo "$PHASE1_ENTRY" | cut -d: -f3) && ` +
+          `  echo "[boot] Phase 1: mounting $subdir -> $target ($mode)" && ` +
+          `  jfs_mount_one "$subdir" "$target" "$mode" || { echo "[boot] FATAL: parent mount $target failed"; exit 1; }; ` +
+          `fi && ` +
+          // ── Phase 2: mount all children in parallel ──
+          `MOUNT_PIDS="" && ` +
+          `MOUNT_TARGETS="" && ` +
+          `OLD_IFS="$IFS" && IFS=';' && for entry in $PHASE2_ENTRIES; do ` +
+          `  [ -z "$entry" ] && continue; ` +
+          `  subdir=$(echo "$entry" | cut -d: -f1) && ` +
+          `  target=$(echo "$entry" | cut -d: -f2) && ` +
+          `  mode=$(echo "$entry" | cut -d: -f3) && ` +
+          `  echo "[boot] Phase 2: $subdir -> $target ($mode)" && ` +
+          `  ( jfs_mount_one "$subdir" "$target" "$mode" ) & ` +
           `  MOUNT_PIDS="$MOUNT_PIDS $!" && ` +
           `  MOUNT_TARGETS="$MOUNT_TARGETS $target"; ` +
           `done && IFS="$OLD_IFS" && ` +
-          // Wait for all mount subshells to finish
+          // Wait for all phase-2 mount subshells to finish.
+          // jfs_mount_one already verifies mountpoint -q, so no second check needed.
           `MOUNT_FAIL=0 && ` +
           `for pid in $MOUNT_PIDS; do ` +
           `  wait "$pid" || MOUNT_FAIL=1; ` +
           `done && ` +
-          // Verify every mount point is actually mounted
-          `for target in $MOUNT_TARGETS; do ` +
-          `  if mountpoint -q "$target"; then ` +
-          `    echo "[boot]   mounted $target"; ` +
-          `  else ` +
-          `    echo "[boot] FATAL: $target is not mounted after juicefs mount"; MOUNT_FAIL=1; ` +
-          `  fi; ` +
-          `done && ` +
           `if [ "$MOUNT_FAIL" = "1" ]; then echo "[boot] FATAL: one or more JuiceFS mounts failed"; exit 1; fi && ` +
           `echo "[boot] All JuiceFS mounts ready" && ` +
-          // ── Git credential helper ───────────────────────────────────────────
-          (() => {
-            const script = [
-              '#!/bin/sh',
-              '# djinnbot-git-credential: fetches a GitHub App token from the DjinnBot API.',
-              '# Git calls this helper as: djinnbot-git-credential get',
-              '[ "$1" = "get" ] || exit 0',
-              'INPUT=$(cat)',
-              'HOST=$(printf "%s" "$INPUT" | grep "^host=" | cut -d= -f2-)',
-              '[ "$HOST" = "github.com" ] || exit 0',
-              `API_URL="${apiUrl}"`,
-              `AGENT_ID="${agentId}"`,
-              'RESP=$(curl -sf "$API_URL/v1/github/git-credential?agent_id=$AGENT_ID" 2>/dev/null || true)',
-              '[ -n "$RESP" ] || exit 1',
-              // Extract token field from JSON without jq (plain sh / sed)
-              'TOKEN=$(printf "%s" "$RESP" | sed \'s/.*"token":"\\([^"]*\\)".*/\\1/\')',
-              '[ -n "$TOKEN" ] || exit 1',
-              'printf "username=x-access-token\\npassword=%s\\n" "$TOKEN"',
-            ].join('\n');
-            const b64 = Buffer.from(script).toString('base64');
-            return (
-              `mkdir -p /usr/local/bin && ` +
-              `echo '${b64}' | base64 -d > /usr/local/bin/djinnbot-git-credential && ` +
-              `chmod +x /usr/local/bin/djinnbot-git-credential && ` +
-              `git config --global credential.helper /usr/local/bin/djinnbot-git-credential && `
-            );
-          })() +
-          // ── Restore Camoufox cache into agent HOME ────────────────────────
-          // camoufox-js expects ~/.cache/camoufox/version.json but the JuiceFS
-          // mount on /home/agent wipes anything baked into the image, so we
-          // copy the cache from a stable image path after mounts are ready.
-          `mkdir -p /home/agent/.cache && ` +
-          `cp -r /opt/camofox/.camoufox-cache /home/agent/.cache/camoufox && ` +
-          // ── Start Camofox browser server (background) ──────────────────────
-          // Generates a per-container API key for cookie import auth.
-          // The server listens on 127.0.0.1:9377 — only accessible within this container.
-          `export CAMOFOX_API_KEY=$(openssl rand -hex 16) && ` +
-          `echo "[boot] Starting camofox server (port 9377)..." && ` +
-          `CAMOFOX_PORT=9377 ` +
-          `CAMOFOX_COOKIES_DIR=/home/agent/cookies ` +
-          `MAX_SESSIONS=5 ` +
-          `MAX_TABS_PER_SESSION=5 ` +
-          `BROWSER_IDLE_TIMEOUT_MS=0 ` +
-          `node --max-old-space-size=128 /opt/camofox/node_modules/@askjo/camofox-browser/server.js &` +
-          `CAMOFOX_PID=$! && ` +
-          // Brief health check — wait up to 15s for camofox to be ready
-          `for i in $(seq 1 30); do ` +
-          `  if curl -sf http://127.0.0.1:9377/health > /dev/null 2>&1; then ` +
-          `    echo "[boot] Camofox server ready"; break; ` +
-          `  fi; ` +
-          `  sleep 0.5; ` +
-          `done && ` +
-          // Start the agent runtime
+          // ── Fix .config collision with JuiceFS ─────────────────────────
+          // JuiceFS creates /home/agent/.config as a regular FILE (mount
+          // metadata JSON).  Tools like qmd need .config to be a DIRECTORY
+          // (e.g. ~/.config/qmd/).  Rename the JuiceFS file so mkdir works.
+          `if [ -f /home/agent/.config ]; then ` +
+          `  mv /home/agent/.config /home/agent/.juicefs-config 2>/dev/null || true; ` +
+          `fi && ` +
+          `mkdir -p /home/agent/.config && ` +
+          // ── Restore Camoufox cache + start server (both backgrounded) ─────
+          // camoufox-js expects ~/.cache/camoufox — the JuiceFS mount on
+          // /home/agent wipes anything baked into the image, so we copy from a
+          // stable image path.  The copy and server start run in a single
+          // background subshell so the agent runtime launches immediately.
+          `export CAMOFOX_API_KEY=$(head -c 16 /dev/urandom | xxd -p) && ` +
+          `( mkdir -p /home/agent/.cache && ` +
+          `  cp -r /opt/camofox/.camoufox-cache /home/agent/.cache/camoufox && ` +
+          `  CAMOFOX_PORT=9377 ` +
+          `  CAMOFOX_COOKIES_DIR=/home/agent/cookies ` +
+          `  MAX_SESSIONS=5 ` +
+          `  MAX_TABS_PER_SESSION=5 ` +
+          `  BROWSER_IDLE_TIMEOUT_MS=0 ` +
+          `  exec node --max-old-space-size=128 /opt/camofox/node_modules/@askjo/camofox-browser/server.js ` +
+          `) &` +
+          // Start the agent runtime immediately — camofox finishes booting in the background
           `exec node /app/packages/agent-runtime/dist/entrypoint.js`
         ],
       };

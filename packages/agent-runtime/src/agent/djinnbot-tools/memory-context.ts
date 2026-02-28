@@ -3,6 +3,7 @@ import type { AgentTool, AgentToolResult, AgentToolUpdateCallback } from '@mario
 // @ts-ignore — clawvault is an ESM package declared in package.json; types resolve at build time
 import { buildContext, createVault, type ContextResult } from 'clawvault';
 import { existsSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import { SharedVaultClient } from './shared-vault-api.js';
 
@@ -82,6 +83,22 @@ export function createMemoryContextTools(config: MemoryContextToolsConfig): Agen
         skipTasks: true,
       });
     }
+    // Ensure the qmd collection is registered in qmd's SQLite database.
+    // ClawVault.init()/load() and buildContext() do NOT do this — they only
+    // set in-memory config.  Without this, qmd search/vsearch returns nothing.
+    const collection = `djinnbot-${agentId}`;
+    try {
+      execFileSync('qmd', ['collection', 'add', vaultPath, '--name', collection, '--mask', '**/*.md'], {
+        stdio: 'ignore',
+        env: {
+          ...process.env,
+          PATH: `/root/.bun/bin:/usr/local/bin:${process.env.PATH}`,
+          XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME || '/tmp/xdg-config',
+        },
+      });
+    } catch {
+      // Collection may already exist, or qmd not available
+    }
     vaultEnsured = true;
   };
 
@@ -106,6 +123,21 @@ export function createMemoryContextTools(config: MemoryContextToolsConfig): Agen
         _onUpdate?: AgentToolUpdateCallback<VoidDetails>
       ): Promise<AgentToolResult<VoidDetails>> => {
         const p = params as ContextQueryParams;
+
+        // ── Defensive unwrapping ──────────────────────────────────────────
+        // PTC agents sometimes pass an options dict as a positional arg,
+        // e.g. context_query("task", {"scope": "all"}) → profile = {"scope": "all"}
+        if (p.profile !== undefined && typeof p.profile !== 'string') {
+          const bag = p.profile as any;
+          (p as any).profile = bag.profile ?? 'auto';
+          if (bag.scope && !(p as any).scope) (p as any).scope = bag.scope;
+          if (bag.budget) (p as any).budget = bag.budget;
+          if (bag.maxHops) (p as any).maxHops = bag.maxHops;
+        }
+        if (p.scope !== undefined && typeof p.scope !== 'string') {
+          const bag = p.scope as any;
+          (p as any).scope = bag.scope ?? 'all';
+        }
 
         if (!p.task?.trim()) {
           return { content: [{ type: 'text', text: 'task description required' }], details: {} };

@@ -1,7 +1,7 @@
 import { Type, type Static } from '@sinclair/typebox';
 import type { AgentTool, AgentToolResult, AgentToolUpdateCallback } from '@mariozechner/pi-agent-core';
 import type { RedisPublisher } from '../../redis/publisher.js';
-import { exec, spawn } from 'node:child_process';
+import { exec, execFileSync, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { join } from 'node:path';
 import { existsSync } from 'node:fs';
@@ -26,7 +26,7 @@ const RememberParamsSchema = Type.Object({
     Type.Literal('relationship'),
     Type.Literal('project'),
   ], { description: 'What kind of memory this is' }),
-  title: Type.String({ description: 'Short title (used as filename). Plain words only — do NOT include colons, quotes, or special characters.' }),
+  title: Type.String({ description: 'Short title (used as filename slug and display name). Colons are OK for namespacing (e.g. "ProjectName - Auth Design"). Avoid quotes or special characters beyond colons/hyphens.' }),
   content: Type.String({
     description: 'Detailed content. Use [[wiki-links]] to reference other memories.',
   }),
@@ -53,7 +53,7 @@ const RateMemoriesParamsSchema = Type.Object({
     memoryId: Type.String({ description: 'ID of the memory to rate (as returned by recall/context_query)' }),
     useful: Type.Boolean({ description: 'Was this memory useful for your current task?' }),
   }), {
-    description: 'Rate each recalled memory as useful or not useful',
+    description: 'List of dicts, each with keys: "memoryId" (str, memory slug e.g. "fact/project-goals") and "useful" (bool, true if helpful). Example: [{"memoryId": "fact/my-memory", "useful": true}]',
     minItems: 1,
   }),
   gap: Type.Optional(Type.String({
@@ -106,6 +106,34 @@ export function createMemoryTools(config: MemoryToolsConfig): AgentTool[] {
 
   // ── Personal vault (local JuiceFS mount, agent-owned qmd index) ────────
   let personalVault: InstanceType<typeof ClawVault> | null = null;
+  let qmdCollectionEnsured = false;
+
+  /**
+   * Ensure the qmd collection exists for this agent's personal vault.
+   * Must be called before any qmd update/search so that qmd knows where
+   * to find the markdown files. Without this, `qmd update -c <collection>`
+   * prints "No collections found" and the index is never built.
+   */
+  const ensureQmdCollection = (): void => {
+    if (qmdCollectionEnsured) return;
+    const collection = `djinnbot-${agentId}`;
+    try {
+      execFileSync('qmd', ['collection', 'add', vaultPath, '--name', collection, '--mask', '**/*.md'], {
+        stdio: 'ignore',
+        env: {
+          ...process.env,
+          PATH: `/root/.bun/bin:/usr/local/bin:${process.env.PATH}`,
+          // JuiceFS creates ~/.config as a regular file (mount metadata),
+          // blocking mkdir ~/.config/qmd.  Use /tmp as fallback config home.
+          XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME || '/tmp/xdg-config',
+        },
+      });
+      console.log(`[memory] ${agentId}: qmd collection registered: ${collection}`);
+    } catch {
+      // Collection may already exist, or qmd not available — both are fine
+    }
+    qmdCollectionEnsured = true;
+  };
 
   const getPersonalVault = async (): Promise<InstanceType<typeof ClawVault>> => {
     if (!personalVault) {
@@ -126,6 +154,11 @@ export function createMemoryTools(config: MemoryToolsConfig): AgentTool[] {
           skipTasks: true,
         });
       }
+      // Register the qmd collection so that qmd update/search/embed commands
+      // can find it. ClawVault.init() and .load() do NOT do this — they only
+      // set in-memory config. The actual `qmd collection add` must happen
+      // separately to register the collection in qmd's SQLite database.
+      ensureQmdCollection();
     }
     return personalVault;
   };
@@ -146,6 +179,17 @@ export function createMemoryTools(config: MemoryToolsConfig): AgentTool[] {
         _onUpdate?: AgentToolUpdateCallback<VoidDetails>
       ): Promise<AgentToolResult<VoidDetails>> => {
         const p = params as RememberParams;
+
+        // ── Defensive unwrapping ──────────────────────────────────────────
+        // PTC agents sometimes pass an options dict as a positional arg,
+        // e.g. remember("fact", "title", "content", {"shared": false, "tags": [...]})
+        // which maps the entire dict to the `shared` parameter.
+        if (p.shared !== undefined && typeof p.shared !== 'boolean') {
+          const bag = p.shared as any;
+          (p as any).shared = bag.shared ?? false;
+          if (bag.tags && !p.links) (p as any).links = bag.tags;
+        }
+
         const slug = p.title.toLowerCase().replace(/[^a-z0-9]+/g, '-');
         const memoryId = `${p.type}/${slug}`;
 
@@ -179,7 +223,11 @@ export function createMemoryTools(config: MemoryToolsConfig): AgentTool[] {
         const collection = `djinnbot-${agentId}`;
         const embedProc = spawn('qmd', ['embed', '-c', collection], {
           stdio: 'ignore',
-          env: { ...process.env, PATH: `/root/.bun/bin:/usr/local/bin:${process.env.PATH}` },
+          env: {
+            ...process.env,
+            PATH: `/root/.bun/bin:/usr/local/bin:${process.env.PATH}`,
+            XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME || '/tmp/xdg-config',
+          },
           detached: true,
         });
         embedProc.unref();
@@ -223,6 +271,16 @@ export function createMemoryTools(config: MemoryToolsConfig): AgentTool[] {
         _onUpdate?: AgentToolUpdateCallback<VoidDetails>
       ): Promise<AgentToolResult<VoidDetails>> => {
         const p = params as RecallParams;
+
+        // ── Defensive unwrapping ──────────────────────────────────────────
+        // PTC agents sometimes pass an options dict as the scope parameter,
+        // e.g. recall("query", {"scope": "personal"}) → scope = {"scope": "personal"}
+        if (p.scope !== undefined && typeof p.scope !== 'string') {
+          const bag = p.scope as any;
+          (p as any).scope = bag.scope ?? 'all';
+          if (bag.budget) (p as any).budget = bag.budget;
+        }
+
         const scope = p.scope || 'all';
 
         // Collect all hits with metadata for adaptive score blending
@@ -399,6 +457,29 @@ export function createMemoryTools(config: MemoryToolsConfig): AgentTool[] {
         _onUpdate?: AgentToolUpdateCallback<VoidDetails>
       ): Promise<AgentToolResult<VoidDetails>> => {
         const p = params as RateMemoriesParams;
+
+        // ── Defensive normalization of rating items ─────────────────────
+        // PTC agents may use "id" instead of "memoryId" and numeric
+        // "usefulness" instead of boolean "useful".  Also strip the
+        // human-readable "Memory saved: ..." prefix from IDs.
+        if (Array.isArray(p.ratings)) {
+          for (const r of p.ratings as any[]) {
+            // Accept "id" as alias for "memoryId"
+            if (!r.memoryId && r.id) r.memoryId = r.id;
+            // Strip "Memory saved: " prefix and " (shared)"/" (personal only)" suffix
+            if (typeof r.memoryId === 'string') {
+              r.memoryId = r.memoryId
+                .replace(/^Memory saved:\s*/, '')
+                .replace(/\s*\((shared|personal only)\)\s*$/, '');
+            }
+            // Coerce numeric "usefulness" to boolean "useful"
+            if (r.useful === undefined && r.usefulness !== undefined) {
+              r.useful = typeof r.usefulness === 'number' ? r.usefulness >= 3 : !!r.usefulness;
+            }
+            // Default useful to false if still missing
+            if (r.useful === undefined) r.useful = false;
+          }
+        }
 
         if (!retrievalTracker) {
           return {

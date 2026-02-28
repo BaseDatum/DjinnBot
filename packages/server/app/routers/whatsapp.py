@@ -312,6 +312,31 @@ async def unlink_whatsapp(
     return {"unlinked": True}
 
 
+# ─── Internal endpoints (engine → API) ────────────────────────────────────────
+
+
+@router.post("/mark-unlinked", include_in_schema=False)
+async def mark_whatsapp_unlinked(
+    session: AsyncSession = Depends(get_async_session),
+) -> dict:
+    """Mark the WhatsApp account as unlinked.
+
+    Called by the engine when Baileys detects the device has been logged out
+    (user removed the linked device from their WhatsApp primary app).
+    """
+    row = await session.get(WhatsAppConfig, 1)
+    if row:
+        row.linked = False
+        row.phone_number = None
+        row.enabled = False
+        row.updated_at = now_ms()
+        await session.commit()
+        logger.warning(
+            "WhatsApp account marked as unlinked (device removed externally)"
+        )
+    return {"unlinked": True}
+
+
 # ─── Allowlist endpoints ──────────────────────────────────────────────────────
 
 

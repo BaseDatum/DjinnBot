@@ -71,6 +71,7 @@ from app.models.project_template import ProjectTemplate
 from app.models.project_agent_routine import ProjectAgentRoutine
 from app.models.admin_notification import AdminNotification
 from app.models.agent_tool_override import AgentToolOverride
+from app.models.agent_messaging_permission import AgentMessagingPermission
 from app.models.workflow_policy import WorkflowPolicy
 from app.models.memory_score import (
     MemoryRetrievalLog,
@@ -162,6 +163,8 @@ __all__ = [
     "AdminNotification",
     # Built-in tool overrides
     "AgentToolOverride",
+    # Messaging permissions
+    "AgentMessagingPermission",
     # Workflow policies
     "WorkflowPolicy",
     # Memory scoring

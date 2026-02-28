@@ -140,7 +140,13 @@ export function useSigma(opts: UseSigmaOptions = {}): UseSigmaReturn {
       zIndex: true,
 
       // Node reducer: selection + highlight + blast radius
+      //
+      // IMPORTANT: Sigma v3 uses a WebGL picking framebuffer downscaled
+      // by 2×devicePixelRatio (4× on Retina).  Nodes smaller than ~5px
+      // become sub-pixel in the picking buffer and are unclickable.
+      // We enforce a floor of MIN_PICK_SIZE on every visible node.
       nodeReducer: (node: string, data: any) => {
+        const MIN_PICK_SIZE = 5;
         const res = { ...data };
         if (data.hidden) { res.hidden = true; return res; }
 
@@ -151,7 +157,7 @@ export function useSigma(opts: UseSigmaOptions = {}): UseSigmaReturn {
           if (depth !== undefined) {
             const blastColors: Record<number, string> = { 1: '#ef4444', 2: '#f97316', 3: '#eab308' };
             res.color = blastColors[depth] || '#eab308';
-            res.size = (data.size || 8) * (depth === 1 ? 2.0 : depth === 2 ? 1.6 : 1.3);
+            res.size = Math.max(MIN_PICK_SIZE, (data.size || 8) * (depth === 1 ? 2.0 : depth === 2 ? 1.6 : 1.3));
             res.zIndex = 3 - depth;
             res.highlighted = true;
             return res;
@@ -163,12 +169,12 @@ export function useSigma(opts: UseSigmaOptions = {}): UseSigmaReturn {
         if (hlSet && hlSet.size > 0) {
           if (hlSet.has(node)) {
             res.color = data.communityColor || data.color;
-            res.size = (data.size || 8) * 1.6;
+            res.size = Math.max(MIN_PICK_SIZE, (data.size || 8) * 1.6);
             res.zIndex = 2;
             res.highlighted = true;
           } else {
             res.color = dimColor(data.color, 0.4);
-            res.size = (data.size || 8) * 0.75;
+            res.size = Math.max(MIN_PICK_SIZE, (data.size || 8) * 0.75);
             res.zIndex = 0;
           }
           return res;
@@ -182,19 +188,22 @@ export function useSigma(opts: UseSigmaOptions = {}): UseSigmaReturn {
             const isSel = node === sel;
             const isNeighbour = gr.hasEdge(node, sel) || gr.hasEdge(sel, node);
             if (isSel) {
-              res.size = (data.size || 8) * 1.8;
+              res.size = Math.max(MIN_PICK_SIZE, (data.size || 8) * 1.8);
               res.zIndex = 2;
               res.highlighted = true;
             } else if (isNeighbour) {
-              res.size = (data.size || 8) * 1.3;
+              res.size = Math.max(MIN_PICK_SIZE, (data.size || 8) * 1.3);
               res.zIndex = 1;
             } else {
               res.color = dimColor(data.color, 0.25);
-              res.size = (data.size || 8) * 0.6;
+              res.size = Math.max(MIN_PICK_SIZE, (data.size || 8) * 0.6);
               res.zIndex = 0;
             }
           }
         }
+
+        // Default state: enforce minimum size for picking
+        res.size = Math.max(MIN_PICK_SIZE, res.size || 4);
         return res;
       },
 
@@ -343,8 +352,16 @@ export function useSigma(opts: UseSigmaOptions = {}): UseSigmaReturn {
     const g = graphRef.current;
     if (!sigma || !g || !g.hasNode(nodeId)) return;
     setSelectedNode(nodeId);
-    const attrs = g.getNodeAttributes(nodeId);
-    sigma.getCamera().animate({ x: attrs.x, y: attrs.y, ratio: 0.15 }, { duration: 400 });
+
+    // Use Sigma's display data (viewport coords) and convert to the
+    // framed-graph coordinate system the camera operates in.
+    // Raw graph coords are NOT in camera space — passing them directly
+    // would send the camera far off-screen (black screen).
+    const displayData = sigma.getNodeDisplayData(nodeId);
+    if (displayData) {
+      const framedCoords = sigma.viewportToFramedGraph({ x: displayData.x, y: displayData.y });
+      sigma.getCamera().animate({ x: framedCoords.x, y: framedCoords.y, ratio: 0.15 }, { duration: 400 });
+    }
   }, [setSelectedNode]);
 
   const startLayout = useCallback(() => {

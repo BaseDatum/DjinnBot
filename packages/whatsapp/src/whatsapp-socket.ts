@@ -59,6 +59,11 @@ export type ConnectionStatus = 'disconnected' | 'connecting' | 'open';
 export interface WhatsAppSocketEvents {
   onQrCode: (qr: string) => void;
   onConnectionUpdate: (status: ConnectionStatus, phoneNumber?: string) => void;
+  /**
+   * Fired when the device has been logged out (user removed the linked device
+   * from their WhatsApp primary app). The socket will NOT auto-reconnect.
+   */
+  onLoggedOut?: () => void;
   onMessage: (message: {
     senderJid: string;
     senderPhone: string;
@@ -333,9 +338,9 @@ export class WhatsAppSocket {
         this.events.onConnectionUpdate('disconnected');
 
         const statusCode = (lastDisconnect?.error as Boom)?.output?.statusCode;
-        const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
+        const isLoggedOut = statusCode === DisconnectReason.loggedOut;
 
-        if (shouldReconnect && this.shouldReconnect) {
+        if (!isLoggedOut && this.shouldReconnect) {
           console.log(`[WhatsAppSocket] Connection closed (${statusCode}), reconnecting in 5s...`);
           this.reconnectTimer = setTimeout(() => {
             this.createSocket().catch((err) => {
@@ -343,7 +348,14 @@ export class WhatsAppSocket {
             });
           }, 5000);
         } else {
-          console.log(`[WhatsAppSocket] Connection closed permanently (loggedOut=${!shouldReconnect})`);
+          console.log(`[WhatsAppSocket] Connection closed permanently (loggedOut=${isLoggedOut})`);
+          if (isLoggedOut) {
+            this.phoneNumber = null;
+            this.latestQr = null;
+            this.sock = null;
+            // Notify the bridge that the device was unlinked externally
+            this.events.onLoggedOut?.();
+          }
         }
       } else if (connection === 'open') {
         this.connectionStatus = 'open';

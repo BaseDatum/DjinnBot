@@ -62,7 +62,7 @@ const GraphQueryParamsSchema = Type.Object({
     Type.Literal('neighbors'),
     Type.Literal('search'),
   ], { description: 'Query action: "summary" for graph stats, "neighbors" for BFS traversal from a node, "search" to find nodes by title/tag' }),
-  nodeId: Type.Optional(Type.String({ description: 'Node ID for neighbors action (e.g. "note:decisions/use-postgresql")' })),
+  nodeId: Type.Optional(Type.String({ description: 'Node ID for neighbors action. Format is "note:type/slug" (e.g. "note:fact/project-goals", "note:decision/use-postgresql"). Use graph_query(action="search") first to discover exact node IDs.' })),
   query: Type.Optional(Type.String({ description: 'Search term — matches against node titles, IDs, and tags (NOT full-text content — use the recall tool for content search)' })),
   maxHops: Type.Optional(Type.Number({ default: 1, description: 'Max hops for neighbors (1-3)' })),
   scope: Type.Optional(Type.Union([
@@ -108,6 +108,14 @@ export function createMemoryGraphTools(config: MemoryGraphToolsConfig): AgentToo
         _onUpdate?: AgentToolUpdateCallback<VoidDetails>
       ): Promise<AgentToolResult<VoidDetails>> => {
         const p = params as GraphQueryParams;
+
+        // ── Defensive unwrapping ──────────────────────────────────────────
+        // PTC agents sometimes pass an options dict as a positional arg.
+        if (p.scope !== undefined && typeof p.scope !== 'string') {
+          const bag = p.scope as any;
+          (p as any).scope = bag.scope ?? 'all';
+        }
+
         const scope = p.scope || 'all';
 
         // Helper: query personal graph (local ClawVault)
@@ -122,8 +130,27 @@ export function createMemoryGraphTools(config: MemoryGraphToolsConfig): AgentToo
                 if (!p.nodeId) return '## Personal Graph\nnodeId required';
                 const maxHops = Math.min(p.maxHops || 1, 3);
                 const graph = await getGraphReadOnly(vaultPath);
+
+                // Resolve nodeId: try exact match first, then fuzzy match by
+                // title or partial ID so agents don't need to know the exact
+                // "note:type/slug" format.
+                let resolvedNodeId = p.nodeId;
+                const exactMatch = graph.nodes.find((n: any) => n.id === p.nodeId);
+                if (!exactMatch) {
+                  const needle = p.nodeId.toLowerCase();
+                  const fuzzy = graph.nodes.find((n: any) =>
+                    n.title.toLowerCase() === needle ||
+                    n.id.toLowerCase().endsWith(needle) ||
+                    n.id.toLowerCase() === `note:${needle}` ||
+                    n.title.toLowerCase().includes(needle)
+                  );
+                  if (fuzzy) {
+                    resolvedNodeId = fuzzy.id;
+                  }
+                }
+
                 const visited = new Set<string>();
-                let frontier = new Set<string>([p.nodeId]);
+                let frontier = new Set<string>([resolvedNodeId]);
                 for (let hop = 0; hop < maxHops; hop++) {
                   const next = new Set<string>();
                   for (const nodeId of frontier) {
@@ -136,13 +163,16 @@ export function createMemoryGraphTools(config: MemoryGraphToolsConfig): AgentToo
                   frontier = next;
                   for (const n of next) visited.add(n);
                 }
-                visited.delete(p.nodeId);
+                visited.delete(resolvedNodeId);
                 const neighborNodes = graph.nodes.filter((n: any) => visited.has(n.id));
                 if (neighborNodes.length) {
                   const lines = neighborNodes.map((n: any) => `- [${n.type}] ${n.title} (id: ${n.id})`);
-                  return `## Personal Graph\n${lines.join('\n')}`;
+                  const header = resolvedNodeId !== p.nodeId
+                    ? `## Personal Graph (resolved "${p.nodeId}" → ${resolvedNodeId})`
+                    : '## Personal Graph';
+                  return `${header}\n${lines.join('\n')}`;
                 }
-                return `## Personal Graph\nNo neighbors found for node: ${p.nodeId}`;
+                return `## Personal Graph\nNo neighbors found for node: ${p.nodeId}${resolvedNodeId !== p.nodeId ? ` (resolved to: ${resolvedNodeId})` : ''}`;
               }
               case 'search': {
                 if (!p.query) return '## Personal Graph\nquery required';
@@ -178,12 +208,35 @@ export function createMemoryGraphTools(config: MemoryGraphToolsConfig): AgentToo
               case 'neighbors': {
                 if (!p.nodeId) return '## Shared Graph\nnodeId required';
                 const maxHops = Math.min(p.maxHops || 1, 3);
-                const data = await sharedVaultApi.getNeighbors(p.nodeId, maxHops);
-                if (data.nodes.length) {
-                  const lines = data.nodes.map(n => `- [${n.type}] ${n.title} (id: ${n.id})`);
-                  return `## Shared Graph\n${lines.join('\n')}`;
+
+                // Try exact match first, then fuzzy resolve via full graph
+                let resolvedNodeId = p.nodeId;
+                try {
+                  const graphData = await sharedVaultApi.getGraph();
+                  const exactMatch = graphData.nodes.find(n => n.id === p.nodeId);
+                  if (!exactMatch) {
+                    const needle = p.nodeId!.toLowerCase();
+                    const fuzzy = graphData.nodes.find(n =>
+                      n.title.toLowerCase() === needle ||
+                      n.id.toLowerCase().endsWith(needle) ||
+                      n.id.toLowerCase() === `note:${needle}` ||
+                      n.title.toLowerCase().includes(needle)
+                    );
+                    if (fuzzy) resolvedNodeId = fuzzy.id;
+                  }
+                } catch { /* fall through with original nodeId */ }
+
+                const data = await sharedVaultApi.getNeighbors(resolvedNodeId, maxHops);
+                // Filter out the queried node itself from results
+                const neighborNodes = data.nodes.filter(n => n.id !== resolvedNodeId);
+                if (neighborNodes.length) {
+                  const lines = neighborNodes.map(n => `- [${n.type}] ${n.title} (id: ${n.id})`);
+                  const header = resolvedNodeId !== p.nodeId
+                    ? `## Shared Graph (resolved "${p.nodeId}" → ${resolvedNodeId})`
+                    : '## Shared Graph';
+                  return `${header}\n${lines.join('\n')}`;
                 }
-                return `## Shared Graph\nNo neighbors found for node: ${p.nodeId}`;
+                return `## Shared Graph\nNo neighbors found for node: ${p.nodeId}${resolvedNodeId !== p.nodeId ? ` (resolved to: ${resolvedNodeId})` : ''}`;
               }
               case 'search': {
                 if (!p.query) return '## Shared Graph\nquery required';
@@ -225,11 +278,11 @@ export function createMemoryGraphTools(config: MemoryGraphToolsConfig): AgentToo
 
     {
       name: 'link_memory',
-      description: 'Create a typed link between two memories in your knowledge graph. Use this to build connections between related decisions, lessons, and facts.',
+      description: 'Create a typed link between two memories in your knowledge graph. Use this to build connections between related decisions, lessons, and facts. Memory IDs use the slug format returned by the remember tool: "type/slugified-title" (e.g. "fact/project-goals", "lesson/auth-patterns").',
       label: 'link_memory',
       parameters: Type.Object({
-        fromId: Type.String({ description: 'Source memory ID (e.g. "decisions/use-postgresql")' }),
-        toId: Type.String({ description: 'Target memory ID (e.g. "projects/user-auth")' }),
+        fromId: Type.String({ description: 'Source memory slug ID as returned by remember (e.g. "fact/project-goals", "decision/use-postgresql"). Format: type/slugified-title' }),
+        toId: Type.String({ description: 'Target memory slug ID as returned by remember (e.g. "lesson/auth-patterns", "fact/tech-stack"). Format: type/slugified-title' }),
         relationType: Type.Union([
           Type.Literal('related'),
           Type.Literal('depends_on'),
@@ -243,6 +296,17 @@ export function createMemoryGraphTools(config: MemoryGraphToolsConfig): AgentToo
         _onUpdate?: AgentToolUpdateCallback<VoidDetails>
       ): Promise<AgentToolResult<VoidDetails>> => {
         const p = params as { fromId: string; toId: string; relationType: string };
+
+        // ── Defensive ID cleanup ──────────────────────────────────────────
+        // Agents often pass the full human-readable message from remember()
+        // (e.g. "Memory saved: fact/project-goals (shared)") instead of the
+        // raw slug ("fact/project-goals").  Strip the wrapper.
+        const cleanId = (id: string): string =>
+          id.replace(/^Memory saved:\s*/, '')
+            .replace(/\s*\((shared|personal only)\)\s*$/, '')
+            .trim();
+        p.fromId = cleanId(p.fromId);
+        p.toId = cleanId(p.toId);
 
         const sourceFile = join(vaultPath, `${p.fromId}.md`);
         try {

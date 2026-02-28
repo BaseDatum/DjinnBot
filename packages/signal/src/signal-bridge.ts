@@ -168,8 +168,12 @@ export class SignalBridge {
       });
     } catch (err) {
       console.error('[SignalBridge] signal-cli daemon failed to start:', err);
-      this.daemonHandle.stop();
-      this.daemonHandle = null;
+      // daemonHandle may be null if the process already exited and
+      // watchDaemonExit cleared it before we got here.
+      if (this.daemonHandle) {
+        this.daemonHandle.stop();
+        this.daemonHandle = null;
+      }
       return;
     }
 
@@ -224,8 +228,10 @@ export class SignalBridge {
       console.log(`[SignalBridge] Daemon running in receive-only mode — account=${this.account}`);
     } catch (err) {
       console.error('[SignalBridge] signal-cli daemon (receive-only) failed to start:', err);
-      this.daemonHandle.stop();
-      this.daemonHandle = null;
+      if (this.daemonHandle) {
+        this.daemonHandle.stop();
+        this.daemonHandle = null;
+      }
     }
   }
 
@@ -262,6 +268,18 @@ export class SignalBridge {
         this.sseAbortController = null;
         this.typingManager?.stopAll();
         this.fullModeActive = false;
+      }
+
+      // If the daemon reported that the account is not registered (user
+      // unlinked their device externally), don't restart — notify the API
+      // to mark the account as unlinked and stop.
+      if (exit.accountUnregistered) {
+        console.error(
+          '[SignalBridge] Account has been unregistered (device unlinked externally). ' +
+          'Stopping restart loop and marking account as unlinked.',
+        );
+        await this.notifyAccountUnlinked();
+        return;
       }
 
       await this.restartDaemon(mode);
@@ -1151,6 +1169,38 @@ export class SignalBridge {
         await this.redis.publish(`signal:rpc:reply:${req.id}`, reply);
       })();
     });
+  }
+
+  // ── Account unlinked notification ────────────────────────────────────────
+
+  /**
+   * Notify the API that the Signal account has been unlinked externally
+   * (e.g. the user removed the linked device from their primary Signal app).
+   * This updates the DB so the dashboard shows the correct state.
+   */
+  private async notifyAccountUnlinked(): Promise<void> {
+    try {
+      const res = await authFetch(`${this.config.apiUrl}/v1/signal/mark-unlinked`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        signal: AbortSignal.timeout(10_000),
+      });
+      if (res.ok) {
+        console.log('[SignalBridge] API notified: account marked as unlinked');
+      } else {
+        console.warn(`[SignalBridge] Failed to notify API of unlink: HTTP ${res.status}`);
+      }
+    } catch (err) {
+      console.warn('[SignalBridge] Failed to notify API of unlink:', err);
+    }
+
+    // Update local config state
+    if (this.signalConfig) {
+      this.signalConfig.linked = false;
+      this.signalConfig.enabled = false;
+      this.signalConfig.phoneNumber = null;
+    }
+    this.account = undefined;
   }
 
   // ── Config/allowlist loading ───────────────────────────────────────────

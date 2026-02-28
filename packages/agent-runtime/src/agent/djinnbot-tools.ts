@@ -16,6 +16,8 @@ import { createPulseTasksTools } from './djinnbot-tools/pulse-tasks.js';
 import { createSecretsTools } from './djinnbot-tools/secrets.js';
 import { createSlackTools } from './djinnbot-tools/slack.js';
 import { createTelegramTools } from './djinnbot-tools/telegram.js';
+import { createWhatsAppTools } from './djinnbot-tools/whatsapp.js';
+import { createSignalTools } from './djinnbot-tools/signal.js';
 import { createSpawnExecutorTools } from './djinnbot-tools/spawn-executor.js';
 import { createSwarmExecutorTools } from './djinnbot-tools/swarm-executor.js';
 import { createWorkLedgerTools } from './djinnbot-tools/work-ledger.js';
@@ -99,6 +101,10 @@ export function createDjinnBotTools(config: DjinnBotToolsConfig): AgentTool[] {
     ...createSlackTools({ agentId, apiBaseUrl }),
 
     ...createTelegramTools({ agentId, apiBaseUrl }),
+
+    ...createWhatsAppTools({ agentId, apiBaseUrl }),
+
+    ...createSignalTools({ agentId, apiBaseUrl }),
 
     // Pulse/pipeline tools — always included (chat, pipeline, and pulse sessions)
     ...createPulseProjectsTools({ agentId, apiBaseUrl, pulseColumns }),

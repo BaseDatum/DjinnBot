@@ -72,6 +72,36 @@ COPY --from=builder /app/alembic.ini /app/alembic.ini
 # Allow git to work with any directory ownership (engine creates vaults/runs as root)
 RUN git config --system --add safe.directory '*'
 
+# ── ClawVault + QMDR (shared vault search & context) ──────────────────────
+# The API serves shared vault search/context endpoints. Rather than
+# reimplementing search in Python, we shell out to the clawvault CLI which
+# uses qmd (BM25 + vector search) under the hood.
+
+# Install Node.js LTS (required by clawvault CLI)
+RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
+    apt-get install -y --no-install-recommends nodejs && \
+    rm -rf /var/lib/apt/lists/*
+
+# Install Bun 1.3.6 (required by QMDR — 1.3.7+ has sqlite-vec segfault)
+RUN apt-get update && apt-get install -y --no-install-recommends unzip && rm -rf /var/lib/apt/lists/* && \
+    curl -fsSL https://bun.sh/install | bash -s "bun-v1.3.6"
+ENV PATH="/root/.bun/bin:${PATH}"
+
+# Install QMDR (remote-first qmd fork) and clawvault CLI
+RUN bun install -g github:uf-hy/qmdr && \
+    ln -sf /root/.bun/bin/qmd /usr/local/bin/qmd && \
+    npm install -g clawvault && \
+    echo "QMDR + ClawVault CLI installed"
+
+# Apply the same QMDR patches as the engine (remote embedding fixes)
+RUN sed -i 's/await remote.embed(formattedText, { model, isQuery })/await remote.embed(formattedText, { isQuery })/' /root/.bun/install/global/node_modules/qmdr/src/store.ts
+RUN sed -i "s/process.env.QMD_EMBED_PROVIDER === 'siliconflow'/process.env.QMD_EMBED_PROVIDER === 'siliconflow' || process.env.QMD_EMBED_PROVIDER === 'openai'/" /root/.bun/install/global/node_modules/qmdr/src/qmd.ts && \
+    sed -i "s/const remoteModel = process.env.QMD_SILICONFLOW_EMBED_MODEL || 'Qwen\/Qwen3-Embedding-8B'/const remoteModel = process.env.QMD_EMBED_PROVIDER === 'openai' ? (process.env.QMD_OPENAI_EMBED_MODEL || 'text-embedding-3-small') : (process.env.QMD_SILICONFLOW_EMBED_MODEL || 'Qwen\/Qwen3-Embedding-8B')/" /root/.bun/install/global/node_modules/qmdr/src/qmd.ts && \
+    sed -i "s/Using remote embedding: SiliconFlow/Using remote embedding:/" /root/.bun/install/global/node_modules/qmdr/src/qmd.ts
+
+# QMDR environment
+ENV QMD_ALLOW_SQLITE_EXTENSIONS=1
+
 # Expose port
 EXPOSE 8000
 

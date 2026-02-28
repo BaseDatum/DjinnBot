@@ -38,6 +38,8 @@ export interface SignalDaemonExitEvent {
   source: 'process' | 'spawn-error';
   code: number | null;
   signal: string | null;
+  /** True when the daemon logged "User ... is not registered" — device was unlinked externally. */
+  accountUnregistered?: boolean;
 }
 
 export interface SignalDaemonHandle {
@@ -143,6 +145,23 @@ function cleanStaleLocks(configDir: string): void {
 
 // ── Spawn ────────────────────────────────────────────────────────────────────
 
+// ── Fatal error patterns ─────────────────────────────────────────────────────
+
+/**
+ * Patterns in signal-cli output that indicate the linked device has been
+ * removed externally (user unlinked from their primary device). When detected,
+ * the daemon should NOT be restarted — the account needs re-linking.
+ */
+const UNREGISTERED_PATTERNS = [
+  /User \S+ is not registered/i,
+  /unregistered/i,
+  /device was removed/i,
+];
+
+export function isUnregisteredError(line: string): boolean {
+  return UNREGISTERED_PATTERNS.some((re) => re.test(line));
+}
+
 export function spawnSignalDaemon(config: SignalDaemonConfig): SignalDaemonHandle {
   const cliPath = config.cliPath ?? 'signal-cli';
   const args = buildDaemonArgs(config);
@@ -159,6 +178,8 @@ export function spawnSignalDaemon(config: SignalDaemonConfig): SignalDaemonHandl
 
   let exited = false;
   let settled = false;
+  /** Set to true if we detect "not registered" in daemon output before exit. */
+  let detectedUnregistered = false;
   let resolveExit!: (value: SignalDaemonExitEvent) => void;
 
   const exitedPromise = new Promise<SignalDaemonExitEvent>((resolve) => {
@@ -169,11 +190,26 @@ export function spawnSignalDaemon(config: SignalDaemonConfig): SignalDaemonHandl
     if (settled) return;
     settled = true;
     exited = true;
+    event.accountUnregistered = detectedUnregistered;
     resolveExit(event);
   };
 
   bindOutput(child.stdout, 'signal-cli');
   bindOutput(child.stderr, 'signal-cli');
+
+  // Scan stderr for unregistered-account errors
+  const scanForUnregistered = (stream: NodeJS.ReadableStream | null | undefined) => {
+    stream?.on('data', (data: Buffer) => {
+      for (const line of data.toString().split(/\r?\n/)) {
+        if (isUnregisteredError(line)) {
+          detectedUnregistered = true;
+          console.error(`[SignalDaemon] Detected account unregistered: ${line.trim()}`);
+        }
+      }
+    });
+  };
+  scanForUnregistered(child.stdout);
+  scanForUnregistered(child.stderr);
 
   child.once('exit', (code, signal) => {
     settle({

@@ -80,11 +80,13 @@ export interface APIGraphData {
 // ── Helpers ────────────────────────────────────────────────────────────────
 
 function scaledNodeSize(base: number, nodeCount: number): number {
-  if (nodeCount > 50_000) return Math.max(1, base * 0.4);
-  if (nodeCount > 20_000) return Math.max(1.5, base * 0.5);
-  if (nodeCount > 5_000) return Math.max(2, base * 0.65);
-  if (nodeCount > 1_000) return Math.max(2.5, base * 0.8);
-  return base;
+  // Floor of 4 ensures nodes remain visible and pickable in Sigma's
+  // WebGL picking framebuffer (which is downscaled by 2×devicePixelRatio).
+  if (nodeCount > 50_000) return Math.max(4, base * 0.4);
+  if (nodeCount > 20_000) return Math.max(4, base * 0.5);
+  if (nodeCount > 5_000) return Math.max(4, base * 0.65);
+  if (nodeCount > 1_000) return Math.max(4, base * 0.8);
+  return Math.max(4, base);
 }
 
 const STRUCTURAL = new Set(['Folder', 'Package', 'Module', 'Namespace']);

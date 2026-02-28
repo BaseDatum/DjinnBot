@@ -248,7 +248,11 @@ export function MemoryExplorer({ agentId, vaultId }: MemoryExplorerProps) {
         <div className="h-full flex-1 min-w-0 flex flex-col overflow-hidden">
           <MemoryViewer 
             agentId={effectiveVaultId} 
-            filename={selectedFile} 
+            filename={selectedFile}
+            onDelete={() => {
+              setSelectedFile(null);
+              refetchMemories();
+            }}
           />
         </div>
       </div>

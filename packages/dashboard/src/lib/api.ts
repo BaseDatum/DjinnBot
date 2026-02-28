@@ -3031,3 +3031,74 @@ export async function revokeCookiesFromAgent(agentId: string, cookieSetId: strin
   });
   return handleResponse(res, 'Failed to revoke cookies');
 }
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// AGENT MESSAGING PERMISSIONS
+// ═══════════════════════════════════════════════════════════════════════════
+
+export type MessagingChannel = 'telegram' | 'whatsapp' | 'signal';
+
+export interface MessagingPermission {
+  id: number;
+  agentId: string;
+  channel: MessagingChannel;
+  target: string;
+  label: string | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+/** Fetch all messaging permissions for an agent, optionally filtered by channel. */
+export async function fetchMessagingPermissions(
+  agentId: string,
+  channel?: MessagingChannel,
+): Promise<MessagingPermission[]> {
+  const url = channel
+    ? `${API_BASE}/agents/${agentId}/messaging-permissions?channel=${channel}`
+    : `${API_BASE}/agents/${agentId}/messaging-permissions`;
+  const res = await authFetch(url);
+  const data = await handleResponse(res, 'Failed to fetch messaging permissions') as { permissions: MessagingPermission[] };
+  return data.permissions;
+}
+
+/** Add a single messaging permission. */
+export async function createMessagingPermission(
+  agentId: string,
+  channel: MessagingChannel,
+  target: string,
+  label?: string,
+): Promise<MessagingPermission> {
+  const res = await authFetch(`${API_BASE}/agents/${agentId}/messaging-permissions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ channel, target, label: label || null }),
+  });
+  return handleResponse(res, 'Failed to create messaging permission');
+}
+
+/** Replace all permissions for a specific channel. */
+export async function bulkSetMessagingPermissions(
+  agentId: string,
+  channel: MessagingChannel,
+  permissions: Array<{ channel: MessagingChannel; target: string; label?: string }>,
+): Promise<MessagingPermission[]> {
+  const res = await authFetch(`${API_BASE}/agents/${agentId}/messaging-permissions`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ channel, permissions }),
+  });
+  const data = await handleResponse(res, 'Failed to update messaging permissions') as { permissions: MessagingPermission[] };
+  return data.permissions;
+}
+
+/** Delete a single messaging permission. */
+export async function deleteMessagingPermission(
+  agentId: string,
+  permissionId: number,
+): Promise<void> {
+  const res = await authFetch(`${API_BASE}/agents/${agentId}/messaging-permissions/${permissionId}`, {
+    method: 'DELETE',
+  });
+  return handleResponse(res, 'Failed to delete messaging permission');
+}

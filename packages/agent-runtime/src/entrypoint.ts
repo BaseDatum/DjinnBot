@@ -7,6 +7,26 @@ import { startFileWatcher } from './tools/watcher.js';
 import type { StepStartEvent, StepEndEvent, StructuredOutputCommand } from '@djinnbot/core';
 
 async function main(): Promise<void> {
+  // ── Ensure XDG_CONFIG_HOME is a writable directory ────────────────────
+  // JuiceFS creates ~/.config as a regular file (mount metadata JSON),
+  // which prevents tools like qmd from creating ~/.config/qmd/.
+  // The boot script should have already moved it, but as a fallback we
+  // set XDG_CONFIG_HOME so all child processes (including clawvault's
+  // internal qmd calls) use an alternate config directory.
+  if (!process.env.XDG_CONFIG_HOME) {
+    const fs = await import('node:fs');
+    const homeConfig = `${process.env.HOME || '/home/agent'}/.config`;
+    try {
+      const stat = fs.statSync(homeConfig);
+      if (!stat.isDirectory()) {
+        // .config exists but is not a directory — use /tmp fallback
+        process.env.XDG_CONFIG_HOME = '/tmp/xdg-config';
+      }
+    } catch {
+      // .config doesn't exist — that's fine, qmd will create it
+    }
+  }
+
   const config = loadConfig();
   console.log(`[AgentRuntime] Starting for run ${config.runId}`);
 

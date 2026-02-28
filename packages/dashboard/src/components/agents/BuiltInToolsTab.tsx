@@ -14,6 +14,8 @@ import { useState, useEffect, useCallback } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Input } from '@/components/ui/input';
+import { Button } from '@/components/ui/button';
 import {
   Terminal, FileText, FilePen, FileInput,
   CheckCircle, XCircle, Brain, Search, Share2, ThumbsUp, Compass,
@@ -33,10 +35,18 @@ import {
   History,
   GlobeLock, MousePointer, Type, Navigation, ScrollText,
   Camera, X, List, Cookie, ArrowLeft, ArrowRight, Captions,
+  Plus, Trash2, Shield, Asterisk, ChevronDown, ChevronRight,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { toast } from 'sonner';
-import { fetchToolOverrides, setToolOverrides } from '@/lib/api';
+import {
+  fetchToolOverrides,
+  setToolOverrides,
+  fetchMessagingPermissions,
+  createMessagingPermission,
+  deleteMessagingPermission,
+} from '@/lib/api';
+import type { MessagingChannel, MessagingPermission } from '@/lib/api';
 
 interface BuiltInTool {
   name: string;
@@ -64,6 +74,10 @@ const TOOL_CATEGORIES: { key: string; label: string; color: string }[] = [
   { key: 'github',      label: 'GitHub',            color: 'text-foreground border-border'         },
   { key: 'secrets',     label: 'Secrets',           color: 'text-red-500 border-red-500/30'        },
   { key: 'slack',       label: 'Slack',             color: 'text-emerald-500 border-emerald-500/30'},
+  { key: 'discord',     label: 'Discord',           color: 'text-indigo-400 border-indigo-400/30'  },
+  { key: 'telegram',    label: 'Telegram',          color: 'text-sky-400 border-sky-400/30'        },
+  { key: 'whatsapp',    label: 'WhatsApp',          color: 'text-green-400 border-green-400/30'    },
+  { key: 'signal',      label: 'Signal',            color: 'text-blue-400 border-blue-400/30'      },
   { key: 'browser',     label: 'Browser (Camofox)', color: 'text-lime-500 border-lime-500/30'      },
   { key: 'onboarding',  label: 'Onboarding',        color: 'text-teal-500 border-teal-500/30'      },
 ];
@@ -439,6 +453,68 @@ const BUILT_IN_TOOLS: BuiltInTool[] = [
     icon: SearchCode,
   },
 
+  // ── Discord tools ─────────────────────────────────────────────────────────
+  {
+    name: 'discord_send_message',
+    description: 'Send a message to a Discord channel or DM a user. Supports Discord markdown and thread replies.',
+    category: 'discord',
+    icon: Send,
+  },
+  {
+    name: 'discord_list_channels',
+    description: 'List the Discord channels the agent\'s bot has access to, including IDs, names, types, and guild info.',
+    category: 'discord',
+    icon: Hash,
+  },
+  {
+    name: 'discord_lookup_user',
+    description: 'Look up a Discord user by their user ID. Returns username, display name, and bot status.',
+    category: 'discord',
+    icon: SearchCode,
+  },
+
+  // ── Telegram tools ──────────────────────────────────────────────────────
+  {
+    name: 'send_telegram_message',
+    description: 'Send a Telegram message to a user or chat for escalation or notification. Supports markdown formatting and urgent flags.',
+    category: 'telegram',
+    icon: Send,
+  },
+  {
+    name: 'telegram_list_targets',
+    description: 'List the Telegram chat IDs and usernames this agent is allowed to send messages to.',
+    category: 'telegram',
+    icon: SearchCode,
+  },
+
+  // ── WhatsApp tools ─────────────────────────────────────────────────────
+  {
+    name: 'send_whatsapp_message',
+    description: 'Send a WhatsApp message to a phone number or group. Messages sent from the shared WhatsApp linked device.',
+    category: 'whatsapp',
+    icon: Send,
+  },
+  {
+    name: 'whatsapp_list_targets',
+    description: 'List the phone numbers and groups this agent is allowed to send WhatsApp messages to.',
+    category: 'whatsapp',
+    icon: SearchCode,
+  },
+
+  // ── Signal tools ───────────────────────────────────────────────────────
+  {
+    name: 'send_signal_message',
+    description: 'Send a Signal message to a phone number or group. Messages sent from the shared Signal linked device.',
+    category: 'signal',
+    icon: Send,
+  },
+  {
+    name: 'signal_list_targets',
+    description: 'List the phone numbers and groups this agent is allowed to send Signal messages to.',
+    category: 'signal',
+    icon: SearchCode,
+  },
+
   // ── Browser tools (Camofox) ───────────────────────────────────────────────
   {
     name: 'camofox_create_tab',
@@ -539,6 +615,232 @@ const BUILT_IN_TOOLS: BuiltInTool[] = [
     icon: Handshake,
   },
 ];
+
+// ── Categories that have messaging permission controls ──────────────────────
+const MESSAGING_CATEGORIES = new Set<string>(['telegram', 'whatsapp', 'signal']);
+
+const CHANNEL_TARGET_LABELS: Record<string, { placeholder: string; hint: string }> = {
+  telegram: {
+    placeholder: 'Chat ID or @username',
+    hint: 'e.g. 12345678, @mychannel, or * for any',
+  },
+  whatsapp: {
+    placeholder: 'Phone number (+E.164) or group JID',
+    hint: 'e.g. +14155551234, or * for any',
+  },
+  signal: {
+    placeholder: 'Phone number (+E.164) or group ID',
+    hint: 'e.g. +14155551234, or * for any',
+  },
+};
+
+
+// ── MessagingPermissionsPanel ───────────────────────────────────────────────
+
+function MessagingPermissionsPanel({
+  agentId,
+  channel,
+}: {
+  agentId: string;
+  channel: MessagingChannel;
+}) {
+  const [permissions, setPermissions] = useState<MessagingPermission[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [expanded, setExpanded] = useState(false);
+  const [newTarget, setNewTarget] = useState('');
+  const [newLabel, setNewLabel] = useState('');
+  const [adding, setAdding] = useState(false);
+  const [deleting, setDeleting] = useState<Set<number>>(new Set());
+
+  useEffect(() => {
+    fetchMessagingPermissions(agentId, channel)
+      .then(setPermissions)
+      .catch(() => {/* silent — empty list */})
+      .finally(() => setLoading(false));
+  }, [agentId, channel]);
+
+  const hasWildcard = permissions.some((p) => p.target === '*');
+  const permCount = permissions.length;
+
+  const handleAdd = useCallback(async () => {
+    const target = newTarget.trim();
+    if (!target) return;
+    setAdding(true);
+    try {
+      const perm = await createMessagingPermission(agentId, channel, target, newLabel.trim() || undefined);
+      setPermissions((prev) => [...prev, perm]);
+      setNewTarget('');
+      setNewLabel('');
+      toast.success(`Added ${channel} target: ${target}`);
+    } catch (err: any) {
+      toast.error(err?.message || `Failed to add ${channel} permission`);
+    } finally {
+      setAdding(false);
+    }
+  }, [agentId, channel, newTarget, newLabel]);
+
+  const handleDelete = useCallback(async (id: number) => {
+    setDeleting((prev) => new Set(prev).add(id));
+    try {
+      await deleteMessagingPermission(agentId, id);
+      setPermissions((prev) => prev.filter((p) => p.id !== id));
+      toast.success('Permission removed');
+    } catch {
+      toast.error('Failed to remove permission');
+    } finally {
+      setDeleting((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+    }
+  }, [agentId]);
+
+  const handleAddWildcard = useCallback(async () => {
+    setAdding(true);
+    try {
+      const perm = await createMessagingPermission(agentId, channel, '*', 'Wildcard — any target');
+      setPermissions((prev) => [...prev, perm]);
+      toast.success(`${channel} wildcard access granted`);
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to add wildcard');
+    } finally {
+      setAdding(false);
+    }
+  }, [agentId, channel]);
+
+  const meta = CHANNEL_TARGET_LABELS[channel] || CHANNEL_TARGET_LABELS.telegram;
+
+  return (
+    <div className="mt-2 ml-1 border-l-2 border-muted pl-3">
+      <button
+        type="button"
+        onClick={() => setExpanded(!expanded)}
+        className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+      >
+        {expanded ? (
+          <ChevronDown className="h-3 w-3" />
+        ) : (
+          <ChevronRight className="h-3 w-3" />
+        )}
+        <Shield className="h-3 w-3" />
+        <span>
+          Allowed targets
+          {loading ? '' : permCount === 0
+            ? ' (none — agent cannot send)'
+            : hasWildcard
+              ? ' (wildcard — any target)'
+              : ` (${permCount} target${permCount !== 1 ? 's' : ''})`
+          }
+        </span>
+      </button>
+
+      {expanded && (
+        <div className="mt-2 space-y-2">
+          {loading ? (
+            <Skeleton height={32} />
+          ) : (
+            <>
+              {/* Existing permissions */}
+              {permissions.length > 0 ? (
+                <div className="space-y-1">
+                  {permissions.map((perm) => (
+                    <div
+                      key={perm.id}
+                      className="flex items-center gap-2 px-2 py-1.5 rounded-md bg-muted/20 border text-xs"
+                    >
+                      {perm.target === '*' ? (
+                        <Asterisk className="h-3 w-3 text-yellow-500 shrink-0" />
+                      ) : (
+                        <Shield className="h-3 w-3 text-muted-foreground shrink-0" />
+                      )}
+                      <code className="font-mono flex-1 truncate">
+                        {perm.target}
+                      </code>
+                      {perm.label && (
+                        <span className="text-muted-foreground truncate max-w-[120px]">
+                          {perm.label}
+                        </span>
+                      )}
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-5 w-5 p-0 shrink-0 text-muted-foreground hover:text-destructive"
+                        disabled={deleting.has(perm.id)}
+                        onClick={() => handleDelete(perm.id)}
+                      >
+                        <Trash2 className="h-3 w-3" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-xs text-muted-foreground italic px-2">
+                  No targets configured. The agent cannot send {channel} messages until targets are added.
+                </p>
+              )}
+
+              {/* Add new target */}
+              <div className="flex items-end gap-2 pt-1">
+                <div className="flex-1 min-w-0 space-y-1">
+                  <div className="flex gap-2">
+                    <Input
+                      value={newTarget}
+                      onChange={(e) => setNewTarget(e.target.value)}
+                      placeholder={meta.placeholder}
+                      className="h-7 text-xs font-mono flex-1"
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') handleAdd();
+                      }}
+                    />
+                    <Input
+                      value={newLabel}
+                      onChange={(e) => setNewLabel(e.target.value)}
+                      placeholder="Label (optional)"
+                      className="h-7 text-xs w-32"
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') handleAdd();
+                      }}
+                    />
+                  </div>
+                  <p className="text-[10px] text-muted-foreground">{meta.hint}</p>
+                </div>
+                <div className="flex gap-1 shrink-0">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-7 text-xs px-2"
+                    disabled={adding || !newTarget.trim()}
+                    onClick={handleAdd}
+                  >
+                    <Plus className="h-3 w-3 mr-1" />
+                    Add
+                  </Button>
+                  {!hasWildcard && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-7 text-xs px-2 text-yellow-500 hover:text-yellow-600"
+                      disabled={adding}
+                      onClick={handleAddWildcard}
+                      title="Grant access to send to any target"
+                    >
+                      <Asterisk className="h-3 w-3 mr-1" />
+                      Allow all
+                    </Button>
+                  )}
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+// ── Main component ──────────────────────────────────────────────────────────
 
 interface BuiltInToolsTabProps {
   agentId: string;
@@ -703,6 +1005,14 @@ export function BuiltInToolsTab({ agentId }: BuiltInToolsTabProps) {
               );
             })}
           </div>
+
+          {/* Messaging permissions panel for Telegram, WhatsApp, Signal */}
+          {MESSAGING_CATEGORIES.has(key) && (
+            <MessagingPermissionsPanel
+              agentId={agentId}
+              channel={key as MessagingChannel}
+            />
+          )}
         </div>
       ))}
     </div>

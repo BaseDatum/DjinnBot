@@ -196,12 +196,16 @@ export function CodeKnowledgeGraph({ projectId }: CodeKnowledgeGraphProps) {
       if (edge.targetId === nodeId) connected.add(edge.sourceId);
     }
     setHighlightedNodeIds(connected);
-    // Also select the node
+    // Also select the node (this may open the inspector panel, resizing the graph container)
     const n = graphData.nodes.find(n => n.id === nodeId);
     if (n) {
       handleNodeSelect({ id: n.id, name: n.name, label: n.label, filePath: n.filePath, startLine: n.startLine });
     }
-    focusNodeFnRef.current?.(nodeId);
+    // Delay focusNode so the panel resize + Sigma's ResizeObserver can
+    // settle first — otherwise viewportToFramedGraph uses stale dimensions.
+    requestAnimationFrame(() => {
+      focusNodeFnRef.current?.(nodeId);
+    });
   }, [graphData, handleNodeSelect]);
 
   // ── Blast radius ────────────────────────────────────────────────────
