@@ -3,7 +3,7 @@
  * with per-agent enable/disable toggles persisted to the database.
  *
  * These tools come from two sources in the agent-runtime:
- *   - Container tools   (createContainerTools)  : read, write, edit, bash
+ *   - Container tools   (createContainerTools)  : read, write, edit, bash, grep, find, ls, multiedit
  *   - DjinnBot tools    (createDjinnBotTools)    : all domain-specific tools
  *
  * The tool manifest is static — it never varies per agent.
@@ -90,9 +90,33 @@ const BUILT_IN_TOOLS: BuiltInTool[] = [
   },
   {
     name: 'bash',
-    description: 'Execute shell commands with stdout/stderr streaming to the UI. Supports timeouts and abort signals.',
+    description: 'Execute shell commands with stdout/stderr streaming to the UI. Supports timeouts and abort signals. Output auto-truncated at 2000 lines / 50KB.',
     category: 'file',
     icon: Terminal,
+  },
+  {
+    name: 'grep',
+    description: 'Search file contents for a regex or literal pattern using ripgrep. Returns matching lines with paths and line numbers. Respects .gitignore. Supports glob filtering and context lines.',
+    category: 'file',
+    icon: SearchCode,
+  },
+  {
+    name: 'find',
+    description: 'Search for files by glob pattern using fd. Returns matching file paths relative to the search directory. Respects .gitignore.',
+    category: 'file',
+    icon: FolderOpen,
+  },
+  {
+    name: 'ls',
+    description: 'List directory contents sorted alphabetically with directory indicators. Includes dotfiles. Output capped at 500 entries.',
+    category: 'file',
+    icon: List,
+  },
+  {
+    name: 'multiedit',
+    description: 'Apply multiple edits to a single file in one call. Reads once, applies edits sequentially with fuzzy matching, writes once. More efficient than multiple separate edit calls.',
+    category: 'file',
+    icon: FileDiff,
   },
 
   // ── Step control ─────────────────────────────────────────────────────────
