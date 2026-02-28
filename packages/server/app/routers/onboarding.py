@@ -1473,6 +1473,25 @@ async def finalize_onboarding_session(
 
     await db.commit()
 
+    # Auto-setup workspace: clone repo + trigger code-graph indexing.
+    # This runs before the planning pipeline so that agents have the code
+    # graph available from the start.
+    workspace_setup = None
+    if repository:
+        try:
+            from app.routers.projects._repo_setup import setup_project_repository
+
+            setup_result = await setup_project_repository(project_id, repository, db)
+            workspace_setup = setup_result.to_dict()
+            await db.commit()
+        except Exception as exc:
+            logger.warning(
+                "Auto workspace setup failed during onboarding finalize for "
+                "project %s (non-fatal): %s",
+                project_id,
+                exc,
+            )
+
     # Stop the current agent container
     if onb.chat_session_id:
         await _stop_agent_container(onb.chat_session_id, onb.current_agent_id)
@@ -1501,6 +1520,7 @@ async def finalize_onboarding_session(
         "projectId": project_id,
         "projectName": req.project_name,
         "planningRunId": planning_run_id,
+        "workspaceSetup": workspace_setup,
     }
 
 

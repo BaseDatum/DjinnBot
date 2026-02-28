@@ -119,20 +119,27 @@ async def set_project_repository(
         },
     )
 
-    # Auto-clone the repository in the background so the workspace is ready
-    # for the first pipeline run.  This replaces the manual "Clone Now" step.
-    clone_result = None
-    clone_error = None
+    # Auto-setup: clone the repository and trigger code-graph indexing.
+    # Uses the shared helper so the behaviour is identical to project creation.
+    workspace_setup = None
     try:
-        clone_result = await _auto_clone_repository(
-            project_id, normalized_url, installation_id, session
-        )
-    except Exception as e:
-        clone_error = str(e)
-        logger.warning(
-            "Auto-clone failed for project %s (non-fatal): %s",
+        from ._repo_setup import setup_project_repository
+
+        setup_result = await setup_project_repository(
             project_id,
-            clone_error,
+            normalized_url,
+            session,
+            installation_id=installation_id,
+            # GitHub connection was already saved above when applicable
+            save_github_connection=installation_id is None,
+        )
+        workspace_setup = setup_result.to_dict()
+        await session.commit()
+    except Exception as e:
+        logger.warning(
+            "Auto workspace setup failed for project %s (non-fatal): %s",
+            project_id,
+            str(e),
         )
 
     return {
@@ -140,9 +147,13 @@ async def set_project_repository(
         "repoUrl": normalized_url,
         "validated": req.validateAccess,
         "installationId": installation_id,
-        "cloned": clone_result is not None,
-        "cloneResult": clone_result,
-        "cloneError": clone_error,
+        "cloned": workspace_setup.get("cloned", False) if workspace_setup else False,
+        "cloneResult": workspace_setup,
+        "cloneError": workspace_setup.get("clone_error") if workspace_setup else None,
+        "indexTriggered": workspace_setup.get("index_triggered", False)
+        if workspace_setup
+        else False,
+        "indexJobId": workspace_setup.get("index_job_id") if workspace_setup else None,
     }
 
 

@@ -160,12 +160,32 @@ async def create_project(
         "PROJECT_CREATED", {"projectId": project.id, "name": project.name}
     )
 
+    # Auto-setup workspace: clone repo + trigger code-graph indexing
+    workspace_setup = None
+    if project.repository:
+        try:
+            from ._repo_setup import setup_project_repository
+
+            setup_result = await setup_project_repository(
+                project.id, project.repository, session
+            )
+            workspace_setup = setup_result.to_dict()
+            # Commit any DB changes made by setup (ProjectGitHub, CodeGraphIndex)
+            await session.commit()
+        except Exception as exc:
+            logger.warning(
+                "Auto workspace setup failed for project %s (non-fatal): %s",
+                project.id,
+                exc,
+            )
+
     return {
         "id": project.id,
         "name": project.name,
         "status": "active",
         "template_id": template_id,
         "created_at": now,
+        "workspace_setup": workspace_setup,
     }
 
 
