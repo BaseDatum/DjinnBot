@@ -19,6 +19,7 @@ import {
   ChevronUp,
   ShieldCheck,
   Activity,
+  GitPullRequestArrow,
 } from 'lucide-react';
 import { fetchAgents, fetchStatus } from '@/lib/api';
 import { useAuth } from '@/hooks/useAuth';
@@ -38,6 +39,7 @@ const navItems = [
   { to: '/projects', label: 'Projects', icon: FolderKanban },
   { to: '/agents', label: 'Agents', icon: Bot },
   { to: '/chat', label: 'Chat', icon: MessagesSquare },
+  { to: '/resolve', label: 'Resolve', icon: GitPullRequestArrow },
   { to: '/memory', label: 'Memory', icon: Brain },
   { to: '/runs', label: 'Runs', icon: Play },
   { to: '/usage', label: 'Usage', icon: Activity },

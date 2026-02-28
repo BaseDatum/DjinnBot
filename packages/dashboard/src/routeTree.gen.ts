@@ -10,6 +10,7 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as UsageRouteImport } from './routes/usage'
+import { Route as ResolveRouteImport } from './routes/resolve'
 import { Route as SkillsRouteImport } from './routes/skills'
 import { Route as SetupRouteImport } from './routes/setup'
 import { Route as SettingsRouteImport } from './routes/settings'
@@ -36,6 +37,11 @@ import { Route as RunsSwarmSwarmIdRouteImport } from './routes/runs/swarm.$swarm
 const UsageRoute = UsageRouteImport.update({
   id: '/usage',
   path: '/usage',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ResolveRoute = ResolveRouteImport.update({
+  id: '/resolve',
+  path: '/resolve',
   getParentRoute: () => rootRouteImport,
 } as any)
 const SkillsRoute = SkillsRouteImport.update({
@@ -157,6 +163,7 @@ export interface FileRoutesByFullPath {
   '/mcp': typeof McpRouteWithChildren
   '/memory': typeof MemoryRoute
   '/profile': typeof ProfileRoute
+  '/resolve': typeof ResolveRoute
   '/settings': typeof SettingsRoute
   '/setup': typeof SetupRoute
   '/skills': typeof SkillsRouteWithChildren
@@ -182,6 +189,7 @@ export interface FileRoutesByTo {
   '/mcp': typeof McpRouteWithChildren
   '/memory': typeof MemoryRoute
   '/profile': typeof ProfileRoute
+  '/resolve': typeof ResolveRoute
   '/settings': typeof SettingsRoute
   '/setup': typeof SetupRoute
   '/skills': typeof SkillsRouteWithChildren
@@ -208,6 +216,7 @@ export interface FileRoutesById {
   '/mcp': typeof McpRouteWithChildren
   '/memory': typeof MemoryRoute
   '/profile': typeof ProfileRoute
+  '/resolve': typeof ResolveRoute
   '/settings': typeof SettingsRoute
   '/setup': typeof SetupRoute
   '/skills': typeof SkillsRouteWithChildren
@@ -235,6 +244,7 @@ export interface FileRouteTypes {
     | '/mcp'
     | '/memory'
     | '/profile'
+    | '/resolve'
     | '/settings'
     | '/setup'
     | '/skills'
@@ -260,6 +270,7 @@ export interface FileRouteTypes {
     | '/mcp'
     | '/memory'
     | '/profile'
+    | '/resolve'
     | '/settings'
     | '/setup'
     | '/skills'
@@ -285,6 +296,7 @@ export interface FileRouteTypes {
     | '/mcp'
     | '/memory'
     | '/profile'
+    | '/resolve'
     | '/settings'
     | '/setup'
     | '/skills'
@@ -311,6 +323,7 @@ export interface RootRouteChildren {
   McpRoute: typeof McpRouteWithChildren
   MemoryRoute: typeof MemoryRoute
   ProfileRoute: typeof ProfileRoute
+  ResolveRoute: typeof ResolveRoute
   SettingsRoute: typeof SettingsRoute
   SetupRoute: typeof SetupRoute
   SkillsRoute: typeof SkillsRouteWithChildren
@@ -390,6 +403,13 @@ declare module '@tanstack/react-router' {
       path: '/chat'
       fullPath: '/chat'
       preLoaderRoute: typeof ChatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/resolve': {
+      id: '/resolve'
+      path: '/resolve'
+      fullPath: '/resolve'
+      preLoaderRoute: typeof ResolveRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/admin': {
@@ -522,6 +542,7 @@ const rootRouteChildren: RootRouteChildren = {
   McpRoute: McpRouteWithChildren,
   MemoryRoute: MemoryRoute,
   ProfileRoute: ProfileRoute,
+  ResolveRoute: ResolveRoute,
   SettingsRoute: SettingsRoute,
   SetupRoute: SetupRoute,
   SkillsRoute: SkillsRouteWithChildren,
