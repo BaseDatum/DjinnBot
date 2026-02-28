@@ -453,7 +453,7 @@ export class ContainerManager {
           // background subshell so the agent runtime launches immediately.
           // NOTE: The camofox subshell MUST be in its own command (after ';')
           // so a .config mkdir failure doesn't skip camofox via the && chain.
-          `export CAMOFOX_API_KEY=$(head -c 16 /dev/urandom | xxd -p) && ` +
+          `export CAMOFOX_API_KEY=$(head -c 16 /dev/urandom | xxd -p); ` +
           `( mkdir -p /home/agent/.cache && ` +
           `  cp -r /opt/camofox/.camoufox-cache /home/agent/.cache/camoufox && ` +
           `  echo "[boot] Camofox cache restored, starting server" && ` +
