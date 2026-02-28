@@ -32,6 +32,8 @@ export interface ContainerInfo {
   status: 'created' | 'starting' | 'ready' | 'running' | 'stopping' | 'stopped';
   /** Set to true when the image was auto-pulled during container creation. */
   imagePulled?: boolean;
+  /** Ready timeout override from admin settings (ms). Stored at creation, used at start. */
+  readyTimeoutMs?: number;
 }
 
 const DEFAULT_IMAGE = process.env.AGENT_RUNTIME_IMAGE || 'ghcr.io/basedatum/djinnbot/agent-runtime:latest';
@@ -199,6 +201,7 @@ export class ContainerManager {
             containerId: info.Id,
             runId,
             status: info.State.Running ? 'running' : 'created',
+            readyTimeoutMs,
           };
           this.containers.set(runId, containerInfo);
           return containerInfo;
@@ -358,11 +361,16 @@ export class ContainerManager {
           'sh', '-c',
           // Exit immediately if any command fails
           `set -e && ` +
-          // ── Mount JuiceFS subdirectories ─────────────────────────────────────
+          // ── Mount JuiceFS subdirectories (parallel) ──────────────────────────
           // Parse JFS_MOUNT_SPEC (semicolon-delimited entries of subdir:target:mode)
-          // and mount each as an independent FUSE filesystem.
-          `echo "[boot] Mounting JuiceFS subdirectories..." && ` +
-          `IFS=';' && for entry in $JFS_MOUNT_SPEC; do ` +
+          // and mount ALL entries in parallel. Each `juicefs mount --background`
+          // is independent (separate subdir, separate FUSE mount point), so we
+          // launch them concurrently and `wait` for all to finish. This cuts
+          // startup time from O(N * mount_latency) to O(mount_latency).
+          `echo "[boot] Mounting JuiceFS subdirectories (parallel)..." && ` +
+          `MOUNT_PIDS="" && ` +
+          `MOUNT_TARGETS="" && ` +
+          `OLD_IFS="$IFS" && IFS=';' && for entry in $JFS_MOUNT_SPEC; do ` +
           `  subdir=$(echo "$entry" | cut -d: -f1) && ` +
           `  target=$(echo "$entry" | cut -d: -f2) && ` +
           `  mode=$(echo "$entry" | cut -d: -f3) && ` +
@@ -370,7 +378,8 @@ export class ContainerManager {
           `  if [ "$mode" = "ro" ]; then ro_flag="--read-only"; fi && ` +
           `  echo "[boot]   $subdir -> $target ($mode)" && ` +
           `  mkdir -p "$target" && ` +
-          `  juicefs mount ` +
+          // Launch each mount in a background subshell
+          `  ( juicefs mount ` +
           `    --subdir "$subdir" ` +
           `    --cache-dir /tmp/jfscache ` +
           `    --cache-size "$JFS_CACHE_SIZE" ` +
@@ -381,10 +390,24 @@ export class ContainerManager {
           `    --background ` +
           `    $ro_flag ` +
           `    "$JFS_META_URL" ` +
-          `    "$target" && ` +
-          `  echo "[boot]   mounted $target" || ` +
-          `  { echo "[boot] FATAL: failed to mount $subdir at $target"; exit 1; }; ` +
-          `done && unset IFS && ` +
+          `    "$target" ) & ` +
+          `  MOUNT_PIDS="$MOUNT_PIDS $!" && ` +
+          `  MOUNT_TARGETS="$MOUNT_TARGETS $target"; ` +
+          `done && IFS="$OLD_IFS" && ` +
+          // Wait for all mount subshells to finish
+          `MOUNT_FAIL=0 && ` +
+          `for pid in $MOUNT_PIDS; do ` +
+          `  wait "$pid" || MOUNT_FAIL=1; ` +
+          `done && ` +
+          // Verify every mount point is actually mounted
+          `for target in $MOUNT_TARGETS; do ` +
+          `  if mountpoint -q "$target"; then ` +
+          `    echo "[boot]   mounted $target"; ` +
+          `  else ` +
+          `    echo "[boot] FATAL: $target is not mounted after juicefs mount"; MOUNT_FAIL=1; ` +
+          `  fi; ` +
+          `done && ` +
+          `if [ "$MOUNT_FAIL" = "1" ]; then echo "[boot] FATAL: one or more JuiceFS mounts failed"; exit 1; fi && ` +
           `echo "[boot] All JuiceFS mounts ready" && ` +
           // ── Git credential helper ───────────────────────────────────────────
           (() => {
@@ -475,6 +498,7 @@ export class ContainerManager {
         runId,
         status: 'created',
         imagePulled,
+        readyTimeoutMs,
       };
       this.containers.set(runId, info);
 
@@ -498,8 +522,7 @@ export class ContainerManager {
       console.log(`[ContainerManager] Started container ${info.containerId}`);
 
       // Wait for ready status from container
-      // @ts-ignore — config is typed but TS loses resolution without @types/dockerode
-      await this.waitForReady(runId, readyTimeoutMs);
+      await this.waitForReady(runId, info.readyTimeoutMs);
       info.status = 'ready';
     } catch (error) {
       const err = error as Error;
