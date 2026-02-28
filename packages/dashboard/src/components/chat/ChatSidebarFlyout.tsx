@@ -249,7 +249,7 @@ export function ChatSidebarFlyoutDesktop() {
                                 'h-1.5 w-1.5 rounded-full shrink-0',
                                 s.status === 'running' || s.status === 'ready' ? 'bg-green-500' : 'bg-muted-foreground/40',
                               )} />
-                              {new Date(s.created_at * 1000).toLocaleDateString(undefined, {
+                              {new Date(s.created_at).toLocaleDateString(undefined, {
                                 month: 'short', day: 'numeric',
                                 hour: '2-digit', minute: '2-digit',
                               })}
@@ -431,7 +431,7 @@ export function ChatSidebarFlyoutMobile({ onClose }: { onClose?: () => void }) {
                                 'h-2 w-2 rounded-full shrink-0',
                                 s.status === 'running' || s.status === 'ready' ? 'bg-green-500' : 'bg-muted-foreground/40',
                               )} />
-                              {new Date(s.created_at * 1000).toLocaleDateString(undefined, {
+                              {new Date(s.created_at).toLocaleDateString(undefined, {
                                 month: 'short', day: 'numeric',
                                 hour: '2-digit', minute: '2-digit',
                               })}
@@ -613,7 +613,7 @@ export function ChatMobilePill() {
                                 'h-2 w-2 rounded-full shrink-0',
                                 s.status === 'running' || s.status === 'ready' ? 'bg-green-500' : 'bg-muted-foreground/40',
                               )} />
-                              {new Date(s.created_at * 1000).toLocaleDateString(undefined, {
+                              {new Date(s.created_at).toLocaleDateString(undefined, {
                                 month: 'short', day: 'numeric',
                                 hour: '2-digit', minute: '2-digit',
                               })}

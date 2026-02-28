@@ -196,17 +196,50 @@ async def upload_cookie_set(
         created_at=ts,
         updated_at=ts,
     )
+    # Write file to staging area BEFORE committing to DB — if the file write
+    # fails we don't want a DB record pointing to a non-existent file.
+    staging_dir = os.path.join(DATA_PATH, "cookies", "_staging")
+    staging_path = os.path.join(staging_dir, filename)
+    try:
+        os.makedirs(staging_dir, exist_ok=True)
+        with open(staging_path, "w") as f:
+            f.write(content)
+    except Exception as e:
+        logger.error(
+            "Failed to write cookie staging file %s: %s (DATA_PATH=%s)",
+            staging_path,
+            e,
+            DATA_PATH,
+        )
+        raise HTTPException(
+            500,
+            f"Failed to save cookie file to storage: {e}. "
+            f"Check that the storage backend (JuiceFS) is mounted and writable.",
+        )
+
+    # Verify the file was actually written (catches JuiceFS mount issues)
+    if not os.path.exists(staging_path):
+        logger.error(
+            "Cookie staging file write appeared to succeed but file not found at %s "
+            "(JuiceFS may not be mounted at %s)",
+            staging_path,
+            DATA_PATH,
+        )
+        raise HTTPException(
+            500,
+            "Cookie file was written but could not be verified on disk. "
+            "The storage backend may not be properly mounted.",
+        )
+
     db.add(cookie_set)
     await db.commit()
 
-    # Write file to a staging area — it gets copied to agent dirs on grant
-    staging_dir = os.path.join(DATA_PATH, "cookies", "_staging")
-    os.makedirs(staging_dir, exist_ok=True)
-    with open(os.path.join(staging_dir, filename), "w") as f:
-        f.write(content)
-
     logger.info(
-        "Cookie set uploaded: %s (%s, %d cookies)", cookie_id, domain, len(cookies)
+        "Cookie set uploaded: %s (%s, %d cookies, staging=%s)",
+        cookie_id,
+        domain,
+        len(cookies),
+        staging_path,
     )
 
     return CookieSetResponse(
@@ -358,29 +391,77 @@ async def grant_cookies_to_agent(
             AgentCookieGrant.cookie_set_id == cookie_set_id,
         )
     )
-    if existing.scalar_one_or_none():
-        return {"ok": True, "message": "Already granted"}
+    already_granted = existing.scalar_one_or_none() is not None
 
-    # Create grant
-    grant = AgentCookieGrant(
-        agent_id=agent_id,
-        cookie_set_id=cookie_set_id,
-        granted_by="ui",
-        granted_at=now_ms(),
-    )
-    db.add(grant)
-    await db.commit()
+    if not already_granted:
+        # Create grant
+        grant = AgentCookieGrant(
+            agent_id=agent_id,
+            cookie_set_id=cookie_set_id,
+            granted_by="ui",
+            granted_at=now_ms(),
+        )
+        db.add(grant)
+        await db.commit()
 
-    # Copy cookie file to agent's directory on JuiceFS
+    # Copy cookie file to agent's directory on JuiceFS.
+    # Always attempt the copy — even for "already granted" — so that
+    # re-granting repairs a missing file (e.g. after a transient JuiceFS error).
     src = os.path.join(DATA_PATH, "cookies", "_staging", cs.filename)
-    if os.path.exists(src):
+    if not os.path.exists(src):
+        logger.error(
+            "Staging cookie file missing: %s (cookie_set=%s, agent=%s). "
+            "The file may not have been written during upload or JuiceFS may not be mounted at %s.",
+            src,
+            cookie_set_id,
+            agent_id,
+            DATA_PATH,
+        )
+        raise HTTPException(
+            500,
+            f"Cookie file not found on disk ({cs.filename}). "
+            f"The upload may have failed or the storage backend is unavailable. "
+            f"Try re-uploading the cookie set.",
+        )
+
+    try:
         _ensure_cookie_dir(agent_id)
         dst = _cookie_file_path(agent_id, cs.filename)
         shutil.copy2(src, dst)
+        logger.info(
+            "Cookie file copied: %s -> %s (%d bytes)",
+            src,
+            dst,
+            os.path.getsize(dst),
+        )
+    except Exception as e:
+        logger.error(
+            "Failed to copy cookie file %s -> agent %s: %s",
+            cs.filename,
+            agent_id,
+            e,
+        )
+        raise HTTPException(
+            500,
+            f"Failed to place cookie file in agent directory: {e}",
+        )
+
+    # Verify the file actually landed (catch silent JuiceFS sync issues)
+    if not os.path.exists(dst):
+        logger.error(
+            "Cookie file copy appeared to succeed but file not found at %s "
+            "(possible JuiceFS sync issue)",
+            dst,
+        )
+        raise HTTPException(
+            500,
+            "Cookie file was copied but could not be verified on disk. "
+            "This may indicate a storage sync issue. Try again in a few seconds.",
+        )
 
     await _publish_cookies_changed(agent_id)
     logger.info("Cookie grant: %s -> %s (%s)", cookie_set_id, agent_id, cs.domain)
-    return {"ok": True}
+    return {"ok": True, "file_copied": True, "filename": cs.filename}
 
 
 @router.delete("/cookies/agents/{agent_id}/{cookie_set_id}")

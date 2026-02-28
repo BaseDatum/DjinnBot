@@ -654,7 +654,7 @@ export function FloatingChatWidget() {
                               <SelectItem key={s.id} value={s.id}>
                                 <span className="flex items-center gap-1.5 text-xs">
                                   <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${s.status === 'running' || s.status === 'ready' ? 'bg-green-500' : 'bg-muted-foreground/40'}`} />
-                                  {new Date(s.created_at * 1000).toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                                  {new Date(s.created_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
                                   <Badge variant="outline" className="text-[9px] h-3.5 px-1">{s.message_count}</Badge>
                                 </span>
                               </SelectItem>

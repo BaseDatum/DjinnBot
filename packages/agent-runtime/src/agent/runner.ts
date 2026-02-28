@@ -1074,6 +1074,18 @@ export class ContainerAgentRunner {
 
     const model = this.getModel();
 
+    // Apply the same system prompt supplements that runStep() applies.
+    // Without this, the prompt comparison in runStep() would fail on the
+    // first turn (effectiveSystemPrompt !== persistentSystemPrompt) and
+    // recreate the agent with empty messages, wiping all seeded history.
+    let effectiveSystemPrompt = systemPrompt;
+    if (process.env.CAMOFOX_URL) {
+      effectiveSystemPrompt += CAMOFOX_SYSTEM_PROMPT_SUPPLEMENT;
+    }
+    if (this.options.ptcEnabled) {
+      effectiveSystemPrompt += PTC_SYSTEM_PROMPT_SUPPLEMENT;
+    }
+
     // Build LLM-compatible messages from history.
     // We use `any` casts here because pi-ai's AssistantMessage type requires
     // provider-specific fields (api, provider, usage, etc.) that we don't have
@@ -1131,7 +1143,7 @@ export class ContainerAgentRunner {
     const thinkingLevel = this.options.thinkingLevel;
     this.persistentAgent = new Agent({
       initialState: {
-        systemPrompt,
+        systemPrompt: effectiveSystemPrompt,
         model,
         tools: [],   // Tools are injected via getTools() on first runStep
         messages,
@@ -1141,7 +1153,7 @@ export class ContainerAgentRunner {
         getApiKey: async () => customApiKey,
       } : {}),
     });
-    this.persistentSystemPrompt = systemPrompt;
+    this.persistentSystemPrompt = effectiveSystemPrompt;
 
     // Populate shadow log from historical messages
     this.shadowLog.seedFromHistory(history);
