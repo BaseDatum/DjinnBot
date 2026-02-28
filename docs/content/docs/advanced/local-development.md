@@ -135,6 +135,29 @@ packages/
 │       ├── slack-bridge.ts
 │       ├── agent-slack-runtime.ts
 │       └── thread-manager.ts
+├── discord/          # Discord integration (TypeScript)
+│   └── src/
+│       ├── discord-bridge-manager.ts
+│       ├── discord-agent-bridge.ts
+│       └── discord-streamer.ts
+├── telegram/         # Telegram integration (TypeScript)
+│   └── src/
+│       ├── telegram-bridge-manager.ts
+│       └── telegram-agent-bridge.ts
+├── signal/           # Signal integration (TypeScript)
+│   └── src/
+│       ├── signal-bridge.ts
+│       ├── signal-daemon.ts
+│       └── signal-router.ts
+├── whatsapp/         # WhatsApp integration (TypeScript)
+│   └── src/
+│       ├── whatsapp-bridge.ts
+│       └── whatsapp-router.ts
+├── code-graph/       # Code Knowledge Graph (TypeScript)
+│   └── src/
+│       ├── indexer/      # Tree-sitter parsing pipeline
+│       ├── graph/        # KuzuDB graph storage
+│       └── query/        # Graph query endpoints
 └── agent-runtime/    # Container entrypoint (TypeScript)
     └── src/
         ├── entrypoint.ts

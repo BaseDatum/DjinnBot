@@ -262,6 +262,14 @@ djinn cookies export
 
 The `export` subcommand reads cookies directly from your local browser's cookie database (supports Chrome, Firefox, and Safari on macOS/Linux/Windows). It exports them in Netscape format and uploads to the server in one step.
 
+### Update
+
+```bash
+djinn update
+```
+
+Pulls the latest code and Docker images, rebuilds or pulls containers, and restarts the stack. Your data (database, Redis, file storage) is preserved. See [Updating DjinnBot](/docs/getting-started/updating) for details.
+
 ### Memory
 
 ```bash

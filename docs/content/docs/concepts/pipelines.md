@@ -184,6 +184,26 @@ DECOMPOSE → VALIDATE → DECOMPOSE_SUBTASKS → VALIDATE_SUBTASKS
 
 Uses structured output mode — no tools, just constrained JSON. Eric breaks down the project, Finn validates and enriches. Then Eric creates bite-sized subtasks, and Finn validates those too. The output integrates directly with the project board.
 
+### resolve
+
+Takes a GitHub issue and turns it into a pull request:
+
+```
+ANALYZE → IMPLEMENT → VALIDATE → PR
+```
+
+Yukihiro (SWE) analyzes the issue, implements the fix, validates it works, and opens a PR. Useful for issue-driven development — point it at an issue and walk away.
+
+### import
+
+Onboards an existing GitHub repository into DjinnBot:
+
+```
+ANALYZE → MEMORIZE → PLAN
+```
+
+Agents analyze the codebase structure, create shared ClawVault memories about the architecture and patterns they find, and generate a prioritized task backlog on the project board. This is the fastest way to get agents productive on an existing codebase.
+
 ### execute
 
 Runs a single task from a project board in an isolated container.

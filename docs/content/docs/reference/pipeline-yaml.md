@@ -155,9 +155,15 @@ DjinnBot ships with several built-in pipelines:
 
 | Pipeline | Description |
 |----------|-------------|
-| `engineering` | Full SDLC pipeline: spec, design, implement, test, review, deploy |
-| `planning` | Structured planning with Eric + Finn validation loop |
+| `engineering` | Full SDLC pipeline: spec, design, UX, implement (loop), review, test, deploy |
+| `planning` | Structured two-stage planning with Eric + Finn validation loop |
 | `planning-agentic` | Single-agent planning with tool-based task creation and dependency wiring |
-| `onboarding` | Interactive project onboarding that creates vision and runs planning |
+| `feature` | Lightweight development: design, implement, review, test |
+| `bugfix` | Focused debugging: diagnose, fix, validate |
+| `resolve` | GitHub issue to pull request: analyze, implement, test, open PR |
+| `import` | Onboard an existing repo: analyze codebase, create shared memories, generate task backlog |
+| `execute` | Run a single task from a project board in an isolated container |
 
 The `planning-agentic` pipeline is particularly useful for large projects where structured output hits token limits. It uses a single powerful model (e.g., Claude Opus) with full tool access to incrementally create tasks, subtasks, and dependency edges via API calls.
+
+The `resolve` pipeline is designed for issue-driven development — point it at a GitHub issue and agents will analyze the issue, implement a fix, run tests, and open a pull request. The `import` pipeline is the fastest way to onboard an existing codebase — agents analyze the repo structure, create shared ClawVault memories about the architecture, and generate a prioritized task backlog on the project board.

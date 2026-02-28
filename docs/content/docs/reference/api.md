@@ -308,6 +308,40 @@ POST /v1/waitlist                   # Join the waitlist
 GET  /v1/waitlist                   # List waitlist entries (admin)
 ```
 
+## Voice & TTS
+
+```
+GET  /v1/tts/voices                 # List Fish Audio voices
+GET  /v1/tts/voices/{voice_id}      # Get voice details
+GET  /v1/tts/voicebox/profiles      # List Voicebox voice profiles
+GET  /v1/tts/voicebox/health        # Check Voicebox connectivity
+POST /v1/internal/tts/synthesize    # Generate speech (internal, called by engine)
+GET  /v1/tts-calls                  # Query TTS call logs
+GET  /v1/agents/{id}/tts-settings   # Get agent TTS settings
+PUT  /v1/agents/{id}/tts-settings   # Update agent TTS settings
+GET  /v1/admin/tts-settings         # Get global TTS settings (admin)
+PUT  /v1/admin/tts-settings         # Update global TTS settings (admin)
+```
+
+## OIDC Providers
+
+```
+GET  /v1/auth/oidc                  # List configured OIDC providers
+POST /v1/auth/oidc                  # Create an OIDC provider
+PUT  /v1/auth/oidc/{id}             # Update an OIDC provider
+DELETE /v1/auth/oidc/{id}           # Delete an OIDC provider
+GET  /v1/auth/oidc/{slug}/authorize # Start OIDC login flow
+POST /v1/auth/oidc/{slug}/callback  # OIDC callback handler
+```
+
+## Onboarding
+
+```
+POST /v1/onboarding/sessions        # Create an onboarding session
+GET  /v1/onboarding/sessions/{id}   # Get onboarding session
+POST /v1/onboarding/sessions/{id}/message  # Send message to onboarding agent
+```
+
 ## Events (SSE)
 
 ```

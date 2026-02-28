@@ -57,13 +57,24 @@ curl -fsSL https://raw.githubusercontent.com/BaseDatum/djinnbot/main/install.sh 
 
 The installer handles everything — Docker, Python, the CLI, cloning the repo, generating secrets, configuring your model provider, optional SSL, and starting the stack. Works on **Linux** (Ubuntu, Debian, Fedora, CentOS, Arch, Amazon Linux) and **macOS** (Intel and Apple Silicon).
 
-### Manual Install
+### Manual Install (Build from Source)
 
 ```bash
 git clone https://github.com/BaseDatum/djinnbot.git && cd djinnbot
 cp .env.example .env
 # Add your API key: OPENROUTER_API_KEY=sk-or-v1-your-key-here
 docker compose up -d
+```
+
+### Pre-Built Images (Faster)
+
+Skip the build step entirely using pre-built GHCR images:
+
+```bash
+git clone https://github.com/BaseDatum/djinnbot.git && cd djinnbot
+cp .env.example .env
+# Add your API key: OPENROUTER_API_KEY=sk-or-v1-your-key-here
+COMPOSE_FILE=docker-compose.ghcr.yml docker compose up -d
 ```
 
 ### First Visit
@@ -83,8 +94,9 @@ pip install djinn-bot-cli
 djinn setup          # interactive setup wizard (safe to re-run)
 djinn login          # email/password + optional 2FA
 djinn chat           # interactive agent + model selection
-djinn cookies list   # manage browser cookies for agent browsing
+djinn cookies export # export cookies from your browser for agent browsing
 djinn provider list  # see configured LLM providers
+djinn update         # pull latest images and restart the stack
 ```
 
 See the [CLI reference](https://docs.djinn.bot/docs/reference/cli/) for all commands.
@@ -302,6 +314,13 @@ A dedicated admin interface with container log streaming, LLM call logs with fil
 
 </details>
 
+<details>
+<summary><strong>Voice — STT & TTS</strong> — agents that listen and speak</summary>
+
+Send voice messages on any channel and agents transcribe them via faster-whisper (4x faster than Whisper, runs on CPU). Agents can speak back — responses are synthesized to audio via Fish Audio (cloud, voice cloning) or Voicebox (self-hosted Qwen3-TTS, free). Per-agent voice selection, automatic format conversion for each platform (OGG/Opus for Telegram/WhatsApp/Discord, MP3 for Slack/Signal/dashboard), and full cost tracking in the admin panel.
+
+</details>
+
 ---
 
 ## Pipelines
@@ -313,6 +332,8 @@ A dedicated admin interface with container log streaming, LLM call logs with fil
 | `planning-agentic` | Single-agent planning with tool-based task creation and dependency wiring |
 | `feature`          | Lightweight: design, implement, review, test                              |
 | `bugfix`           | Focused: diagnose, fix, validate                                          |
+| `resolve`          | GitHub issue to pull request: analyze, implement, test, PR                |
+| `import`           | Onboard an existing repo: analyze codebase, create memories, generate backlog |
 | `execute`          | Run a single task from a project board                                    |
 
 Pipelines are YAML files with steps, template variables, conditional branching, loops, structured output schemas, retries, and per-step model overrides. Drop a YAML file in `pipelines/` and it appears in the dashboard instantly — no restart needed.

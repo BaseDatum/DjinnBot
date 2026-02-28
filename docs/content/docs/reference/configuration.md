@@ -162,8 +162,42 @@ WhatsApp is configured and linked via the dashboard (**Settings > Integrations >
 |----------|---------|------------|
 | `MOCK_RUNNER` | `false` | Use mock agent runner for testing |
 | `USE_CONTAINER_RUNNER` | `true` | Use Docker containers for agents |
-| `LOG_LEVEL` | `INFO` | Logging level |
+| `AGENT_RUNTIME_IMAGE` | `ghcr.io/basedatum/djinnbot/agent-runtime:latest` | Docker image used by the engine to spawn agent containers. Override to use a locally-built or custom image. |
+| `LOG_LEVEL` | `INFO` (API), `DEBUG` (engine) | Logging level (`DEBUG`, `INFO`, `WARNING`, `ERROR`) |
 | `DJINNBOT_VERSION` | `latest` | Current version (for update checking) |
+
+### JuiceFS + RustFS Storage
+
+| Variable | Default | Description |
+|----------|---------|------------|
+| `RUSTFS_ACCESS_KEY` | `djinnbot-rustfs-admin` | S3 access key for RustFS object storage. |
+| `RUSTFS_SECRET_KEY` | `change-me-to-a-strong-secret-key` | S3 secret key for RustFS. **Change in production.** |
+| `JUICEFS_VOLUME_NAME` | `djinnbot` | JuiceFS volume name (stored in Redis DB 2). |
+| `JUICEFS_CACHE_SIZE` | `20480` | JuiceFS local read cache in MB (default 20 GB). Adjust based on available disk. |
+| `JFS_META_URL` | `redis://redis:6379/2` | JuiceFS metadata engine URL (set in docker-compose, not `.env`). |
+| `JFS_AGENT_CACHE_SIZE` | `2048` | Cache size in MB for agent container JuiceFS mounts. |
+
+### Memory Search (QMDR / ClawVault)
+
+These control the semantic search engine used for agent memory retrieval. Set automatically by the engine and API containers.
+
+| Variable | Default | Description |
+|----------|---------|------------|
+| `QMD_OPENAI_API_KEY` | `${OPENROUTER_API_KEY}` | API key for embedding and reranking models. |
+| `QMD_OPENAI_BASE_URL` | `https://openrouter.ai/api/v1` | Base URL for the embedding/reranking provider. |
+| `QMD_EMBED_PROVIDER` | `openai` | Embedding provider type. |
+| `QMD_OPENAI_EMBED_MODEL` | `openai/text-embedding-3-small` | Embedding model for memory vector search. |
+| `QMD_RERANK_PROVIDER` | `openai` | Reranking provider type. |
+| `QMD_RERANK_MODE` | `llm` | Reranking mode (`llm` for LLM-based reranking). |
+| `QMD_OPENAI_MODEL` | `openai/gpt-4o-mini` | Model used for LLM-based reranking. |
+| `QMD_QUERY_EXPANSION_PROVIDER` | `openai` | Provider for query expansion. |
+
+### Voice — STT & TTS
+
+| Variable | Default | Description |
+|----------|---------|------------|
+| `WHISPER_MODEL_SIZE` | `base` | faster-whisper model size (`tiny`, `base`, `small`, `medium`, `large-v3`). Larger = more accurate, slower. |
+| `WHISPER_MODEL_DIR` | `/jfs/cache/whisper-models` | Directory for cached whisper models (persisted on JuiceFS). |
 
 ### Programmatic Tool Calling (PTC)
 

@@ -9,4 +9,5 @@ Get DjinnBot running in under 5 minutes. By the end of this section you'll have 
   {{< card link="installation" title="Installation" icon="download" subtitle="One-line install or manual setup with Docker Compose." >}}
   {{< card link="first-run" title="Your First Run" icon="play" subtitle="Create a project, plan it, and watch agents collaborate." >}}
   {{< card link="dashboard-tour" title="Dashboard Tour" icon="desktop-computer" subtitle="Navigate the real-time dashboard, admin panel, chat, and project boards." >}}
+  {{< card link="updating" title="Updating DjinnBot" icon="refresh" subtitle="Keep DjinnBot up to date without losing data or configuration." >}}
 {{< /cards >}}
