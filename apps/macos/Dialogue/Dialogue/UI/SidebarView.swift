@@ -9,6 +9,7 @@ import UniformTypeIdentifiers
 struct SidebarView: View {
     @ObservedObject var documentManager: DocumentManager
     var onSelectDocument: (URL) -> Void
+    var onSelectHome: () -> Void = {}
 
     @State private var showNewFolderAlert = false
     @State private var newFolderName = ""
@@ -22,6 +23,8 @@ struct SidebarView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
+            homeButton
+            Divider()
             headerView
             Divider()
 
@@ -79,6 +82,23 @@ struct SidebarView: View {
                 onCancel: { showNewDocFolderPicker = false }
             )
         }
+    }
+
+    private var homeButton: some View {
+        Button(action: onSelectHome) {
+            HStack(spacing: 6) {
+                Image(systemName: "house")
+                    .font(.body)
+                Text("Home")
+                    .font(.headline)
+            }
+            .foregroundStyle(.primary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     private var headerView: some View {

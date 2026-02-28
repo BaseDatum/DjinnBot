@@ -269,8 +269,14 @@ struct ChatPanelView: View {
                 .frame(minHeight: 24, maxHeight: 120)
                 .fixedSize(horizontal: false, vertical: true)
                 .focused($isInputFocused)
-                .onSubmit {
-                    // Cmd+Enter handled via keyboard shortcut
+                // Enter to send, Shift+Enter for newline (matches dashboard UX)
+                .onKeyPress(keys: [.return], phases: .down) { press in
+                    if press.modifiers.isEmpty {
+                        send()
+                        return .handled
+                    }
+                    // Shift+Enter: let TextEditor insert a newline
+                    return .ignored
                 }
             
             VStack(spacing: 4) {

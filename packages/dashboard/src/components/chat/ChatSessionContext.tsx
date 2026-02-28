@@ -407,21 +407,6 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
         }
       }
 
-      // Guard: if no specific session is requested, check if an active pane for
-      // this agent already exists (running or starting). If so, bring it to the
-      // foreground rather than starting a duplicate chat.
-      if (!_resumeSessionId) {
-        const existingForAgent = panesRef.current.find(
-          p => p.agentId === agentId && (p.sessionStatus === 'running' || p.sessionStatus === 'starting'),
-        );
-        if (existingForAgent) {
-          setPanes(prev =>
-            prev.map(p => (p.paneId === existingForAgent.paneId ? { ...p, visible: true } : p)),
-          );
-          return;
-        }
-      }
-
       const agent = agents.find(a => a.id === agentId);
       const visibleCount = panesRef.current.filter(p => p.visible).length;
       const paneId = nextPaneId();

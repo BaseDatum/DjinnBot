@@ -19,6 +19,12 @@ struct FloatingChatToolbar: View {
     /// Input text for the collapsed bar's text field.
     @State private var collapsedInput: String = ""
     
+    /// Focus state for the collapsed bar's text field — used to force a
+    /// visual refresh after clearing the input (works around a macOS SwiftUI
+    /// bug where TextField doesn't update visually when @State changes
+    /// inside onCommit/onSubmit).
+    @FocusState private var collapsedInputFocused: Bool
+    
     /// Whether the inline response area is showing in collapsed mode.
     @State private var showInlineResponse: Bool = false
     
@@ -109,14 +115,13 @@ struct FloatingChatToolbar: View {
                         .font(.caption)
                         .foregroundStyle(.tertiary)
                     
-                    TextField("Ask Dialogue AI...", text: $collapsedInput, onCommit: {
-                        let trimmed = collapsedInput.trimmingCharacters(in: .whitespacesAndNewlines)
-                        if !trimmed.isEmpty {
+                    TextField("Ask Dialogue AI...", text: $collapsedInput)
+                        .textFieldStyle(.plain)
+                        .font(.subheadline)
+                        .focused($collapsedInputFocused)
+                        .onSubmit {
                             sendFromCollapsedBar()
                         }
-                    })
-                    .textFieldStyle(.plain)
-                    .font(.subheadline)
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 8)
@@ -244,8 +249,17 @@ struct FloatingChatToolbar: View {
     /// Shows the response inline in the warp-up area.
     private func sendFromCollapsedBar() {
         let text = collapsedInput.trimmingCharacters(in: .whitespacesAndNewlines)
-        collapsedInput = ""
         guard !text.isEmpty else { return }
+        
+        // Clear input immediately. The focus cycle forces the TextField to
+        // re-read the binding, working around a macOS SwiftUI rendering bug
+        // where the displayed text doesn't update when @State changes during
+        // onSubmit.
+        collapsedInput = ""
+        collapsedInputFocused = false
+        DispatchQueue.main.async {
+            collapsedInputFocused = true
+        }
         
         withAnimation(.easeOut(duration: 0.2)) {
             showInlineResponse = true

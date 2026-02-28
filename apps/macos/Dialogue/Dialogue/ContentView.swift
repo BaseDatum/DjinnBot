@@ -37,11 +37,19 @@ struct ContentView: View {
                         documentManager: documentManager,
                         onSelectDocument: { url in
                             appState.openDocument(at: url)
+                        },
+                        onSelectHome: {
+                            appState.navigateHome()
                         }
                     )
                 } detail: {
-                    BlockNoteEditorView(document: appState.currentDocument)
-                        .frame(minWidth: 500, minHeight: 400)
+                    if appState.showHome {
+                        HomeView()
+                            .frame(minWidth: 500, minHeight: 400)
+                    } else {
+                        BlockNoteEditorView(document: appState.currentDocument)
+                            .frame(minWidth: 500, minHeight: 400)
+                    }
                 }
                 .navigationSplitViewStyle(.balanced)
                 
@@ -85,8 +93,9 @@ struct ContentView: View {
             chatToolbarVisible = isNear
         }
         .onAppear {
-            // Open the most recently edited document, or create one if none exist
-            if appState.currentFileURL == nil {
+            // Start on the Home screen; pre-load the most recent document
+            // so it's ready when the user navigates to it.
+            if appState.currentFileURL == nil && !appState.showHome {
                 if let recent = documentManager.mostRecentDocument() {
                     appState.openDocument(at: recent)
                 } else {

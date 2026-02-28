@@ -29,8 +29,8 @@ enum ASREngine: String, CaseIterable, Identifiable {
     /// The currently selected engine, persisted in UserDefaults.
     static var current: ASREngine {
         get {
-            let raw = UserDefaults.standard.string(forKey: "dialogue.asrEngine") ?? ASREngine.fluidAudio.rawValue
-            return ASREngine(rawValue: raw) ?? .fluidAudio
+            let raw = UserDefaults.standard.string(forKey: "dialogue.asrEngine") ?? ASREngine.appleSpeech.rawValue
+            return ASREngine(rawValue: raw) ?? .appleSpeech
         }
         set {
             UserDefaults.standard.set(newValue.rawValue, forKey: "dialogue.asrEngine")

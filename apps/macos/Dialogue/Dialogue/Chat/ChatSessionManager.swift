@@ -50,7 +50,26 @@ final class ChatSessionManager: ObservableObject {
     /// notifications to ~30fps instead of firing on every token.
     private var streamingUIUpdatePending = false
     
+    /// Forwards the active session's objectWillChange to the manager's own
+    /// objectWillChange so that views observing the manager re-render when
+    /// session-level state (messages, isGenerating, status) changes.
+    private var sessionSubscription: Any?
+    
     private init() {}
+    
+    /// Subscribe to the active session's objectWillChange publisher and
+    /// forward it to the manager's own publisher. Without this, SwiftUI
+    /// views observing the manager would never re-render when session-level
+    /// @Published properties change (messages, isGenerating, status).
+    private func observeActiveSession() {
+        // Cancel any existing subscription
+        sessionSubscription = nil
+        guard let session = activeSession else { return }
+        sessionSubscription = session.objectWillChange
+            .sink { [weak self] _ in
+                self?.objectWillChange.send()
+            }
+    }
     
     // MARK: - Session Lifecycle
     
@@ -84,6 +103,7 @@ final class ChatSessionManager: ObservableObject {
                 
                 sessions.insert(session, at: 0)
                 activeSession = session
+                observeActiveSession()
                 isStartingSession = false
                 
                 // Start polling for session to become ready, then connect SSE
@@ -138,6 +158,7 @@ final class ChatSessionManager: ObservableObject {
         disconnectSSE()
         
         activeSession = session
+        observeActiveSession()
         
         // Reconnect SSE for the new session
         if session.status.isActive {
@@ -145,7 +166,8 @@ final class ChatSessionManager: ObservableObject {
         }
     }
     
-    /// Send a user message, queuing it if the session isn't ready yet.
+    /// Send a user message, queuing it if the session isn't ready yet or is
+    /// currently generating a response.
     /// Creates a new session automatically if none exists.
     /// This is the preferred entry point from the UI — it never races.
     func sendMessageWhenReady(_ text: String) {
@@ -153,7 +175,12 @@ final class ChatSessionManager: ObservableObject {
         guard !trimmed.isEmpty else { return }
         
         if let session = activeSession, (session.status == .running || session.status == .ready) {
-            sendMessage(trimmed)
+            if session.isGenerating {
+                // Queue the message — it will be sent when the current turn ends.
+                queuedMessage = trimmed
+            } else {
+                sendMessage(trimmed)
+            }
         } else {
             // Queue the message — it will be sent when the session becomes ready.
             queuedMessage = trimmed
@@ -173,6 +200,12 @@ final class ChatSessionManager: ObservableObject {
         
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
+        
+        // Guard: don't send while already generating — queue instead.
+        guard !session.isGenerating else {
+            queuedMessage = trimmed
+            return
+        }
         
         // Add user message locally
         let userMsg = ChatMessage(role: .user, content: trimmed)
@@ -317,27 +350,26 @@ final class ChatSessionManager: ObservableObject {
             }
             
         case .stepEnd(let result, let success):
-            // step_end carries the complete response text. If streaming tokens were
-            // received via "output" events, the assistant message already has content.
-            // If they were missed (e.g. late SSE connect), fill from step_end result.
-            if success, let result = result, !result.isEmpty {
-                if let msg = session.messages.last(where: { $0.role == .assistant && $0.isStreaming }) {
-                    if msg.content.isEmpty {
-                        msg.content = result
-                    }
-                } else {
-                    // No streaming assistant message was created (tokens were missed).
-                    // Create one now with the complete result.
-                    let assistantMsg = ChatMessage(role: .assistant, content: result, isStreaming: true)
-                    session.messages.append(assistantMsg)
-                }
-            } else if !success, let result = result {
+            // Align with dashboard: only handle errors in step_end.
+            // Successful content is already handled by textDelta/output events.
+            // Creating assistant messages here caused duplicate messages.
+            if !success, let result = result {
                 let errorMsg = ChatMessage(role: .error, content: result)
                 session.messages.append(errorMsg)
             }
             
         case .turnEnd:
             finalizeStreaming(in: session)
+            
+            // Auto-send any queued message now that the turn has ended.
+            if let queued = self.queuedMessage {
+                self.queuedMessage = nil
+                Task {
+                    // Brief delay to let the turn settle before sending the next message
+                    try? await Task.sleep(nanoseconds: 100_000_000) // 100ms
+                    self.sendMessage(queued)
+                }
+            }
             
         case .responseAborted:
             finalizeStreaming(in: session)

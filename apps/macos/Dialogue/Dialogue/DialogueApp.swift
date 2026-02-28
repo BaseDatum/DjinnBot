@@ -73,6 +73,9 @@ struct DialogueApp: App {
 final class AppState: ObservableObject {
     static let shared = AppState()
 
+    /// Whether the Home screen is currently shown instead of the editor.
+    @Published var showHome: Bool = true
+
     /// The document currently loaded in the editor.
     @Published var currentDocument: BlockNoteDocument = .init()
 
@@ -80,6 +83,11 @@ final class AppState: ObservableObject {
     @Published var currentFileURL: URL?
 
     private init() {}
+
+    /// Navigate to the Home screen.
+    func navigateHome() {
+        showHome = true
+    }
 
     func openDocument(at url: URL) {
         // Save current document before switching to prevent data loss
@@ -92,6 +100,7 @@ final class AppState: ObservableObject {
         }
         currentDocument = BlockNoteDocument(file: file)
         currentFileURL = url
+        showHome = false
     }
 
     func createAndOpenNewDocument(in folder: URL? = nil) {

@@ -19,6 +19,7 @@
 		BB000005 /* KeychainManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB000015 /* KeychainManager.swift */; };
 		BB000006 /* DocumentManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB000016 /* DocumentManager.swift */; };
 		BB000007 /* SidebarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB000017 /* SidebarView.swift */; };
+		EE000001 /* HomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE000002 /* HomeView.swift */; };
 		BB000008 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB000018 /* SettingsView.swift */; };
 		CC000001 /* VoiceProfileManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC000011 /* VoiceProfileManager.swift */; };
 		CC000002 /* AudioEngineManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC000012 /* AudioEngineManager.swift */; };
@@ -59,6 +60,7 @@
 		BB000015 /* KeychainManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainManager.swift; sourceTree = "<group>"; };
 		BB000016 /* DocumentManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DocumentManager.swift; sourceTree = "<group>"; };
 		BB000017 /* SidebarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarView.swift; sourceTree = "<group>"; };
+		EE000002 /* HomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
 		BB000018 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		CC000011 /* VoiceProfileManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceProfileManager.swift; sourceTree = "<group>"; };
 		CC000012 /* AudioEngineManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioEngineManager.swift; sourceTree = "<group>"; };
@@ -171,6 +173,7 @@
 		BB000033 /* UI */ = {
 			isa = PBXGroup;
 			children = (
+				EE000002 /* HomeView.swift */,
 				BB000017 /* SidebarView.swift */,
 				BB000018 /* SettingsView.swift */,
 				CC00001A /* StatusFooterView.swift */,
@@ -332,6 +335,7 @@
 				BB000005 /* KeychainManager.swift in Sources */,
 				BB000006 /* DocumentManager.swift in Sources */,
 				BB000007 /* SidebarView.swift in Sources */,
+				EE000001 /* HomeView.swift in Sources */,
 				BB000008 /* SettingsView.swift in Sources */,
 				CC000001 /* VoiceProfileManager.swift in Sources */,
 				CC000002 /* AudioEngineManager.swift in Sources */,
