@@ -30,6 +30,10 @@ final class RealTimeDiarizationService: ObservableObject {
     
     private var diarizerManager: DiarizerManager?
     private let profileManager: VoiceProfileManager
+    private let diarizationSettings: DiarizationSettings
+    
+    /// Cached models so we can re-create the manager when settings change.
+    private var cachedModels: DiarizerModels?
     
     /// Separate audio buffers for each source so the diarizer processes
     /// coherent audio streams. Both share the same DiarizerManager (and
@@ -57,8 +61,9 @@ final class RealTimeDiarizationService: ObservableObject {
     
     // MARK: - Init
     
-    nonisolated init(profileManager: VoiceProfileManager? = nil) {
+    nonisolated init(profileManager: VoiceProfileManager? = nil, diarizationSettings: DiarizationSettings? = nil) {
         self.profileManager = profileManager ?? VoiceProfileManager.shared
+        self.diarizationSettings = diarizationSettings ?? DiarizationSettings.shared
     }
     
     // MARK: - Model Loading
@@ -67,8 +72,11 @@ final class RealTimeDiarizationService: ObservableObject {
     func loadModels() async {
         do {
             let models = try await DiarizerModels.download()
+            cachedModels = models
+            
+            let threshold = Float(diarizationSettings.clusteringThreshold)
             let config = DiarizerConfig(
-                clusteringThreshold: 0.7,
+                clusteringThreshold: threshold,
                 minSpeechDuration: 1.0,
                 chunkDuration: 10.0
             )
@@ -78,11 +86,30 @@ final class RealTimeDiarizationService: ObservableObject {
             self.diarizerManager = manager
             isReady = true
             errorMessage = nil
-            print("[Dialogue] FluidAudio diarizer loaded")
+            print("[Dialogue] FluidAudio diarizer loaded (threshold: \(threshold))")
         } catch {
             errorMessage = "Failed to load diarization models: \(error.localizedDescription)"
             print("[Dialogue] FluidAudio load error: \(error)")
         }
+    }
+    
+    /// Re-create the diarizer manager with the current threshold setting.
+    /// Call this when the user changes the clustering threshold in Settings.
+    /// Safe to call while not recording; during a recording the new threshold
+    /// takes effect on the next session.
+    func applyThresholdSetting() {
+        guard let models = cachedModels else { return }
+        
+        let threshold = Float(diarizationSettings.clusteringThreshold)
+        let config = DiarizerConfig(
+            clusteringThreshold: threshold,
+            minSpeechDuration: 1.0,
+            chunkDuration: 10.0
+        )
+        let manager = DiarizerManager(config: config)
+        manager.initialize(models: models)
+        self.diarizerManager = manager
+        print("[Dialogue] Diarizer threshold updated to \(threshold)")
     }
     
     // MARK: - Streaming Interface

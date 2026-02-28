@@ -386,6 +386,11 @@ final class RecordingCoordinator: ObservableObject {
     /// The current meeting recording data.
     var recording: MeetingRecording?
     
+    /// Source metadata for the current recording (set by auto-record orchestrator).
+    var currentSourceApp: String?
+    var currentSourceBundleID: String?
+    var currentSourceType: MeetingSourceType = .manual
+    
     /// Callback when recording stops (triggers post-meeting labeler).
     var onRecordingStopped: ((MeetingRecording) -> Void)?
     
@@ -488,6 +493,18 @@ final class RecordingCoordinator: ObservableObject {
     }
     
     // MARK: - Lifecycle
+    
+    /// Start a new recording session with source metadata (for auto-recording).
+    func startRecording(
+        sourceApp: String?,
+        sourceBundleID: String?,
+        sourceType: MeetingSourceType
+    ) {
+        self.currentSourceApp = sourceApp
+        self.currentSourceBundleID = sourceBundleID
+        self.currentSourceType = sourceType
+        startRecording()
+    }
     
     /// Start a new recording session.
     /// Captures both the default microphone (for "You") and system audio
@@ -600,8 +617,21 @@ final class RecordingCoordinator: ObservableObject {
             meeting.segments = displaySegments
             meeting.detectedSpeakers = detectedSpeakers
             
+            // Persist the meeting to disk
+            MeetingStore.shared.saveMeeting(
+                recording: meeting,
+                sourceApp: currentSourceApp,
+                sourceBundleID: currentSourceBundleID,
+                sourceType: currentSourceType
+            )
+            
             onRecordingStopped?(meeting)
         }
+        
+        // Reset source metadata
+        currentSourceApp = nil
+        currentSourceBundleID = nil
+        currentSourceType = .manual
         
         isRecording = false
     }

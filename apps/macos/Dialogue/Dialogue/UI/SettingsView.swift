@@ -11,6 +11,9 @@ struct SettingsView: View {
     @State private var agentId: String = UserDefaults.standard.string(forKey: "chatAgentId") ?? "chieko"
     @State private var selectedASREngine: ASREngine = ASREngine.current
     @State private var isReloadingASR: Bool = false
+    
+    @ObservedObject private var autoRecordSettings = AutoRecordSettings.shared
+    @ObservedObject private var diarizationSettings = DiarizationSettings.shared
 
     @Environment(\.dismiss) private var dismiss
 
@@ -203,9 +206,100 @@ struct SettingsView: View {
                     }
                 }
             }
+            Section {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Speaker Separation")
+                        .font(.headline)
+
+                    Text("Controls how aggressively the app splits voices into separate speakers. If people on speakerphone or with similar voices are being merged into one speaker, move the slider toward \"More Speakers.\" If one person is being split into multiple speakers, move it toward \"Fewer Speakers.\"")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    VStack(spacing: 4) {
+                        Slider(
+                            value: $diarizationSettings.clusteringThreshold,
+                            in: DiarizationSettings.thresholdRange
+                        )
+
+                        HStack {
+                            Text("More Speakers")
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                            Spacer()
+                            Text("Fewer Speakers")
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                        }
+                    }
+
+                    HStack {
+                        Spacer()
+                        Button("Reset to Default") {
+                            diarizationSettings.clusteringThreshold = DiarizationSettings.defaultThreshold
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .disabled(diarizationSettings.clusteringThreshold == DiarizationSettings.defaultThreshold)
+                    }
+
+                    Text("Changes take effect on the next recording session.")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+                .onChange(of: diarizationSettings.clusteringThreshold) { _, _ in
+                    RecordingCoordinator.shared.diarizationService.applyThresholdSetting()
+                }
+            }
+
+            Section {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Meeting Auto-Recording")
+                        .font(.headline)
+
+                    Text("Automatically record and transcribe calls and meetings. Dialogue monitors supported apps for active audio and begins recording when a call is detected.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    Toggle("Auto-record meetings and calls", isOn: $autoRecordSettings.autoRecordEnabled)
+
+                    Toggle("Show notification before recording", isOn: $autoRecordSettings.showNotificationBeforeRecording)
+                        .disabled(!autoRecordSettings.autoRecordEnabled)
+
+                    Text("When enabled, a notification with a 5-second countdown appears before recording starts, allowing you to cancel.")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+
+                    Divider()
+
+                    Text("Monitored Apps")
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        ForEach(AutoRecordSettings.monitoredApps) { app in
+                            HStack(spacing: 8) {
+                                Image(systemName: app.type == .meetingApp ? "video" : "phone")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .frame(width: 16)
+                                Text(app.name)
+                                    .font(.caption)
+                                Spacer()
+                                Text(app.type == .meetingApp ? "Meeting" : "Call")
+                                    .font(.caption2)
+                                    .foregroundStyle(.tertiary)
+                            }
+                        }
+                    }
+
+                    Text("Meeting apps (Zoom, Google Meet) also show a notification to start recording when opened, even if auto-record is off.")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+            }
         }
         .formStyle(.grouped)
-        .frame(width: 520, height: 580)
+        .frame(width: 520, height: 940)
         .onAppear(perform: loadExistingKey)
     }
 

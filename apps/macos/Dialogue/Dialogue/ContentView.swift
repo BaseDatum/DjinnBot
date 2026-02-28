@@ -21,6 +21,11 @@ struct ContentView: View {
     /// Whether to show the voice enrollment modal.
     @State private var showEnrollmentSheet = false
     
+    // MARK: - Phase 4: Auto-Recording
+    
+    /// The auto-recording orchestrator.
+    @StateObject private var orchestrator = AutoRecordingOrchestrator.shared
+    
     // MARK: - Phase 3: Floating Chat
     
     /// Mouse proximity detector for the floating chat toolbar.
@@ -40,11 +45,17 @@ struct ContentView: View {
                         },
                         onSelectHome: {
                             appState.navigateHome()
+                        },
+                        onSelectMeeting: { meeting in
+                            appState.openMeeting(meeting)
                         }
                     )
                 } detail: {
                     if appState.showHome {
                         HomeView()
+                            .frame(minWidth: 500, minHeight: 400)
+                    } else if let meeting = appState.selectedMeeting {
+                        MeetingDetailView(meeting: meeting)
                             .frame(minWidth: 500, minHeight: 400)
                     } else {
                         BlockNoteEditorView(document: appState.currentDocument)
@@ -108,13 +119,19 @@ struct ContentView: View {
             
             // If models are already downloaded, pre-load them immediately
             if launchManager.isComplete {
-                Task { await recordingCoordinator.loadModelsIfNeeded() }
+                Task {
+                    await recordingCoordinator.loadModelsIfNeeded()
+                    startOrchestrator()
+                }
             }
         }
         .onChange(of: launchManager.isComplete) { _, complete in
             // Pre-load models as soon as first-launch finishes (download + enrollment)
             if complete {
-                Task { await recordingCoordinator.loadModelsIfNeeded() }
+                Task {
+                    await recordingCoordinator.loadModelsIfNeeded()
+                    startOrchestrator()
+                }
             }
         }
         .onChange(of: launchManager.showEnrollmentPrompt) { _, showPrompt in
@@ -149,6 +166,39 @@ struct ContentView: View {
             bottomEdgeDetector.forceHide()
             chatToolbarVisible = false
         }
+        // Phase 4: Show all meetings
+        .onReceive(NotificationCenter.default.publisher(for: .showAllMeetings)) { _ in
+            // Navigate to home or first meeting — for now, navigate home
+            // The meetings list is visible in the sidebar
+            appState.navigateHome()
+        }
+        // Phase 4: Auto-recording started
+        .onReceive(NotificationCenter.default.publisher(for: .autoRecordingStarted)) { _ in
+            recordingPanel.show(coordinator: recordingCoordinator)
+        }
+    }
+    
+    // MARK: - Phase 4: Auto-Recording Orchestrator
+    
+    private func startOrchestrator() {
+        guard recordingCoordinator.modelsReady else { return }
+        
+        orchestrator.onAutoRecordingStarted = { [self] in
+            // Configure the coordinator's stop callback for auto-recordings
+            recordingCoordinator.onRecordingStopped = { [self] meeting in
+                recordingPanel.close()
+                voiceLabelerPanel.show(recording: meeting)
+            }
+            // Show the recording panel
+            recordingPanel.show(coordinator: recordingCoordinator)
+        }
+        
+        orchestrator.onAutoRecordingStopped = { [self] in
+            recordingPanel.close()
+        }
+        
+        orchestrator.requestNotificationPermission()
+        orchestrator.start()
     }
     
     // MARK: - Phase 3: Chat Toggle

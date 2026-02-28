@@ -3,7 +3,7 @@ import Foundation
 // MARK: - TranscriptSegment
 
 /// A single segment of transcribed speech with speaker attribution.
-struct TranscriptSegment: Identifiable, Equatable {
+struct TranscriptSegment: Identifiable, Equatable, Codable {
     let id: UUID
     var speakerLabel: String        // "You", "Speaker 1", or a named profile
     var speakerProfileID: String?   // VoiceProfile.id if matched, nil if unknown
@@ -15,6 +15,12 @@ struct TranscriptSegment: Identifiable, Equatable {
     
     /// Speaker color index (stable per speaker label within a meeting).
     var speakerColorIndex: Int = 0
+    
+    // Exclude the large embedding vector from serialization.
+    enum CodingKeys: String, CodingKey {
+        case id, speakerLabel, speakerProfileID, text
+        case startTime, endTime, isPartial, speakerColorIndex
+    }
     
     init(
         id: UUID = UUID(),
@@ -34,6 +40,19 @@ struct TranscriptSegment: Identifiable, Equatable {
         self.endTime = endTime
         self.isPartial = isPartial
         self.speakerEmbedding = speakerEmbedding
+    }
+    
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        speakerLabel = try container.decode(String.self, forKey: .speakerLabel)
+        speakerProfileID = try container.decodeIfPresent(String.self, forKey: .speakerProfileID)
+        text = try container.decode(String.self, forKey: .text)
+        startTime = try container.decode(TimeInterval.self, forKey: .startTime)
+        endTime = try container.decode(TimeInterval.self, forKey: .endTime)
+        isPartial = try container.decode(Bool.self, forKey: .isPartial)
+        speakerColorIndex = try container.decodeIfPresent(Int.self, forKey: .speakerColorIndex) ?? 0
+        speakerEmbedding = nil  // Never decoded from disk
     }
 }
 
