@@ -65,11 +65,15 @@ Agent containers mount the shared JuiceFS filesystem at `/data`. The container's
 ├── clawvault/
 │   ├── {agent-id}/                   ← personal memory vault
 │   └── shared/                       ← team shared knowledge
+├── cookies/                          ← browser cookie files (read-only JuiceFS mount)
+│   └── ck_xxx.txt                    ← Netscape-format cookies for authenticated browsing
 ├── run-workspace/                    ← git worktree (pipeline sessions)
 ├── project-workspace/                ← full project repo (pipeline sessions)
 └── task-workspaces/
     └── {taskId}/                     ← persistent git worktree (pulse sessions)
 ```
+
+The `cookies/` directory is mounted as a separate read-only JuiceFS subdirectory (`--subdir /cookies/{agentId}`). Cookie files are placed here when a user grants access via the dashboard, and are automatically kept up to date by the [Cookie Bridge browser extension](/docs/guides/browser-cookies). Agents use `camofox_import_cookies` to load these cookies into their headless browser sessions.
 
 Which workspace paths are populated depends on the session type. See [Workspaces](/docs/concepts/workspaces) for the full comparison between pipeline and pulse workspace strategies.
 

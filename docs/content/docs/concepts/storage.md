@@ -82,6 +82,11 @@ Everything under `/data` is on JuiceFS:
 │       │   └── shared/           ← team shared vault
 │       └── task-workspaces/      ← persistent task worktrees (pulse)
 │           └── {taskId}/         ← git worktree for a pulse task
+├── cookies/                      ← browser cookie files for authenticated browsing
+│   ├── _staging/                 ← master copies uploaded via extension/dashboard
+│   │   └── ck_xxx.txt            ← Netscape-format cookie file
+│   └── {agentId}/                ← per-agent copies (mounted read-only in containers)
+│       └── ck_xxx.txt
 └── uploads/                      ← file attachments
 ```
 
