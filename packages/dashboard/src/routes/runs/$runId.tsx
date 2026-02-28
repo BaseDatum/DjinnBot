@@ -3,7 +3,7 @@ import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { ArrowLeft, Play, RotateCcw, Square, ChevronDown, ChevronRight, Brain, X, Trash2 } from 'lucide-react';
-import { useState, useEffect, useRef, Fragment } from 'react';
+import { useState, useEffect, useRef, useCallback, Fragment } from 'react';
 import { Panel, Group as PanelGroup, Separator as PanelResizeHandle } from 'react-resizable-panels';
 import { fetchRun, fetchRunLogs, restartStep, cancelRun, restartRun, startRun, deleteRun, API_BASE } from '@/lib/api';
 import { WorkspacePanel } from '@/components/workspace/WorkspacePanel';
@@ -161,15 +161,78 @@ function RunDetailPage() {
   const [restartContext, setRestartContext] = useState('');
   const [restarting, setRestarting] = useState(false);
   const [confirmAction, setConfirmAction] = useState<{ title: string; desc: string; action: () => void } | null>(null);
-  const logEndRef = useRef<HTMLDivElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const userScrolledAwayRef = useRef(false);
   
   // Container events state
   const [containerEvents, setContainerEvents] = useState<ContainerEvent[]>([]);
   const [containerStatus, setContainerStatus] = useState<ContainerStatus | null>(null);
 
-  // Auto-scroll to bottom when new segments appear
+  // ── rAF batching for SSE token events ─────────────────────────────────────
+  // Instead of calling setSegments on every SSE token (which triggers a full
+  // React re-render per token), we buffer high-frequency events and flush
+  // once per animation frame. This reduces main-thread pressure by ~10-50x
+  // and prevents the chat input from becoming laggy.
+  const pendingEventsRef = useRef<Array<any>>([]);
+  const rafIdRef = useRef<number | null>(null);
+
+  const flushPendingEvents = useCallback(() => {
+    rafIdRef.current = null;
+    const events = pendingEventsRef.current;
+    if (events.length === 0) return;
+    pendingEventsRef.current = [];
+
+    setSegments(prev => {
+      // Copy once, then mutate the copy — avoids O(N*M) array spreads
+      // where N = segment count and M = events in this batch.
+      const next = [...prev];
+      for (const event of events) {
+        const segType = event.type === 'STEP_OUTPUT' ? 'text' : 'thinking';
+        const last = next[next.length - 1];
+        if (last?.type === segType && last?.stepId === event.stepId) {
+          // Merge into the last segment (replace with updated content)
+          next[next.length - 1] = { ...last, content: last.content + event.chunk };
+        } else {
+          next.push({ type: segType, content: event.chunk, stepId: event.stepId, timestamp: event.timestamp });
+        }
+      }
+      return next;
+    });
+  }, []);
+
+  const enqueueTokenEvent = useCallback((event: any) => {
+    pendingEventsRef.current.push(event);
+    if (rafIdRef.current === null) {
+      rafIdRef.current = requestAnimationFrame(flushPendingEvents);
+    }
+  }, [flushPendingEvents]);
+
+  // Cancel pending rAF on unmount
   useEffect(() => {
-    logEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    return () => {
+      if (rafIdRef.current !== null) cancelAnimationFrame(rafIdRef.current);
+    };
+  }, []);
+
+  // Track user scroll intent — only auto-scroll if user is near the bottom
+  useEffect(() => {
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    const handleScroll = () => {
+      const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+      userScrolledAwayRef.current = !atBottom;
+    };
+    el.addEventListener('scroll', handleScroll, { passive: true });
+    return () => el.removeEventListener('scroll', handleScroll);
+  }, []);
+
+  // Auto-scroll within the output container only, respecting user intent
+  useEffect(() => {
+    if (userScrolledAwayRef.current) return;
+    const el = scrollContainerRef.current;
+    if (el) {
+      el.scrollTop = el.scrollHeight;
+    }
   }, [segments]);
 
   // Load initial run data
@@ -344,25 +407,10 @@ function RunDetailPage() {
     onMessage: (event) => {
       switch (event.type) {
         case 'STEP_OUTPUT':
-          setSegments(prev => {
-            // Append to existing text segment for same step, or create new
-            const last = prev[prev.length - 1];
-            if (last?.type === 'text' && last?.stepId === event.stepId) {
-              return [...prev.slice(0, -1), { ...last, content: last.content + event.chunk }];
-            }
-            return [...prev, { type: 'text', content: event.chunk, stepId: event.stepId, timestamp: event.timestamp }];
-          });
-          break;
-
         case 'STEP_THINKING':
-          setSegments(prev => {
-            // Append to existing thinking segment for same step
-            const last = prev[prev.length - 1];
-            if (last?.type === 'thinking' && last?.stepId === event.stepId) {
-              return [...prev.slice(0, -1), { ...last, content: last.content + event.chunk }];
-            }
-            return [...prev, { type: 'thinking', content: event.chunk, stepId: event.stepId, timestamp: event.timestamp }];
-          });
+          // High-frequency token events — batched via rAF to avoid
+          // per-token React re-renders that saturate the main thread.
+          enqueueTokenEvent(event);
           break;
 
         case 'STEP_STARTED':
@@ -687,7 +735,7 @@ function RunDetailPage() {
                       />
                     </div>
                   </CardHeader>
-                  <CardContent className="flex-1 overflow-auto p-0">
+                  <CardContent ref={scrollContainerRef} className="flex-1 overflow-auto p-0">
                     <div className="p-4 font-mono text-sm">
                       {segments.length > 0 ? (
                         segments.map((seg, i) => {
@@ -721,7 +769,6 @@ function RunDetailPage() {
                           {run.status === 'running' ? 'Waiting for agent output...' : 'No output recorded'}
                         </p>
                       )}
-                      <div ref={logEndRef} />
                     </div>
                   </CardContent>
                 </Card>

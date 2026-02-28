@@ -269,6 +269,13 @@ export class ContainerRunner implements AgentRunner {
     };
     signal?.addEventListener('abort', abortHandler);
 
+    // Hoisted event handler references — stored so they can be removed in
+    // the finally block, preventing listener accumulation across pipeline steps.
+    let outputHandler: ((evtRunId: string, msg: OutputMessage) => void) | undefined;
+    let eventHandler: ((evtRunId: string, msg: EventMessage) => void) | undefined;
+    let statusHandler: ((evtRunId: string, msg: StatusMessage) => void) | undefined;
+    let errorHandler: ((evtRunId: string, err: Error) => void) | undefined;
+
     try {
       // 1. Create container
       console.log(`[ContainerRunner] Creating container for run ${runId} (agent: ${agentId})`);
@@ -369,7 +376,9 @@ export class ContainerRunner implements AgentRunner {
       // 2. Subscribe to events BEFORE starting container
       await this.eventReceiver.subscribeToRun(runId);
 
-      // Set up event handlers
+      // Set up event handlers — references are hoisted above the try block
+      // so they can be removed in finally, preventing listener accumulation
+      // across pipeline steps (same runId, different stepId).
       const outputPromise = new Promise<void>((resolve, reject) => {
         // Wire abort signal into the promise so cancellation stops the container
         rejectOutput = reject;
@@ -379,7 +388,7 @@ export class ContainerRunner implements AgentRunner {
         }, timeout);
 
         // Handle output streaming
-        this.eventReceiver.onOutput((evtRunId, msg) => {
+        outputHandler = (evtRunId: string, msg: OutputMessage) => {
           if (evtRunId !== runId) return;
 
           // Skip tool output (bash stdout/stderr) — it leaks into the agent
@@ -395,10 +404,11 @@ export class ContainerRunner implements AgentRunner {
             output += msg.data;
             this.config.onStreamChunk?.(agentId, runId, stepId, msg.data);
           }
-        });
+        };
+        this.eventReceiver.onOutput(outputHandler);
 
         // Handle structured events
-        this.eventReceiver.onEvent((evtRunId, msg) => {
+        eventHandler = (evtRunId: string, msg: EventMessage) => {
           if (evtRunId !== runId) return;
           
           if (msg.type !== 'thinking') {
@@ -496,10 +506,11 @@ export class ContainerRunner implements AgentRunner {
               }
               break;
           }
-        });
+        };
+        this.eventReceiver.onEvent(eventHandler);
 
         // Handle status changes
-        this.eventReceiver.onStatus((evtRunId, msg) => {
+        statusHandler = (evtRunId: string, msg: StatusMessage) => {
           if (evtRunId !== runId) return;
 
           if (msg.type === 'error') {
@@ -516,16 +527,18 @@ export class ContainerRunner implements AgentRunner {
               reject(new Error(error));
             }
           }
-        });
+        };
+        this.eventReceiver.onStatus(statusHandler);
 
         // Handle errors
-        this.eventReceiver.onError((evtRunId, err) => {
+        errorHandler = (evtRunId: string, err: Error) => {
           if (evtRunId !== runId) return;
           clearTimeout(timeoutId);
           error = err.message;
           success = false;
           reject(err);
-        });
+        };
+        this.eventReceiver.onError(errorHandler);
       });
 
       // 3. Start container and wait for ready
@@ -593,8 +606,13 @@ export class ContainerRunner implements AgentRunner {
       };
 
     } finally {
-      // Cleanup
+      // Cleanup — remove event listeners BEFORE unsubscribing to prevent
+      // stale handlers from accumulating across pipeline steps.
       signal?.removeEventListener('abort', abortHandler);
+      if (outputHandler) this.eventReceiver.removeListener('output', outputHandler);
+      if (eventHandler) this.eventReceiver.removeListener('event', eventHandler);
+      if (statusHandler) this.eventReceiver.removeListener('status', statusHandler);
+      if (errorHandler) this.eventReceiver.removeListener('error', errorHandler);
 
       // Unsubscribe from events
       await this.eventReceiver.unsubscribeFromRun(runId).catch(err => {
