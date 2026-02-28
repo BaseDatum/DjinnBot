@@ -39,7 +39,7 @@ export interface RuntimeSettings {
 }
 
 export const DEFAULT_RUNTIME_SETTINGS: RuntimeSettings = {
-  ptcEnabled: false,
+  ptcEnabled: true,
   containerMemoryLimitMb: 2048,
   containerCpuLimit: 2,
   containerShmSizeMb: 256,
@@ -188,9 +188,15 @@ export class ContainerRunner implements AgentRunner {
     return this.config.image || process.env.AGENT_RUNTIME_IMAGE || 'ghcr.io/basedatum/djinnbot/agent-runtime:latest';
   }
 
+  /** Cached settings from the last successful fetch.
+   *  Used as fallback when the settings API is temporarily unreachable,
+   *  preventing silent regression (e.g. PTC getting disabled mid-pipeline). */
+  private _cachedSettings: RuntimeSettings | null = null;
+
   /**
    * Fetch global runtime settings from the settings API.
-   * Non-fatal: returns safe defaults on failure.
+   * Caches the last successful result so transient API failures don't
+   * silently revert to defaults (which could disable PTC mid-pipeline).
    */
   private async fetchGlobalFlags(): Promise<RuntimeSettings> {
     const apiBaseUrl = this.config.apiBaseUrl
@@ -200,12 +206,15 @@ export class ContainerRunner implements AgentRunner {
       const res = await authFetch(`${apiBaseUrl}/v1/settings/`);
       if (res.ok) {
         const data = await res.json() as Partial<RuntimeSettings>;
-        return { ...DEFAULT_RUNTIME_SETTINGS, ...data };
+        const settings = { ...DEFAULT_RUNTIME_SETTINGS, ...data };
+        this._cachedSettings = settings;
+        return settings;
       }
+      console.warn(`[ContainerRunner] Settings API returned ${res.status}, using ${this._cachedSettings ? 'cached' : 'default'} settings`);
     } catch (err) {
-      console.warn('[ContainerRunner] Failed to fetch global flags:', err);
+      console.warn(`[ContainerRunner] Failed to fetch global flags (using ${this._cachedSettings ? 'cached' : 'default'} settings):`, err);
     }
-    return { ...DEFAULT_RUNTIME_SETTINGS };
+    return this._cachedSettings ?? { ...DEFAULT_RUNTIME_SETTINGS };
   }
 
   /**

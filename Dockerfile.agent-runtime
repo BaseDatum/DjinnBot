@@ -192,6 +192,13 @@ RUN ARCH=$(dpkg --print-architecture) && \
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal
 ENV PATH="/root/.cargo/bin:${PATH}"
 
+# Alias python → python3 (agents/LLMs frequently use bare "python")
+RUN ln -sf /usr/bin/python3 /usr/bin/python
+
+# Install uv (fast Python package manager — agents use it to install pytest, dependencies, etc.)
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+ENV PATH="/root/.local/bin:${PATH}"
+
 # Headless Chromium for Playwright browser automation (testing only)
 # Agents use Chromium for automated testing, screenshots, PDF generation, etc.
 # --with-deps auto-installs all required system libraries (libnss3, libgbm1, fonts, etc.)
@@ -306,7 +313,7 @@ printf "username=x-access-token\\npassword=%%s\\n" "$TOKEN"\n' \
 
 # Verify tools
 RUN echo "=== Agent Runtime Tools ===" && \
-    node --version && python3 --version && go version && \
+    node --version && python3 --version && uv --version && go version && \
     git --version && gh --version | head -1 && \
     rg --version | head -1 && fd --version && bat --version | head -1 && \
     jq --version && yq --version | head -1 && \

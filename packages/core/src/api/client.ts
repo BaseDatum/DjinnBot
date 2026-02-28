@@ -5,6 +5,7 @@ import { authFetch } from './auth-fetch.js';
 export interface ApiClientConfig {
   baseUrl: string;
   timeout?: number;
+  maxRetries?: number;
 }
 
 interface UpdateRunRequest {
@@ -50,10 +51,43 @@ interface UpdateLoopItemRequest {
 export class ApiClient {
   private baseUrl: string;
   private timeout: number;
+  private maxRetries: number;
 
   constructor(config: ApiClientConfig) {
     this.baseUrl = config.baseUrl.replace(/\/$/, ''); // Remove trailing slash
     this.timeout = config.timeout ?? 30000;
+    this.maxRetries = config.maxRetries ?? 3;
+  }
+
+  /**
+   * Check if an error is retryable (transient network / server errors).
+   */
+  private isRetryable(err: unknown, statusCode?: number): boolean {
+    // Retry on 502, 503, 504 server errors
+    if (statusCode && [502, 503, 504].includes(statusCode)) {
+      return true;
+    }
+
+    if (err instanceof Error) {
+      const cause = (err as any).cause;
+      // Socket errors (UND_ERR_SOCKET, ECONNRESET, ECONNREFUSED, EPIPE)
+      if (cause && typeof cause === 'object' && 'code' in cause) {
+        const code = (cause as { code: string }).code;
+        if (['UND_ERR_SOCKET', 'ECONNRESET', 'ECONNREFUSED', 'EPIPE', 'ETIMEDOUT'].includes(code)) {
+          return true;
+        }
+      }
+      // AbortError from timeout
+      if (err.name === 'AbortError') {
+        return true;
+      }
+      // fetch failed with generic network error
+      if (err.message === 'fetch failed') {
+        return true;
+      }
+    }
+
+    return false;
   }
 
   private async request<T>(
@@ -61,33 +95,65 @@ export class ApiClient {
     path: string,
     body?: unknown
   ): Promise<T> {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), this.timeout);
+    let lastError: unknown;
 
-    try {
-      const response = await authFetch(`${this.baseUrl}${path}`, {
-        method,
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: body ? JSON.stringify(body) : undefined,
-        signal: controller.signal,
-      });
+    for (let attempt = 0; attempt <= this.maxRetries; attempt++) {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), this.timeout);
 
-      if (!response.ok) {
-        const error = await response.text();
-        throw new Error(`API error ${response.status}: ${error}`);
+      try {
+        const response = await authFetch(`${this.baseUrl}${path}`, {
+          method,
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: body ? JSON.stringify(body) : undefined,
+          signal: controller.signal,
+        });
+
+        if (!response.ok) {
+          const error = await response.text();
+          // Retry on transient server errors
+          if (attempt < this.maxRetries && this.isRetryable(null, response.status)) {
+            console.warn(`[ApiClient] ${method} ${path} returned ${response.status}, retrying (${attempt + 1}/${this.maxRetries})...`);
+            clearTimeout(timeoutId);
+            await this.backoff(attempt);
+            continue;
+          }
+          throw new Error(`API error ${response.status}: ${error}`);
+        }
+
+        // Handle empty responses
+        if (response.status === 204) {
+          return undefined as T;
+        }
+
+        return response.json() as T;
+      } catch (err) {
+        lastError = err;
+        clearTimeout(timeoutId);
+
+        if (attempt < this.maxRetries && this.isRetryable(err)) {
+          console.warn(`[ApiClient] ${method} ${path} failed (${(err as Error).message}), retrying (${attempt + 1}/${this.maxRetries})...`);
+          await this.backoff(attempt);
+          continue;
+        }
+
+        throw err;
+      } finally {
+        clearTimeout(timeoutId);
       }
-
-      // Handle empty responses
-      if (response.status === 204) {
-        return undefined as T;
-      }
-
-      return response.json() as T;
-    } finally {
-      clearTimeout(timeoutId);
     }
+
+    // Should not reach here, but just in case
+    throw lastError;
+  }
+
+  private backoff(attempt: number): Promise<void> {
+    const delay = Math.min(1000 * Math.pow(2, attempt), 10000);
+    // Add jitter (±25%)
+    const jitter = delay * (0.75 + Math.random() * 0.5);
+    return new Promise(resolve => setTimeout(resolve, jitter));
   }
 
   // ══════════════════════════════════════════════════════════════

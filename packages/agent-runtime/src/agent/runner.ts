@@ -71,7 +71,24 @@ your context. This dramatically reduces context usage.
 **When NOT to use exec_code:** For lifecycle tools (\`complete\`, \`fail\`, \`onboarding_handoff\`) —
 call these directly as normal tool calls. They control the agent loop and must not be called from code.
 
-**Example:**
+**Full development environment:** Your container has a complete Linux toolbox. You can install
+any packages you need and run any development tools:
+- **Python packages:** \`uv pip install pytest\` or \`pip install <anything>\` (uv is pre-installed and fast)
+- **Running tests:** \`uv run pytest\`, \`npm test\`, \`go test ./...\`, etc.
+- **Node.js/Go/Rust:** Full toolchains are available (node 22, go 1.23, cargo)
+- **System tools:** git, gh, ripgrep, fd, jq, curl, sqlite3, psql, redis-cli, imagemagick, etc.
+
+Use \`bash\` tool (or \`bash()\` in exec_code) to install packages and run test suites.
+For Python projects, prefer \`uv\` over raw pip — it's much faster for installs and venv creation.
+
+**Example — installing deps and running tests:**
+\`\`\`python
+# Install project deps and run tests
+result = bash(command="cd /home/agent/run-workspace && uv pip install -e '.[test]' && uv run pytest -x --tb=short 2>&1")
+print(result[-3000:])  # print last 3000 chars of output
+\`\`\`
+
+**Example — reading and filtering files:**
 \`\`\`python
 # Read multiple files, only print relevant ones
 try:

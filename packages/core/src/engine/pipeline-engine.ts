@@ -23,21 +23,22 @@ export interface PipelineEngineConfig {
   reloadPipeline?: (pipelineId: string) => PipelineConfig | null;
 }
 
-// Minimal store interface the engine needs
+// Minimal store interface the engine needs.
+// Methods return T | Promise<T> to support both sync (local Store) and async (ApiStore) implementations.
 export interface EngineStore {
   getRun(runId: string): PipelineRun | null | Promise<PipelineRun | null>;
-  updateRun(runId: string, updates: Partial<PipelineRun>): void;
+  updateRun(runId: string, updates: Partial<PipelineRun>): void | Promise<void>;
   createRun(run: Omit<PipelineRun, 'createdAt' | 'updatedAt'>): PipelineRun;
-  getStep(runId: string, stepId: string): StepExecution | null;
-  createStep(step: Omit<StepExecution, 'startedAt' | 'completedAt'>): StepExecution;
-  updateStep(runId: string, stepId: string, updates: Partial<StepExecution>): void;
-  getOutputs(runId: string): Record<string, string>;
-  setOutput(runId: string, stepId: string, key: string, value: string): void;
+  getStep(runId: string, stepId: string): StepExecution | null | Promise<StepExecution | null>;
+  createStep(step: Omit<StepExecution, 'startedAt' | 'completedAt'>): StepExecution | Promise<StepExecution>;
+  updateStep(runId: string, stepId: string, updates: Partial<StepExecution>): void | Promise<void>;
+  getOutputs(runId: string): Record<string, string> | Promise<Record<string, string>>;
+  setOutput(runId: string, stepId: string, key: string, value: string): void | Promise<void>;
   // Loop operations
-  getLoopState(runId: string, stepId: string): LoopState | null;
-  createLoopState(state: LoopState): void;
-  updateLoopItem(runId: string, stepId: string, itemId: string, updates: Partial<LoopItem>): void;
-  advanceLoop(runId: string, stepId: string): LoopItem | null;
+  getLoopState(runId: string, stepId: string): LoopState | null | Promise<LoopState | null>;
+  createLoopState(state: LoopState): void | Promise<void>;
+  updateLoopItem(runId: string, stepId: string, itemId: string, updates: Partial<LoopItem>): void | Promise<void>;
+  advanceLoop(runId: string, stepId: string): LoopItem | null | Promise<LoopItem | null>;
 }
 
 export class PipelineEngine {
@@ -269,7 +270,7 @@ export class PipelineEngine {
     }
 
     // Update run to running status
-    this.store.updateRun(runId, {
+    await this.store.updateRun(runId, {
       status: 'running',
       updatedAt: now,
     });
@@ -294,12 +295,12 @@ export class PipelineEngine {
 
     // Check for queued/running steps (interrupted execution)
     for (const stepConfig of pipeline.steps) {
-      const step = this.store.getStep(runId, stepConfig.id);
+      const step = await this.store.getStep(runId, stepConfig.id);
       if (step && (step.status === 'queued' || step.status === 'running')) {
         resumeStep = stepConfig;
         // Reset running steps back to queued so they re-execute cleanly
         if (step.status === 'running') {
-          this.store.updateStep(runId, stepConfig.id, {
+          await this.store.updateStep(runId, stepConfig.id, {
             status: 'queued',
             startedAt: undefined as any,
             sessionId: undefined as any,
@@ -312,11 +313,11 @@ export class PipelineEngine {
 
     // If no interrupted step found, find first non-completed step
     if (resumeStep === pipeline.steps[0]) {
-      const firstStep = this.store.getStep(runId, pipeline.steps[0].id);
+      const firstStep = await this.store.getStep(runId, pipeline.steps[0].id);
       if (firstStep && firstStep.status === 'completed') {
         // First step already done, find the next incomplete one
         for (const stepConfig of pipeline.steps) {
-          const step = this.store.getStep(runId, stepConfig.id);
+          const step = await this.store.getStep(runId, stepConfig.id);
           if (!step || step.status === 'pending' || step.status === 'queued') {
             resumeStep = stepConfig;
             console.log(`[PipelineEngine] Resuming from next pending step: ${stepConfig.id}`);
@@ -352,7 +353,7 @@ export class PipelineEngine {
       console.log(`[PipelineEngine] Received stop request for run ${runId}`);
       // Try to cancel current step if we have one
       if (event.stepId) {
-        const step = this.store.getStep(runId, event.stepId);
+        const step = await this.store.getStep(runId, event.stepId);
         if (step) {
           await this.cancelStep(runId, event.stepId, `Human stop: ${event.context}`);
         }
@@ -409,14 +410,14 @@ export class PipelineEngine {
 
     switch (event.type) {
       case 'STEP_STARTED': {
-        const step = this.store.getStep(runId, event.stepId);
+        const step = await this.store.getStep(runId, event.stepId);
         if (step) {
-          this.store.updateStep(runId, event.stepId, {
+          await this.store.updateStep(runId, event.stepId, {
             status: 'running',
             sessionId: event.sessionId,
             startedAt: event.timestamp,
           });
-          this.store.updateRun(runId, {
+          await this.store.updateRun(runId, {
             currentStepId: event.stepId,
             status: 'running',
             updatedAt: event.timestamp,
@@ -434,14 +435,14 @@ export class PipelineEngine {
       }
 
       case 'STEP_COMPLETE': {
-        const step = this.store.getStep(runId, event.stepId);
+        const step = await this.store.getStep(runId, event.stepId);
         if (!step) {
           console.error(`[PipelineEngine] Step not found: ${event.stepId}`);
           return;
         }
 
         // Update step with outputs
-        this.store.updateStep(runId, event.stepId, {
+        await this.store.updateStep(runId, event.stepId, {
           status: 'completed',
           outputs: event.outputs,
           completedAt: event.timestamp,
@@ -466,7 +467,7 @@ export class PipelineEngine {
       }
 
       case 'STEP_FAILED': {
-        const step = this.store.getStep(runId, event.stepId);
+        const step = await this.store.getStep(runId, event.stepId);
         if (!step) {
           console.error(`[PipelineEngine] Step not found: ${event.stepId}`);
           return;
@@ -477,7 +478,7 @@ export class PipelineEngine {
 
         if (step.retryCount < maxRetries) {
           // Retry the step
-          this.store.updateStep(runId, event.stepId, {
+          await this.store.updateStep(runId, event.stepId, {
             status: 'retrying',
             retryCount: step.retryCount + 1,
             error: event.error,
@@ -496,7 +497,7 @@ export class PipelineEngine {
           await this.queueStep(runId, event.stepId, retryContext);
         } else {
           // Max retries exceeded, fail the run
-          this.store.updateStep(runId, event.stepId, {
+          await this.store.updateStep(runId, event.stepId, {
             status: 'failed',
             error: event.error,
             completedAt: event.timestamp,
@@ -524,9 +525,9 @@ export class PipelineEngine {
       }
 
       case 'STEP_CANCELLED': {
-        const step = this.store.getStep(runId, event.stepId);
+        const step = await this.store.getStep(runId, event.stepId);
         if (step) {
-          this.store.updateStep(runId, event.stepId, {
+          await this.store.updateStep(runId, event.stepId, {
             status: 'cancelled',
             completedAt: event.timestamp,
           });
@@ -538,7 +539,7 @@ export class PipelineEngine {
         // Note: 'stop' action is handled earlier in this function before run existence check
         switch (event.action) {
           case 'restart': {
-            const step = this.store.getStep(runId, event.stepId);
+            const step = await this.store.getStep(runId, event.stepId);
             if (!step) {
               console.error(`[PipelineEngine] Step not found for restart: ${event.stepId}`);
               return;
@@ -550,14 +551,14 @@ export class PipelineEngine {
             break;
           }
           case 'inject_context': {
-            const injectStep = this.store.getStep(runId, event.stepId);
+            const injectStep = await this.store.getStep(runId, event.stepId);
             if (!injectStep) {
               console.error(`[PipelineEngine] Step not found for inject_context: ${event.stepId}`);
               return;
             }
             // Update step with additional context but don't restart
             const updatedContext = `${injectStep.humanContext || ''}\n\n[ADDITIONAL CONTEXT] ${event.context}`;
-            this.store.updateStep(runId, event.stepId, {
+            await this.store.updateStep(runId, event.stepId, {
               humanContext: updatedContext,
             });
             break;
@@ -649,11 +650,11 @@ export class PipelineEngine {
 
     // Handle retry
     if (action.retry) {
-      const step = this.store.getStep(runId, stepConfig.id);
+      const step = await this.store.getStep(runId, stepConfig.id);
       if (step) {
         const maxRetries = action.maxRetries ?? step.maxRetries;
         if (step.retryCount < maxRetries) {
-          this.store.updateStep(runId, stepConfig.id, {
+          await this.store.updateStep(runId, stepConfig.id, {
             status: 'retrying',
             retryCount: step.retryCount + 1,
           });
@@ -692,11 +693,15 @@ export class PipelineEngine {
     // Handle continueLoop — advance the parent loop step, not the current step
     if (action.continueLoop) {
       // Find the active loop step for this run by checking which step has loop state
-      const loopStep = pipeline.steps.find(s => {
-        if (!s.loop) return false;
-        const loopState = this.store.getLoopState(runId, s.id);
-        return loopState !== null;
-      });
+      let loopStep: StepConfig | undefined;
+      for (const s of pipeline.steps) {
+        if (!s.loop) continue;
+        const ls = await this.store.getLoopState(runId, s.id);
+        if (ls !== null) {
+          loopStep = s;
+          break;
+        }
+      }
       if (loopStep) {
         await this.handleLoopAdvance(runId, loopStep, outputs, true);
       } else {
@@ -725,7 +730,7 @@ export class PipelineEngine {
     }
 
     // Get or create loop state
-    let loopState = this.store.getLoopState(runId, stepConfig.id);
+    let loopState = await this.store.getLoopState(runId, stepConfig.id);
 
     if (!loopState) {
       // First time entering this loop - initialize
@@ -778,13 +783,13 @@ export class PipelineEngine {
         currentIndex: 0,
       };
 
-      this.store.createLoopState(loopState);
+      await this.store.createLoopState(loopState);
       console.log(`[PipelineEngine] Initialized loop for ${stepConfig.id} with ${loopItems.length} items`);
     } else {
       // Mark current item as done
       const currentItem = loopState.items[loopState.currentIndex];
       if (currentItem) {
-        this.store.updateLoopItem(runId, stepConfig.id, currentItem.id, {
+        await this.store.updateLoopItem(runId, stepConfig.id, currentItem.id, {
           status: 'completed',
           output: JSON.stringify(itemOutputs),
         });
@@ -802,10 +807,10 @@ export class PipelineEngine {
     }
 
     // Advance to next item
-    const nextItem = this.store.advanceLoop(runId, stepConfig.id);
+    const nextItem = await this.store.advanceLoop(runId, stepConfig.id);
     if (nextItem) {
       // More items to process
-      const loopState = this.store.getLoopState(runId, stepConfig.id);
+      const loopState = await this.store.getLoopState(runId, stepConfig.id);
       const totalItems = loopState?.items.length ?? 0;
       const currentIndex = nextItem.index + 1;
       console.log(`[PipelineEngine] Loop ${stepConfig.id}: advancing to item ${currentIndex}/${totalItems}`);
@@ -911,7 +916,7 @@ export class PipelineEngine {
 
   // Cancel a running step
   async cancelStep(runId: string, stepId: string, reason: string): Promise<void> {
-    this.store.updateStep(runId, stepId, {
+    await this.store.updateStep(runId, stepId, {
       status: 'cancelled',
       error: reason,
       completedAt: Date.now(),
@@ -931,7 +936,7 @@ export class PipelineEngine {
   // Restart a step with additional context
   async restartStep(runId: string, stepId: string, additionalContext: string): Promise<void> {
     await this.cancelStep(runId, stepId, 'Restarting with additional context');
-    const step = this.store.getStep(runId, stepId);
+    const step = await this.store.getStep(runId, stepId);
     const newContext = `${step?.humanContext || ''}\n\n[RESTART] ${additionalContext}`;
     await this.queueStep(runId, stepId, newContext);
   }

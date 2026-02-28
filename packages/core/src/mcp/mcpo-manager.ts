@@ -43,6 +43,12 @@ export class McpoManager {
   private fileWatchDebounce: ReturnType<typeof setTimeout> | null = null;
   private stopping = false;
   private restartInProgress = false;
+  /** Timestamp of the last config.json write we performed ourselves. */
+  private lastSelfWriteTs = 0;
+  /** Content hash of the last config.json we wrote, to detect external changes. */
+  private lastWrittenContent = '';
+  /** Cache of last-seen tool lists per server, to avoid repetitive logging. */
+  private lastSeenTools = new Map<string, string>();
 
   constructor(opts: McpoManagerOptions) {
     this.redis = opts.redis;
@@ -60,6 +66,14 @@ export class McpoManager {
     console.log('[McpoManager] Starting');
     // Ensure the mcp directory exists
     await mkdir(join(this.configPath, '..'), { recursive: true });
+
+    // Seed lastWrittenContent so the file watcher doesn't treat the existing
+    // config.json as an external change on first run.
+    if (existsSync(this.configPath)) {
+      try {
+        this.lastWrittenContent = await readFile(this.configPath, 'utf8');
+      } catch { /* non-fatal */ }
+    }
 
     // Do an initial config write + health poll on startup
     await this.writeConfigAndReload();
@@ -134,6 +148,16 @@ export class McpoManager {
       }
 
       const configJson = JSON.stringify(config, null, 2);
+
+      // Skip writing if the content hasn't changed
+      if (configJson === this.lastWrittenContent) {
+        // Still poll health so statuses are up to date
+        await this.pollHealthAndUpdateStatuses(mcpServers);
+        return;
+      }
+
+      this.lastSelfWriteTs = Date.now();
+      this.lastWrittenContent = configJson;
       await writeFile(this.configPath, configJson, 'utf8');
       console.log(
         `[McpoManager] Wrote config.json with ${serverCount} server(s) to ${this.configPath}`
@@ -190,7 +214,16 @@ export class McpoManager {
         // Try to GET first — if it exists, update the config; if not, create it.
         const getRes = await authFetch(`${this.apiBaseUrl}/v1/mcp/${serverId}`);
         if (getRes.ok) {
-          // Server already in DB — update config in case it drifted
+          // Server already in DB — only update if config actually drifted.
+          // Skipping the PUT avoids triggering MCP_RESTART_REQUESTED which
+          // would create a restart loop.
+          const existing = await getRes.json() as { config?: unknown };
+          const existingJson = JSON.stringify(existing.config ?? {});
+          const newJson = JSON.stringify(serverConfig);
+          if (existingJson === newJson) {
+            // Config unchanged — nothing to do
+            continue;
+          }
           await authFetch(`${this.apiBaseUrl}/v1/mcp/${serverId}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
@@ -268,16 +301,29 @@ export class McpoManager {
   private async handleConfigFileChanged(): Promise<void> {
     if (this.restartInProgress || this.stopping) return;
 
+    // Ignore file-watcher events caused by our own writes (within a generous window
+    // to account for the debounce timer + filesystem flush latency).
+    const msSinceSelfWrite = Date.now() - this.lastSelfWriteTs;
+    if (msSinceSelfWrite < 5_000) return;
+
     try {
       const raw = await readFile(this.configPath, 'utf8');
+
+      // If the content matches what we last wrote, nothing external changed.
+      if (raw.trim() === this.lastWrittenContent.trim()) return;
+
       const config = JSON.parse(raw) as { mcpServers?: Record<string, unknown> };
       const mcpServers = config.mcpServers ?? {};
       const serverCount = Object.keys(mcpServers).length;
 
       if (serverCount === 0) return;
 
-      console.log(`[McpoManager] config.json changed — syncing ${serverCount} server(s) to DB`);
+      console.log(`[McpoManager] config.json changed externally — syncing ${serverCount} server(s) to DB`);
       await this.publishLog(`config.json changed: syncing ${serverCount} server(s)...`, 'info');
+
+      // Update our record so subsequent watcher events for the same content are ignored
+      this.lastWrittenContent = raw;
+
       await this.importConfigFileToDB(mcpServers);
       await this.pollHealthAndUpdateStatuses(mcpServers);
     } catch (err) {
@@ -377,13 +423,19 @@ export class McpoManager {
 
       await this.patchServerStatus(serverId, 'running');
       await this.patchServerTools(serverId, tools);
-      await this.publishLog(
-        `Server '${serverId}': running (${tools.length} tools)`,
-        'info'
-      );
-      console.log(
-        `[McpoManager] Server '${serverId}': running, tools: [${tools.join(', ')}]`
-      );
+
+      // Only log tool lists when they change to reduce noise
+      const toolsKey = tools.join(',');
+      if (this.lastSeenTools.get(serverId) !== toolsKey) {
+        this.lastSeenTools.set(serverId, toolsKey);
+        await this.publishLog(
+          `Server '${serverId}': running (${tools.length} tools)`,
+          'info'
+        );
+        console.log(
+          `[McpoManager] Server '${serverId}': running, tools: [${tools.join(', ')}]`
+        );
+      }
     } catch (err: unknown) {
       console.warn(`[McpoManager] Server '${serverId}' check failed:`, err);
       await this.publishLog(`Server '${serverId}': ${String(err)}`, 'error');

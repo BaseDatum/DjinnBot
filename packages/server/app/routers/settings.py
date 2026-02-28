@@ -33,7 +33,7 @@ DEFAULT_SETTINGS: Dict[str, str] = {
     "pulseEnabled": "true",
     "userSlackId": "",
     "agentRuntimeImage": "",
-    "ptcEnabled": "false",
+    "ptcEnabled": "true",
     # ── Container Resources ──────────────────────────────────────────────────
     "containerMemoryLimitMb": "2048",
     "containerCpuLimit": "2",
@@ -519,7 +519,7 @@ class GlobalSettings(BaseModel):
     pulseEnabled: bool = True
     userSlackId: str = ""
     agentRuntimeImage: str = ""
-    ptcEnabled: bool = False
+    ptcEnabled: bool = True
     # ── Container Resources ──────────────────────────────────────────────────
     containerMemoryLimitMb: int = 2048
     containerCpuLimit: float = 2.0

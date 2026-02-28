@@ -126,6 +126,8 @@ steps:
       - validate_result
       - test_report
     onResult:
+      PASS:
+        goto: PR
       FAIL:
         goto: IMPLEMENT
 

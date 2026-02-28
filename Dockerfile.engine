@@ -323,6 +323,13 @@ RUN ARCH=$(dpkg --print-architecture) && \
     cp /tmp/dust-*/dust /usr/local/bin/ && \
     rm -rf /tmp/dust.tar.gz /tmp/dust-*
 
+# Alias python → python3 (agents/LLMs frequently use bare "python")
+RUN ln -sf /usr/bin/python3 /usr/bin/python
+
+# Install uv (fast Python package manager — agents use it to install pytest, dependencies, etc.)
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+ENV PATH="/root/.local/bin:${PATH}"
+
 # Install Rust/Cargo (for agents to use cargo install)
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal
 ENV PATH="/root/.cargo/bin:${PATH}"
@@ -419,6 +426,7 @@ RUN echo "=== Core Languages ===" && \
     rustc --version && \
     cargo --version && \
     echo "=== Package Managers ===" && \
+    uv --version && \
     pip3 --version && \
     npm --version && \  
     bun --version && \
