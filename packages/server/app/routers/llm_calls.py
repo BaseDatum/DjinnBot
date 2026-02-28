@@ -47,6 +47,10 @@ class RecordLlmCallRequest(BaseModel):
     tool_call_count: int = 0
     has_thinking: bool = False
     stop_reason: Optional[str] = None
+    # Context window usage snapshot (tokens used / limit / %)
+    context_used_tokens: Optional[int] = None
+    context_window_tokens: Optional[int] = None
+    context_percent: Optional[int] = None
 
 
 class LlmCallResponse(BaseModel):
@@ -73,6 +77,9 @@ class LlmCallResponse(BaseModel):
     tool_call_count: int
     has_thinking: bool
     stop_reason: Optional[str] = None
+    context_used_tokens: Optional[int] = None
+    context_window_tokens: Optional[int] = None
+    context_percent: Optional[int] = None
     created_at: int
 
 
@@ -116,6 +123,9 @@ async def record_llm_call(
         tool_call_count=body.tool_call_count,
         has_thinking=body.has_thinking,
         stop_reason=body.stop_reason,
+        context_used_tokens=body.context_used_tokens,
+        context_window_tokens=body.context_window_tokens,
+        context_percent=body.context_percent,
         created_at=now_ms(),
     )
     db.add(call)
@@ -152,6 +162,9 @@ async def record_llm_call(
                     "tool_call_count": call.tool_call_count,
                     "has_thinking": call.has_thinking,
                     "stop_reason": call.stop_reason,
+                    "context_used_tokens": call.context_used_tokens,
+                    "context_window_tokens": call.context_window_tokens,
+                    "context_percent": call.context_percent,
                     "created_at": call.created_at,
                 }
             )
@@ -190,6 +203,9 @@ def _row_to_response(row: LlmCallLog) -> LlmCallResponse:
         tool_call_count=row.tool_call_count,
         has_thinking=row.has_thinking,
         stop_reason=row.stop_reason,
+        context_used_tokens=row.context_used_tokens,
+        context_window_tokens=row.context_window_tokens,
+        context_percent=row.context_percent,
         created_at=row.created_at,
     )
 
@@ -216,6 +232,21 @@ async def _build_summary(db: AsyncSession, query) -> dict:
     )
     result = await db.execute(summary_query)
     row = result.one()
+
+    # Get the latest context snapshot from the most recent call in this set
+    latest_ctx_query = (
+        select(
+            sub.c.context_used_tokens,
+            sub.c.context_window_tokens,
+            sub.c.context_percent,
+        )
+        .where(sub.c.context_used_tokens.isnot(None))
+        .order_by(sub.c.created_at.desc())
+        .limit(1)
+    )
+    latest_ctx = await db.execute(latest_ctx_query)
+    ctx_row = latest_ctx.first()
+
     return {
         "callCount": row.call_count or 0,
         "totalInputTokens": row.total_input_tokens or 0,
@@ -227,6 +258,10 @@ async def _build_summary(db: AsyncSession, query) -> dict:
         "totalCostInput": round(row.total_cost_input or 0, 6),
         "totalCostOutput": round(row.total_cost_output or 0, 6),
         "avgDurationMs": round(row.avg_duration_ms or 0),
+        # Latest context window snapshot (from most recent call)
+        "contextUsedTokens": ctx_row.context_used_tokens if ctx_row else None,
+        "contextWindowTokens": ctx_row.context_window_tokens if ctx_row else None,
+        "contextPercent": ctx_row.context_percent if ctx_row else None,
     }
 
 

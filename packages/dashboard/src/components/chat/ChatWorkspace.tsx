@@ -259,7 +259,7 @@ function ChatPaneWrapper({ pane, onClose, onHide, onSessionEnd, onModelChange }:
             <span className={styles.paneModelChip}>{formatModelChip(pane.model)}</span>
           )}
           {pane.keyResolution && <KeySourceBadge keyResolution={pane.keyResolution} />}
-          {pane.sessionId && <SessionTokenStats sessionId={pane.sessionId} />}
+          {pane.sessionId && <SessionTokenStats key={pane.sessionId} sessionId={pane.sessionId} />}
         </div>
         <div className={styles.paneHeaderActions}>
           <button

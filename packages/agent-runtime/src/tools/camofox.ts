@@ -157,7 +157,9 @@ export function createCamofoxTools(config: CamofoxToolsConfig): AgentTool[] {
       description:
         'PREFERRED: Create a new browser tab using Camoufox anti-detection browser. ' +
         'Use camofox tools instead of Chrome/built-in browser — they bypass bot detection ' +
-        'on Google, Amazon, LinkedIn, etc. Returns tabId for subsequent operations.',
+        'on Google, Amazon, LinkedIn, etc. Returns JSON with a "tabId" field — parse it ' +
+        'with json.loads() and pass result["tabId"] to other camofox tools. ' +
+        'Always call camofox_snapshot after creating a tab to read the page content.',
       parameters: CreateTabParams,
       execute: async (_id: string, params: unknown): Promise<AgentToolResult<{}>> => {
         const p = params as Static<typeof CreateTabParams>;
@@ -175,7 +177,9 @@ export function createCamofoxTools(config: CamofoxToolsConfig): AgentTool[] {
       label: 'camofox_snapshot',
       description:
         'Get accessibility snapshot of a Camoufox page with element refs (e1, e2, etc.) for interaction. ' +
-        'Large pages are truncated with pagination — if hasMore=true, call again with the nextOffset value.',
+        'Returns JSON with "snapshot" (page text with element refs), "url", "refsCount", and pagination fields. ' +
+        'Large pages are truncated — if hasMore=true, call again with the nextOffset value. ' +
+        'Always call this after create_tab, navigate, click, scroll, back, or forward to see the result.',
       parameters: SnapshotParams,
       execute: async (_id: string, params: unknown): Promise<AgentToolResult<{}>> => {
         const p = params as Static<typeof SnapshotParams>;
@@ -199,7 +203,7 @@ export function createCamofoxTools(config: CamofoxToolsConfig): AgentTool[] {
     {
       name: 'camofox_click',
       label: 'camofox_click',
-      description: 'Click an element in a Camoufox tab by ref (e.g., e1) or CSS selector.',
+      description: 'Click an element in a Camoufox tab by ref (e.g., e1) or CSS selector. Must provide either ref or selector. Call camofox_snapshot afterward to see the updated page.',
       parameters: ClickParams,
       execute: async (_id: string, params: unknown): Promise<AgentToolResult<{}>> => {
         const p = params as Static<typeof ClickParams>;
@@ -215,7 +219,7 @@ export function createCamofoxTools(config: CamofoxToolsConfig): AgentTool[] {
     {
       name: 'camofox_type',
       label: 'camofox_type',
-      description: 'Type text into an element in a Camoufox tab.',
+      description: 'Type text into an element in a Camoufox tab. Must provide either ref or selector to target the input field. Call camofox_snapshot afterward to verify.',
       parameters: TypeParams,
       execute: async (_id: string, params: unknown): Promise<AgentToolResult<{}>> => {
         const p = params as Static<typeof TypeParams>;
@@ -238,8 +242,10 @@ export function createCamofoxTools(config: CamofoxToolsConfig): AgentTool[] {
       name: 'camofox_navigate',
       label: 'camofox_navigate',
       description:
-        'Navigate a Camoufox tab to a URL or use a search macro (@google_search, @youtube_search, etc.). ' +
-        'Preferred over Chrome for sites with bot detection.',
+        'Navigate a Camoufox tab to a URL or use a search macro. ' +
+        'Provide either url (direct navigation) OR macro + query (e.g., macro="@google_search", query="python requests"). ' +
+        'Available macros: @google_search, @youtube_search, @amazon_search, @reddit_search, @wikipedia_search, @twitter_search, @linkedin_search. ' +
+        'Call camofox_snapshot afterward to read the page.',
       parameters: NavigateParams,
       execute: async (_id: string, params: unknown): Promise<AgentToolResult<{}>> => {
         const p = params as Static<typeof NavigateParams>;
@@ -255,7 +261,7 @@ export function createCamofoxTools(config: CamofoxToolsConfig): AgentTool[] {
     {
       name: 'camofox_scroll',
       label: 'camofox_scroll',
-      description: 'Scroll a Camoufox page.',
+      description: 'Scroll a Camoufox page in a given direction (up/down/left/right). Default scroll amount is 500px. Call camofox_snapshot afterward to see newly visible content.',
       parameters: ScrollParams,
       execute: async (_id: string, params: unknown): Promise<AgentToolResult<{}>> => {
         const p = params as Static<typeof ScrollParams>;
@@ -364,7 +370,7 @@ export function createCamofoxTools(config: CamofoxToolsConfig): AgentTool[] {
     {
       name: 'camofox_back',
       label: 'camofox_back',
-      description: 'Go back in a Camoufox tab.',
+      description: 'Go back in browser history for a Camoufox tab. Call camofox_snapshot afterward to see the page.',
       parameters: TabIdParams,
       execute: async (_id: string, params: unknown): Promise<AgentToolResult<{}>> => {
         const p = params as Static<typeof TabIdParams>;
@@ -380,7 +386,7 @@ export function createCamofoxTools(config: CamofoxToolsConfig): AgentTool[] {
     {
       name: 'camofox_forward',
       label: 'camofox_forward',
-      description: 'Go forward in a Camoufox tab.',
+      description: 'Go forward in browser history for a Camoufox tab. Call camofox_snapshot afterward to see the page.',
       parameters: TabIdParams,
       execute: async (_id: string, params: unknown): Promise<AgentToolResult<{}>> => {
         const p = params as Static<typeof TabIdParams>;

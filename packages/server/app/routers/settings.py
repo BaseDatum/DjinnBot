@@ -53,6 +53,10 @@ DEFAULT_SETTINGS: Dict[str, str] = {
     # ── Pulse Execution ──────────────────────────────────────────────────────
     "maxConcurrentPulseSessions": "2",
     "defaultPulseTimeoutSec": "120",
+    # ── Autonomous Agent Execution ────────────────────────────────────────
+    "chatInactivityTimeoutSec": "180",
+    "chatHardTimeoutSec": "900",
+    "maxAutoContinuations": "50",
 }
 
 # ─── Models known to support extended thinking/reasoning ─────────────────────
@@ -535,6 +539,10 @@ class GlobalSettings(BaseModel):
     # ── Pulse Execution ──────────────────────────────────────────────────────
     maxConcurrentPulseSessions: int = 2
     defaultPulseTimeoutSec: int = 120
+    # ── Autonomous Agent Execution ────────────────────────────────────────
+    chatInactivityTimeoutSec: int = 180
+    chatHardTimeoutSec: int = 900
+    maxAutoContinuations: int = 50
 
 
 class ExtraFieldSpec(BaseModel):
@@ -719,8 +727,13 @@ async def get_settings(
     result = await session.execute(select(GlobalSetting))
     rows = {r.key: r.value for r in result.scalars().all()}
 
-    def _get(key: str):
-        return rows.get(key, DEFAULT_SETTINGS[key])
+    def _get(key: str, fallback: str | None = None):
+        default = DEFAULT_SETTINGS.get(key, fallback or "")
+        value = rows.get(key, default)
+        # Guard against empty strings stored in DB (e.g. from a PUT before
+        # a new field was added to the frontend). Fall back to the default
+        # so int("") / float("") never crashes.
+        return value if value != "" else default
 
     return GlobalSettings(
         defaultWorkingModel=_get("defaultWorkingModel"),
@@ -757,6 +770,10 @@ async def get_settings(
         # ── Pulse Execution ──────────────────────────────────────────────────
         maxConcurrentPulseSessions=int(_get("maxConcurrentPulseSessions")),
         defaultPulseTimeoutSec=int(_get("defaultPulseTimeoutSec")),
+        # ── Autonomous Agent Execution ───────────────────────────────────────
+        chatInactivityTimeoutSec=int(_get("chatInactivityTimeoutSec")),
+        chatHardTimeoutSec=int(_get("chatHardTimeoutSec")),
+        maxAutoContinuations=int(_get("maxAutoContinuations")),
     )
 
 
@@ -797,6 +814,10 @@ async def update_settings(
         # ── Pulse Execution ──────────────────────────────────────────────────
         "maxConcurrentPulseSessions": str(settings.maxConcurrentPulseSessions),
         "defaultPulseTimeoutSec": str(settings.defaultPulseTimeoutSec),
+        # ── Autonomous Agent Execution ────────────────────────────────────────
+        "chatInactivityTimeoutSec": str(settings.chatInactivityTimeoutSec),
+        "chatHardTimeoutSec": str(settings.chatHardTimeoutSec),
+        "maxAutoContinuations": str(settings.maxAutoContinuations),
     }
     for key, value in updates.items():
         row = await session.get(GlobalSetting, key)

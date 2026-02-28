@@ -86,5 +86,11 @@ class LlmCallLog(Base):
     # Stop reason: "stop", "tool_use", "max_tokens", etc.
     stop_reason: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
 
+    # ── Context window usage snapshot ───────────────────────────────────────
+    # Point-in-time snapshot of context window utilisation after this LLM call.
+    context_used_tokens: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    context_window_tokens: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    context_percent: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+
     # ── Timestamps ──────────────────────────────────────────────────────────
     created_at: Mapped[int] = mapped_column(BigInteger, nullable=False)

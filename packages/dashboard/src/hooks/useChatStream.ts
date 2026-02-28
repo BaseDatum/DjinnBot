@@ -124,6 +124,18 @@ export interface UseChatStreamReturn {
    *   duplicate/reordered messages on page refresh.
    */
   markHistoryLoaded: (dbMessageIds?: Set<string>) => void;
+
+  // ── Scroll control (user-intent aware) ──────────────────────────────────
+  /** Whether the scroll position is at or near the bottom. Reactive — can drive UI. */
+  isAtBottom: boolean;
+  /**
+   * Imperatively scroll to the bottom. Use when user intent clearly signals
+   * they want to see the latest content (e.g. sending a message, clicking
+   * the "scroll to bottom" button).
+   */
+  scrollToBottomImperative: () => void;
+  /** True when new content arrived while the user was scrolled away from the bottom. */
+  hasNewContent: boolean;
 }
 
 export interface DbMessage {
@@ -186,6 +198,9 @@ export function useChatStream({
   // the DB fetch in AgentChat/OnboardingChat and the SSE stream.
   const historyLoadedRef = useRef(false);
   const eventQueueRef = useRef<StreamingSSEEvent[]>([]);
+  // DB message IDs from the last history load — used to skip duplicate SSE
+  // events that replay content already present in the DB.
+  const dbMessageIdsRef = useRef<Set<string>>(new Set());
 
   // ── Mutable streaming accumulators (O(1) per token) ───────────────────────
   // During streaming, text is accumulated in these refs. React state (messages)
@@ -231,11 +246,29 @@ export function useChatStream({
     };
   }, []);
 
-  // ── Auto-scroll ──────────────────────────────────────────────────────────
+  // ── Auto-scroll (user-intent aware) ─────────────────────────────────────
+  //
+  // Design: auto-scroll should ONLY happen when the user is at (or very near)
+  // the bottom. User scrolling away is a clear intent to read earlier content;
+  // auto-scroll must never override that. We use:
+  //   1. A scroll event listener with a distance threshold (primary signal)
+  //   2. An IntersectionObserver on a sentinel div (secondary/validation)
+  //
+  // We also expose `isAtBottom` as reactive state so the UI can render a
+  // floating "scroll to bottom" button when the user has scrolled away.
+
   const scrollAreaRef = useRef<HTMLDivElement | null>(null);
   const scrollSentinelRef = useRef<HTMLDivElement | null>(null);
   const viewportRef = useRef<HTMLElement | null>(null);
   const isAtBottomRef = useRef(true);
+  const [isAtBottom, setIsAtBottom] = useState(true);
+  const [hasNewContent, setHasNewContent] = useState(false);
+
+  // Threshold in pixels — if the user is within this distance of the bottom,
+  // we consider them "at the bottom" and auto-scroll continues. This prevents
+  // tiny rounding differences or sub-pixel scroll positions from breaking
+  // auto-scroll for users who ARE at the bottom.
+  const BOTTOM_THRESHOLD = 80;
 
   // Cache the Radix ScrollArea viewport element once
   useEffect(() => {
@@ -247,7 +280,35 @@ export function useChatStream({
     }
   }, [sessionId]); // re-query if session changes (re-mount)
 
-  // IntersectionObserver on the sentinel — tracks whether user is at the bottom
+  // Scroll event listener — distance-based "at bottom" check.
+  // This is more reliable than IntersectionObserver alone because the
+  // observer has timing issues when content is appended (sentinel moves
+  // out of view before the observer can fire).
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+
+    const handleScroll = () => {
+      const { scrollTop, scrollHeight, clientHeight } = viewport;
+      const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
+      const atBottom = distanceFromBottom <= BOTTOM_THRESHOLD;
+
+      isAtBottomRef.current = atBottom;
+      // Batch the state update — React will deduplicate if value hasn't changed
+      setIsAtBottom(atBottom);
+
+      // Clear the "new content" badge when the user scrolls to the bottom
+      if (atBottom) {
+        setHasNewContent(false);
+      }
+    };
+
+    viewport.addEventListener('scroll', handleScroll, { passive: true });
+    return () => viewport.removeEventListener('scroll', handleScroll);
+  }, [sessionId]);
+
+  // IntersectionObserver on the sentinel — secondary signal.
+  // Useful for the initial state before any scroll events have fired.
   useEffect(() => {
     const sentinel = scrollSentinelRef.current;
     const viewport = viewportRef.current;
@@ -255,7 +316,11 @@ export function useChatStream({
 
     const observer = new IntersectionObserver(
       ([entry]) => {
-        isAtBottomRef.current = entry.isIntersecting;
+        if (entry.isIntersecting) {
+          isAtBottomRef.current = true;
+          setIsAtBottom(true);
+          setHasNewContent(false);
+        }
       },
       { root: viewport, threshold: 0.1 },
     );
@@ -263,17 +328,40 @@ export function useChatStream({
     return () => observer.disconnect();
   }, [sessionId]);
 
-  // Scroll-to-bottom helper — called on structural events and tick updates
+  // Auto-scroll helper — only scrolls if user is at/near the bottom.
   const scrollToBottom = useCallback(() => {
     if (!isAtBottomRef.current) return;
     const vp = viewportRef.current;
     if (vp) vp.scrollTop = vp.scrollHeight;
   }, []);
 
-  // Scroll on tick (during streaming) and on messages change (structural)
+  // Imperative scroll-to-bottom — always scrolls regardless of position.
+  // Used when user intent is clear (sending a message, clicking the button).
+  const scrollToBottomImperative = useCallback(() => {
+    const vp = viewportRef.current;
+    if (vp) {
+      vp.scrollTop = vp.scrollHeight;
+      isAtBottomRef.current = true;
+      setIsAtBottom(true);
+      setHasNewContent(false);
+    }
+  }, []);
+
+  // Auto-scroll on tick (during streaming) and on messages change (structural).
+  // Respects user intent: if the user has scrolled away, this is a no-op.
   useEffect(() => {
     scrollToBottom();
   }, [streamingTick, messages, scrollToBottom]);
+
+  // Track "new content" — when messages change while user is scrolled up,
+  // set the flag so the UI can show a badge/indicator.
+  const prevMessageCountRef = useRef(messages.length);
+  useEffect(() => {
+    if (messages.length > prevMessageCountRef.current && !isAtBottomRef.current) {
+      setHasNewContent(true);
+    }
+    prevMessageCountRef.current = messages.length;
+  }, [messages.length]);
 
   // ── Reconnect cursor ──────────────────────────────────────────────────────
   const lastStreamIdRef = useRef('0-0');
@@ -285,6 +373,7 @@ export function useChatStream({
     // the sessionId stays the same).
     historyLoadedRef.current = false;
     eventQueueRef.current = [];
+    dbMessageIdsRef.current = new Set();
   }, []);
 
   // ── Stable callback refs for options ──────────────────────────────────────
@@ -848,6 +937,12 @@ export function useChatStream({
     if (historyLoadedRef.current) return;
     historyLoadedRef.current = true;
 
+    // Store the DB message IDs so that future live SSE structural events
+    // (tool_start, output, thinking) that duplicate already-loaded DB content
+    // can be detected. This is important because on page reload the SSE
+    // reconnect may replay events via XRANGE that overlap with DB records.
+    dbMessageIdsRef.current = dbMessageIds ?? new Set();
+
     // Replay any events that arrived while we were loading history.
     // Filter out structural replay events (from XRANGE) that the DB already
     // has — these are the events that cause duplication on refresh.
@@ -855,19 +950,25 @@ export function useChatStream({
     eventQueueRef.current = [];
 
     for (const event of queued) {
-      // Always process live events (no stream_id means it came from pub/sub, not XRANGE)
-      if (!event.stream_id) {
-        processEvent(event);
-        continue;
-      }
-
-      // When DB messages were loaded, skip ALL XRANGE replay events — the DB
-      // is the source of truth for committed content. Previously only structural
-      // events were skipped, but output/thinking token replays would duplicate
-      // content already in the DB and cause reordering on refresh.
+      // When DB messages were loaded, skip ALL replay events (both XRANGE
+      // and pub/sub) that arrived before the DB fetch completed. The DB is
+      // the source of truth for committed content, and any SSE events that
+      // arrived during the fetch window are almost certainly duplicates of
+      // what the DB returned.
       if (dbMessageIds && dbMessageIds.size > 0) {
         // Update the cursor so subsequent reconnects start from here
-        lastStreamIdRef.current = event.stream_id;
+        if (event.stream_id) {
+          lastStreamIdRef.current = event.stream_id;
+        }
+        // Still process session lifecycle events that don't produce messages
+        // (turn_end, session_complete, container_ready, response_aborted, etc.)
+        // since these control session state and aren't duplicated in the DB.
+        const type = event.type;
+        if (type === 'turn_end' || type === 'session_complete' ||
+            type === 'container_ready' || type === 'response_aborted' ||
+            type === 'session_status' || type === 'session_error') {
+          processEvent(event);
+        }
         continue;
       }
 
@@ -879,21 +980,34 @@ export function useChatStream({
   const setMessagesFromDb = useCallback(
     (dbMsgs: ChatMessageData[]) => {
       setMessages(prev => {
-        // Collect any active streaming messages (not yet committed)
+        // Collect any active streaming messages (not yet committed).
+        // Include both `streaming_` (in-flight) and `done_` (committed but
+        // not yet persisted to DB) prefixed messages, plus other transient
+        // prefixes like `placeholder_`, `user_`, `queued_`, `error_`, `system_`.
         const streamingMsgs = prev.filter(
           m => m.id.startsWith('streaming_') || m.id.startsWith('placeholder_'),
         );
 
         if (streamingMsgs.length === 0) {
-          return dbMsgs;
+          // No in-flight streaming — DB is the sole source of truth.
+          // Sort by timestamp to guarantee correct order.
+          return [...dbMsgs].sort((a, b) => a.timestamp - b.timestamp);
         }
 
-        // Deduplicate: build a set of DB message IDs; only append streaming
-        // messages whose IDs don't collide with anything from the DB.
+        // Deduplicate: build a set of DB message IDs (and their derived
+        // sub-IDs like `{id}_thinking`, `{id}_tool_0`, etc.) so we don't
+        // append streaming messages that the DB already covers.
         const dbIds = new Set(dbMsgs.map(m => m.id));
-        const uniqueStreaming = streamingMsgs.filter(m => !dbIds.has(m.id));
+        const uniqueStreaming = streamingMsgs.filter(m => {
+          if (dbIds.has(m.id)) return false;
+          // Also check if the streaming_ id corresponds to a committed DB id
+          const strippedId = m.id.replace(/^streaming_/, '').replace(/^done_/, '');
+          if (dbIds.has(strippedId)) return false;
+          return true;
+        });
 
-        return [...dbMsgs, ...uniqueStreaming];
+        // Merge and sort by timestamp for stable ordering
+        return [...dbMsgs, ...uniqueStreaming].sort((a, b) => a.timestamp - b.timestamp);
       });
     },
     [],
@@ -922,6 +1036,7 @@ export function useChatStream({
     abortedRef.current = false;
     historyLoadedRef.current = false;
     eventQueueRef.current = [];
+    dbMessageIdsRef.current = new Set();
     setIsStreaming(false);
     setStreamingTick(0);
   }, [sessionId]);
@@ -1026,5 +1141,8 @@ export function useChatStream({
     resetStreamCursor,
     expandDbMessages,
     markHistoryLoaded,
+    isAtBottom,
+    scrollToBottomImperative,
+    hasNewContent,
   };
 }

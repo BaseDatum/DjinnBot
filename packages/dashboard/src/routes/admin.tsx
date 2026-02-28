@@ -218,6 +218,10 @@ function AdminPage() {
     // Pulse Execution
     maxConcurrentPulseSessions: number;
     defaultPulseTimeoutSec: number;
+    // Autonomous Agent Execution
+    chatInactivityTimeoutSec: number;
+    chatHardTimeoutSec: number;
+    maxAutoContinuations: number;
   }
   const [globalSettings, setGlobalSettings] = useState<GlobalSettings | null>(null);
   const [globalSettingsEdited, setGlobalSettingsEdited] = useState(false);
@@ -1795,6 +1799,56 @@ function AdminPage() {
                       className="h-8 text-sm"
                     />
                     <p className="text-[10px] text-muted-foreground">Container timeout for pulses. Default: 120</p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Autonomous Agent Execution */}
+            {globalSettings && (
+              <div className="border rounded-lg p-4 space-y-4">
+                <h3 className="font-medium text-sm">Autonomous Agent Execution</h3>
+                <p className="text-xs text-muted-foreground">
+                  Controls how long agents can run autonomously during chat sessions.
+                  The inactivity timeout aborts stuck agents; the hard timeout caps total execution time.
+                  Auto-continuations keep agents working when they have pending tool calls.
+                </p>
+                <div className="grid grid-cols-3 gap-4 max-w-2xl">
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">Inactivity Timeout (sec)</Label>
+                    <Input
+                      type="number"
+                      min={30}
+                      max={600}
+                      value={globalSettings.chatInactivityTimeoutSec}
+                      onChange={(e) => handleGlobalSettingsChange({ ...globalSettings, chatInactivityTimeoutSec: parseInt(e.target.value) || 180 })}
+                      className="h-8 text-sm"
+                    />
+                    <p className="text-[10px] text-muted-foreground">Abort if no activity for this long. Default: 180</p>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">Hard Timeout (sec)</Label>
+                    <Input
+                      type="number"
+                      min={60}
+                      max={3600}
+                      value={globalSettings.chatHardTimeoutSec}
+                      onChange={(e) => handleGlobalSettingsChange({ ...globalSettings, chatHardTimeoutSec: parseInt(e.target.value) || 900 })}
+                      className="h-8 text-sm"
+                    />
+                    <p className="text-[10px] text-muted-foreground">Max wall-clock time per turn. Default: 900 (15 min)</p>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">Max Auto-Continuations</Label>
+                    <Input
+                      type="number"
+                      min={5}
+                      max={200}
+                      value={globalSettings.maxAutoContinuations}
+                      onChange={(e) => handleGlobalSettingsChange({ ...globalSettings, maxAutoContinuations: parseInt(e.target.value) || 50 })}
+                      className="h-8 text-sm"
+                    />
+                    <p className="text-[10px] text-muted-foreground">Safety cap on re-engagements per turn. Default: 50</p>
                   </div>
                 </div>
               </div>

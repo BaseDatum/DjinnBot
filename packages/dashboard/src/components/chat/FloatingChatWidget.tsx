@@ -501,30 +501,41 @@ export function FloatingChatWidget() {
         )}
       </button>
 
-      {/* Drawer — full-screen bottom sheet on mobile, floating card on desktop */}
-      {/* Also hidden on /chat to prevent overlap with the workspace */}
-      {widgetOpen && !isChatPage && (
-        <div
-          className={[
-            'fixed z-50 flex flex-col',
-            'border border-border shadow-2xl bg-card overflow-hidden',
-            // Mobile: full-width bottom sheet pinned to bottom with safe-area
-            'left-0 right-0 bottom-0 rounded-t-2xl border-t border-x',
-            // Desktop: floating card with rounded corners — position overridden by drawerStyle()
-            !isMobile && fabPos
-              ? 'sm:rounded-xl'
-              : !isMobile
-                ? 'sm:left-auto sm:right-5 sm:bottom-20 sm:rounded-xl'
-                : '',
-            // Prevent text selection while resizing (desktop only)
-            isResizing ? 'select-none' : '',
-          ].join(' ')}
-          style={isMobile ? {
+      {/* Drawer — full-screen bottom sheet on mobile, floating card on desktop.
+       *
+       * IMPORTANT: The drawer is hidden with CSS (visibility/pointer-events)
+       * instead of conditional rendering so that AgentChat components stay
+       * mounted when the widget is closed. This preserves:
+       *   - In-progress input text (draft messages)
+       *   - Live SSE streaming state and message history
+       *   - Token stats accumulators
+       *   - Thinking block content
+       * Previously, unmounting destroyed all of this state.
+       */}
+      <div
+        className={[
+          'fixed z-50 flex flex-col',
+          'border border-border shadow-2xl bg-card overflow-hidden',
+          // Mobile: full-width bottom sheet pinned to bottom with safe-area
+          'left-0 right-0 bottom-0 rounded-t-2xl border-t border-x',
+          // Desktop: floating card with rounded corners — position overridden by drawerStyle()
+          !isMobile && fabPos
+            ? 'sm:rounded-xl'
+            : !isMobile
+              ? 'sm:left-auto sm:right-5 sm:bottom-20 sm:rounded-xl'
+              : '',
+          // Prevent text selection while resizing (desktop only)
+          isResizing ? 'select-none' : '',
+          // Hidden when widget is closed or on /chat page — use CSS not conditional render
+          !(widgetOpen && !isChatPage) ? 'invisible pointer-events-none' : '',
+        ].join(' ')}
+        style={{
+          ...(isMobile ? {
             // Mobile: fixed bottom sheet, constrained to viewport
             maxHeight: 'calc(90dvh - env(safe-area-inset-top, 0px))',
             maxWidth: '100vw',
             height: 'calc(85dvh - env(safe-area-inset-top, 0px))',
-            resize: 'none',
+            resize: 'none' as const,
             touchAction: 'pan-y',
             paddingBottom: 'env(safe-area-inset-bottom, 0px)',
           } : fabPos ? drawerStyle() : {
@@ -532,9 +543,10 @@ export function FloatingChatWidget() {
             width: drawerSize.w,
             height: `min(${drawerSize.h}px, calc(100dvh - 5rem))`,
             maxHeight: `min(${drawerSize.h}px, 85dvh)`,
-          }}
-          ref={drawerRef}
-        >
+          }),
+        }}
+        ref={drawerRef}
+      >
           {/* Desktop-only resize handles — hidden on mobile */}
           {/* Top edge: resize height */}
           <div
@@ -713,7 +725,7 @@ export function FloatingChatWidget() {
                 </span>
               )}
               {activePane.keyResolution && <KeySourceBadge keyResolution={activePane.keyResolution} />}
-              {activePane.sessionId && <SessionTokenStats sessionId={activePane.sessionId} />}
+              {activePane.sessionId && <SessionTokenStats key={activePane.sessionId} sessionId={activePane.sessionId} />}
             </div>
           )}
 
@@ -747,7 +759,6 @@ export function FloatingChatWidget() {
             ) : null}
           </div>
         </div>
-      )}
     </>
   );
 

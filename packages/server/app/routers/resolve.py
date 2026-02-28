@@ -56,17 +56,23 @@ def parse_issue_ref(ref: str) -> dict:
 
     m = GITHUB_ISSUE_URL_RE.search(ref)
     if m:
+        repo = m.group("repo")
+        if repo.endswith(".git"):
+            repo = repo[:-4]
         return {
             "owner": m.group("owner"),
-            "repo": m.group("repo"),
+            "repo": repo,
             "number": int(m.group("number")),
         }
 
     m = GITHUB_SHORTHAND_RE.match(ref)
     if m:
+        repo = m.group("repo")
+        if repo.endswith(".git"):
+            repo = repo[:-4]
         return {
             "owner": m.group("owner"),
-            "repo": m.group("repo"),
+            "repo": repo,
             "number": int(m.group("number")),
         }
 

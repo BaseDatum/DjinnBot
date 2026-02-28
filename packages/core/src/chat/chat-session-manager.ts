@@ -94,6 +94,7 @@ interface ActiveSession {
   startedAt: number;  // Timestamp when session became ready — used to compute duration
   userId?: string;  // DjinnBot user who owns this session — for per-user key resolution
   pendingCommands: PendingCommand[];  // Commands queued while session is busy
+  emptyResultContinuations: number;   // Track consecutive empty-result auto-continuations
 }
 
 interface ConversationMessage {
@@ -1209,6 +1210,7 @@ export class ChatSessionManager {
       lastActivityAt: Date.now(),
       startedAt: Date.now(),
       pendingCommands: [],
+      emptyResultContinuations: 0,
     };
     this.activeSessions.set(sessionId, session);
     
@@ -1368,6 +1370,11 @@ export class ChatSessionManager {
           // Programmatic Tool Calling — when enabled, agent writes Python to call
           // tools via exec_code, reducing context usage by 30-40%+.
           PTC_ENABLED: globalFlags.ptcEnabled ? 'true' : 'false',
+          // Autonomous agent execution settings from admin panel.
+          // Chat sessions use these instead of STEP_TIMEOUT_MS (which is for pipelines).
+          CHAT_INACTIVITY_TIMEOUT_MS: String(globalFlags.chatInactivityTimeoutSec * 1000),
+          CHAT_HARD_TIMEOUT_MS: String(globalFlags.chatHardTimeoutSec * 1000),
+          MAX_AUTO_CONTINUATIONS: String(globalFlags.maxAutoContinuations),
         },
       };
       
@@ -2518,6 +2525,98 @@ export class ChatSessionManager {
           `[ChatSessionManager] stepEnd ${sessionId}: success=${msg.success}, result=${resultLen} chars, thinking=${thinkingLen} chars, tools=${toolCount}` +
           (resultLen === 0 ? ' ⚠️ EMPTY RESULT' : '')
         );
+
+        // ── Auto-continuation (engine-level safety net) ─────────────────
+        // The primary autonomous continuation happens inside the container
+        // via pi-agent-core's followUp() mechanism (see runner.ts). This
+        // engine-level handler is a safety net for cases where:
+        //  1. The container's followUp loop exited but the task isn't done
+        //  2. The result is empty (model did tools but produced no text)
+        //
+        // The container now sets explicitCompletion=true when the agent
+        // called complete()/fail(), and false when the model simply stopped.
+        // For chat sessions (no complete/fail), explicitCompletion=false is
+        // expected — the in-container followUp loop handles continuation.
+        // This safety net only fires for truly empty results that slipped
+        // through, which should be rare with the followUp mechanism.
+        const MAX_EMPTY_RESULT_CONTINUATIONS = 5;
+        if (
+          msg.success &&
+          resultLen === 0 &&
+          toolCount > 0 &&
+          activeSession &&
+          (activeSession.emptyResultContinuations ?? 0) < MAX_EMPTY_RESULT_CONTINUATIONS
+        ) {
+          activeSession.emptyResultContinuations = (activeSession.emptyResultContinuations ?? 0) + 1;
+          const attempt = activeSession.emptyResultContinuations;
+          console.log(
+            `[ChatSessionManager] Auto-continuing empty result for ${sessionId} ` +
+            `(attempt ${attempt}/${MAX_EMPTY_RESULT_CONTINUATIONS}, explicitCompletion=${msg.explicitCompletion})`
+          );
+
+          // Complete the current message (with empty content) so the DB
+          // record is closed, then immediately send a continuation prompt.
+          if (activeSession.currentMessageId) {
+            const msgId = activeSession.currentMessageId;
+            const thinking = activeSession.accumulatedThinking;
+            const toolCalls = activeSession.accumulatedToolCalls.length > 0
+              ? activeSession.accumulatedToolCalls
+              : undefined;
+
+            // Clear accumulators before the async fetch
+            activeSession.accumulatedThinking = '';
+            activeSession.accumulatedToolCalls = [];
+            activeSession.currentMessageId = undefined;
+
+            const completeUrl = sessionId.startsWith('onb_')
+              ? `${this.apiBaseUrl}/v1/onboarding/internal/messages/${msgId}/complete`
+              : `${this.apiBaseUrl}/v1/internal/chat/messages/${msgId}/complete`;
+
+            console.log(`[ChatSessionManager] Completing empty message ${msgId} before auto-continuation`);
+
+            authFetch(completeUrl, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                content: '',
+                thinking: thinking || undefined,
+                tool_calls: toolCalls,
+              }),
+            })
+              .then(async (res) => {
+                if (!res.ok) {
+                  const text = await res.text().catch(() => '');
+                  console.error(`[ChatSessionManager] Complete empty message ${msgId} failed: HTTP ${res.status} ${text}`);
+                }
+              })
+              .catch(err => console.error(`[ChatSessionManager] Failed to complete empty message ${msgId}:`, err));
+          }
+
+          // Set session back to ready so sendMessage() works
+          activeSession.status = 'ready';
+          activeSession.lastActivityAt = Date.now();
+
+          // Send the continuation prompt (without a messageId — the server
+          // will create a new assistant message for the response). We use
+          // sendMessage which handles the busy/queue logic properly.
+          const continuationPrompt = attempt === 1
+            ? 'Continue — your last response was empty. Please provide a text response summarizing what you accomplished or continue your work.'
+            : 'You still haven\'t provided a text response. Please reply with a summary of your progress or continue working.';
+
+          this.sendMessage(sessionId, continuationPrompt)
+            .catch(err => console.error(
+              `[ChatSessionManager] Auto-continuation failed for ${sessionId}:`, err
+            ));
+
+          // Skip the normal turn_end / completion / drain flow — the
+          // continuation will trigger a new stepEnd when it completes.
+          return;
+        }
+
+        // Reset continuation counter on successful non-empty result
+        if (activeSession && resultLen > 0) {
+          activeSession.emptyResultContinuations = 0;
+        }
 
         // Publish turn_end FIRST so the frontend stops its spinner immediately,
         // before the DB persistence fetch which may take tens of milliseconds.

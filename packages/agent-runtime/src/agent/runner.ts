@@ -90,6 +90,10 @@ export interface StepResult {
   output?: string;
   error?: string;
   success: boolean;
+  /** True when the agent explicitly called complete() or fail(). False when
+   *  the model simply stopped producing output (chat-style). The engine uses
+   *  this to decide whether auto-continuation is appropriate. */
+  explicitCompletion?: boolean;
 }
 
 /**
@@ -200,6 +204,26 @@ export class ContainerAgentRunner {
   private rawOutput = '';
   private turnCount = 0;
   private toolCallStartTimes = new Map<string, number>();
+
+  // ── Autonomous continuation (chat sessions) ────────────────────────────
+  /** Number of tool calls the model made in the current pi-agent-core run. */
+  private runToolCallCount = 0;
+  /** Number of auto-continuations we've issued via followUp() in this step. */
+  private autoContinuations = 0;
+  /** Max follow-up continuations per runStep (safety cap).
+   *  Overridden at runtime by MAX_AUTO_CONTINUATIONS env var (set by admin panel). */
+  private maxAutoContinuations = parseInt(process.env.MAX_AUTO_CONTINUATIONS || '50', 10);
+  /** True when this is a plain chat session (no pipeline, pulse, or onboarding).
+   *  Chat sessions have no explicit complete/fail tools, so the model's text
+   *  response IS the step completion.  Set once in buildTools(). */
+  private isChatSession = false;
+
+  // ── Inactivity timeout ─────────────────────────────────────────────────
+  /** Timestamp of last meaningful activity (tool execution, turn start, etc.).
+   *  Reset by the subscription handler on every sign of progress. */
+  private lastActivityAt = Date.now();
+  /** Handle for the repeating inactivity check interval. */
+  private inactivityIntervalId: ReturnType<typeof setInterval> | null = null;
 
   // ── LLM call logging ──────────────────────────────────────────────────
   private turnStartTime = 0;
@@ -562,8 +586,11 @@ export class ContainerAgentRunner {
     const isPulseSession = runId.startsWith('standalone_');
     const isOnboardingSession = Boolean(process.env.ONBOARDING_SESSION_ID);
 
+    const isChatSession = !isPipelineRun && !isPulseSession && !isOnboardingSession;
+    this.isChatSession = isChatSession;
+
     console.log(
-      `[AgentRunner] Session context: isPipelineRun=${isPipelineRun}, isPulseSession=${isPulseSession}, isOnboardingSession=${isOnboardingSession}`,
+      `[AgentRunner] Session context: isPipelineRun=${isPipelineRun}, isPulseSession=${isPulseSession}, isOnboardingSession=${isOnboardingSession}, isChatSession=${isChatSession}`,
     );
 
     const tools: AgentTool[] = [];
@@ -715,6 +742,13 @@ export class ContainerAgentRunner {
     const maxTurns = 999;
 
     this.unsubscribeAgent = agent.subscribe(async (event: AgentEvent) => {
+      // Reset inactivity timer on any sign of progress
+      if (event.type === 'turn_start' || event.type === 'turn_end' ||
+          event.type === 'tool_execution_start' || event.type === 'tool_execution_end' ||
+          event.type === 'message_start' || event.type === 'message_update') {
+        this.lastActivityAt = Date.now();
+      }
+
       if (event.type === 'turn_start') {
         console.log(`[AgentRunner] turn_start`);
         this.turnStartTime = Date.now();
@@ -728,6 +762,71 @@ export class ContainerAgentRunner {
           console.warn(`[AgentRunner] Max turns (${maxTurns}) reached, aborting`);
           agent.abort();
         }
+
+        // ── Autonomous continuation ──────────────────────────────────
+        //
+        // pi-agent-core's inner loop (agent-loop.js) already continues
+        // while the model produces tool calls (hasMoreToolCalls = true).
+        // The followUp mechanism is consumed AFTER the inner loop exits
+        // — i.e., when the model produces a text-only turn with no tool
+        // calls.  Queuing followUp on every tool-call turn is therefore
+        // redundant and harmful: the messages accumulate in a FIFO queue
+        // and fire one-at-a-time after the model's natural text response,
+        // causing N unnecessary LLM round-trips (where N = number of
+        // previous tool-call turns).
+        //
+        // Correct strategy:
+        //  • Tool-call turn → do nothing (inner loop handles continuation)
+        //  • Text-only turn in a chat session → do nothing (text IS the
+        //    completion; chat sessions have no complete/fail tools)
+        //  • Text-only turn in a pipeline/pulse/onboarding run → queue
+        //    ONE followUp, because the model should have called
+        //    complete()/fail() and may have stopped prematurely.
+        //
+        // Every ~50 tool calls we ask for a progress update so the user
+        // isn't left staring at a spinner with no feedback.
+        if (
+          !this.stepCompleted &&
+          this.turnToolCallCount === 0 &&
+          this.runToolCallCount > 0 &&
+          !this.isChatSession &&
+          this.autoContinuations < this.maxAutoContinuations
+        ) {
+          // Model produced text but didn't call complete/fail in a
+          // pipeline/pulse/onboarding run.  Nudge it to keep working.
+          this.autoContinuations++;
+
+          const prompt = 'Continue — you produced a response but didn\'t call complete() or fail(). ' +
+            'Keep working. If you are done, call complete() with your results.';
+
+          console.log(
+            `[AgentRunner] Auto-continuation ${this.autoContinuations}/${this.maxAutoContinuations}: ` +
+            `text-only turn after ${this.runToolCallCount} tool call(s), ` +
+            `agent didn't call complete/fail — queuing followUp`
+          );
+          agent.followUp({
+            role: 'user' as const,
+            content: prompt,
+            timestamp: Date.now(),
+          });
+        } else if (
+          !this.stepCompleted &&
+          this.turnToolCallCount > 0 &&
+          this.runToolCallCount > 0 &&
+          this.runToolCallCount % 50 === 0
+        ) {
+          // Progress update checkpoint — fires every 50 tool calls
+          // regardless of session type, so the user gets feedback.
+          agent.followUp({
+            role: 'user' as const,
+            content: 'You\'ve made a lot of tool calls. Give the user a brief progress update — ' +
+              'a sentence or two on what you\'ve done so far and what\'s next — then continue working.',
+            timestamp: Date.now(),
+          });
+          console.log(
+            `[AgentRunner] Progress update requested at ${this.runToolCallCount} tool calls`
+          );
+        }
       }
       if (event.type === 'tool_execution_start') {
         const toolName = (event as any).toolName ?? 'unknown';
@@ -735,6 +834,7 @@ export class ContainerAgentRunner {
         const args = (event as any).args ?? {};
         console.log(`[AgentRunner] tool_execution_start: ${toolName}`);
         this.turnToolCallCount++;
+        this.runToolCallCount++;
 
         this.toolCallStartTimes.set(toolCallId, Date.now());
 
@@ -865,6 +965,10 @@ export class ContainerAgentRunner {
     // If model was inferred with sibling cost rates, flag as approximate
     const isApproximateFromModel = !!(model as any).costApproximate;
 
+    // Snapshot context usage — runs after lastContextTokens is updated from
+    // the LLM response so the numbers reflect this turn's actual usage.
+    const ctx = this.getContextUsage();
+
     const sendPayload = (
       finalCost: { input: number; output: number; total: number },
       costApproximate: boolean,
@@ -892,6 +996,10 @@ export class ContainerAgentRunner {
         tool_call_count: this.turnToolCallCount,
         has_thinking: this.turnHasThinking,
         stop_reason: message.stopReason ? String(message.stopReason) : undefined,
+        // Context window usage snapshot (tokens used / limit / %)
+        context_used_tokens: ctx.usedTokens || undefined,
+        context_window_tokens: ctx.contextWindow || undefined,
+        context_percent: ctx.percent ?? undefined,
       };
 
       authFetch(`${apiBaseUrl}/v1/internal/llm-calls`, {
@@ -1343,6 +1451,8 @@ export class ContainerAgentRunner {
     this.stepResult = { success: false };
     this.rawOutput = '';
     this.turnCount = 0;
+    this.runToolCallCount = 0;
+    this.autoContinuations = 0;
     this.toolCallStartTimes.clear();
     this.retrievalTracker.clear();
 
@@ -1424,15 +1534,45 @@ export class ContainerAgentRunner {
 
       console.log(`[AgentRunner] Running step ${requestId}. Model: ${model.id}, Tools: ${tools.length}`);
 
-      // Set up timeout — use pipeline-configured timeout if available, else defaults.
-      // STEP_TIMEOUT_MS is injected by the engine's container runner from the pipeline config.
-      const timeoutMs = process.env.STEP_TIMEOUT_MS
-        ? parseInt(process.env.STEP_TIMEOUT_MS, 10)
-        : process.env.ONBOARDING_SESSION_ID ? 600_000 : 180_000;
-      const timeoutId = setTimeout(() => {
-        console.warn(`[AgentRunner] Timeout reached, aborting`);
-        agent.abort();
-      }, timeoutMs);
+      // Set up inactivity timeout — fires only when the agent hasn't made
+      // progress (tool calls, turns, streaming) within the window.  For
+      // pipeline runs, STEP_TIMEOUT_MS acts as a hard wall-clock cap.
+      //
+      // Chat sessions use CHAT_INACTIVITY_TIMEOUT_MS / CHAT_HARD_TIMEOUT_MS
+      // (configurable via admin panel). Pipeline runs use STEP_TIMEOUT_MS.
+      // Onboarding sessions get longer defaults.
+      const inactivityMs = process.env.CHAT_INACTIVITY_TIMEOUT_MS
+        ? parseInt(process.env.CHAT_INACTIVITY_TIMEOUT_MS, 10)
+        : process.env.STEP_TIMEOUT_MS
+          ? parseInt(process.env.STEP_TIMEOUT_MS, 10)
+          : process.env.ONBOARDING_SESSION_ID ? 600_000 : 180_000;
+      // Hard wall-clock cap: absolute maximum regardless of activity.
+      // Prevents runaway agents from consuming resources indefinitely.
+      const hardCapMs = process.env.CHAT_HARD_TIMEOUT_MS
+        ? parseInt(process.env.CHAT_HARD_TIMEOUT_MS, 10)
+        : process.env.STEP_TIMEOUT_MS
+          ? parseInt(process.env.STEP_TIMEOUT_MS, 10) * 3
+          : process.env.ONBOARDING_SESSION_ID ? 1_800_000 : 900_000;
+
+      this.lastActivityAt = Date.now();
+      const stepStartTime = Date.now();
+
+      // Check for inactivity every 10 seconds
+      this.inactivityIntervalId = setInterval(() => {
+        const now = Date.now();
+        const idleFor = now - this.lastActivityAt;
+        const elapsed = now - stepStartTime;
+
+        if (elapsed >= hardCapMs) {
+          console.warn(`[AgentRunner] Hard wall-clock cap reached (${Math.round(elapsed / 1000)}s), aborting`);
+          agent.abort();
+          return;
+        }
+        if (idleFor >= inactivityMs) {
+          console.warn(`[AgentRunner] Inactivity timeout (${Math.round(idleFor / 1000)}s idle, threshold ${Math.round(inactivityMs / 1000)}s), aborting`);
+          agent.abort();
+        }
+      }, 10_000);
 
       try {
         // Run the agent — with multimodal content if attachments are present
@@ -1468,9 +1608,9 @@ export class ContainerAgentRunner {
           await agent.prompt(userPrompt);
         }
         await agent.waitForIdle();
-        clearTimeout(timeoutId);
+        if (this.inactivityIntervalId) { clearInterval(this.inactivityIntervalId); this.inactivityIntervalId = null; }
       } catch (err) {
-        clearTimeout(timeoutId);
+        if (this.inactivityIntervalId) { clearInterval(this.inactivityIntervalId); this.inactivityIntervalId = null; }
         throw err;
       } finally {
         // Clear current agent reference (subscription stays for next turn)
@@ -1485,19 +1625,26 @@ export class ContainerAgentRunner {
         this.checkAutoCompaction().catch(err =>
           console.error('[AgentRunner] Auto-compaction check failed:', err)
         );
-        return this.stepResult;
+        if (this.autoContinuations > 0) {
+          console.log(`[AgentRunner] Step completed after ${this.autoContinuations} auto-continuation(s), ${this.runToolCallCount} total tool call(s)`);
+        }
+        return { ...this.stepResult, explicitCompletion: true };
       }
 
-      // Agent didn't call complete/fail — return raw output
+      // Agent didn't call complete/fail — return raw output (chat-style)
       // Flush memory retrieval tracking for analytics (no outcome — scoring is agent-driven)
       this.retrievalTracker.flush().catch(() => {});
       // Check if auto-compaction is needed (fire-and-forget)
       this.checkAutoCompaction().catch(err =>
         console.error('[AgentRunner] Auto-compaction check failed:', err)
       );
+      if (this.autoContinuations > 0) {
+        console.log(`[AgentRunner] Step finished (no explicit completion) after ${this.autoContinuations} auto-continuation(s), ${this.runToolCallCount} total tool call(s)`);
+      }
       return {
         output: this.rawOutput,
         success: true,
+        explicitCompletion: false,
       };
     } catch (err) {
       const error = err instanceof Error ? err.message : String(err);

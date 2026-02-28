@@ -32,6 +32,10 @@ export interface RuntimeSettings {
   // Pulse execution
   maxConcurrentPulseSessions: number;
   defaultPulseTimeoutSec: number;
+  // Autonomous agent execution
+  chatInactivityTimeoutSec: number;
+  chatHardTimeoutSec: number;
+  maxAutoContinuations: number;
 }
 
 export const DEFAULT_RUNTIME_SETTINGS: RuntimeSettings = {
@@ -50,6 +54,9 @@ export const DEFAULT_RUNTIME_SETTINGS: RuntimeSettings = {
   maxWakesPerPairPerDay: 5,
   maxConcurrentPulseSessions: 2,
   defaultPulseTimeoutSec: 120,
+  chatInactivityTimeoutSec: 180,
+  chatHardTimeoutSec: 900,
+  maxAutoContinuations: 50,
 };
 
 export interface ContainerRunnerConfig {
@@ -336,6 +343,10 @@ export class ContainerRunner implements AgentRunner {
           // Pipeline step timeout — passed to agent-runtime so it can use it
           // instead of its hardcoded 180s default. Value is in milliseconds.
           STEP_TIMEOUT_MS: String(timeout),
+          // Autonomous agent execution settings from admin panel
+          CHAT_INACTIVITY_TIMEOUT_MS: String(globalFlags.chatInactivityTimeoutSec * 1000),
+          CHAT_HARD_TIMEOUT_MS: String(globalFlags.chatHardTimeoutSec * 1000),
+          MAX_AUTO_CONTINUATIONS: String(globalFlags.maxAutoContinuations),
           // LLM call logging context — used by the runtime to tag each API call
           RUN_ID: runId,
           // User attribution — agent-runtime includes this in LLM call logs

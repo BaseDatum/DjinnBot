@@ -82,12 +82,22 @@ def _run_clawvault(args: list[str], vault_path: str, timeout: int = 30) -> str |
         )
         if result.returncode == 0:
             return result.stdout
-        _log.warning(
-            "clawvault %s failed (exit %d): %s",
-            args[0],
-            result.returncode,
-            result.stderr[:500],
-        )
+        stderr = result.stderr[:500]
+        # "non-JSON output" means qmd returned "No results found." or
+        # similar plain-text — not a real error, just no matches.
+        if "non-JSON" not in stderr:
+            _log.warning(
+                "clawvault %s failed (exit %d): %s",
+                args[0],
+                result.returncode,
+                stderr,
+            )
+        else:
+            _log.debug(
+                "clawvault %s returned no results (non-JSON): %s",
+                args[0],
+                stderr,
+            )
         return None
     except FileNotFoundError:
         _log.warning("clawvault CLI not found — falling back to Python search")

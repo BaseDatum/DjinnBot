@@ -73,12 +73,20 @@ export function createDjinnBotTools(config: DjinnBotToolsConfig): AgentTool[] {
   const {
     publisher, redis, requestIdRef, agentId, sessionId, vaultPath, apiBaseUrl,
     onComplete, onFail, pulseColumns,
+    isPipelineRun = false,
+    isPulseSession = false,
     isOnboardingSession = false,
     retrievalTracker,
   } = config;
 
+  // Chat sessions are anything that isn't a pipeline run, pulse session, or onboarding session.
+  // These are user-facing conversations via dashboard, WhatsApp, Signal, Slack, Discord, Telegram.
+  // Pipeline/pulse-only tools (step control, executors, work ledger) are excluded from chat.
+  const isChatSession = !isPipelineRun && !isPulseSession && !isOnboardingSession;
+
   return [
-    ...createStepControlTools({ onComplete, onFail }),
+    // Step control (complete/fail) — pipeline/pulse only; meaningless in chat sessions
+    ...(!isChatSession ? createStepControlTools({ onComplete, onFail }) : []),
 
     ...createMemoryTools({ publisher, agentId, vaultPath, apiBaseUrl, retrievalTracker }),
 

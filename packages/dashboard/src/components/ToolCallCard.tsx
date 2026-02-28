@@ -47,6 +47,12 @@ function formatJson(s: string): string {
   catch { return s; }
 }
 
+/** Returns true if the string is valid JSON (object, array, or primitive). */
+function isJsonString(s: string): boolean {
+  try { JSON.parse(s); return true; }
+  catch { return false; }
+}
+
 /**
  * For exec_code tool calls, extract the `code` value and wrap it in a
  * Python fenced code block for syntax-highlighted rendering.
@@ -127,17 +133,19 @@ export function ToolCallCard({ toolName, args, result, isError, durationMs, stat
         </button>
       )}
       {expandedResult && result && (
-        toolName === 'exec_code' ? (
-          <div className="px-3 py-2 border-t border-zinc-800/50 max-h-64 overflow-y-auto">
+        <div className="px-3 py-2 border-t border-zinc-800/50 max-h-64 overflow-y-auto">
+          {isJsonString(result) ? (
+            // Render valid JSON in a syntax-highlighted markdown code fence
             <MarkdownRenderer content={'```json\n' + formatJson(result) + '\n```'} className="text-xs" />
-          </div>
-        ) : (
-          <pre className={`px-3 py-2 text-xs font-mono whitespace-pre-wrap break-words border-t border-zinc-800/50 max-h-64 overflow-y-auto ${
-            isError ? 'text-red-300' : 'text-zinc-400'
-          }`}>
-            {formatJson(result)}
-          </pre>
-        )
+          ) : (
+            // Plain text results — render as-is in a monospace block
+            <pre className={`text-xs font-mono whitespace-pre-wrap break-words ${
+              isError ? 'text-red-300' : 'text-zinc-400'
+            }`}>
+              {result}
+            </pre>
+          )}
+        </div>
       )}
     </div>
   );

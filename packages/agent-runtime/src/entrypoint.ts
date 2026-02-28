@@ -173,6 +173,7 @@ async function main(): Promise<void> {
           stepNumber: 1,
           result: result.output || result.error || '',
           success: result.success,
+          explicitCompletion: result.explicitCompletion,
         };
         await publisher.publishEvent(stepEnd);
       } catch (err) {

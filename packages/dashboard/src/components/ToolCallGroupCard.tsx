@@ -36,29 +36,59 @@ function getCallStatus(call: ChatMessageData): ToolStatus {
 
 export function ToolCallGroupCard({ calls, hasRunning }: ToolCallGroupCardProps) {
   const [expanded, setExpanded] = useState(false);
-  // Track whether the user manually toggled expansion so we don't override it
-  const userToggledRef = useRef(false);
+  // Track the user's explicit intent: 'expanded' | 'collapsed' | null (no opinion).
+  // Auto-expand/collapse only fire when this is null — once the user clicks
+  // the toggle, their choice is respected until the group is done.
+  const userIntentRef = useRef<'expanded' | 'collapsed' | null>(null);
   // Auto-expand when a call starts running, auto-collapse when all finish
   const prevHasRunning = useRef(hasRunning);
+  // Debounce timer for auto-collapse — prevents flicker when tool calls
+  // arrive in quick succession (the brief gap between tool_end and the
+  // next tool_start would trigger a collapse/expand flash).
+  const collapseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const handleToggle = () => {
-    userToggledRef.current = true;
-    setExpanded(prev => !prev);
+    setExpanded(prev => {
+      const next = !prev;
+      userIntentRef.current = next ? 'expanded' : 'collapsed';
+      return next;
+    });
   };
 
   useEffect(() => {
     if (hasRunning && !prevHasRunning.current) {
-      // A new tool started — auto-expand
-      setExpanded(true);
-      userToggledRef.current = false;
+      // A new tool started — cancel any pending auto-collapse
+      if (collapseTimerRef.current) {
+        clearTimeout(collapseTimerRef.current);
+        collapseTimerRef.current = null;
+      }
+      // Only auto-expand if the user hasn't explicitly collapsed
+      if (userIntentRef.current !== 'collapsed') {
+        setExpanded(true);
+      }
     } else if (!hasRunning && prevHasRunning.current && calls.length > 1) {
-      // All tools finished — only auto-collapse if the user hasn't manually toggled
-      if (!userToggledRef.current) {
-        setExpanded(false);
+      // All tools finished — debounce the auto-collapse so that
+      // if another tool_start arrives shortly, we don't flicker.
+      // Only auto-collapse if the user hasn't explicitly expanded.
+      if (userIntentRef.current !== 'expanded') {
+        collapseTimerRef.current = setTimeout(() => {
+          collapseTimerRef.current = null;
+          setExpanded(false);
+          // Reset user intent once the group settles so that future
+          // tool runs in this group can auto-expand again.
+          userIntentRef.current = null;
+        }, 800);
       }
     }
     prevHasRunning.current = hasRunning;
   }, [hasRunning, calls.length]);
+
+  // Clean up timer on unmount
+  useEffect(() => {
+    return () => {
+      if (collapseTimerRef.current) clearTimeout(collapseTimerRef.current);
+    };
+  }, []);
 
   // Count statuses
   const counts = { running: 0, complete: 0, error: 0 };

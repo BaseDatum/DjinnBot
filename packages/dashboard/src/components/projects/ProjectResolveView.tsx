@@ -28,7 +28,24 @@ interface ProjectResolveViewProps {
   repoFullName?: string | null;
 }
 
-export function ProjectResolveView({ projectId, repoFullName }: ProjectResolveViewProps) {
+/**
+ * Extract "owner/repo" from a repository reference that may be a full URL
+ * (e.g. "https://github.com/owner/repo.git") or already shorthand ("owner/repo").
+ * Strips any trailing ".git" suffix from the repo name.
+ */
+function normalizeRepoFullName(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  // Try to match github.com URLs (HTTPS or SSH-like)
+  const m = raw.match(/github\.com[/:]([^/]+)\/([^/.]+?)(?:\.git)?\/?$/);
+  if (m) return `${m[1]}/${m[2]}`;
+  // Already looks like owner/repo (possibly with .git)
+  const parts = raw.replace(/\.git$/, '').split('/');
+  if (parts.length === 2 && parts[0] && parts[1]) return `${parts[0]}/${parts[1]}`;
+  return null;
+}
+
+export function ProjectResolveView({ projectId, repoFullName: rawRepoFullName }: ProjectResolveViewProps) {
+  const repoFullName = normalizeRepoFullName(rawRepoFullName) ?? rawRepoFullName;
   const [issueUrl, setIssueUrl] = useState('');
   const [parsedIssue, setParsedIssue] = useState<ParsedIssue | null>(null);
   const [parseError, setParseError] = useState<string | null>(null);

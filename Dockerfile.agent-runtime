@@ -211,6 +211,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libdbus-glib-1-2 \
     libxt6 \
     libx11-xcb1 \
+    xxd \
     && rm -rf /var/lib/apt/lists/*
 
 # Install camofox-browser server (REST API wrapper around Camoufox)

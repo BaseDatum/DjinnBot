@@ -16,6 +16,7 @@ import { Badge } from '@/components/ui/badge';
 import { Textarea } from '@/components/ui/textarea';
 import { ChatMessage } from './ChatMessage';
 import { ToolCallGroupCard } from '@/components/ToolCallGroupCard';
+import { useChatSessions } from './ChatSessionContext';
 import {
   sendChatMessage,
   stopChatResponse,
@@ -33,6 +34,7 @@ import {
   StopCircle,
   RotateCcw,
   Paperclip,
+  ArrowDown,
 } from 'lucide-react';
 
 // ── Message grouping ─────────────────────────────────────────────────────────
@@ -65,15 +67,25 @@ export function AgentChat({
   initialSessionStatus = 'running',
   onSessionEnd,
 }: AgentChatProps) {
+  const { getDraft, setDraft, getMessageCache, setMessageCache } = useChatSessions();
+
   const [sessionStatus, setSessionStatus] = useState<SessionStatus>(initialSessionStatus);
   const [isResponding, setIsResponding] = useState(false);
-  const [inputValue, setInputValue] = useState('');
+  // Initialize from the cross-mount draft cache so the user's in-progress
+  // text survives navigating between the floating widget and /chat page.
+  const [inputValue, setInputValue] = useState(() => getDraft(sessionId));
   const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
   const fileInputRef2 = useRef<HTMLInputElement>(null);
 
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const historyLoadedRef = useRef(false);
+
+  // Persist draft text to the cross-mount cache on every change so it
+  // survives component remounts (e.g. floating widget → /chat page).
+  useEffect(() => {
+    setDraft(sessionId, inputValue);
+  }, [sessionId, inputValue, setDraft]);
   // Bumped on restart to re-trigger the history-loading useEffect (since
   // sessionId stays the same across restarts, we need an extra dep).
   const [restartGeneration, setRestartGeneration] = useState(0);
@@ -196,6 +208,9 @@ export function AgentChat({
     streamingTick,
     expandDbMessages,
     markHistoryLoaded,
+    isAtBottom,
+    scrollToBottomImperative,
+    hasNewContent,
   } = chatStream;
 
 
@@ -204,6 +219,19 @@ export function AgentChat({
     sseConnectionStatus === 'connected' ? 'connected' :
     sseConnectionStatus === 'connecting' ? 'connecting' :
     sseConnectionStatus === 'error' ? 'error' : 'disconnected';
+
+  // ── Restore from cross-mount message cache ─────────────────────────────
+  // When AgentChat remounts (e.g. navigating from floating widget to /chat),
+  // immediately populate from the cache so the user sees their messages
+  // without waiting for the DB fetch. The DB fetch below will reconcile.
+  useEffect(() => {
+    const cached = getMessageCache(sessionId);
+    if (cached && cached.length > 0) {
+      setMessagesFromDb(cached);
+    }
+    // Only run once on mount — deps intentionally limited to sessionId
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionId]);
 
   // Load message history on mount.
   // markHistoryLoaded() gates the SSE handler: events arriving before this
@@ -257,6 +285,15 @@ export function AgentChat({
       });
   }, [sessionId, restartGeneration, expandDbMessages, setMessages, setMessagesFromDb, markHistoryLoaded, onSessionEnd]);
 
+  // ── Sync messages to the cross-mount cache ─────────────────────────────
+  // Debounced write: update the cache whenever messages change so that if
+  // the component remounts, the latest state is available instantly.
+  useEffect(() => {
+    if (messages.length > 0) {
+      setMessageCache(sessionId, messages);
+    }
+  }, [messages, sessionId, setMessageCache]);
+
   // ── Messaging ──────────────────────────────────────────────────────────────
 
   /** Send a message to the agent immediately (not queued). */
@@ -282,6 +319,10 @@ export function AgentChat({
       timestamp: Date.now(),
       attachments: attachmentIds.length > 0 ? attachmentIds : undefined,
     }]);
+
+    // User sent a message — clear intent: they want to see their message
+    // and the response. Force scroll to bottom regardless of current position.
+    requestAnimationFrame(() => scrollToBottomImperative());
 
     abortControllerRef.current = new AbortController();
 
@@ -477,7 +518,7 @@ export function AgentChat({
   );
 
   return (
-    <div className="flex flex-col h-full min-h-0 min-w-0 overflow-hidden">
+    <div className="relative flex flex-col h-full min-h-0 min-w-0 overflow-hidden">
       {/* Connection status strip */}
       <div className="flex items-center gap-2 px-3 py-1.5 border-b bg-muted/10 shrink-0">
         <ConnectionBadge />
@@ -571,6 +612,23 @@ export function AgentChat({
           <div ref={scrollSentinelRef} className="h-px" />
         </div>
       </ScrollArea>
+
+      {/* Floating "scroll to bottom" button — appears when user scrolls up.
+       * Positioned as a non-flow element that floats above the input border.
+       * Uses a wrapper with pointer-events-none so it doesn't block the
+       * scroll area underneath, with the button itself re-enabling pointer events. */}
+      {!isAtBottom && (
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 flex justify-center pb-[72px] z-10">
+          <button
+            onClick={scrollToBottomImperative}
+            className="pointer-events-auto flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-background/95 border border-border shadow-lg backdrop-blur-sm text-xs text-muted-foreground hover:text-foreground hover:border-foreground/20 transition-all animate-in fade-in slide-in-from-bottom-2 duration-200"
+            aria-label="Scroll to bottom"
+          >
+            <ArrowDown className="h-3 w-3" />
+            {hasNewContent ? 'New messages' : 'Scroll to bottom'}
+          </button>
+        </div>
+      )}
 
       {/* Input */}
       <FileUploadZone

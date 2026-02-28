@@ -7,6 +7,8 @@ import {
   Github,
   Zap,
   LayoutTemplate,
+  Settings,
+  GitPullRequestArrow,
 } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useState, useEffect, useCallback, useRef } from 'react';
@@ -436,17 +438,55 @@ function ProjectBoardPage() {
           </div>
         )}
 
-        {view === 'code' && (project.workspace_type === 'git_worktree' || project.repository) && (
-          <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
-            <CodeKnowledgeGraph projectId={projectId} />
-          </div>
+        {view === 'code' && (
+          (project.workspace_type === 'git_worktree' || project.repository) ? (
+            <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+              <CodeKnowledgeGraph projectId={projectId} />
+            </div>
+          ) : (
+            <div className="flex-1 flex items-center justify-center p-8">
+              <div className="text-center space-y-3 max-w-sm">
+                <Github className="h-10 w-10 mx-auto text-muted-foreground" />
+                <h3 className="font-semibold">No repository configured</h3>
+                <p className="text-sm text-muted-foreground">
+                  Connect a GitHub repository in project settings to explore the Code Knowledge Graph.
+                </p>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => navigate({ to: '.', search: { view: 'settings' }, replace: true })}
+                >
+                  <Settings className="mr-2 h-3.5 w-3.5" /> Go to Settings
+                </Button>
+              </div>
+            </div>
+          )
         )}
 
-        {view === 'resolve' && (project.workspace_type === 'git_worktree' || project.repository) && (
-          <ProjectResolveView
-            projectId={projectId}
-            repoFullName={project.repository}
-          />
+        {view === 'resolve' && (
+          (project.workspace_type === 'git_worktree' || project.repository) ? (
+            <ProjectResolveView
+              projectId={projectId}
+              repoFullName={project.repository}
+            />
+          ) : (
+            <div className="flex-1 flex items-center justify-center p-8">
+              <div className="text-center space-y-3 max-w-sm">
+                <GitPullRequestArrow className="h-10 w-10 mx-auto text-muted-foreground" />
+                <h3 className="font-semibold">No repository configured</h3>
+                <p className="text-sm text-muted-foreground">
+                  Connect a GitHub repository in project settings to resolve issues with agents.
+                </p>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => navigate({ to: '.', search: { view: 'settings' }, replace: true })}
+                >
+                  <Settings className="mr-2 h-3.5 w-3.5" /> Go to Settings
+                </Button>
+              </div>
+            </div>
+          )
         )}
 
         {view === 'settings' && (

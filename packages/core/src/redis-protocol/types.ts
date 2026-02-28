@@ -177,6 +177,10 @@ export const stepEndEventSchema = baseMessageSchema.extend({
   stepNumber: z.number(),
   result: z.string(),
   success: z.boolean(),
+  /** True when the agent explicitly called complete() or fail(). False/undefined
+   *  when the model simply stopped producing output (chat-style). The engine
+   *  uses this to decide whether auto-continuation is appropriate. */
+  explicitCompletion: z.boolean().optional(),
 });
 
 export type StepEndEvent = z.infer<typeof stepEndEventSchema>;

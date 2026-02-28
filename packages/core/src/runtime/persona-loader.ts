@@ -319,12 +319,12 @@ export class PersonaLoader {
         lines.push('2. Create all task-related files there');
         lines.push('3. Reference project files from project-workspace as needed');
       } else if (sessionContext.sessionType === 'chat') {
-        lines.push(`- **Session Type**: Interactive dashboard chat`);
+        lines.push(`- **Session Type**: Interactive chat`);
         if (sessionContext.runId) {
           lines.push(`- **Session ID**: \`${sessionContext.runId}\``);
         }
         lines.push('');
-        lines.push('You are having a direct, interactive conversation with a human via the dashboard.');
+        lines.push('You are having a direct, interactive conversation with a human.');
         lines.push('Be conversational, helpful, and engage naturally with the user\'s requests.');
         lines.push('You have full access to your workspace and tools to help with complex requests.');
         lines.push('Use your tools when appropriate, but also feel free to have a natural discussion.');
@@ -349,6 +349,27 @@ export class PersonaLoader {
         lines.push('4. Call `open_pull_request(...)` when ready for review.');
         lines.push('5. Call `transition_task(..., "review")` to move the task forward.');
         lines.push('6. DO NOT use `/home/agent/run-workspace/` — that is for pipeline runs only.');
+      }
+
+      // ── Autonomous continuation guidance ─────────────────────────────
+      // Applies to all interactive session types (chat, slack, pulse).
+      // Pipeline sessions use complete()/fail() and don't need this.
+      if (sessionContext.sessionType !== 'pipeline') {
+        lines.push('');
+        lines.push('### Autonomous Task Completion');
+        lines.push('When asked to do something that involves multiple steps (e.g. writing code,');
+        lines.push('researching, setting up a project, investigating an issue), work through');
+        lines.push('ALL steps to completion before giving your final response. Do not stop');
+        lines.push('after one tool call or a partial result — keep going until the task is');
+        lines.push('fully done. Only pause to ask a question if you are genuinely blocked');
+        lines.push('and need user input to proceed.');
+        lines.push('');
+        lines.push('**Progress updates:** If a task requires many tool calls (roughly 50+),');
+        lines.push('pause briefly to give the user a short progress update — a sentence or');
+        lines.push('two on what you\'ve done so far and what\'s next — then continue working.');
+        lines.push('This keeps the user informed without interrupting your flow.');
+        lines.push('');
+        lines.push('When you finish, provide a clear summary of what you accomplished.');
       }
 
       if (sessionContext.installedTools && sessionContext.installedTools.length > 0) {

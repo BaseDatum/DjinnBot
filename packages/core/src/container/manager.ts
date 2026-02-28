@@ -439,21 +439,24 @@ export class ContainerManager {
           `if [ "$MOUNT_FAIL" = "1" ]; then echo "[boot] FATAL: one or more JuiceFS mounts failed"; exit 1; fi && ` +
           `echo "[boot] All JuiceFS mounts ready" && ` +
           // ── Fix .config collision with JuiceFS ─────────────────────────
-          // JuiceFS creates /home/agent/.config as a regular FILE (mount
-          // metadata JSON).  Tools like qmd need .config to be a DIRECTORY
-          // (e.g. ~/.config/qmd/).  Rename the JuiceFS file so mkdir works.
-          `if [ -f /home/agent/.config ]; then ` +
-          `  mv /home/agent/.config /home/agent/.juicefs-config 2>/dev/null || true; ` +
-          `fi && ` +
-          `mkdir -p /home/agent/.config && ` +
+          // JuiceFS creates /home/agent/.config as a read-only FUSE metadata
+          // FILE that cannot be removed or renamed.  Tools like qmd need a
+          // ~/.config DIRECTORY.  Work around this by creating a config dir
+          // elsewhere and pointing XDG_CONFIG_HOME at it.  The trailing ';'
+          // ensures the camofox chain below always runs even if this fails.
+          `mkdir -p /home/agent/.local/config && ` +
+          `export XDG_CONFIG_HOME=/home/agent/.local/config; ` +
           // ── Restore Camoufox cache + start server (both backgrounded) ─────
           // camoufox-js expects ~/.cache/camoufox — the JuiceFS mount on
           // /home/agent wipes anything baked into the image, so we copy from a
           // stable image path.  The copy and server start run in a single
           // background subshell so the agent runtime launches immediately.
+          // NOTE: The camofox subshell MUST be in its own command (after ';')
+          // so a .config mkdir failure doesn't skip camofox via the && chain.
           `export CAMOFOX_API_KEY=$(head -c 16 /dev/urandom | xxd -p) && ` +
           `( mkdir -p /home/agent/.cache && ` +
           `  cp -r /opt/camofox/.camoufox-cache /home/agent/.cache/camoufox && ` +
+          `  echo "[boot] Camofox cache restored, starting server" && ` +
           `  CAMOFOX_PORT=9377 ` +
           `  CAMOFOX_COOKIES_DIR=/home/agent/cookies ` +
           `  MAX_SESSIONS=5 ` +

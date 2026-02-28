@@ -161,10 +161,18 @@ function pythonDefault(value: unknown): string {
 }
 
 /**
- * Sanitize a tool/param name for Python (replace hyphens, avoid reserved words).
+ * Convert camelCase to snake_case.
+ * e.g. "tabId" → "tab_id", "pressEnter" → "press_enter", "domainSuffix" → "domain_suffix"
+ */
+function camelToSnake(name: string): string {
+  return name.replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase();
+}
+
+/**
+ * Sanitize a tool/param name for Python (camelCase→snake_case, replace hyphens, avoid reserved words).
  */
 function sanitizePythonName(name: string): string {
-  let result = name.replace(/-/g, '_');
+  let result = camelToSnake(name).replace(/-/g, '_');
   // Python reserved words
   const reserved = new Set(['type', 'class', 'import', 'from', 'return', 'pass', 'in', 'is', 'not', 'and', 'or', 'for', 'while', 'if', 'else', 'elif', 'try', 'except', 'finally', 'with', 'as', 'def', 'del', 'global', 'nonlocal', 'lambda', 'yield', 'assert', 'break', 'continue', 'raise']);
   if (reserved.has(result)) {

@@ -69,6 +69,27 @@ interface ChatSessionContextValue {
   setWidgetOpen: (open: boolean) => void;
   /** Whether initial session restore has run */
   restored: boolean;
+
+  // ── Cross-mount persistence ─────────────────────────────────────────────
+  // These survive when AgentChat remounts (e.g. navigating from floating
+  // widget to /chat page). The floating widget now uses CSS visibility
+  // instead of unmounting, but the /chat page still creates new AgentChat
+  // instances that benefit from this cache.
+
+  /** Get the draft input text for a session (survives remounts). */
+  getDraft: (sessionId: string) => string;
+  /** Save draft input text for a session. */
+  setDraft: (sessionId: string, text: string) => void;
+  /** Get cached messages for a session (survives remounts). */
+  getMessageCache: (sessionId: string) => any[] | undefined;
+  /** Save messages to the cache for a session. */
+  setMessageCache: (sessionId: string, messages: any[]) => void;
+  /** Clear the message cache for a session (e.g. on session end). */
+  clearMessageCache: (sessionId: string) => void;
+  /** Get cached token stats for a session. */
+  getTokenStats: (sessionId: string) => any | undefined;
+  /** Save token stats to the cache for a session. */
+  setTokenStats: (sessionId: string, stats: any) => void;
 }
 
 const ChatSessionContext = createContext<ChatSessionContextValue | null>(null);
@@ -151,6 +172,37 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
   // Keep a ref so callbacks don't need panes in their dep arrays
   const panesRef = useRef(panes);
   panesRef.current = panes;
+
+  // ── Cross-mount caches ──────────────────────────────────────────────────
+  // These Maps persist in the Provider (lives at the root layout) even when
+  // AgentChat instances remount (e.g. navigating between floating widget and
+  // /chat page). Uses refs instead of state because writes should NOT trigger
+  // re-renders of the entire provider tree.
+  const draftCacheRef = useRef(new Map<string, string>());
+  const messageCacheRef = useRef(new Map<string, any[]>());
+  const tokenStatsCacheRef = useRef(new Map<string, any>());
+
+  const getDraft = useCallback((sessionId: string) => draftCacheRef.current.get(sessionId) ?? '', []);
+  const setDraft = useCallback((sessionId: string, text: string) => {
+    if (text) {
+      draftCacheRef.current.set(sessionId, text);
+    } else {
+      draftCacheRef.current.delete(sessionId);
+    }
+  }, []);
+  const getMessageCache = useCallback((sessionId: string) => messageCacheRef.current.get(sessionId), []);
+  const setMessageCache = useCallback((sessionId: string, messages: any[]) => {
+    messageCacheRef.current.set(sessionId, messages);
+  }, []);
+  const clearMessageCache = useCallback((sessionId: string) => {
+    messageCacheRef.current.delete(sessionId);
+    draftCacheRef.current.delete(sessionId);
+    tokenStatsCacheRef.current.delete(sessionId);
+  }, []);
+  const getTokenStats = useCallback((sessionId: string) => tokenStatsCacheRef.current.get(sessionId), []);
+  const setTokenStats = useCallback((sessionId: string, stats: any) => {
+    tokenStatsCacheRef.current.set(sessionId, stats);
+  }, []);
 
   // Persist panes to localStorage on every change (skip the initial empty state
   // before restore completes — otherwise we'd wipe the saved panes).
@@ -441,13 +493,17 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
     const pane = panesRef.current.find(p => p.paneId === paneId);
     // Remove from UI immediately — don't wait for the backend call
     setPanes(prev => prev.filter(p => p.paneId !== paneId));
+    // Clear cross-mount caches for this session
+    if (pane?.sessionId) {
+      clearMessageCache(pane.sessionId);
+    }
     // End the backend session (kill container, mark completed) — fire and forget
     if (pane?.sessionId && pane.sessionStatus !== 'idle' && pane.sessionStatus !== 'stopping') {
       endChatSession(pane.agentId, pane.sessionId).catch(err =>
         console.error(`Failed to end session ${pane.sessionId}:`, err),
       );
     }
-  }, []);
+  }, [clearMessageCache]);
 
   const showPane = useCallback((paneId: string) => {
     setPanes(prev =>
@@ -569,6 +625,13 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
         widgetOpen,
         setWidgetOpen,
         restored,
+        getDraft,
+        setDraft,
+        getMessageCache,
+        setMessageCache,
+        clearMessageCache,
+        getTokenStats,
+        setTokenStats,
       }}
     >
       {children}

@@ -3,14 +3,28 @@
 const fs = require('fs');
 const path = require('path');
 
-// Try relative to script (local dev) or /app (Docker build)
-let chunkPath = path.join(__dirname, '..', 'node_modules', 'clawvault', 'dist', 'chunk-6B3JWM7J.js');
-if (!fs.existsSync(chunkPath)) {
-  chunkPath = '/app/node_modules/clawvault/dist/chunk-6B3JWM7J.js';
+const CHUNK_NAME = 'chunk-6B3JWM7J.js';
+
+// Search paths: local node_modules, /app Docker build, and global npm installs
+const candidates = [
+  path.join(__dirname, '..', 'node_modules', 'clawvault', 'dist', CHUNK_NAME),
+  path.join('/app', 'node_modules', 'clawvault', 'dist', CHUNK_NAME),
+  // Global npm install (Dockerfile.server uses npm install -g clawvault)
+  path.join('/usr/local/lib/node_modules', 'clawvault', 'dist', CHUNK_NAME),
+  path.join('/usr/lib/node_modules', 'clawvault', 'dist', CHUNK_NAME),
+];
+
+let chunkPath = null;
+for (const p of candidates) {
+  if (fs.existsSync(p)) {
+    chunkPath = p;
+    break;
+  }
 }
 
-if (!fs.existsSync(chunkPath)) {
-  console.log('clawvault chunk not found, skipping patch');
+if (!chunkPath) {
+  console.log('clawvault chunk not found in any known location, skipping patch');
+  console.log('  searched:', candidates.join('\n           '));
   process.exit(0);
 }
 
@@ -22,12 +36,12 @@ const patch = `if (t.startsWith("[node-llama-cpp]")) return false;
     if (t.startsWith("No results found")) return false;`;
 
 if (src.includes('if (t.startsWith("Warning:"))')) {
-  console.log('Already patched');
+  console.log(`Already patched: ${chunkPath}`);
   process.exit(0);
 }
 
 if (!src.includes(marker)) {
-  console.log('Marker not found in clawvault chunk — version may have changed');
+  console.log(`Marker not found in ${chunkPath} — clawvault version may have changed`);
   process.exit(0);
 }
 

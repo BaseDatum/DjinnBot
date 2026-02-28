@@ -99,6 +99,10 @@ RUN sed -i "s/process.env.QMD_EMBED_PROVIDER === 'siliconflow'/process.env.QMD_E
     sed -i "s/const remoteModel = process.env.QMD_SILICONFLOW_EMBED_MODEL || 'Qwen\/Qwen3-Embedding-8B'/const remoteModel = process.env.QMD_EMBED_PROVIDER === 'openai' ? (process.env.QMD_OPENAI_EMBED_MODEL || 'text-embedding-3-small') : (process.env.QMD_SILICONFLOW_EMBED_MODEL || 'Qwen\/Qwen3-Embedding-8B')/" /root/.bun/install/global/node_modules/qmdr/src/qmd.ts && \
     sed -i "s/Using remote embedding: SiliconFlow/Using remote embedding:/" /root/.bun/install/global/node_modules/qmdr/src/qmd.ts
 
+# Patch clawvault to handle "No results found" and "Warning:" from qmd
+COPY scripts/patch-clawvault-qmd.js /tmp/patch-clawvault-qmd.js
+RUN node /tmp/patch-clawvault-qmd.js && rm /tmp/patch-clawvault-qmd.js
+
 # QMDR environment
 ENV QMD_ALLOW_SQLITE_EXTENSIONS=1
 
@@ -125,7 +129,12 @@ if [ -n \"$JFS_META_URL\" ]; then \
     --background \
     \"$JFS_META_URL\" \
     /jfs && \
-  echo '[API] JuiceFS mounted at /jfs'; \
+  echo '[API] JuiceFS mounted at /jfs' && \
+  echo '[API] Symlinking qmd cache to JuiceFS...' && \
+  mkdir -p /root/.cache && \
+  rm -rf /root/.cache/qmd && \
+  ln -sf /jfs/.cache/qmd /root/.cache/qmd && \
+  echo '[API] qmd cache -> /jfs/.cache/qmd'; \
 else \
   echo '[API] JFS_META_URL not set — running without JuiceFS'; \
 fi && \
