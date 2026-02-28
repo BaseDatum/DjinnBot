@@ -124,12 +124,25 @@ REDIS_RESULT_KEY = "djinnbot:code-graph:result:{project_id}"
 REDIS_RESULT_TTL = 600  # 10 minutes
 
 
-async def _run_indexing(project_id: str, job_id: str, force: bool = False):
+async def _run_indexing(
+    project_id: str,
+    job_id: str,
+    force: bool = False,
+    *,
+    skip_publish: bool = False,
+):
     """Background task: publish indexing request to Redis, poll for engine result.
 
     The engine (Node.js) listens for CODE_GRAPH_INDEX_REQUESTED on the global
     event stream, runs the @djinnbot/code-graph pipeline, and writes the result
     to a Redis key. This function polls that key and updates the DB.
+
+    Parameters
+    ----------
+    skip_publish : bool
+        When True, skip publishing the Redis event (the caller already did it).
+        Used by ``_repo_setup._trigger_code_graph_index`` which publishes the
+        event itself before spawning this as a background task.
     """
     _index_jobs[job_id] = {
         "status": "running",
@@ -139,20 +152,21 @@ async def _run_indexing(project_id: str, job_id: str, force: bool = False):
     }
 
     try:
-        # Publish event for the engine to pick up
         if not dependencies.redis_client:
             raise RuntimeError("Redis not available")
 
-        event = {
-            "type": "CODE_GRAPH_INDEX_REQUESTED",
-            "projectId": project_id,
-            "jobId": job_id,
-            "force": force,
-            "timestamp": now_ms(),
-        }
-        await dependencies.redis_client.xadd(
-            "djinnbot:events:global", {"data": json.dumps(event)}
-        )
+        # Publish event for the engine to pick up (unless caller already did)
+        if not skip_publish:
+            event = {
+                "type": "CODE_GRAPH_INDEX_REQUESTED",
+                "projectId": project_id,
+                "jobId": job_id,
+                "force": force,
+                "timestamp": now_ms(),
+            }
+            await dependencies.redis_client.xadd(
+                "djinnbot:events:global", {"data": json.dumps(event)}
+            )
 
         _index_jobs[job_id]["phase"] = "indexing"
         _index_jobs[job_id]["percent"] = 5

@@ -20,6 +20,8 @@ import { McpoManager } from './mcp/mcpo-manager.js';
 import { ContainerLogStreamer } from './container/log-streamer.js';
 import { AgentLifecycleTracker } from './lifecycle/agent-lifecycle-tracker.js';
 import { execFile } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { PROVIDER_ENV_MAP } from './constants.js';
 import { parseModelString } from './runtime/model-resolver.js';
@@ -685,6 +687,23 @@ async function handleCodeGraphIndex(projectId: string, jobId?: string): Promise<
   const progressKey = `djinnbot:code-graph:progress:${projectId}`;
 
   try {
+    // Wait for workspace to be ready — the clone may still be in progress
+    // when the index event is received (both are triggered at project creation).
+    const maxWaitMs = 120_000; // 2 minutes
+    const pollMs = 2_000;
+    let waited = 0;
+    while (!existsSync(join(repoPath, '.git')) && waited < maxWaitMs) {
+      console.log(`[Engine] Workspace not ready for ${projectId}, waiting... (${waited / 1000}s)`);
+      await new Promise(r => setTimeout(r, pollMs));
+      waited += pollMs;
+    }
+    if (!existsSync(join(repoPath, '.git'))) {
+      throw new Error(
+        `Workspace not found at ${repoPath} after waiting ${maxWaitMs / 1000}s. ` +
+        `Clone may have failed — check project repository settings.`
+      );
+    }
+
     // Dynamic import of the code-graph package
     const { runPipeline } = await import('@djinnbot/code-graph') as any;
 
