@@ -8,7 +8,7 @@ import { PersonaLoader } from './runtime/persona-loader.js';
 import { MockRunner } from './runtime/mock-runner.js';
 import { PiMonoRunner } from './runtime/pi-mono-runner.js';
 import type { PiMonoRunnerConfig } from './runtime/pi-mono-runner.js';
-import { ContainerRunner } from './container/runner.js';
+import { ContainerRunner, type RuntimeSettings, DEFAULT_RUNTIME_SETTINGS } from './container/runner.js';
 import { ProgressFileManager } from './memory/progress-file.js';
 import { KnowledgeStore } from './memory/knowledge-store.js';
 import { ContextAssembler } from './memory/context-assembler.js';
@@ -53,6 +53,8 @@ export interface DjinnBotConfig {
   useApiStore?: boolean;      // Use HTTP API instead of SQLite
   apiUrl?: string;            // API base URL when useApiStore is true
   useContainerRunner?: boolean; // Use container-based agent runner (spawns containers per run)
+  /** Runtime settings from the admin panel (fetched by main.ts at startup). */
+  runtimeSettings?: RuntimeSettings;
 }
 
 export class DjinnBot {
@@ -785,14 +787,25 @@ export class DjinnBot {
     console.log('[DjinnBot] Agent inbox connected');
 
     // Phase 9a: Start wake system (independent of pulse)
+    const rs = this.config.runtimeSettings ?? DEFAULT_RUNTIME_SETTINGS;
     this.agentWake = new AgentWake(
       {
         redisUrl: this.config.redisUrl,
         agentIds: this.agentRegistry.getIds(),
+        wakeGuardrails: {
+          cooldownSeconds: rs.wakeCooldownSec,
+          maxWakesPerDay: rs.maxWakesPerDay,
+          maxWakesPerPairPerDay: rs.maxWakesPerPairPerDay,
+        },
       },
       {
-        onWakeAgent: (targetAgentId, fromAgentId, message) =>
-          this.runWakeSession(targetAgentId, fromAgentId, message),
+        onWakeAgent: (targetAgentId, fromAgentId, message) => {
+          if (!rs.wakeEnabled) {
+            console.log(`[DjinnBot] Wake system disabled — ignoring wake for ${targetAgentId} from ${fromAgentId}`);
+            return Promise.resolve();
+          }
+          return this.runWakeSession(targetAgentId, fromAgentId, message);
+        },
       },
     );
     await this.agentWake.start();
@@ -819,7 +832,7 @@ export class DjinnBot {
           return this.lifecycleManager.startPulseSession(agentId, sessionId, maxConcurrent);
         },
         endPulseSession: (agentId, sessionId) => this.lifecycleManager.endPulseSession(agentId, sessionId),
-        maxConcurrentPulseSessions: 2, // Global default — per-agent overrides via startPulseSession
+        maxConcurrentPulseSessions: rs.maxConcurrentPulseSessions,
         onRoutinePulseComplete: (routineId) => this.updateRoutineStats(routineId),
       },
     );
@@ -1108,10 +1121,10 @@ export class DjinnBot {
         || agent?.config?.model
         || 'openrouter/minimax/minimax-m2.5';
 
-      // Determine timeout: routine override > agent config > default
+      // Determine timeout: routine override > agent config > admin default
       const timeout = context.routineTimeoutMs
         ?? agent?.config?.pulseContainerTimeoutMs
-        ?? 120000;
+        ?? (this.config.runtimeSettings?.defaultPulseTimeoutSec ?? 120) * 1000;
 
       // Executor model resolution: routine.executorModel → agent.executorModel → agent.model → fallback
       const executorModel = context.routineExecutorModel

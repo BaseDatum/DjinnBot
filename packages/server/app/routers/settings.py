@@ -34,6 +34,25 @@ DEFAULT_SETTINGS: Dict[str, str] = {
     "userSlackId": "",
     "agentRuntimeImage": "",
     "ptcEnabled": "false",
+    # ── Container Resources ──────────────────────────────────────────────────
+    "containerMemoryLimitMb": "2048",
+    "containerCpuLimit": "2",
+    "containerShmSizeMb": "256",
+    "jfsAgentCacheSizeMb": "2048",
+    "containerReadyTimeoutSec": "30",
+    # ── Pipeline Execution ───────────────────────────────────────────────────
+    "defaultStepTimeoutSec": "300",
+    # ── Chat Session Reaper ──────────────────────────────────────────────────
+    "chatIdleTimeoutMin": "30",
+    "reaperIntervalSec": "60",
+    # ── Wake System Guardrails ───────────────────────────────────────────────
+    "wakeEnabled": "true",
+    "wakeCooldownSec": "300",
+    "maxWakesPerDay": "12",
+    "maxWakesPerPairPerDay": "5",
+    # ── Pulse Execution ──────────────────────────────────────────────────────
+    "maxConcurrentPulseSessions": "2",
+    "defaultPulseTimeoutSec": "120",
 }
 
 # ─── Models known to support extended thinking/reasoning ─────────────────────
@@ -497,6 +516,25 @@ class GlobalSettings(BaseModel):
     userSlackId: str = ""
     agentRuntimeImage: str = ""
     ptcEnabled: bool = False
+    # ── Container Resources ──────────────────────────────────────────────────
+    containerMemoryLimitMb: int = 2048
+    containerCpuLimit: float = 2.0
+    containerShmSizeMb: int = 256
+    jfsAgentCacheSizeMb: int = 2048
+    containerReadyTimeoutSec: int = 30
+    # ── Pipeline Execution ───────────────────────────────────────────────────
+    defaultStepTimeoutSec: int = 300
+    # ── Chat Session Reaper ──────────────────────────────────────────────────
+    chatIdleTimeoutMin: int = 30
+    reaperIntervalSec: int = 60
+    # ── Wake System Guardrails ───────────────────────────────────────────────
+    wakeEnabled: bool = True
+    wakeCooldownSec: int = 300
+    maxWakesPerDay: int = 12
+    maxWakesPerPairPerDay: int = 5
+    # ── Pulse Execution ──────────────────────────────────────────────────────
+    maxConcurrentPulseSessions: int = 2
+    defaultPulseTimeoutSec: int = 120
 
 
 class ExtraFieldSpec(BaseModel):
@@ -700,6 +738,25 @@ async def get_settings(
         userSlackId=_get("userSlackId"),
         agentRuntimeImage=_get("agentRuntimeImage"),
         ptcEnabled=_get("ptcEnabled").lower() == "true",
+        # ── Container Resources ──────────────────────────────────────────────
+        containerMemoryLimitMb=int(_get("containerMemoryLimitMb")),
+        containerCpuLimit=float(_get("containerCpuLimit")),
+        containerShmSizeMb=int(_get("containerShmSizeMb")),
+        jfsAgentCacheSizeMb=int(_get("jfsAgentCacheSizeMb")),
+        containerReadyTimeoutSec=int(_get("containerReadyTimeoutSec")),
+        # ── Pipeline Execution ───────────────────────────────────────────────
+        defaultStepTimeoutSec=int(_get("defaultStepTimeoutSec")),
+        # ── Chat Session Reaper ──────────────────────────────────────────────
+        chatIdleTimeoutMin=int(_get("chatIdleTimeoutMin")),
+        reaperIntervalSec=int(_get("reaperIntervalSec")),
+        # ── Wake System Guardrails ───────────────────────────────────────────
+        wakeEnabled=_get("wakeEnabled").lower() == "true",
+        wakeCooldownSec=int(_get("wakeCooldownSec")),
+        maxWakesPerDay=int(_get("maxWakesPerDay")),
+        maxWakesPerPairPerDay=int(_get("maxWakesPerPairPerDay")),
+        # ── Pulse Execution ──────────────────────────────────────────────────
+        maxConcurrentPulseSessions=int(_get("maxConcurrentPulseSessions")),
+        defaultPulseTimeoutSec=int(_get("defaultPulseTimeoutSec")),
     )
 
 
@@ -721,6 +778,25 @@ async def update_settings(
         "userSlackId": settings.userSlackId,
         "agentRuntimeImage": settings.agentRuntimeImage,
         "ptcEnabled": str(settings.ptcEnabled).lower(),
+        # ── Container Resources ──────────────────────────────────────────────
+        "containerMemoryLimitMb": str(settings.containerMemoryLimitMb),
+        "containerCpuLimit": str(settings.containerCpuLimit),
+        "containerShmSizeMb": str(settings.containerShmSizeMb),
+        "jfsAgentCacheSizeMb": str(settings.jfsAgentCacheSizeMb),
+        "containerReadyTimeoutSec": str(settings.containerReadyTimeoutSec),
+        # ── Pipeline Execution ───────────────────────────────────────────────
+        "defaultStepTimeoutSec": str(settings.defaultStepTimeoutSec),
+        # ── Chat Session Reaper ──────────────────────────────────────────────
+        "chatIdleTimeoutMin": str(settings.chatIdleTimeoutMin),
+        "reaperIntervalSec": str(settings.reaperIntervalSec),
+        # ── Wake System Guardrails ───────────────────────────────────────────
+        "wakeEnabled": str(settings.wakeEnabled).lower(),
+        "wakeCooldownSec": str(settings.wakeCooldownSec),
+        "maxWakesPerDay": str(settings.maxWakesPerDay),
+        "maxWakesPerPairPerDay": str(settings.maxWakesPerPairPerDay),
+        # ── Pulse Execution ──────────────────────────────────────────────────
+        "maxConcurrentPulseSessions": str(settings.maxConcurrentPulseSessions),
+        "defaultPulseTimeoutSec": str(settings.defaultPulseTimeoutSec),
     }
     for key, value in updates.items():
         row = await session.get(GlobalSetting, key)
