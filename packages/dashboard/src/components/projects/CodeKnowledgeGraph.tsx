@@ -238,9 +238,9 @@ export function CodeKnowledgeGraph({ projectId }: CodeKnowledgeGraphProps) {
 
   // ── Render ──────────────────────────────────────────────────────────
   return (
-    <div className={graphFullscreen ? 'flex flex-col h-screen' : 'flex flex-col'}>
+    <div className={graphFullscreen ? 'flex flex-col h-screen' : 'flex flex-col h-full min-h-0'}>
       {/* Header */}
-      <div className="flex items-center justify-between gap-4 px-4 md:px-6 py-3 border-b">
+      <div className="shrink-0 flex items-center justify-between gap-4 px-4 md:px-6 py-3 border-b">
         <div className="flex items-center gap-3">
           <Brain className="h-5 w-5 text-primary" />
           <h2 className="text-lg font-semibold">Code Knowledge Graph</h2>
@@ -293,7 +293,7 @@ export function CodeKnowledgeGraph({ projectId }: CodeKnowledgeGraphProps) {
 
       {/* Indexing Progress */}
       {indexProgress && (
-        <div className="mx-4 md:mx-6 mt-3 rounded-lg border border-primary/20 bg-primary/5 p-3 space-y-2">
+        <div className="shrink-0 mx-4 md:mx-6 mt-3 rounded-lg border border-primary/20 bg-primary/5 p-3 space-y-2">
           <div className="flex items-center justify-between text-sm">
             <span>{indexProgress.message}</span>
             <span className="text-muted-foreground">{indexProgress.percent}%</span>
@@ -306,7 +306,7 @@ export function CodeKnowledgeGraph({ projectId }: CodeKnowledgeGraphProps) {
 
       {/* Errors */}
       {(status?.error || indexError) && (
-        <div className="mx-4 md:mx-6 mt-3 rounded-lg border border-destructive/30 bg-destructive/5 p-3 flex items-start gap-2">
+        <div className="shrink-0 mx-4 md:mx-6 mt-3 rounded-lg border border-destructive/30 bg-destructive/5 p-3 flex items-start gap-2">
           <AlertTriangle className="h-4 w-4 text-destructive shrink-0 mt-0.5" />
           <div className="text-sm text-destructive">{indexError || status?.error}</div>
         </div>
@@ -329,7 +329,7 @@ export function CodeKnowledgeGraph({ projectId }: CodeKnowledgeGraphProps) {
       {status?.indexed && graphData && graphData.nodes.length > 0 && (
         <>
           {/* AI Chat hint */}
-          <div className="mx-4 md:mx-6 mt-3 flex items-center gap-2 px-3 py-2 rounded-lg border border-primary/20 bg-primary/5 text-xs">
+          <div className="shrink-0 mx-4 md:mx-6 mt-3 flex items-center gap-2 px-3 py-2 rounded-lg border border-primary/20 bg-primary/5 text-xs">
             <MessageSquare className="w-4 h-4 text-primary shrink-0" />
             <span className="text-muted-foreground">
               Your project agent can explore this knowledge graph.
@@ -339,7 +339,7 @@ export function CodeKnowledgeGraph({ projectId }: CodeKnowledgeGraphProps) {
           </div>
 
           {/* Three-pane layout with resizable panels */}
-          <div className={`flex ${graphFullscreen ? 'flex-1 min-h-0' : 'h-[calc(100vh-220px)] min-h-[500px]'} mt-3`}>
+          <div className="flex flex-1 min-h-0 mt-3">
             {/* Left: File Tree */}
             <FileTreePanel
               nodes={graphData.nodes}
@@ -402,7 +402,7 @@ export function CodeKnowledgeGraph({ projectId }: CodeKnowledgeGraphProps) {
                   <PanelResizeHandle className="w-1.5 bg-border/50 hover:bg-primary/30 active:bg-primary/50 transition-colors cursor-col-resize flex items-center justify-center">
                     <GripVertical className="w-3 h-3 text-muted-foreground/50" />
                   </PanelResizeHandle>
-                  <Panel defaultSize={40} minSize={20} maxSize={60}>
+                  <Panel defaultSize={40} minSize={20}>
                     <div className="flex flex-col h-full bg-background overflow-hidden">
                       {/* Tab bar */}
                       <div className="flex items-center gap-1 px-2 py-1.5 border-b border-border bg-muted/20 shrink-0">

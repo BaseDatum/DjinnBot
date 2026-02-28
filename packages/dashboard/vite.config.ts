@@ -11,6 +11,11 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
+      // Prevent duplicate Three.js core: three-render-objects imports
+      // 'three/webgpu' which is a separate self-contained bundle that
+      // duplicates the entire Three.js core, triggering the
+      // "Multiple instances of Three.js being imported" warning.
+      'three/webgpu': 'three',
     },
   },
   // VITE_API_URL is injected at build time via --mode or the environment.
