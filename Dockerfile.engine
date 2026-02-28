@@ -98,7 +98,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /build
 
 # Copy root workspace files for dependency resolution
-COPY package.json package-lock.json tsconfig.base.json ./
+COPY package.json package-lock.json tsconfig.base.json .npmrc ./
 COPY packages/core/package.json ./packages/core/
 COPY packages/slack/package.json ./packages/slack/
 COPY packages/signal/package.json ./packages/signal/
@@ -346,7 +346,7 @@ RUN ARCH=$(dpkg --print-architecture) && \
     fi
 
 # Copy root workspace files
-COPY package.json package-lock.json ./
+COPY package.json package-lock.json .npmrc ./
 COPY packages/core/package.json ./packages/core/
 COPY packages/slack/package.json ./packages/slack/
 COPY packages/signal/package.json ./packages/signal/

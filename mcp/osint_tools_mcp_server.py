@@ -14,7 +14,6 @@ import asyncio
 import json
 import os
 import sys
-import tempfile
 import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -24,6 +23,25 @@ from typing import Any, Dict, List, Optional
 # ---------------------------------------------------------------------------
 
 _jobs: Dict[str, Dict[str, Any]] = {}
+
+# ---------------------------------------------------------------------------
+# Output directory helper — prefer JuiceFS (/jfs/osint-outputs) for persistent
+# storage, fall back to /tmp when JuiceFS is not mounted.
+# ---------------------------------------------------------------------------
+
+OSINT_OUTPUT_BASE = os.environ.get("OSINT_OUTPUT_DIR", "/jfs/osint-outputs")
+
+
+def _output_dir(tool_name: str) -> str:
+    """Return (and create) a timestamped output directory for a tool run."""
+    from datetime import datetime
+
+    ts = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
+    run_id = uuid.uuid4().hex[:8]
+    d = os.path.join(OSINT_OUTPUT_BASE, tool_name, f"{ts}-{run_id}")
+    os.makedirs(d, exist_ok=True)
+    return d
+
 
 # ---------------------------------------------------------------------------
 # Subprocess helper
@@ -37,6 +55,7 @@ async def run_command(
     timeout: Optional[int] = None,
 ) -> tuple[str, str, int]:
     """Run a command as a subprocess and return (stdout, stderr, returncode)."""
+    process = None
     try:
         env = os.environ.copy()
         process = await asyncio.create_subprocess_exec(
@@ -54,10 +73,11 @@ async def run_command(
         return (
             stdout.decode("utf-8", errors="ignore"),
             stderr.decode("utf-8", errors="ignore"),
-            process.returncode,
+            process.returncode or 0,
         )
     except asyncio.TimeoutError:
-        process.kill()
+        if process is not None:
+            process.kill()
         return "", "Command timed out", 1
     except Exception as e:
         return "", str(e), 1
@@ -74,6 +94,10 @@ async def handle_sherlock(params: Dict[str, Any]) -> Dict[str, Any]:
     sites = params.get("sites", [])
     output_format = params.get("output_format", "csv")
 
+    # Use persistent JuiceFS-backed output dir instead of /tmp to avoid
+    # disk exhaustion on the container's tiny tmpfs overlay.
+    output_dir = _output_dir("sherlock")
+
     cmd = ["sherlock", username, "--timeout", str(timeout)]
     if sites:
         for site in sites:
@@ -83,20 +107,19 @@ async def handle_sherlock(params: Dict[str, Any]) -> Dict[str, Any]:
     elif output_format == "xlsx":
         cmd.append("--xlsx")
 
-    with tempfile.TemporaryDirectory() as temp_dir:
-        cmd.extend(["--folderoutput", temp_dir])
-        stdout, stderr, rc = await run_command(cmd, timeout=300)
-        if rc == 0:
-            results = {"stdout": stdout, "files": []}
-            for fp in Path(temp_dir).glob(f"{username}.*"):
-                try:
-                    results["files"].append(
-                        {"filename": fp.name, "content": fp.read_text("utf-8")}
-                    )
-                except Exception:
-                    pass
-            return {"success": True, "content": results}
-        return {"success": False, "error": f"Sherlock failed: {stderr}"}
+    cmd.extend(["--folderoutput", output_dir])
+    stdout, stderr, rc = await run_command(cmd, timeout=300)
+    if rc == 0:
+        results: Dict[str, Any] = {"stdout": stdout, "files": []}
+        for fp in Path(output_dir).glob(f"{username}.*"):
+            try:
+                results["files"].append(
+                    {"filename": fp.name, "content": fp.read_text("utf-8")}
+                )
+            except Exception:
+                pass
+        return {"success": True, "content": results}
+    return {"success": False, "error": f"Sherlock failed: {stderr}"}
 
 
 async def handle_holehe(params: Dict[str, Any]) -> Dict[str, Any]:
@@ -117,11 +140,31 @@ async def handle_holehe(params: Dict[str, Any]) -> Dict[str, Any]:
 async def handle_maigret(params: Dict[str, Any]) -> Dict[str, Any]:
     username = params["username"]
     timeout = params.get("timeout", 60)
+    output_dir = _output_dir("maigret")
 
-    cmd = ["maigret", username, "--timeout", str(timeout), "--json", "nouse"]
+    cmd = [
+        "maigret",
+        username,
+        "--timeout",
+        str(timeout),
+        "--json",
+        "simple",
+        "--folderoutput",
+        output_dir,
+    ]
     stdout, stderr, rc = await run_command(cmd, timeout=600)
     if rc == 0:
-        return {"success": True, "content": stdout}
+        # Collect any generated report files
+        results: Dict[str, Any] = {"stdout": stdout, "files": []}
+        for fp in Path(output_dir).glob("*"):
+            if fp.is_file():
+                try:
+                    results["files"].append(
+                        {"filename": fp.name, "content": fp.read_text("utf-8")}
+                    )
+                except Exception:
+                    pass
+        return {"success": True, "content": results}
     return {"success": False, "error": f"Maigret failed: {stderr}"}
 
 
@@ -130,7 +173,19 @@ async def handle_theharvester(params: Dict[str, Any]) -> Dict[str, Any]:
     sources = params.get("sources", "all")
     limit = params.get("limit", 500)
 
-    cmd = ["theHarvester", "-d", domain, "-b", sources, "-l", str(limit)]
+    # The binary name depends on how the package was installed.
+    # Try 'theHarvester' first (pipx / git install), then 'theharvester' (apt).
+    import shutil
+
+    binary = shutil.which("theHarvester") or shutil.which("theharvester")
+    if not binary:
+        return {
+            "success": False,
+            "error": "theHarvester binary not found in PATH. "
+            "Ensure it is installed (uv tool install git+https://github.com/laramies/theHarvester.git).",
+        }
+
+    cmd = [binary, "-d", domain, "-b", sources, "-l", str(limit)]
     stdout, stderr, rc = await run_command(cmd, timeout=600)
     if rc == 0:
         return {"success": True, "content": stdout}

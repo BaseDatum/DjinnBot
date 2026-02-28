@@ -316,35 +316,75 @@ services:
       context: .
       dockerfile: Dockerfile.mcpo
     container_name: djinnbot-mcpo
+    # FUSE capabilities — mcpo mounts JuiceFS directly at /jfs for OSINT output persistence
+    cap_add:
+      - SYS_ADMIN
+    security_opt:
+      - seccomp=unconfined
+      - apparmor=unconfined
+    devices:
+      - /dev/fuse:/dev/fuse
     environment:
       # Pass secrets needed by MCP servers through to the container.
       # mcpo substitutes ${VAR} references in config.json env blocks.
       - GITHUB_TOKEN=${GITHUB_TOKEN:-}
-    # mcpo reads config.json from the bind-mounted /mcp directory.
-    # --hot-reload watches the file for changes and reloads servers without downtime.
-    # The engine writes /mcp/config.json via the MCP manager.
-    command: >
-      --config /mcp/config.json
-      --hot-reload
-      --port 8000
-      --api-key "${MCPO_API_KEY:-changeme}"
+      # ── JuiceFS direct-mount ──
+      # mcpo mounts JuiceFS at /jfs on startup for persistent OSINT tool outputs.
+      - JFS_META_URL=redis://redis:6379/2
+      - OSINT_OUTPUT_DIR=/jfs/osint-outputs
+    # Mount JuiceFS first, then start mcpo. The entrypoint script formats (idempotent)
+    # and mounts JuiceFS, creates the osint-outputs directory, then execs mcpo.
+    entrypoint:
+      - sh
+      - -c
+      - |
+        echo '[mcpo] Mounting JuiceFS at /jfs...'
+        juicefs mount \
+          --cache-dir /tmp/jfscache-mcpo \
+          --cache-size 1024 \
+          --no-usage-report \
+          --buffer-size 100 \
+          --attr-cache 1 \
+          --entry-cache 1 \
+          --dir-entry-cache 1 \
+          "$$JFS_META_URL" \
+          /jfs &
+        # Wait for mount (up to 30s)
+        for i in $(seq 1 30); do
+          mountpoint -q /jfs && break
+          sleep 1
+        done
+        if mountpoint -q /jfs; then
+          echo '[mcpo] JuiceFS mounted at /jfs'
+          mkdir -p /jfs/osint-outputs
+        else
+          echo '[mcpo] WARNING: JuiceFS mount failed, falling back to local /jfs directory'
+          mkdir -p /jfs/osint-outputs
+        fi
+        exec mcpo \
+          --config /mcp/config.json \
+          --hot-reload \
+          --port 8000 \
+          --api-key "${MCPO_API_KEY:-changeme}"
     ports:
       - "${BIND_HOST:-0.0.0.0}:${MCPO_PORT:-8001}:8000"
     volumes:
-      # No Docker volume — mcpo only needs the config file from the bind mount.
-      # The engine also writes to this path when servers are added via the UI.
+      # MCP config from the bind mount — engine also writes to this path.
       - ./mcp:/mcp
     networks:
       - djinnbot_default
+    depends_on:
+      redis:
+        condition: service_healthy
+      juicefs-mount:
+        condition: service_healthy
     restart: unless-stopped
-    # mcpo starts even if config.json doesn't exist yet — it will be created by the engine.
-    # We use unless-stopped so it comes back after the engine rewrites config.json.
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:8000/docs"]
       interval: 15s
       timeout: 5s
       retries: 5
-      start_period: 10s
+      start_period: 20s
 
   dashboard:
     build:

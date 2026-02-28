@@ -47,7 +47,8 @@
         "/mcp/osint_tools_mcp_server.py"
       ],
       "env": {
-        "PYTHONUNBUFFERED": "1"
+        "PYTHONUNBUFFERED": "1",
+        "OSINT_OUTPUT_DIR": "/jfs/osint-outputs"
       }
     }
   }

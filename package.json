@@ -25,5 +25,8 @@
   "dependencies": {
     "@openrouter/sdk": "^0.9.11",
     "clawvault": "2.4.6"
+  },
+  "overrides": {
+    "tree-sitter": "0.22.4"
   }
 }
