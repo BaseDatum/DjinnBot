@@ -532,6 +532,45 @@ class DjinnBotClient:
         response.raise_for_status()
         return response.json()
 
+    # ── Resolve ───────────────────────────────────────────────────────────
+
+    def resolve_issue(
+        self,
+        issue_url: str,
+        project_id: Optional[str] = None,
+        model: Optional[str] = None,
+    ) -> dict:
+        """Start a resolve pipeline run for a GitHub issue.
+
+        Args:
+            issue_url: GitHub issue URL or shorthand (owner/repo#123)
+            project_id: Optional project ID to link the run to
+            model: Optional model override
+
+        Returns:
+            {run_id, pipeline_id, issue_number, repo_full_name, issue_title, status}
+        """
+        payload: dict = {"issue_url": issue_url}
+        if project_id:
+            payload["project_id"] = project_id
+        if model:
+            payload["model"] = model
+        response = self.client.post("/v1/resolve/", json=payload)
+        response.raise_for_status()
+        return response.json()
+
+    def parse_issue_url(self, url: str) -> dict:
+        """Parse a GitHub issue URL without starting a run.
+
+        Returns:
+            {owner, repo, number, full_name}
+        """
+        response = self.client.get("/v1/resolve/parse", params={"url": url})
+        response.raise_for_status()
+        return response.json()
+
+    # ── Chat ────────────────────────────────────────────────────────────
+
     def stream_chat_events(self, session_id: str) -> Iterator[dict]:
         """Stream SSE events for a chat session.
 

@@ -3,7 +3,16 @@
 from typing import Optional
 
 import typer
-from djinnbot.commands import pipeline, agent, memory, provider, setup, update, cookies
+from djinnbot.commands import (
+    pipeline,
+    agent,
+    memory,
+    provider,
+    setup,
+    update,
+    cookies,
+    resolve,
+)
 from djinnbot.client import DjinnBotClient
 from djinnbot.formatting import print_status, console
 
@@ -19,9 +28,10 @@ app.add_typer(memory.app, name="memory")
 app.add_typer(provider.app, name="provider")
 app.add_typer(cookies.app, name="cookies")
 
-# Register setup and update as top-level commands (not sub-groups)
+# Register setup, update, and resolve as top-level commands (not sub-groups)
 app.command("setup")(setup.setup)
 app.command("update")(update.update)
+app.command("resolve")(resolve.resolve)
 
 
 @app.callback()

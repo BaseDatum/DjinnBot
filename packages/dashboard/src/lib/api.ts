@@ -3102,3 +3102,41 @@ export async function deleteMessagingPermission(
   });
   return handleResponse(res, 'Failed to delete messaging permission');
 }
+
+// ── Resolve (GitHub issue → PR) ─────────────────────────────────────────
+
+export interface ResolveRequest {
+  issue_url: string;
+  project_id?: string;
+  model?: string;
+}
+
+export interface ResolveResponse {
+  run_id: string;
+  pipeline_id: string;
+  issue_number: number;
+  repo_full_name: string;
+  issue_title: string;
+  status: string;
+}
+
+export interface ParsedIssue {
+  owner: string;
+  repo: string;
+  number: number;
+  full_name: string;
+}
+
+export async function resolveIssue(req: ResolveRequest): Promise<ResolveResponse> {
+  const res = await authFetch(`${API_BASE}/resolve/`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(req),
+  });
+  return handleResponse(res, 'Failed to start resolve');
+}
+
+export async function parseIssueUrl(url: string): Promise<ParsedIssue> {
+  const res = await authFetch(`${API_BASE}/resolve/parse?url=${encodeURIComponent(url)}`);
+  return handleResponse(res, 'Failed to parse issue URL');
+}

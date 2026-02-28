@@ -32,6 +32,7 @@ import { ProjectActivityFeed, type ActivityEntry } from '@/components/projects/P
 import { ProjectSettingsPanel } from '@/components/projects/ProjectSettingsPanel';
 import { ProjectSwarmHistory } from '@/components/projects/ProjectSwarmHistory';
 import { CodeKnowledgeGraph } from '@/components/projects/CodeKnowledgeGraph';
+import { ProjectResolveView } from '@/components/projects/ProjectResolveView';
 import { DependencyGraph } from '@/components/DependencyGraph';
 import { GanttChart } from '@/components/GanttChart';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
@@ -49,9 +50,9 @@ import {
   API_BASE,
 } from '@/lib/api';
 
-type ViewType = 'board' | 'graph' | 'timeline' | 'team' | 'code' | 'settings';
+type ViewType = 'board' | 'graph' | 'timeline' | 'team' | 'code' | 'resolve' | 'settings';
 
-const VALID_VIEWS: ViewType[] = ['board', 'graph', 'timeline', 'team', 'code', 'settings'];
+const VALID_VIEWS: ViewType[] = ['board', 'graph', 'timeline', 'team', 'code', 'resolve', 'settings'];
 
 export const Route = createFileRoute('/projects/$projectId')({
   validateSearch: (search: Record<string, unknown>) => ({
@@ -439,6 +440,13 @@ function ProjectBoardPage() {
           <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
             <CodeKnowledgeGraph projectId={projectId} />
           </div>
+        )}
+
+        {view === 'resolve' && (project.workspace_type === 'git_worktree' || project.repository) && (
+          <ProjectResolveView
+            projectId={projectId}
+            repoFullName={project.repository}
+          />
         )}
 
         {view === 'settings' && (
