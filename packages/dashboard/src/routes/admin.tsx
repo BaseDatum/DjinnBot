@@ -49,6 +49,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog';
+import { Switch } from '@/components/ui/switch';
 import { SecretsSettings } from '@/components/settings/SecretsSettings';
 import { ModelProvidersSettings } from '@/components/settings/ModelProvidersSettings';
 import { MemorySearchSettings } from '@/components/settings/MemorySearchSettings';
@@ -119,7 +120,7 @@ interface AdminNotification {
 const VALID_TABS = new Set<AdminTab>([
   'notifications', 'usage', 'pulse', 'users', 'providers', 'sharing', 'memory',
   'memory-scoring', 'models', 'approvals', 'runtime', 'secrets', 'waitlist',
-  'email', 'logs',
+  'email', 'logs', 'tts',
 ]);
 
 function getTabFromHash(): AdminTab {
@@ -1845,11 +1846,15 @@ function AdminTtsPanel() {
     ttsEnabled: true,
     ttsCharacterThreshold: 1000,
     ttsMaxConcurrentRequests: 5,
+    defaultTtsProvider: 'fish-audio',
+    voiceboxUrl: 'http://localhost:8000',
   });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [providers, setProviders] = useState<any[]>([]);
   const [apiKey, setApiKey] = useState('');
+  const [voiceboxHealth, setVoiceboxHealth] = useState<{ reachable: boolean; modelLoaded?: boolean; gpuType?: string } | null>(null);
+  const [checkingVoicebox, setCheckingVoicebox] = useState(false);
 
   useEffect(() => {
     loadAll();
@@ -1912,6 +1917,21 @@ function AdminTtsPanel() {
     }
   };
 
+  const checkVoiceboxHealth = async () => {
+    setCheckingVoicebox(true);
+    try {
+      const urlParam = encodeURIComponent(ttsSettings.voiceboxUrl);
+      const res = await authFetch(`${API_BASE}/tts/voicebox/health?url=${urlParam}`);
+      if (res.ok) {
+        setVoiceboxHealth(await res.json());
+      }
+    } catch {
+      setVoiceboxHealth({ reachable: false });
+    } finally {
+      setCheckingVoicebox(false);
+    }
+  };
+
   if (loading) {
     return <div className="max-w-5xl mx-auto"><Loader2 className="h-5 w-5 animate-spin mx-auto mt-8" /></div>;
   }
@@ -1924,7 +1944,7 @@ function AdminTtsPanel() {
           Text-to-Speech
         </h2>
         <p className="text-sm text-muted-foreground mt-1">
-          Configure Fish Audio text-to-speech settings and instance-level API keys.
+          Configure TTS providers, default provider, and instance-level settings.
         </p>
       </div>
 
@@ -1939,12 +1959,25 @@ function AdminTtsPanel() {
               Master switch for text-to-speech across all agents
             </p>
           </div>
-          <input
-            type="checkbox"
+          <Switch
             checked={ttsSettings.ttsEnabled}
-            onChange={(e) => setTtsSettings({ ...ttsSettings, ttsEnabled: e.target.checked })}
-            className="h-4 w-4"
+            onCheckedChange={(checked) => setTtsSettings({ ...ttsSettings, ttsEnabled: checked })}
           />
+        </div>
+
+        <div>
+          <Label className="text-sm font-medium">Default TTS Provider</Label>
+          <p className="text-xs text-muted-foreground mb-2">
+            The default provider used for text-to-speech when not overridden by agent or user settings.
+          </p>
+          <select
+            value={ttsSettings.defaultTtsProvider}
+            onChange={(e) => setTtsSettings({ ...ttsSettings, defaultTtsProvider: e.target.value })}
+            className="flex h-9 w-64 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          >
+            <option value="fish-audio">Fish Audio (Cloud)</option>
+            <option value="voicebox">Voicebox (Local)</option>
+          </select>
         </div>
 
         <div>
@@ -1969,8 +2002,7 @@ function AdminTtsPanel() {
         <div>
           <Label className="text-sm font-medium">Max Concurrent Requests</Label>
           <p className="text-xs text-muted-foreground mb-2">
-            Maximum number of simultaneous Fish Audio API requests.
-            Fish Audio starter tier allows 5 concurrent requests.
+            Maximum number of simultaneous TTS requests.
           </p>
           <Input
             type="number"
@@ -1991,15 +2023,67 @@ function AdminTtsPanel() {
         </Button>
       </div>
 
-      {/* Instance TTS Provider Keys */}
+      {/* Voicebox Configuration */}
       <div className="border rounded-lg p-4 space-y-4">
-        <h3 className="font-medium text-sm">Instance TTS Provider Keys</h3>
+        <h3 className="font-medium text-sm">Voicebox (Local TTS)</h3>
+        <p className="text-xs text-muted-foreground">
+          Voicebox runs locally on your machine. No API key required.
+          Download from <a href="https://github.com/jamiepine/voicebox" target="_blank" rel="noopener noreferrer" className="underline hover:text-foreground">github.com/jamiepine/voicebox</a>.
+        </p>
+
+        <div>
+          <Label className="text-sm font-medium">Voicebox URL</Label>
+          <p className="text-xs text-muted-foreground mb-2">
+            Base URL for the Voicebox API server.
+          </p>
+          <div className="flex items-center gap-2">
+            <Input
+              type="text"
+              value={ttsSettings.voiceboxUrl}
+              onChange={(e) => setTtsSettings({ ...ttsSettings, voiceboxUrl: e.target.value })}
+              className="w-80 text-sm"
+              placeholder="http://localhost:8000"
+            />
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={checkVoiceboxHealth}
+              disabled={checkingVoicebox}
+              className="h-9"
+            >
+              {checkingVoicebox ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : null}
+              Test Connection
+            </Button>
+          </div>
+          {voiceboxHealth && (
+            <div className={`mt-2 text-xs flex items-center gap-1.5 ${voiceboxHealth.reachable ? 'text-green-500' : 'text-red-500'}`}>
+              {voiceboxHealth.reachable ? (
+                <>
+                  <Check className="h-3 w-3" />
+                  Connected
+                  {voiceboxHealth.modelLoaded && ' — model loaded'}
+                  {voiceboxHealth.gpuType && ` (${voiceboxHealth.gpuType})`}
+                </>
+              ) : (
+                <>
+                  <X className="h-3 w-3" />
+                  Not reachable — make sure Voicebox is running
+                </>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Instance TTS Provider Keys (Fish Audio) */}
+      <div className="border rounded-lg p-4 space-y-4">
+        <h3 className="font-medium text-sm">Fish Audio (Cloud TTS)</h3>
         <p className="text-xs text-muted-foreground">
           Configure the instance-level Fish Audio API key. This can be shared
           with users via the Key Sharing mechanism, or users can provide their own.
         </p>
 
-        {providers.map((provider) => (
+        {providers.filter((p: any) => p.providerId === 'fish-audio').map((provider: any) => (
           <div key={provider.providerId} className="flex items-center gap-3 p-3 border rounded-md">
             <div className="flex-1">
               <div className="font-medium text-sm">{provider.name}</div>

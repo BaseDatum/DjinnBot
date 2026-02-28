@@ -29,6 +29,7 @@ import { API_BASE } from '@/lib/api';
 import { authFetch } from '@/lib/auth';
 import { useSSE } from '@/hooks/useSSE';
 import { LlmCallLog } from './LlmCallLog';
+import { TtsCallLog } from './TtsCallLog';
 import { toast } from 'sonner';
 
 interface ProviderSource {
@@ -540,6 +541,18 @@ function UsageItemDetail({ item }: { item: UsageItem }) {
         <LlmCallLog
           sessionId={item.type === 'chat' ? item.id : undefined}
           runId={item.type === 'run' ? item.id : undefined}
+          admin
+          maxHeight="300px"
+          live={item.status === 'running' || item.status === 'starting' || item.status === 'pending'}
+        />
+      </div>
+
+      {/* TTS Call Log */}
+      <div>
+        <div className="text-muted-foreground font-medium mb-1.5">TTS API Calls</div>
+        <TtsCallLog
+          sessionId={item.type === 'chat' ? item.id : undefined}
+          agentId={item.agentId}
           admin
           maxHeight="300px"
           live={item.status === 'running' || item.status === 'starting' || item.status === 'pending'}

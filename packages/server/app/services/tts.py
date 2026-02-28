@@ -1,7 +1,11 @@
-"""Text-to-speech service using Fish Audio.
+"""Text-to-speech service supporting multiple providers.
+
+Supported providers:
+- Fish Audio: Cloud TTS via Fish Audio Python SDK
+- Voicebox: Local TTS via Voicebox REST API (Qwen3-TTS)
 
 Provides server-side TTS generation for voice message replies.
-Audio is generated via the Fish Audio Python SDK and stored using
+Audio is generated via the configured provider and stored using
 the existing file_storage service as ChatAttachments.
 
 Channel-specific audio format conversion is handled automatically:
@@ -12,9 +16,8 @@ Channel-specific audio format conversion is handled automatically:
 - Slack: MP3
 - Dashboard: MP3
 
-Cost calculation: Fish Audio charges $15.00 / 1M UTF-8 bytes for all
-TTS models (s1, speech-1.5, speech-1.6). The API response does not
-include usage metadata, so we compute cost from input text size.
+Cost calculation (Fish Audio only): $15.00 / 1M UTF-8 bytes.
+Voicebox is local/free — cost is always $0.
 """
 
 import json
@@ -24,6 +27,8 @@ import subprocess
 import tempfile
 import os
 from typing import Optional
+
+import httpx
 
 from app.logging_config import get_logger
 from app.utils import gen_id, now_ms
@@ -36,34 +41,47 @@ FISH_AUDIO_PRICE_PER_M_BYTES = 15.00
 # Default TTS model
 DEFAULT_TTS_MODEL = "s1"
 
-# Audio format mapping per channel
-# Fish Audio supports: mp3, wav, pcm, opus
-# We request the closest native format and convert if needed.
+# Default Voicebox base URL
+DEFAULT_VOICEBOX_URL = "http://localhost:8000"
+
+# Target audio format per channel.
+#
+# Fish Audio natively supports: mp3, wav, pcm, opus (raw Opus frames).
+# Telegram/WhatsApp/Discord voice notes require OGG-wrapped Opus
+# (OGG container with Opus codec). Fish Audio's "opus" output is raw
+# Opus packets — we just need to remux into an OGG container via ffmpeg
+# which is essentially free (no transcoding, just container wrapping).
 CHANNEL_FORMAT_MAP = {
-    "telegram": "opus",  # Telegram voice notes use OGG/Opus
-    "signal": "mp3",  # Signal — convert to M4A post-generation
-    "whatsapp": "opus",  # WhatsApp voice notes use OGG/Opus
-    "discord": "opus",  # Discord voice messages use OGG/Opus
-    "slack": "mp3",  # Slack audio — MP3 works natively
+    "telegram": "ogg_opus",  # Telegram sendVoice requires OGG/Opus
+    "signal": "mp3",  # Signal handles MP3 attachments fine
+    "whatsapp": "ogg_opus",  # WhatsApp ptt voice notes require OGG/Opus
+    "discord": "ogg_opus",  # Discord voice messages use OGG/Opus
+    "slack": "mp3",  # Slack — MP3 works natively
     "dashboard": "mp3",  # Dashboard web player — MP3 is universal
 }
 
-# Mime types for the output formats
+# What to request from Fish Audio for each target format.
+# We request MP3 and convert to OGG/Opus via ffmpeg for channels that need it.
+TARGET_TO_FISH_FORMAT = {
+    "ogg_opus": "mp3",  # Request MP3, convert to OGG/Opus via ffmpeg
+    "mp3": "mp3",
+    "wav": "wav",
+}
+
+# Mime types for the final output formats
 FORMAT_MIME_MAP = {
     "mp3": "audio/mpeg",
-    "opus": "audio/ogg",
+    "ogg_opus": "audio/ogg",
     "wav": "audio/wav",
     "pcm": "audio/pcm",
-    "m4a": "audio/mp4",
 }
 
 # File extensions
 FORMAT_EXT_MAP = {
     "mp3": "mp3",
-    "opus": "ogg",
+    "ogg_opus": "ogg",
     "wav": "wav",
     "pcm": "pcm",
-    "m4a": "m4a",
 }
 
 
@@ -77,6 +95,8 @@ async def get_tts_settings() -> dict:
         "ttsCharacterThreshold": 1000,
         "ttsMaxConcurrentRequests": 5,
         "ttsEnabled": True,
+        "defaultTtsProvider": "fish-audio",
+        "voiceboxUrl": DEFAULT_VOICEBOX_URL,
     }
 
     try:
@@ -97,6 +117,10 @@ async def get_tts_settings() -> dict:
                 )
             ),
             "ttsEnabled": rows.get("ttsEnabled", "true").lower() == "true",
+            "defaultTtsProvider": rows.get(
+                "defaultTtsProvider", defaults["defaultTtsProvider"]
+            ),
+            "voiceboxUrl": rows.get("voiceboxUrl", defaults["voiceboxUrl"]),
         }
     except Exception as e:
         logger.warning(f"Failed to load TTS settings, using defaults: {e}")
@@ -186,6 +210,125 @@ async def resolve_tts_api_key(
     return None, "none"
 
 
+async def get_agent_tts_settings(agent_id: str) -> Optional[dict]:
+    """Fetch per-agent TTS settings from the database.
+
+    Returns a dict with tts_enabled, tts_provider, tts_voice_id, tts_voice_name
+    or None if no settings exist for this agent.
+    """
+    from app.database import AsyncSessionLocal
+    from app.models.agent_tts_settings import AgentTtsSettings
+
+    try:
+        async with AsyncSessionLocal() as session:
+            row = await session.get(AgentTtsSettings, agent_id)
+            if not row:
+                return None
+            return {
+                "tts_enabled": row.tts_enabled,
+                "tts_provider": row.tts_provider,
+                "tts_voice_id": row.tts_voice_id,
+                "tts_voice_name": row.tts_voice_name,
+            }
+    except Exception as e:
+        logger.warning(f"Failed to load agent TTS settings for {agent_id}: {e}")
+        return None
+
+
+async def resolve_tts_provider(
+    agent_id: Optional[str] = None,
+    user_id: Optional[str] = None,
+) -> str:
+    """Resolve which TTS provider to use.
+
+    Priority:
+      1. Agent DB settings `tts_provider` (per-agent override)
+      2. User preference (from global_settings key `userTtsProvider:{user_id}`)
+      3. Admin default (from global_settings key `defaultTtsProvider`)
+      4. Fallback: "fish-audio"
+    """
+    # 1. Agent DB settings override
+    if agent_id:
+        try:
+            agent_settings = await get_agent_tts_settings(agent_id)
+            if agent_settings and agent_settings.get("tts_provider"):
+                return agent_settings["tts_provider"]
+        except Exception:
+            pass
+
+    # 2. User preference
+    if user_id:
+        try:
+            from app.database import AsyncSessionLocal
+            from sqlalchemy import select
+            from app.models.settings import GlobalSetting
+
+            async with AsyncSessionLocal() as session:
+                row = await session.get(GlobalSetting, f"userTtsProvider:{user_id}")
+                if row and row.value:
+                    return row.value
+        except Exception:
+            pass
+
+    # 3 + 4. Admin default (falls back inside get_tts_settings)
+    settings = await get_tts_settings()
+    return settings.get("defaultTtsProvider", "fish-audio")
+
+
+async def get_voicebox_url() -> str:
+    """Get the configured Voicebox base URL."""
+    settings = await get_tts_settings()
+    return settings.get("voiceboxUrl", DEFAULT_VOICEBOX_URL)
+
+
+async def _synthesize_voicebox(
+    text: str,
+    voice_id: Optional[str],
+    output_format: str,
+    language: str = "en",
+) -> Optional[bytes]:
+    """Generate speech via the local Voicebox API.
+
+    Voicebox generates WAV audio. If a different output format is needed,
+    the caller handles conversion via _convert_audio_format.
+
+    Returns raw audio bytes (WAV) or None on failure.
+    """
+    base_url = await get_voicebox_url()
+
+    payload: dict = {
+        "text": text,
+        "language": language,
+    }
+    if voice_id:
+        payload["profile_id"] = voice_id
+
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            # Step 1: Generate speech — returns a GenerationResponse with an id
+            resp = await client.post(
+                f"{base_url}/generate",
+                json=payload,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            generation_id = data.get("id")
+            if not generation_id:
+                logger.warning("Voicebox /generate returned no id")
+                return None
+
+            # Step 2: Fetch the audio file
+            audio_resp = await client.get(f"{base_url}/audio/{generation_id}")
+            audio_resp.raise_for_status()
+            return audio_resp.content
+    except httpx.ConnectError:
+        logger.warning(f"Voicebox not reachable at {base_url} — is it running?")
+        return None
+    except Exception as e:
+        logger.error(f"Voicebox TTS failed: {e}")
+        return None
+
+
 def _mask_key(api_key: str) -> str:
     """Mask an API key for logging."""
     if not api_key or len(api_key) < 8:
@@ -214,8 +357,9 @@ async def _convert_audio_format(
 ) -> Optional[bytes]:
     """Convert audio between formats using ffmpeg.
 
-    Only needed when Fish Audio can't produce the target format natively.
-    Currently used for Signal (MP3 -> M4A).
+    Primary use case: raw Opus from Fish Audio -> OGG/Opus for Telegram,
+    WhatsApp, and Discord voice notes. This is just a container remux
+    (no transcoding) — wraps raw Opus frames in an OGG container.
     """
     if input_format == output_format:
         return input_data
@@ -234,10 +378,15 @@ async def _convert_audio_format(
 
             cmd = ["ffmpeg", "-y", "-i", input_path]
 
-            if output_format == "m4a":
+            if output_format == "ogg_opus":
+                # Wrap into OGG container. If input is already Opus, just
+                # remux (copy). Otherwise transcode to Opus.
+                if input_format in ("opus", "ogg_opus"):
+                    cmd.extend(["-c:a", "copy"])
+                else:
+                    cmd.extend(["-c:a", "libopus", "-b:a", "64k"])
+            elif output_format == "m4a":
                 cmd.extend(["-c:a", "aac", "-b:a", "128k"])
-            elif output_format == "ogg":
-                cmd.extend(["-c:a", "libopus", "-b:a", "64k"])
 
             cmd.append(output_path)
 
@@ -266,7 +415,9 @@ async def synthesize_speech(
     session_id: Optional[str] = None,
     user_id: Optional[str] = None,
 ) -> Optional[dict]:
-    """Generate speech audio from text via Fish Audio.
+    """Generate speech audio from text via the resolved TTS provider.
+
+    Supports Fish Audio (cloud) and Voicebox (local).
 
     Returns a dict with:
       - audio_bytes: The generated audio data
@@ -277,6 +428,7 @@ async def synthesize_speech(
       - duration_ms: API call latency
       - input_text_bytes: UTF-8 byte count of input
       - input_characters: Character count
+      - provider: Which TTS provider was used
 
     Returns None if TTS is unavailable or fails.
     """
@@ -294,66 +446,112 @@ async def synthesize_speech(
         )
         return None
 
-    # Resolve API key
-    api_key, key_source = await resolve_tts_api_key(user_id)
-    if not api_key:
-        logger.warning(
-            f"TTS unavailable: no Fish Audio API key configured (user={user_id})"
-        )
-        return None
+    # Resolve which provider to use
+    provider = await resolve_tts_provider(agent_id=agent_id, user_id=user_id)
 
     # Determine output format for the channel
     output_format = _get_output_format(channel)
 
-    # Fish Audio supports mp3, wav, pcm, opus directly
-    # For Signal we need M4A, so request MP3 and convert
-    fish_format = output_format
-    needs_conversion = False
-    if output_format == "m4a":
-        fish_format = "mp3"
-        needs_conversion = True
-
-    # Acquire rate limiting semaphore
-    semaphore = await _get_semaphore()
-
     start_time = time.monotonic()
-    try:
-        async with semaphore:
-            # Use the Fish Audio async SDK
-            from fishaudio import AsyncFishAudio
+    audio_bytes: Optional[bytes] = None
+    cost = 0.0
+    key_source = "none"
+    key_masked = "****"
+    model = DEFAULT_TTS_MODEL
 
-            client = AsyncFishAudio(api_key=api_key)
+    if provider == "voicebox":
+        # ── Voicebox (local) ─────────────────────────────────────────────
+        model = "qwen3-tts"
 
-            # Generate speech
-            audio_bytes = await client.tts.convert(
-                text=text,
-                reference_id=voice_id,
-                format=fish_format,
-            )
-
+        # Acquire rate limiting semaphore
+        semaphore = await _get_semaphore()
+        try:
+            async with semaphore:
+                raw_wav = await _synthesize_voicebox(
+                    text=text,
+                    voice_id=voice_id,
+                    output_format=output_format,
+                )
+                duration_ms = int((time.monotonic() - start_time) * 1000)
+        except Exception as e:
             duration_ms = int((time.monotonic() - start_time) * 1000)
+            logger.error(f"Voicebox TTS failed ({duration_ms}ms): {e}")
+            return None
 
-    except Exception as e:
-        duration_ms = int((time.monotonic() - start_time) * 1000)
-        logger.error(f"Fish Audio TTS failed ({duration_ms}ms): {e}")
-        return None
+        if not raw_wav:
+            logger.warning("Voicebox returned no audio")
+            return None
 
-    if not audio_bytes:
-        logger.warning("Fish Audio returned empty audio")
-        return None
-
-    # Convert format if needed (e.g., MP3 -> M4A for Signal)
-    if needs_conversion:
-        converted = await _convert_audio_format(audio_bytes, fish_format, output_format)
-        if converted:
-            audio_bytes = converted
-            # Update format to the converted one
+        # Voicebox returns WAV — convert to target format if needed
+        if output_format != "wav":
+            converted = await _convert_audio_format(raw_wav, "wav", output_format)
+            if converted:
+                audio_bytes = converted
+            else:
+                # Fallback: serve as WAV
+                audio_bytes = raw_wav
+                output_format = "wav"
         else:
-            # Fallback: use the original format
-            output_format = fish_format
+            audio_bytes = raw_wav
 
-    # Calculate cost
-    cost = _calculate_cost(text)
+        cost = 0.0  # Local — free
+        key_source = "local"
+        key_masked = "local"
+
+    else:
+        # ── Fish Audio (cloud) ───────────────────────────────────────────
+        # Resolve API key
+        api_key, key_source = await resolve_tts_api_key(user_id)
+        if not api_key:
+            logger.warning(
+                f"TTS unavailable: no Fish Audio API key configured (user={user_id})"
+            )
+            return None
+        key_masked = _mask_key(api_key)
+
+        # Determine what to request from Fish Audio and whether conversion
+        # is needed afterward.
+        fish_format = TARGET_TO_FISH_FORMAT.get(output_format, "mp3")
+        # Fish Audio's "opus" output is OGG/Opus — no conversion needed
+        # for ogg_opus targets. Only convert if formats truly differ.
+        needs_conversion = fish_format != output_format and not (
+            fish_format == "opus" and output_format == "ogg_opus"
+        )
+
+        # Acquire rate limiting semaphore
+        semaphore = await _get_semaphore()
+        try:
+            async with semaphore:
+                from fishaudio import AsyncFishAudio
+
+                client = AsyncFishAudio(api_key=api_key)
+                audio_bytes = await client.tts.convert(
+                    text=text,
+                    reference_id=voice_id,
+                    format=fish_format,
+                )
+                duration_ms = int((time.monotonic() - start_time) * 1000)
+        except Exception as e:
+            duration_ms = int((time.monotonic() - start_time) * 1000)
+            logger.error(f"Fish Audio TTS failed ({duration_ms}ms): {e}")
+            return None
+
+        if not audio_bytes:
+            logger.warning("Fish Audio returned empty audio")
+            return None
+
+        # Convert format if needed (e.g., MP3 -> M4A for Signal)
+        if needs_conversion:
+            converted = await _convert_audio_format(
+                audio_bytes, fish_format, output_format
+            )
+            if converted:
+                audio_bytes = converted
+            else:
+                output_format = fish_format
+
+        cost = _calculate_cost(text)
+
     input_text_bytes = len(text.encode("utf-8"))
     input_characters = len(text)
 
@@ -362,9 +560,10 @@ async def synthesize_speech(
         session_id=session_id,
         agent_id=agent_id,
         user_id=user_id,
-        model=DEFAULT_TTS_MODEL,
+        provider=provider,
+        model=model,
         key_source=key_source,
-        key_masked=_mask_key(api_key),
+        key_masked=key_masked,
         input_text_bytes=input_text_bytes,
         input_characters=input_characters,
         output_audio_bytes=len(audio_bytes),
@@ -381,7 +580,7 @@ async def synthesize_speech(
     filename = f"tts_{agent_id}_{gen_id()}.{ext}"
 
     logger.info(
-        f"TTS complete: {input_characters} chars -> {len(audio_bytes)} bytes "
+        f"TTS complete ({provider}): {input_characters} chars -> {len(audio_bytes)} bytes "
         f"({output_format}), cost=${cost:.6f}, {duration_ms}ms, "
         f"voice={voice_id or 'default'}, channel={channel}"
     )
@@ -395,6 +594,7 @@ async def synthesize_speech(
         "duration_ms": duration_ms,
         "input_text_bytes": input_text_bytes,
         "input_characters": input_characters,
+        "provider": provider,
     }
 
 
@@ -402,6 +602,7 @@ async def _log_tts_call(
     session_id: Optional[str],
     agent_id: str,
     user_id: Optional[str],
+    provider: str,
     model: str,
     key_source: str,
     key_masked: str,
@@ -430,7 +631,7 @@ async def _log_tts_call(
                 session_id=session_id,
                 agent_id=agent_id,
                 user_id=user_id,
-                provider="fish-audio",
+                provider=provider,
                 model=model,
                 key_source=key_source,
                 key_masked=key_masked,
@@ -460,7 +661,7 @@ async def _log_tts_call(
                     "session_id": session_id,
                     "agent_id": agent_id,
                     "user_id": user_id,
-                    "provider": "fish-audio",
+                    "provider": provider,
                     "model": model,
                     "input_text_bytes": input_text_bytes,
                     "input_characters": input_characters,
@@ -484,20 +685,17 @@ async def should_generate_tts(
     """Determine whether to generate TTS audio for this response.
 
     TTS is generated when:
-    1. The agent has tts_enabled: true in config
+    1. The agent has tts_enabled: true in DB settings
     2. The incoming message was a voice message
     3. The response text length is within the character threshold
     4. TTS is globally enabled
-    5. A Fish Audio API key is available
     """
     if not is_voice_input:
         return False
 
-    # Check agent config
-    from app.services.agent_config import get_agent_config
-
-    config = await get_agent_config(agent_id)
-    if not config.get("tts_enabled", False):
+    # Check agent DB settings
+    agent_settings = await get_agent_tts_settings(agent_id)
+    if not agent_settings or not agent_settings.get("tts_enabled", False):
         return False
 
     # Check global settings
@@ -520,14 +718,18 @@ async def generate_tts_for_response(
 ) -> Optional[dict]:
     """Generate TTS audio for an agent's response.
 
-    Reads voice configuration from agent config.yml and generates audio.
+    Reads voice configuration from agent_tts_settings DB table.
     Returns the result dict from synthesize_speech, or None.
     """
-    from app.services.agent_config import get_agent_config
+    agent_settings = await get_agent_tts_settings(agent_id)
 
-    config = await get_agent_config(agent_id)
-    voice_id = config.get("tts_voice_id")
-    voice_name = config.get("tts_voice_name")
+    # Check agent-level TTS enabled
+    if not agent_settings or not agent_settings.get("tts_enabled", False):
+        logger.info(f"TTS skipped for agent {agent_id}: not enabled in agent settings")
+        return None
+
+    voice_id = agent_settings.get("tts_voice_id")
+    voice_name = agent_settings.get("tts_voice_name")
 
     return await synthesize_speech(
         text=response_text,

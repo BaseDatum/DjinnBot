@@ -1,11 +1,12 @@
 """TTS (Text-to-Speech) API endpoints.
 
 Provides:
-- Voice listing (proxy to Fish Audio API)
+- Voice listing (proxy to Fish Audio API or Voicebox local API)
 - TTS synthesis endpoint (internal, called by engine after agent response)
 - TTS call log querying
 - TTS provider configuration (instance + user + admin-shared)
-- TTS admin settings (rate limit, character threshold)
+- TTS admin settings (rate limit, character threshold, default provider)
+- User TTS provider preference
 
 TTS providers are stored in separate tables from LLM providers so they
 appear on a dedicated tab in the dashboard, as requested.
@@ -25,6 +26,7 @@ from app.database import get_async_session
 from app.auth.dependencies import get_current_admin, AuthUser
 from app.models.tts_call_log import TtsCallLog
 from app.models.tts_provider import TtsProvider, UserTtsProvider, AdminSharedTtsProvider
+from app.models.agent_tts_settings import AgentTtsSettings
 from app.models.settings import GlobalSetting
 from app.models.base import now_ms
 from app.logging_config import get_logger
@@ -40,9 +42,10 @@ router = APIRouter()
 TTS_PROVIDER_CATALOG: Dict[str, dict] = {
     "fish-audio": {
         "name": "Fish Audio",
-        "description": "High-quality AI text-to-speech with voice cloning — S1 model",
+        "description": "High-quality cloud text-to-speech with voice cloning — S1 model",
         "apiKeyEnvVar": "FISH_AUDIO_API_KEY",
         "docsUrl": "https://docs.fish.audio",
+        "requiresApiKey": True,
         "models": [
             {
                 "id": "s1",
@@ -55,6 +58,20 @@ TTS_PROVIDER_CATALOG: Dict[str, dict] = {
                 "description": "Previous generation model",
             },
             {"id": "speech-1.5", "name": "Speech 1.5", "description": "Legacy model"},
+        ],
+    },
+    "voicebox": {
+        "name": "Voicebox",
+        "description": "Local voice synthesis powered by Qwen3-TTS — runs on your machine, no API key needed",
+        "apiKeyEnvVar": "",
+        "docsUrl": "https://github.com/jamiepine/voicebox",
+        "requiresApiKey": False,
+        "models": [
+            {
+                "id": "qwen3-tts",
+                "name": "Qwen3-TTS",
+                "description": "Local voice cloning and synthesis via Voicebox",
+            },
         ],
     },
 }
@@ -132,6 +149,12 @@ class TtsSettingsRequest(BaseModel):
     ttsEnabled: Optional[bool] = None
     ttsCharacterThreshold: Optional[int] = None
     ttsMaxConcurrentRequests: Optional[int] = None
+    defaultTtsProvider: Optional[str] = None
+    voiceboxUrl: Optional[str] = None
+
+
+class UserTtsPreferenceRequest(BaseModel):
+    defaultTtsProvider: str
 
 
 class AdminSharedTtsProviderRequest(BaseModel):
@@ -412,7 +435,7 @@ async def get_tts_settings(
     admin: AuthUser = Depends(get_current_admin),
     session: AsyncSession = Depends(get_async_session),
 ) -> dict:
-    """Get TTS admin settings (character threshold, rate limit, enabled)."""
+    """Get TTS admin settings (character threshold, rate limit, enabled, default provider)."""
     result = await session.execute(select(GlobalSetting))
     rows = {r.key: r.value for r in result.scalars().all()}
 
@@ -420,6 +443,8 @@ async def get_tts_settings(
         "ttsEnabled": rows.get("ttsEnabled", "true").lower() == "true",
         "ttsCharacterThreshold": int(rows.get("ttsCharacterThreshold", "1000")),
         "ttsMaxConcurrentRequests": int(rows.get("ttsMaxConcurrentRequests", "5")),
+        "defaultTtsProvider": rows.get("defaultTtsProvider", "fish-audio"),
+        "voiceboxUrl": rows.get("voiceboxUrl", "http://localhost:8000"),
     }
 
 
@@ -439,6 +464,10 @@ async def update_tts_settings(
         updates["ttsCharacterThreshold"] = str(body.ttsCharacterThreshold)
     if body.ttsMaxConcurrentRequests is not None:
         updates["ttsMaxConcurrentRequests"] = str(body.ttsMaxConcurrentRequests)
+    if body.defaultTtsProvider is not None:
+        updates["defaultTtsProvider"] = body.defaultTtsProvider
+    if body.voiceboxUrl is not None:
+        updates["voiceboxUrl"] = body.voiceboxUrl
 
     for key, value in updates.items():
         row = await session.get(GlobalSetting, key)
@@ -589,6 +618,155 @@ async def get_voice(
     }
 
 
+# ─── Voicebox Voice Profiles ──────────────────────────────────────────────────
+
+
+@router.get("/tts/voicebox/profiles")
+async def list_voicebox_profiles(
+    search: Optional[str] = Query(None),
+) -> dict:
+    """List available Voicebox voice profiles from the local instance.
+
+    Proxies to the Voicebox API at the configured base URL.
+    """
+    from app.services.tts import get_voicebox_url
+
+    base_url = await get_voicebox_url()
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(f"{base_url}/profiles")
+            resp.raise_for_status()
+            profiles = resp.json()
+    except httpx.ConnectError:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Voicebox not reachable at {base_url}. Is it running?",
+        )
+    except Exception as e:
+        logger.warning(f"Voicebox profile listing failed: {e}")
+        raise HTTPException(
+            status_code=502, detail="Failed to fetch profiles from Voicebox"
+        )
+
+    # Transform to match our voice schema
+    voices = []
+    for p in profiles:
+        title = p.get("name", "")
+        # Client-side search filter
+        if search and search.lower() not in title.lower():
+            continue
+        voices.append(
+            {
+                "id": p.get("id", ""),
+                "title": title,
+                "description": p.get("description", ""),
+                "coverImage": None,
+                "tags": [],
+                "languages": [p.get("language", "en")],
+                "author": "Local",
+            }
+        )
+
+    return {
+        "voices": voices,
+        "total": len(voices),
+        "page": 1,
+        "pageSize": len(voices),
+    }
+
+
+@router.get("/tts/voicebox/health")
+async def voicebox_health(
+    url: Optional[str] = Query(
+        None, description="Override URL to test (uses saved setting if omitted)"
+    ),
+) -> dict:
+    """Check if Voicebox is reachable.
+
+    Pass ?url=... to test a specific URL before saving it.
+    """
+    if url:
+        base_url = url.rstrip("/")
+    else:
+        from app.services.tts import get_voicebox_url
+
+        base_url = await get_voicebox_url()
+
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(f"{base_url}/health")
+            resp.raise_for_status()
+            data = resp.json()
+            return {
+                "reachable": True,
+                "url": base_url,
+                "modelLoaded": data.get("model_loaded", False),
+                "gpuType": data.get("gpu_type"),
+                "backendType": data.get("backend_type"),
+            }
+    except Exception as e:
+        logger.debug(f"Voicebox health check failed for {base_url}: {e}")
+        return {"reachable": False, "url": base_url}
+
+
+# ─── User TTS Provider Preference ────────────────────────────────────────────
+
+
+@router.get("/settings/user-tts-preference")
+async def get_user_tts_preference(
+    user_id: str = Query(...),
+    session: AsyncSession = Depends(get_async_session),
+) -> dict:
+    """Get a user's preferred TTS provider."""
+    key = f"userTtsProvider:{user_id}"
+    row = await session.get(GlobalSetting, key)
+    return {
+        "defaultTtsProvider": row.value if row else None,
+    }
+
+
+@router.put("/settings/user-tts-preference")
+async def set_user_tts_preference(
+    body: UserTtsPreferenceRequest,
+    user_id: str = Query(...),
+    session: AsyncSession = Depends(get_async_session),
+) -> dict:
+    """Set a user's preferred TTS provider."""
+    if body.defaultTtsProvider not in TTS_PROVIDER_CATALOG:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown TTS provider: {body.defaultTtsProvider}",
+        )
+
+    now = now_ms()
+    key = f"userTtsProvider:{user_id}"
+    row = await session.get(GlobalSetting, key)
+    if row:
+        row.value = body.defaultTtsProvider
+        row.updated_at = now
+    else:
+        session.add(
+            GlobalSetting(key=key, value=body.defaultTtsProvider, updated_at=now)
+        )
+    await session.commit()
+    return {"status": "ok", "defaultTtsProvider": body.defaultTtsProvider}
+
+
+@router.delete("/settings/user-tts-preference")
+async def clear_user_tts_preference(
+    user_id: str = Query(...),
+    session: AsyncSession = Depends(get_async_session),
+) -> dict:
+    """Clear a user's TTS provider preference (fall back to admin default)."""
+    key = f"userTtsProvider:{user_id}"
+    row = await session.get(GlobalSetting, key)
+    if row:
+        await session.delete(row)
+        await session.commit()
+    return {"status": "ok"}
+
+
 # ─── TTS Synthesis Endpoint (Internal) ───────────────────────────────────────
 
 
@@ -613,42 +791,54 @@ async def synthesize(body: TtsSynthesizeRequest) -> dict:
     if not result:
         return {"ok": False, "reason": "TTS generation failed or skipped"}
 
-    # Store the audio file
-    storage_path = None
-    if body.session_id:
-        attachment_id = gen_id("ttsatt")
-        storage_path = file_storage.store_file(
-            session_id=body.session_id,
-            attachment_id=attachment_id,
-            filename=result["filename"],
-            data=result["audio_bytes"],
-        )
+    # Store the audio file on disk (no DB foreign key dependency)
+    attachment_id = gen_id("ttsatt")
+    storage_session = body.session_id or f"tts_{body.agent_id}"
+    storage_path = file_storage.store_file(
+        session_id=storage_session,
+        attachment_id=attachment_id,
+        filename=result["filename"],
+        data=result["audio_bytes"],
+    )
 
-        # Create a ChatAttachment record for the audio
+    # Only create a ChatAttachment DB record if the session exists in the DB.
+    # Channel bridges (Signal, Telegram, etc.) pass logical keys like
+    # "signal_+1234_grace" which aren't real chat_sessions rows — they
+    # download the audio directly from this response.
+    if body.session_id:
         from app.database import AsyncSessionLocal
-        from app.models.chat import ChatAttachment
+        from app.models.chat import ChatAttachment, ChatSession
         from app.utils import now_ms as _now_ms
 
         try:
             async with AsyncSessionLocal() as db:
-                att = ChatAttachment(
-                    id=attachment_id,
-                    session_id=body.session_id,
-                    filename=result["filename"],
-                    mime_type=result["mime_type"],
-                    size_bytes=len(result["audio_bytes"]),
-                    storage_path=storage_path,
-                    processing_status="ready",
-                    created_at=_now_ms(),
-                )
-                db.add(att)
-                await db.commit()
+                # Verify session exists before inserting attachment
+                session_row = await db.get(ChatSession, body.session_id)
+                if session_row:
+                    att = ChatAttachment(
+                        id=attachment_id,
+                        session_id=body.session_id,
+                        filename=result["filename"],
+                        mime_type=result["mime_type"],
+                        size_bytes=len(result["audio_bytes"]),
+                        storage_path=storage_path,
+                        processing_status="ready",
+                        created_at=_now_ms(),
+                    )
+                    db.add(att)
+                    await db.commit()
         except Exception as e:
             logger.error(f"Failed to create TTS attachment record: {e}")
 
+    # Return audio bytes directly so channel bridges don't need a second
+    # download request. Base64-encoded to fit in JSON.
+    import base64
+
+    audio_b64 = base64.b64encode(result["audio_bytes"]).decode("ascii")
+
     return {
         "ok": True,
-        "attachmentId": attachment_id if body.session_id else None,
+        "attachmentId": attachment_id,
         "storagePath": storage_path,
         "filename": result["filename"],
         "mimeType": result["mime_type"],
@@ -656,6 +846,7 @@ async def synthesize(body: TtsSynthesizeRequest) -> dict:
         "sizeBytes": len(result["audio_bytes"]),
         "cost": result["cost"],
         "durationMs": result["duration_ms"],
+        "audioBase64": audio_b64,
     }
 
 
@@ -786,6 +977,92 @@ async def admin_list_tts_calls(
         total=total,
         hasMore=(offset + len(calls)) < total,
         summary=summary,
+    )
+
+
+# ─── Agent TTS Settings (DB-persisted, survives restarts) ────────────────
+
+
+class AgentTtsSettingsRequest(BaseModel):
+    tts_enabled: Optional[bool] = None
+    tts_provider: Optional[str] = None
+    tts_voice_id: Optional[str] = None
+    tts_voice_name: Optional[str] = None
+
+
+class AgentTtsSettingsResponse(BaseModel):
+    agent_id: str
+    tts_enabled: bool
+    tts_provider: Optional[str] = None
+    tts_voice_id: Optional[str] = None
+    tts_voice_name: Optional[str] = None
+
+
+@router.get("/agents/{agent_id}/tts-settings")
+async def get_agent_tts_settings(
+    agent_id: str,
+    session: AsyncSession = Depends(get_async_session),
+) -> AgentTtsSettingsResponse:
+    """Get per-agent TTS settings from the database."""
+    row = await session.get(AgentTtsSettings, agent_id)
+    if not row:
+        return AgentTtsSettingsResponse(
+            agent_id=agent_id,
+            tts_enabled=False,
+        )
+    return AgentTtsSettingsResponse(
+        agent_id=agent_id,
+        tts_enabled=row.tts_enabled,
+        tts_provider=row.tts_provider,
+        tts_voice_id=row.tts_voice_id,
+        tts_voice_name=row.tts_voice_name,
+    )
+
+
+@router.put("/agents/{agent_id}/tts-settings")
+async def update_agent_tts_settings(
+    agent_id: str,
+    body: AgentTtsSettingsRequest,
+    session: AsyncSession = Depends(get_async_session),
+) -> AgentTtsSettingsResponse:
+    """Update per-agent TTS settings in the database.
+
+    These settings persist across server restarts (unlike config.yml).
+    """
+    now = now_ms()
+    row = await session.get(AgentTtsSettings, agent_id)
+
+    if row:
+        if body.tts_enabled is not None:
+            row.tts_enabled = body.tts_enabled
+        if body.tts_provider is not None:
+            row.tts_provider = body.tts_provider if body.tts_provider else None
+        # Allow explicit null to clear voice
+        if "tts_voice_id" in (body.model_dump(exclude_unset=True)):
+            row.tts_voice_id = body.tts_voice_id
+        if "tts_voice_name" in (body.model_dump(exclude_unset=True)):
+            row.tts_voice_name = body.tts_voice_name
+        row.updated_at = now
+    else:
+        row = AgentTtsSettings(
+            agent_id=agent_id,
+            tts_enabled=body.tts_enabled if body.tts_enabled is not None else False,
+            tts_provider=body.tts_provider if body.tts_provider else None,
+            tts_voice_id=body.tts_voice_id,
+            tts_voice_name=body.tts_voice_name,
+            updated_at=now,
+        )
+        session.add(row)
+
+    await session.commit()
+    await session.refresh(row)
+
+    return AgentTtsSettingsResponse(
+        agent_id=agent_id,
+        tts_enabled=row.tts_enabled,
+        tts_provider=row.tts_provider,
+        tts_voice_id=row.tts_voice_id,
+        tts_voice_name=row.tts_voice_name,
     )
 
 

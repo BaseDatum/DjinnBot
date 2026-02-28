@@ -460,17 +460,11 @@ export class SlackBridge {
       });
 
       if (!res.ok) return;
-      const data = await res.json() as { ok: boolean; attachmentId?: string; filename?: string };
-      if (!data.ok || !data.attachmentId) return;
+      const data = await res.json() as { ok: boolean; audioBase64?: string; filename?: string };
+      if (!data.ok || !data.audioBase64) return;
 
-      // Download the audio
-      const audioRes = await authFetch(
-        `${apiBaseUrl}/v1/chat/attachments/${data.attachmentId}/content`,
-        { signal: AbortSignal.timeout(10000) },
-      );
-      if (!audioRes.ok) return;
-
-      const audioBuffer = Buffer.from(await audioRes.arrayBuffer());
+      // Decode base64 audio from the response (no second download needed)
+      const audioBuffer = Buffer.from(data.audioBase64, 'base64');
 
       // Upload to Slack and post in thread
       const client = runtime.getClient();

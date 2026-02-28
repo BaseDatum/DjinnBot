@@ -518,11 +518,7 @@ function AgentDetailPage() {
               </CardContent>
             </Card>
 
-            <AgentTtsSettings
-              agentId={agentId}
-              config={config}
-              onConfigChange={(updates) => handleConfigChange({ ...config, ...updates })}
-            />
+            <AgentTtsSettings agentId={agentId} />
 
             <DangerZone agentId={agentId} agentName={agent.name} />
           </div>

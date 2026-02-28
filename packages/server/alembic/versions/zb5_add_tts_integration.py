@@ -130,8 +130,20 @@ def upgrade() -> None:
         ["provider_id", "target_user_id"],
     )
 
+    # ── agent_tts_settings — per-agent TTS configuration (DB-persisted) ──
+    op.create_table(
+        "agent_tts_settings",
+        sa.Column("agent_id", sa.String(128), primary_key=True),
+        sa.Column("tts_enabled", sa.Boolean(), nullable=False, server_default="false"),
+        sa.Column("tts_provider", sa.String(64), nullable=True),
+        sa.Column("tts_voice_id", sa.String(128), nullable=True),
+        sa.Column("tts_voice_name", sa.String(256), nullable=True),
+        sa.Column("updated_at", sa.BigInteger(), nullable=False),
+    )
+
 
 def downgrade() -> None:
+    op.drop_table("agent_tts_settings")
     op.drop_table("admin_shared_tts_providers")
     op.drop_index("idx_user_tts_providers_provider", table_name="user_tts_providers")
     op.drop_index("idx_user_tts_providers_user", table_name="user_tts_providers")

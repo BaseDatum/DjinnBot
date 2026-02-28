@@ -1585,6 +1585,10 @@ export class ChatSessionManager {
         a => a.mimeType.startsWith('audio/'),
       );
       if (audioAttachments.length > 0) {
+        // Mark this session as voice-triggered so TTS audio is generated
+        // after the agent responds (text first, then voice message).
+        this.markVoiceSession(sessionId);
+
         await this.waitForTranscriptions(audioAttachments);
 
         // Fetch transcripts and use as the actual message text.

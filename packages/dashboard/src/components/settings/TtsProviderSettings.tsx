@@ -1,8 +1,10 @@
 /**
- * TtsProviderSettings — per-user TTS API key management.
+ * TtsProviderSettings — per-user TTS provider preference and API key management.
  *
  * Displayed on the Settings page under the "TTS Providers" tab.
- * Mirrors the pattern of UserProviderSettings but for TTS providers (Fish Audio).
+ * Allows users to:
+ * 1. Choose their preferred TTS provider (Fish Audio or Voicebox)
+ * 2. Configure API keys for cloud providers (Fish Audio)
  */
 import { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -23,6 +25,7 @@ import {
 import { toast } from 'sonner';
 import { API_BASE } from '@/lib/api';
 import { authFetch } from '@/lib/auth';
+import { useAuth } from '@/hooks/useAuth';
 
 interface TtsProviderItem {
   providerId: string;
@@ -35,15 +38,24 @@ interface TtsProviderItem {
 }
 
 export function TtsProviderSettings() {
+  const { user } = useAuth();
   const [providers, setProviders] = useState<TtsProviderItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [preferredProvider, setPreferredProvider] = useState<string | null>(null);
+  const [savingPref, setSavingPref] = useState(false);
 
   const loadProviders = async () => {
     try {
-      const res = await authFetch(`${API_BASE}/settings/tts-providers`);
-      if (res.ok) {
-        const data = await res.json();
-        setProviders(data);
+      const [providersRes, prefRes] = await Promise.all([
+        authFetch(`${API_BASE}/settings/tts-providers`),
+        user ? authFetch(`${API_BASE}/settings/user-tts-preference?user_id=${user.id}`) : Promise.resolve(null),
+      ]);
+      if (providersRes.ok) {
+        setProviders(await providersRes.json());
+      }
+      if (prefRes && prefRes.ok) {
+        const prefData = await prefRes.json();
+        setPreferredProvider(prefData.defaultTtsProvider || null);
       }
     } catch (err) {
       console.error('Failed to load TTS providers:', err);
@@ -56,6 +68,37 @@ export function TtsProviderSettings() {
     loadProviders();
   }, []);
 
+  const handleSetPreference = async (provider: string) => {
+    if (!user) return;
+    setSavingPref(true);
+    try {
+      if (provider === '') {
+        // Clear preference — use admin default
+        const res = await authFetch(`${API_BASE}/settings/user-tts-preference?user_id=${user.id}`, {
+          method: 'DELETE',
+        });
+        if (res.ok) {
+          setPreferredProvider(null);
+          toast.success('Using system default TTS provider');
+        }
+      } else {
+        const res = await authFetch(`${API_BASE}/settings/user-tts-preference?user_id=${user.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ defaultTtsProvider: provider }),
+        });
+        if (res.ok) {
+          setPreferredProvider(provider);
+          toast.success(`TTS provider set to ${provider === 'voicebox' ? 'Voicebox' : 'Fish Audio'}`);
+        }
+      }
+    } catch {
+      toast.error('Failed to update preference');
+    } finally {
+      setSavingPref(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="space-y-3">
@@ -66,7 +109,31 @@ export function TtsProviderSettings() {
 
   return (
     <div className="space-y-4">
-      {providers.map((provider) => (
+      {/* Provider Preference */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base">Preferred TTS Provider</CardTitle>
+          <CardDescription className="text-xs">
+            Choose which TTS provider to use for your sessions. Leave on "System Default"
+            to use the admin-configured provider.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="pt-0">
+          <select
+            value={preferredProvider || ''}
+            onChange={(e) => handleSetPreference(e.target.value)}
+            disabled={savingPref}
+            className="flex h-9 w-64 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          >
+            <option value="">System Default</option>
+            <option value="fish-audio">Fish Audio (Cloud)</option>
+            <option value="voicebox">Voicebox (Local)</option>
+          </select>
+        </CardContent>
+      </Card>
+
+      {/* API Key Cards (only show Fish Audio — Voicebox needs no key) */}
+      {providers.filter(p => p.providerId === 'fish-audio').map((provider) => (
         <TtsProviderCard
           key={provider.providerId}
           provider={provider}

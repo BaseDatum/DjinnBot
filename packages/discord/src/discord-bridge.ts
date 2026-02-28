@@ -370,23 +370,17 @@ export class DiscordBridge {
           );
 
           if (res.ok) {
-            const data = await res.json() as { ok: boolean; attachmentId?: string; filename?: string };
-            if (data.ok && data.attachmentId) {
-              // Download and send audio as Discord file attachment
-              const audioRes = await authFetch(
-                `${this.config.apiBaseUrl}/v1/chat/attachments/${data.attachmentId}/content`,
-                { signal: AbortSignal.timeout(10000) },
-              );
-              if (audioRes.ok) {
-                const audioBuffer = Buffer.from(await audioRes.arrayBuffer());
-                const channel = runtime.getClient()?.channels.cache.get(location.channelId);
-                if (channel && 'send' in channel) {
-                  const { AttachmentBuilder } = await import('discord.js');
-                  await (channel as any).send({
-                    files: [new AttachmentBuilder(audioBuffer, { name: data.filename || 'voice.ogg' })],
-                  });
-                  console.log(`[DiscordBridge] TTS audio sent for session ${sessionId}`);
-                }
+            const data = await res.json() as { ok: boolean; audioBase64?: string; filename?: string };
+            if (data.ok && data.audioBase64) {
+              // Decode base64 audio from the response
+              const audioBuffer = Buffer.from(data.audioBase64, 'base64');
+              const channel = runtime.getClient()?.channels.cache.get(location.channelId);
+              if (channel && 'send' in channel) {
+                const { AttachmentBuilder } = await import('discord.js');
+                await (channel as any).send({
+                  files: [new AttachmentBuilder(audioBuffer, { name: data.filename || 'voice.ogg' })],
+                });
+                console.log(`[DiscordBridge] TTS audio sent for session ${sessionId}`);
               }
             }
           }

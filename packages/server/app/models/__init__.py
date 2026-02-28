@@ -83,6 +83,7 @@ from app.models.signal import SignalConfig, SignalAllowlistEntry
 from app.models.telegram import TelegramConfig, TelegramAllowlistEntry
 from app.models.tts_call_log import TtsCallLog
 from app.models.tts_provider import TtsProvider, UserTtsProvider, AdminSharedTtsProvider
+from app.models.agent_tts_settings import AgentTtsSettings
 
 __all__ = [
     # Pydantic models (backward compatibility)
@@ -181,4 +182,5 @@ __all__ = [
     "TtsProvider",
     "UserTtsProvider",
     "AdminSharedTtsProvider",
+    "AgentTtsSettings",
 ]

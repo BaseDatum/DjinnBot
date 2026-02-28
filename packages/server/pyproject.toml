@@ -31,7 +31,7 @@ dependencies = [
     # Audio transcription (voice notes from Signal/Telegram/WhatsApp/Discord)
     "faster-whisper>=1.1.0",
     # Text-to-speech (Fish Audio integration for voice replies)
-    "fishaudio>=1.0.0",
+    "fish-audio-sdk[utils]>=1.2.0",
 ]
 
 [project.optional-dependencies]

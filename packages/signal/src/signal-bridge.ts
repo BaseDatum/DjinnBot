@@ -970,17 +970,11 @@ export class SignalBridge {
 
       if (!res.ok) return false;
 
-      const data = await res.json() as { ok: boolean; attachmentId?: string; filename?: string };
-      if (!data.ok || !data.attachmentId) return false;
+      const data = await res.json() as { ok: boolean; audioBase64?: string; filename?: string };
+      if (!data.ok || !data.audioBase64) return false;
 
-      // Download the audio
-      const audioRes = await authFetch(
-        `${this.config.apiUrl}/v1/chat/attachments/${data.attachmentId}/content`,
-        { signal: AbortSignal.timeout(10000) },
-      );
-      if (!audioRes.ok) return false;
-
-      const audioBuffer = Buffer.from(await audioRes.arrayBuffer());
+      // Decode base64 audio from the response (no second download needed)
+      const audioBuffer = Buffer.from(data.audioBase64, 'base64');
 
       // Write to temp file and send via signal-cli
       const { writeFile, unlink } = await import('node:fs/promises');

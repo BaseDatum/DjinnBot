@@ -687,27 +687,18 @@ class TelegramAgentBridge {
 
       const data = await res.json() as {
         ok: boolean;
-        attachmentId?: string;
-        storagePath?: string;
+        audioBase64?: string;
         filename?: string;
         mimeType?: string;
         sizeBytes?: number;
       };
 
-      if (!data.ok || !data.attachmentId) {
+      if (!data.ok || !data.audioBase64) {
         return false;
       }
 
-      // Download the audio file via the existing attachment content endpoint
-      const audioRes = await authFetch(
-        `${this.config.apiUrl}/v1/chat/attachments/${data.attachmentId}/content`,
-        { signal: AbortSignal.timeout(10000) },
-      );
-
-      if (!audioRes.ok) return false;
-
-      const audioBuffer = await audioRes.arrayBuffer();
-      const audioUint8 = new Uint8Array(audioBuffer);
+      // Decode base64 audio from the response (no second download needed)
+      const audioUint8 = Uint8Array.from(atob(data.audioBase64), c => c.charCodeAt(0));
 
       // Send as a Telegram voice message using the grammy API
       const { InputFile } = await import('grammy');
