@@ -23,8 +23,11 @@ import Accelerate
 ///   their voice on system audio if it leaks).
 /// - Separate AudioStream per source to avoid mixing audio characteristics.
 /// - VAD preprocessing reduces false speakers by 20-40% (FluidAudio docs).
-/// - Post-hoc identification against enrolled profiles using strict threshold
-///   (cosine similarity > 0.75) rather than seeding into SpeakerManager.
+/// - Enrolled voice profiles are seeded into SpeakerManager at session start
+///   via `initializeKnownSpeakers()` and marked permanent, so the diarizer
+///   recognizes known speakers during clustering (not just post-hoc).
+/// - Unknown speakers are periodically re-evaluated against enrolled profiles
+///   as their embeddings improve with more audio data.
 @MainActor
 final class RealTimeDiarizationService: ObservableObject {
     
@@ -73,6 +76,11 @@ final class RealTimeDiarizationService: ObservableObject {
     /// Serial queue for fair chunk processing. Both sources submit chunks here
     /// so neither starves the other, and DiarizerManager isn't accessed concurrently.
     private let processingQueue = DispatchQueue(label: "bot.djinn.dialogue.diarization", qos: .userInitiated)
+    
+    /// Serial queues for VAD processing — one per source to prevent race
+    /// conditions on VAD state while preserving audio chunk ordering.
+    private let micVadQueue = DispatchQueue(label: "bot.djinn.dialogue.vad.mic", qos: .userInitiated)
+    private let sysVadQueue = DispatchQueue(label: "bot.djinn.dialogue.vad.sys", qos: .userInitiated)
     
     /// Speaker label mapping from FluidAudio speaker IDs to display labels.
     private var speakerLabelMap: [String: String] = [:]
@@ -170,8 +178,9 @@ final class RealTimeDiarizationService: ObservableObject {
     private static func applySpeakerThresholds(manager: DiarizerManager, settings: DiarizationSettings) {
         let threshold = Float(settings.clusteringThreshold)
         manager.speakerManager.speakerThreshold = threshold
-        // embeddingThreshold: SpeakerManager default 0.45; at threshold 0.7 → 0.50
-        manager.speakerManager.embeddingThreshold = min(threshold * 0.72, 0.50)
+        // embeddingThreshold: SpeakerManager default 0.45; scale proportionally
+        // to the clustering threshold. At 0.65 → 0.45 (FluidAudio default).
+        manager.speakerManager.embeddingThreshold = min(threshold * 0.70, 0.50)
     }
     
     private static func makeConfig(threshold: Float, settings: DiarizationSettings) -> DiarizerConfig {
@@ -230,8 +239,11 @@ final class RealTimeDiarizationService: ObservableObject {
         
         guard let manager = diarizerManager else { return }
         
-        // Don't seed enrolled speakers — use post-hoc identification instead.
-        manager.speakerManager.reset(keepIfPermanent: false)
+        // Seed enrolled voice profiles into the SpeakerManager so the diarizer
+        // recognizes known speakers during clustering (not just post-hoc).
+        // This dramatically improves recognition accuracy because the clustering
+        // engine compares incoming audio against known embeddings at assignment time.
+        seedEnrolledProfiles(into: manager)
         
         // Create per-source AudioStreams with FluidAudio's recommended streaming config:
         // 5s chunks, 3s skip (= 2s overlap for speaker continuity across boundaries).
@@ -411,44 +423,57 @@ final class RealTimeDiarizationService: ObservableObject {
         }
         
         var offset = 0
+        var chunks: [[Float]] = []
         while offset + vadChunkSize <= buffer.count {
-            let chunk = Array(buffer[offset..<(offset + vadChunkSize)])
+            chunks.append(Array(buffer[offset..<(offset + vadChunkSize)]))
             offset += vadChunkSize
-            
-            // If VAD is available, check if this chunk contains speech
-            if let vad = vadManager {
-                let currentState: VadStreamState
-                switch source {
-                case .mic:    currentState = micVadState
-                case .system: currentState = sysVadState
-                }
-                
-                // VAD is an actor — fire and forget with Task
-                let capturedSource = source
-                Task { [weak self] in
-                    guard let self = self else { return }
-                    do {
-                        let result = try await vad.processStreamingChunk(
-                            chunk,
-                            state: currentState,
-                            returnSeconds: true
-                        )
-                        await self.handleVadResult(result, chunk: chunk, source: capturedSource)
-                    } catch {
-                        // On VAD error, pass audio through unfiltered
-                        await self.forwardToStream(chunk, source: capturedSource)
-                    }
-                }
-            } else {
-                // No VAD available — pass all audio through
-                forwardToStream(chunk, source: source)
-            }
         }
         
         // Keep unprocessed remainder
         switch source {
         case .mic:    micVadBuffer = Array(buffer[offset...])
         case .system: sysVadBuffer = Array(buffer[offset...])
+        }
+        
+        guard !chunks.isEmpty else { return }
+        
+        // Process VAD chunks serially per source to prevent state races.
+        // Each source has its own serial queue so mic and system VAD
+        // run concurrently but chunks within a source stay ordered.
+        if let vad = vadManager {
+            let vadQueue = source == .mic ? micVadQueue : sysVadQueue
+            let capturedSource = source
+            let capturedChunks = chunks
+            
+            vadQueue.async { [weak self] in
+                guard let self = self else { return }
+                Task { @MainActor [weak self] in
+                    guard let self = self else { return }
+                    for chunk in capturedChunks {
+                        let currentState: VadStreamState
+                        switch capturedSource {
+                        case .mic:    currentState = self.micVadState
+                        case .system: currentState = self.sysVadState
+                        }
+                        
+                        do {
+                            let result = try await vad.processStreamingChunk(
+                                chunk,
+                                state: currentState,
+                                returnSeconds: true
+                            )
+                            self.handleVadResult(result, chunk: chunk, source: capturedSource)
+                        } catch {
+                            self.forwardToStream(chunk, source: capturedSource)
+                        }
+                    }
+                }
+            }
+        } else {
+            // No VAD available — pass all audio through
+            for chunk in chunks {
+                forwardToStream(chunk, source: source)
+            }
         }
     }
     
@@ -626,21 +651,91 @@ final class RealTimeDiarizationService: ObservableObject {
         }
     }
     
+    // MARK: - Enrolled Speaker Seeding
+    
+    /// Seed enrolled voice profiles into FluidAudio's SpeakerManager so the
+    /// diarizer recognizes them during clustering, not just post-hoc.
+    ///
+    /// This converts VoiceProfile objects into FluidAudio Speaker objects,
+    /// loads them via `initializeKnownSpeakers()`, and marks them as permanent
+    /// so they survive pruning and merging.
+    private func seedEnrolledProfiles(into manager: DiarizerManager) {
+        let profiles = profileManager.profiles
+        guard !profiles.isEmpty else {
+            manager.speakerManager.reset(keepIfPermanent: false)
+            return
+        }
+        
+        var knownSpeakers: [Speaker] = []
+        for profile in profiles {
+            guard !profile.embedding.isEmpty else { continue }
+            let speaker = Speaker(
+                id: profile.id,
+                name: profile.displayName,
+                currentEmbedding: profile.embedding
+            )
+            knownSpeakers.append(speaker)
+        }
+        
+        if knownSpeakers.isEmpty {
+            manager.speakerManager.reset(keepIfPermanent: false)
+            return
+        }
+        
+        // Reset and load enrolled speakers. Using .reset mode clears any stale
+        // data and loads fresh profiles. preserveIfPermanent is false because
+        // we want a clean slate with only our enrolled profiles.
+        manager.speakerManager.initializeKnownSpeakers(
+            knownSpeakers,
+            mode: .reset,
+            preserveIfPermanent: false
+        )
+        
+        // Mark enrolled speakers as permanent so they survive pruning/merging.
+        for speaker in knownSpeakers {
+            manager.speakerManager.makeSpeakerPermanent(speaker.id)
+            speakerLabelMap[speaker.id] = speaker.name
+            speakerToProfileMap[speaker.id] = speaker.id
+        }
+        
+        print("[Dialogue] Seeded \(knownSpeakers.count) enrolled profile(s) into SpeakerManager: \(knownSpeakers.map { $0.name })")
+    }
+    
     // MARK: - Speaker Label Resolution
     
     private func resolveLabel(for speakerID: String) -> String {
         if let label = speakerLabelMap[speakerID] {
+            // For enrolled speakers, the label is already set during seeding.
+            // For unknown speakers, re-evaluate periodically in case the
+            // embedding has drifted to match a known profile.
+            if !speakerToProfileMap.keys.contains(speakerID) {
+                // Re-check unknown speakers against enrolled profiles
+                if let manager = diarizerManager,
+                   let speaker = manager.speakerManager.getSpeaker(for: speakerID) {
+                    if let matchedProfile = profileManager.matchSpeaker(embedding: speaker.currentEmbedding) {
+                        let newLabel = matchedProfile.displayName
+                        if newLabel != label {
+                            speakerLabelMap[speakerID] = newLabel
+                            speakerToProfileMap[speakerID] = matchedProfile.id
+                            print("[Dialogue] Speaker \(speakerID) re-identified as \"\(newLabel)\" (was \"\(label)\")")
+                            return newLabel
+                        }
+                    }
+                }
+            }
             return label
         }
         
-        // Post-hoc identification against enrolled voice profiles
+        // First-time resolution: check if this is a seeded enrolled speaker
+        // (their labels were set during seedEnrolledProfiles, so this path
+        // handles speakers created by the diarizer during the session).
         if let manager = diarizerManager,
            let speaker = manager.speakerManager.getSpeaker(for: speakerID) {
             if let matchedProfile = profileManager.matchSpeaker(embedding: speaker.currentEmbedding) {
                 let label = matchedProfile.displayName
                 speakerLabelMap[speakerID] = label
                 speakerToProfileMap[speakerID] = matchedProfile.id
-                print("[Dialogue] Speaker \(speakerID) identified as \"\(label)\" (post-hoc voice match)")
+                print("[Dialogue] Speaker \(speakerID) identified as \"\(label)\" (voice match)")
                 return label
             }
         }

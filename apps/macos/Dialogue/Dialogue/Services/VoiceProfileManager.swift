@@ -57,7 +57,10 @@ final class VoiceProfileManager: ObservableObject {
     }
     
     /// Cosine similarity threshold for a positive speaker match.
-    private let matchThreshold: Float = 0.75
+    /// Lowered from 0.75 to 0.65 for more robust cross-session and
+    /// cross-audio-path matching (mic enrollment vs system audio playback
+    /// produces different acoustic characteristics).
+    private let matchThreshold: Float = 0.65
     
     /// EMA blending factor: higher = more weight on existing embedding.
     /// Matches FluidAudio's Speaker.updateMainEmbedding default alpha.

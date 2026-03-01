@@ -336,16 +336,40 @@ final class VoiceEnrollmentViewModel: ObservableObject {
                 
                 // Collect all embeddings from the recording
                 let embeddings = result.segments.map { $0.embedding }
-                guard !embeddings.isEmpty else {
-                    errorMessage = "Could not detect voice in recording. Please try again in a quiet environment."
+                guard embeddings.count >= 2 else {
+                    errorMessage = "Could not detect enough voice data. Please record at least 10 seconds in a quiet environment."
                     isProcessing = false
                     return
                 }
                 
+                // Quality check: verify embeddings are consistent (same speaker).
+                // If any pair has cosine similarity < 0.5, the recording may
+                // contain multiple speakers or excessive noise.
                 let avgEmbedding = averageEmbeddings(embeddings)
+                var minSimilarity: Float = 1.0
+                for emb in embeddings {
+                    let sim = cosineSimilarity(emb, avgEmbedding)
+                    minSimilarity = min(minSimilarity, sim)
+                }
+                guard minSimilarity > 0.4 else {
+                    errorMessage = "Inconsistent voice detected — please record in a quieter environment with only your voice."
+                    isProcessing = false
+                    return
+                }
                 
-                // Enroll as primary user
+                // Enroll as primary user with centroid embedding
                 try VoiceProfileManager.shared.enrollPrimaryUser(embedding: avgEmbedding)
+                
+                // Store all individual embeddings as raw observations
+                // so the profile has richer data for matching.
+                for emb in embeddings {
+                    let normalized = VoiceProfileManager.l2Normalize(emb)
+                    VoiceProfileManager.shared.updateEmbeddingEMA(
+                        profileID: VoiceProfile.primaryUserID,
+                        newEmbedding: normalized
+                    )
+                }
+                VoiceProfileManager.shared.persistPendingUpdates()
                 
                 enrollmentComplete = true
                 isProcessing = false
@@ -376,6 +400,22 @@ final class VoiceEnrollmentViewModel: ObservableObject {
             print("[Dialogue] Failed to set enrollment input device: \(status)")
             errorMessage = "Failed to select microphone (error \(status))"
         }
+    }
+    
+    /// Cosine similarity between two Float vectors.
+    private func cosineSimilarity(_ a: [Float], _ b: [Float]) -> Float {
+        guard a.count == b.count, !a.isEmpty else { return 0 }
+        var dotProduct: Float = 0
+        var normA: Float = 0
+        var normB: Float = 0
+        for i in 0..<a.count {
+            dotProduct += a[i] * b[i]
+            normA += a[i] * a[i]
+            normB += b[i] * b[i]
+        }
+        let denom = sqrt(normA) * sqrt(normB)
+        guard denom > 0 else { return 0 }
+        return dotProduct / denom
     }
     
     /// Compute the element-wise average of multiple embedding vectors.

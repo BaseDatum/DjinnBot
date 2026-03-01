@@ -140,6 +140,9 @@ final class VoiceLabelerViewModel: ObservableObject {
         // Remove this pair from suggestions
         mergeablePairs.removeAll { $0.sourceID == sourceID && $0.destinationID == destinationID }
         
+        // Persist updated labels to disk
+        persistRecording()
+        
         saveMessage = "Merged \(source.label) into \(dest.label)"
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
             self?.saveMessage = nil
@@ -177,6 +180,9 @@ final class VoiceLabelerViewModel: ObservableObject {
                     detectedSpeakers[idx].isIdentified = true
                 }
                 
+                // Persist updated labels to disk
+                persistRecording()
+                
                 saveMessage = "Renamed to \(name) (no voice profile — merge with a known speaker for future recognition)"
                 
                 DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
@@ -199,6 +205,9 @@ final class VoiceLabelerViewModel: ObservableObject {
                         detectedSpeakers[idx].isIdentified = true
                     }
                     
+                    // Persist updated labels to disk
+                    persistRecording()
+                    
                     saveMessage = "Saved voice profile for \(name)"
                     
                     DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
@@ -211,6 +220,15 @@ final class VoiceLabelerViewModel: ObservableObject {
             
             isSaving = false
         }
+    }
+    
+    // MARK: - Persistence
+    
+    /// Re-save the recording's updated metadata and transcript to disk
+    /// after speaker names have been changed in the labeler.
+    private func persistRecording() {
+        recording.detectedSpeakers = detectedSpeakers
+        MeetingStore.shared.saveMeeting(recording: recording)
     }
 }
 

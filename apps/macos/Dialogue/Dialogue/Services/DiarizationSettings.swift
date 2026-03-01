@@ -63,11 +63,11 @@ final class DiarizationSettings: ObservableObject {
     ///   0.7-0.9 = Should create new speaker
     ///   > 0.9  = Clearly different
     ///
-    /// SpeakerManager default: 0.65. We use the same.
+    /// SpeakerManager default: 0.65. We match FluidAudio's default.
     /// Note: this controls DIARIZATION (clustering unknown speakers), not
     /// identification (matching enrolled profiles). Identification uses
-    /// VoiceProfileManager's strict cosine similarity > 0.75 threshold.
-    static let defaultThreshold: Double = 0.70
+    /// VoiceProfileManager's cosine similarity threshold.
+    static let defaultThreshold: Double = 0.65
 
     /// Allowed range for the clustering threshold slider.
     /// Lower = more aggressive splitting, higher = more aggressive merging.
