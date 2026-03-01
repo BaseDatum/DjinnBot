@@ -35,8 +35,8 @@ struct DialogueApp: App {
             
             // Meeting Recorder
             CommandMenu("Meeting") {
-                Button("Meeting Recorder") {
-                    AppState.shared.openMeetingRecorder()
+                Button("Toggle Recording") {
+                    NotificationCenter.default.post(name: .toggleRecording, object: nil)
                 }
                 .keyboardShortcut("r", modifiers: [.command, .shift])
             }
@@ -160,4 +160,7 @@ extension Notification.Name {
     static let toggleChatPanel = Notification.Name("dialogue.toggleChatPanel")
     static let newChatSession = Notification.Name("dialogue.newChatSession")
     static let closeChatPanel = Notification.Name("dialogue.closeChatPanel")
+
+    // Meeting recording
+    static let toggleRecording = Notification.Name("dialogue.toggleRecording")
 }

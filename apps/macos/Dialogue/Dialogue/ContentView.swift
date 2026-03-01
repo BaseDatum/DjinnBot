@@ -1,10 +1,20 @@
+import Combine
 import SwiftUI
 
 /// The main content view for the app window.
 /// Shows a sidebar with the document library and the BlockNote editor.
+/// The meeting recorder is accessible via a toolbar button in the title bar
+/// and a collapsible live transcript banner below the toolbar.
 struct ContentView: View {
     @EnvironmentObject var documentManager: DocumentManager
     @EnvironmentObject var appState: AppState
+    
+    // MARK: - Meeting Recorder (app-wide)
+    
+    /// Shared recorder controller, available from any screen.
+    /// Wrapped in an availability-checked helper so the @StateObject
+    /// can live here without polluting the rest of the view.
+    @StateObject private var recorderHolder = RecorderHolder()
     
     // MARK: - Phase 3: Floating Chat
     
@@ -33,34 +43,32 @@ struct ContentView: View {
                             appState.navigateHome()
                         },
                         onSelectMeetingRecorder: {
-                            appState.openMeetingRecorder()
+                            appState.navigateHome()
                         },
                         onSelectMeeting: { meeting in
                             appState.openMeeting(meeting)
                         }
                     )
                 } detail: {
-                    switch appState.activeScreen {
-                    case .home:
-                        HomeView()
-                            .frame(minWidth: 500, minHeight: 400)
-                    case .editor:
-                        BlockNoteEditorView(document: appState.currentDocument)
-                            .frame(minWidth: 500, minHeight: 400)
-                    case .meetingRecorder:
-                        if #available(macOS 26.0, *) {
-                            MeetingRecorderView()
-                                .frame(minWidth: 500, minHeight: 400)
-                        } else {
-                            Text("Meeting Recorder requires macOS 26.0 or later.")
-                                .frame(minWidth: 500, minHeight: 400)
+                    VStack(spacing: 0) {
+                        if #available(macOS 26.0, *),
+                           let recorder = recorderHolder.recorder,
+                           recorder.isRecording {
+                            LiveTranscriptBanner(recorder: recorder)
                         }
-                    case .meetingDetail(let meeting):
-                        MeetingDetailView(meeting: meeting)
-                            .frame(minWidth: 500, minHeight: 400)
+
+                        detailContent
                     }
                 }
                 .navigationSplitViewStyle(.balanced)
+                .toolbar {
+                    ToolbarItem(placement: .primaryAction) {
+                        if #available(macOS 26.0, *),
+                           let recorder = recorderHolder.recorder {
+                            RecordingToolbarButton(recorder: recorder)
+                        }
+                    }
+                }
 
                 // App-wide status footer (model download progress, etc.)
                 StatusFooterView()
@@ -122,6 +130,40 @@ struct ContentView: View {
             bottomEdgeDetector.forceHide()
             chatToolbarVisible = false
         }
+        .onReceive(NotificationCenter.default.publisher(for: .toggleRecording)) { _ in
+            if #available(macOS 26.0, *) {
+                guard let recorder = recorderHolder.recorder else { return }
+                Task {
+                    if recorder.isRecording {
+                        await recorder.stop()
+                    } else {
+                        await recorder.start()
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: - Detail Content
+
+    @ViewBuilder
+    private var detailContent: some View {
+        switch appState.activeScreen {
+        case .home:
+            HomeView()
+                .frame(minWidth: 500, minHeight: 400)
+        case .editor:
+            BlockNoteEditorView(document: appState.currentDocument)
+                .frame(minWidth: 500, minHeight: 400)
+        case .meetingRecorder:
+            // Legacy: redirect to home (recording now lives in the toolbar)
+            HomeView()
+                .frame(minWidth: 500, minHeight: 400)
+                .onAppear { appState.navigateHome() }
+        case .meetingDetail(let meeting):
+            MeetingDetailView(meeting: meeting)
+                .frame(minWidth: 500, minHeight: 400)
+        }
     }
     
     // MARK: - Phase 3: Chat Toggle
@@ -133,6 +175,41 @@ struct ContentView: View {
         } else {
             bottomEdgeDetector.forceShow()
             chatToolbarVisible = true
+        }
+    }
+}
+
+// MARK: - RecorderHolder
+
+/// Availability-safe wrapper so we can hold a @StateObject of
+/// MeetingRecorderController (which requires macOS 26.0) inside
+/// a view that doesn't itself require macOS 26.0.
+@MainActor
+final class RecorderHolder: ObservableObject {
+    /// The underlying recorder, stored as `AnyObject` to avoid referencing
+    /// the `@available(macOS 26.0, *)` type in the property signature.
+    private let _recorder: AnyObject?
+
+    /// Forwards objectWillChange from the inner controller so ContentView
+    /// re-renders when recorder state (e.g. isRecording) changes.
+    private var cancellable: AnyCancellable?
+
+    /// Typed accessor. Returns nil on systems older than macOS 26.0.
+    @available(macOS 26.0, *)
+    var recorder: MeetingRecorderController? {
+        _recorder as? MeetingRecorderController
+    }
+
+    init() {
+        if #available(macOS 26.0, *) {
+            let controller = MeetingRecorderController()
+            _recorder = controller
+            cancellable = controller.objectWillChange.sink { [weak self] _ in
+                self?.objectWillChange.send()
+            }
+        } else {
+            _recorder = nil
+            cancellable = nil
         }
     }
 }

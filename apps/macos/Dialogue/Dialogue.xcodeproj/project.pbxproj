@@ -51,6 +51,8 @@
 		GG000001 /* MeetingStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = GG000011 /* MeetingStore.swift */; };
 		GG000002 /* MeetingDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = GG000012 /* MeetingDetailView.swift */; };
 		HH000001 /* ModelPreloader.swift in Sources */ = {isa = PBXBuildFile; fileRef = HH000011 /* ModelPreloader.swift */; };
+		II000001 /* RecordingToolbarButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = II000011 /* RecordingToolbarButton.swift */; };
+		II000002 /* LiveTranscriptBanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = II000012 /* LiveTranscriptBanner.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -98,6 +100,8 @@
 		GG000011 /* MeetingStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingStore.swift; sourceTree = "<group>"; };
 		GG000012 /* MeetingDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingDetailView.swift; sourceTree = "<group>"; };
 		HH000011 /* ModelPreloader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelPreloader.swift; sourceTree = "<group>"; };
+		II000011 /* RecordingToolbarButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingToolbarButton.swift; sourceTree = "<group>"; };
+		II000012 /* LiveTranscriptBanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveTranscriptBanner.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -222,6 +226,8 @@
 				FF000015 /* MixedWAVRecorder.swift */,
 				FF000016 /* MergeEngine.swift */,
 				FF000020 /* MeetingRecorderView.swift */,
+				II000011 /* RecordingToolbarButton.swift */,
+				II000012 /* LiveTranscriptBanner.swift */,
 				HH000011 /* ModelPreloader.swift */,
 				FF000031 /* Models */,
 				FF000032 /* Transcription */,
@@ -422,6 +428,8 @@
 				GG000001 /* MeetingStore.swift in Sources */,
 				GG000002 /* MeetingDetailView.swift in Sources */,
 				HH000001 /* ModelPreloader.swift in Sources */,
+				II000001 /* RecordingToolbarButton.swift in Sources */,
+				II000002 /* LiveTranscriptBanner.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
