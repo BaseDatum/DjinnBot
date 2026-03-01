@@ -160,8 +160,15 @@ final class MergeEngine: ObservableObject {
             output.append(partialSegment)
         }
 
-        // 4. Sort by start time and publish
-        mergedSegments = output.sorted { $0.start < $1.start }
+        // 4. Sort: finals by start time, non-finals (live partials) always at the end.
+        //    Partials have start=0.0 from progressive transcription, so sorting by
+        //    start would put them at the top. Using end time for partials places them
+        //    at the current position in the transcript.
+        //    Hide diarization-only segments (no text) to avoid empty "..." rows.
+        let withText = output.filter { !$0.text.isEmpty }
+        let finals = withText.filter { $0.isFinal }.sorted { $0.start < $1.start }
+        let partials = withText.filter { !$0.isFinal }.sorted { $0.end < $1.end }
+        mergedSegments = finals + partials
     }
 
     /// Collapse adjacent segments from the same speaker within a gap threshold.

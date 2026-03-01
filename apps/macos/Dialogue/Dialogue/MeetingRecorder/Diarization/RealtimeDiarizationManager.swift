@@ -158,7 +158,8 @@ actor RealtimeDiarizationManager {
             stream: streamType,
             speaker: speakerLabel,
             start: startTime,
-            end: endTime
+            end: endTime,
+            isFinal: true  // Diarization segments are always committed
         )
     }
 }
