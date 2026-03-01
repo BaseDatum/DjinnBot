@@ -69,7 +69,7 @@ actor RealtimeDiarizationManager {
 
         do {
             if let result = try diarizer.processSamples(samples) {
-                let segments = convertToTaggedSegments(result, baseTime: absoluteTime)
+                let segments = convertToTaggedSegments(result)
                 for segment in segments {
                     await MergeEngine.shared.add(segment)
                 }
@@ -93,8 +93,7 @@ actor RealtimeDiarizationManager {
     /// Convert Sortformer chunk results (frame-level speaker probabilities)
     /// into discrete `TaggedSegment` objects with speaker IDs.
     private func convertToTaggedSegments(
-        _ result: SortformerChunkResult,
-        baseTime: TimeInterval
+        _ result: SortformerChunkResult
     ) -> [TaggedSegment] {
         let numSpeakers = 4 // Sortformer fixed slots
         let frameCount = result.frameCount
@@ -120,8 +119,7 @@ actor RealtimeDiarizationManager {
                     let segment = makeSegment(
                         speakerIndex: speakerIndex,
                         startFrame: result.startFrame + regionStart,
-                        endFrame: result.startFrame + frame,
-                        baseTime: baseTime
+                        endFrame: result.startFrame + frame
                     )
                     if segment.duration >= 0.3 { // Minimum 300ms segment
                         segments.append(segment)
@@ -134,8 +132,7 @@ actor RealtimeDiarizationManager {
                 let segment = makeSegment(
                     speakerIndex: speakerIndex,
                     startFrame: result.startFrame + regionStart,
-                    endFrame: result.startFrame + frameCount,
-                    baseTime: baseTime
+                    endFrame: result.startFrame + frameCount
                 )
                 if segment.duration >= 0.3 {
                     segments.append(segment)
@@ -149,11 +146,12 @@ actor RealtimeDiarizationManager {
     private func makeSegment(
         speakerIndex: Int,
         startFrame: Int,
-        endFrame: Int,
-        baseTime: TimeInterval
+        endFrame: Int
     ) -> TaggedSegment {
-        let startTime = baseTime + TimeInterval(startFrame) * TimeInterval(frameDurationSeconds)
-        let endTime = baseTime + TimeInterval(endFrame) * TimeInterval(frameDurationSeconds)
+        // startFrame is a cumulative global frame index from Sortformer,
+        // so startFrame * frameDuration already gives absolute time.
+        let startTime = TimeInterval(startFrame) * TimeInterval(frameDurationSeconds)
+        let endTime = TimeInterval(endFrame) * TimeInterval(frameDurationSeconds)
         let speakerLabel = "\(streamType.rawValue)-Speaker\(speakerIndex + 1)"
 
         return TaggedSegment(
