@@ -47,12 +47,13 @@
 		FF00000D /* MicPipeline.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF00001D /* MicPipeline.swift */; };
 		FF00000E /* MeetingPipeline.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF00001E /* MeetingPipeline.swift */; };
 		FF00000F /* AudioConverter.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF00001F /* AudioConverter.swift */; };
-		FF000010 /* MeetingRecorderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF000020 /* MeetingRecorderView.swift */; };
+
 		GG000001 /* MeetingStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = GG000011 /* MeetingStore.swift */; };
 		GG000002 /* MeetingDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = GG000012 /* MeetingDetailView.swift */; };
 		HH000001 /* ModelPreloader.swift in Sources */ = {isa = PBXBuildFile; fileRef = HH000011 /* ModelPreloader.swift */; };
 		II000001 /* RecordingToolbarButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = II000011 /* RecordingToolbarButton.swift */; };
 		II000002 /* LiveTranscriptBanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = II000012 /* LiveTranscriptBanner.swift */; };
+		II000003 /* CatppuccinColors.swift in Sources */ = {isa = PBXBuildFile; fileRef = II000013 /* CatppuccinColors.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -96,12 +97,13 @@
 		FF00001D /* MicPipeline.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MicPipeline.swift; sourceTree = "<group>"; };
 		FF00001E /* MeetingPipeline.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingPipeline.swift; sourceTree = "<group>"; };
 		FF00001F /* AudioConverter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioConverter.swift; sourceTree = "<group>"; };
-		FF000020 /* MeetingRecorderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingRecorderView.swift; sourceTree = "<group>"; };
+
 		GG000011 /* MeetingStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingStore.swift; sourceTree = "<group>"; };
 		GG000012 /* MeetingDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingDetailView.swift; sourceTree = "<group>"; };
 		HH000011 /* ModelPreloader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelPreloader.swift; sourceTree = "<group>"; };
 		II000011 /* RecordingToolbarButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingToolbarButton.swift; sourceTree = "<group>"; };
 		II000012 /* LiveTranscriptBanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveTranscriptBanner.swift; sourceTree = "<group>"; };
+		II000013 /* CatppuccinColors.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CatppuccinColors.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -225,7 +227,6 @@
 				FF000014 /* DualAudioEngine.swift */,
 				FF000015 /* MixedWAVRecorder.swift */,
 				FF000016 /* MergeEngine.swift */,
-				FF000020 /* MeetingRecorderView.swift */,
 				II000011 /* RecordingToolbarButton.swift */,
 				II000012 /* LiveTranscriptBanner.swift */,
 				HH000011 /* ModelPreloader.swift */,
@@ -278,6 +279,7 @@
 			isa = PBXGroup;
 			children = (
 				FF00001F /* AudioConverter.swift */,
+				II000013 /* CatppuccinColors.swift */,
 			);
 			path = Utils;
 			sourceTree = "<group>";
@@ -424,12 +426,13 @@
 				FF00000D /* MicPipeline.swift in Sources */,
 				FF00000E /* MeetingPipeline.swift in Sources */,
 				FF00000F /* AudioConverter.swift in Sources */,
-				FF000010 /* MeetingRecorderView.swift in Sources */,
+
 				GG000001 /* MeetingStore.swift in Sources */,
 				GG000002 /* MeetingDetailView.swift in Sources */,
 				HH000001 /* ModelPreloader.swift in Sources */,
 				II000001 /* RecordingToolbarButton.swift in Sources */,
 				II000002 /* LiveTranscriptBanner.swift in Sources */,
+				II000003 /* CatppuccinColors.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

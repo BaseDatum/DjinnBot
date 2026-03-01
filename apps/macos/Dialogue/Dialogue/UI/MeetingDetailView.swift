@@ -148,14 +148,11 @@ private struct MeetingTranscriptRow: View {
                 .foregroundStyle(.tertiary)
                 .frame(width: 52, alignment: .trailing)
 
-            // Speaker pill
+            // Speaker name
             Text(entry.speaker)
                 .font(.caption)
                 .fontWeight(.semibold)
-                .foregroundStyle(.white)
-                .padding(.horizontal, 6)
-                .padding(.vertical, 2)
-                .background(speakerColor(for: entry.speaker), in: Capsule())
+                .foregroundStyle(CatppuccinSpeaker.labelColor(for: entry.speaker))
 
             // Text
             Text(entry.text)
@@ -168,7 +165,8 @@ private struct MeetingTranscriptRow: View {
         .padding(.horizontal, 4)
         .background(
             RoundedRectangle(cornerRadius: 4)
-                .fill(speakerColor(for: entry.speaker).opacity(0.05))
+                .fill(CatppuccinSpeaker.color(for: entry.speaker)
+                    .opacity(CatppuccinSpeaker.rowBackgroundOpacity))
         )
     }
 
@@ -176,14 +174,5 @@ private struct MeetingTranscriptRow: View {
         let minutes = Int(time) / 60
         let seconds = Int(time) % 60
         return String(format: "%d:%02d", minutes, seconds)
-    }
-
-    private func speakerColor(for speaker: String) -> Color {
-        let localColors: [Color] = [.blue, .purple, .indigo, .mint]
-        let remoteColors: [Color] = [.orange, .pink, .red, .yellow]
-        let isLocal = speaker.hasPrefix("Local")
-        let palette = isLocal ? localColors : remoteColors
-        let hash = abs(speaker.hashValue)
-        return palette[hash % palette.count]
     }
 }

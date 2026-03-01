@@ -39,6 +39,7 @@ struct LiveTranscriptBanner: View {
     // MARK: - Auto Scroll
 
     @State private var autoScroll = true
+    @State private var scrollToBottomTrigger = 0
 
     var body: some View {
         VStack(spacing: 0) {
@@ -82,6 +83,9 @@ struct LiveTranscriptBanner: View {
 
     // MARK: - Expanded Content
 
+    /// ~6 lines of caption text tall.
+    private let expandedHeight: CGFloat = 120
+
     private var expandedContent: some View {
         VStack(spacing: 0) {
             if recorder.mergedSegments.isEmpty {
@@ -93,26 +97,69 @@ struct LiveTranscriptBanner: View {
                         .foregroundStyle(.secondary)
                 }
                 .frame(maxWidth: .infinity)
-                .frame(height: 60)
+                .frame(height: expandedHeight)
             } else {
-                ScrollViewReader { proxy in
-                    ScrollView {
-                        LazyVStack(alignment: .leading, spacing: 2) {
-                            ForEach(recorder.mergedSegments) { segment in
-                                BannerTranscriptRow(segment: segment)
-                                    .id(segment.id)
+                ZStack(alignment: .bottomTrailing) {
+                    ScrollViewReader { proxy in
+                        ScrollView {
+                            LazyVStack(alignment: .leading, spacing: 2) {
+                                ForEach(recorder.mergedSegments) { segment in
+                                    BannerTranscriptRow(segment: segment)
+                                        .id(segment.id)
+                                }
+                            }
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                        }
+                        .frame(height: expandedHeight)
+                        .onScrollPhaseChange { _, newPhase in
+                            // User initiated a scroll gesture — respect their intent
+                            if newPhase == .interacting {
+                                autoScroll = false
                             }
                         }
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 6)
+                        .onScrollGeometryChange(for: Bool.self) { geometry in
+                            // True when scrolled to (or very near) the bottom
+                            let distanceFromBottom = geometry.contentSize.height
+                                - geometry.contentOffset.y
+                                - geometry.containerSize.height
+                            return distanceFromBottom < 20
+                        } action: { _, isAtBottom in
+                            // If user scrolled back to the bottom naturally, resume
+                            if isAtBottom {
+                                autoScroll = true
+                            }
+                        }
+                        .onChange(of: recorder.mergedSegments.count) { _, _ in
+                            if autoScroll, let last = recorder.mergedSegments.last {
+                                withAnimation(.easeOut(duration: 0.15)) {
+                                    proxy.scrollTo(last.id, anchor: .bottom)
+                                }
+                            }
+                        }
+                        .onChange(of: scrollToBottomTrigger) { _, _ in
+                            if let last = recorder.mergedSegments.last {
+                                withAnimation(.easeOut(duration: 0.15)) {
+                                    proxy.scrollTo(last.id, anchor: .bottom)
+                                }
+                            }
+                            autoScroll = true
+                        }
                     }
-                    .frame(maxHeight: 150)
-                    .onChange(of: recorder.mergedSegments.count) { _, _ in
-                        if autoScroll, let last = recorder.mergedSegments.last {
-                            withAnimation(.easeOut(duration: 0.15)) {
-                                proxy.scrollTo(last.id, anchor: .bottom)
-                            }
+
+                    // Floating scroll-to-bottom button
+                    if !autoScroll {
+                        Button {
+                            scrollToBottomTrigger += 1
+                        } label: {
+                            Image(systemName: "arrow.down.circle.fill")
+                                .font(.system(size: 20))
+                                .foregroundStyle(.white.opacity(0.9))
+                                .shadow(radius: 2)
                         }
+                        .buttonStyle(.plain)
+                        .padding(8)
+                        .transition(.opacity)
                     }
                 }
             }
@@ -250,10 +297,7 @@ private struct BannerTranscriptRow: View {
             Text(segment.speaker)
                 .font(.caption2)
                 .fontWeight(.semibold)
-                .foregroundStyle(.white)
-                .padding(.horizontal, 4)
-                .padding(.vertical, 1)
-                .background(speakerColor(for: segment.speaker), in: Capsule())
+                .foregroundStyle(CatppuccinSpeaker.labelColor(for: segment.speaker))
 
             if segment.text.isEmpty {
                 Text("...")
@@ -270,6 +314,12 @@ private struct BannerTranscriptRow: View {
             Spacer(minLength: 0)
         }
         .padding(.vertical, 2)
+        .padding(.horizontal, 4)
+        .background(
+            RoundedRectangle(cornerRadius: 4)
+                .fill(CatppuccinSpeaker.color(for: segment.speaker)
+                    .opacity(CatppuccinSpeaker.rowBackgroundOpacity))
+        )
     }
 
     private func formatTimestamp(_ time: TimeInterval) -> String {
@@ -277,14 +327,4 @@ private struct BannerTranscriptRow: View {
         let seconds = Int(time) % 60
         return String(format: "%d:%02d", minutes, seconds)
     }
-}
-
-/// Deterministic color from speaker label hash.
-private func speakerColor(for speaker: String) -> Color {
-    let localColors: [Color] = [.blue, .purple, .indigo, .mint]
-    let remoteColors: [Color] = [.orange, .pink, .red, .yellow]
-    let isLocal = speaker.hasPrefix("Local")
-    let palette = isLocal ? localColors : remoteColors
-    let hash = abs(speaker.hashValue)
-    return palette[hash % palette.count]
 }
