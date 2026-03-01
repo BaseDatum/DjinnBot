@@ -221,7 +221,8 @@ export class ApiClient {
 
   async listSteps(runId: string, status?: string): Promise<StepExecution[]> {
     const query = status ? `?status=${encodeURIComponent(status)}` : '';
-    return this.request<StepExecution[]>('GET', `/v1/runs/${runId}/steps${query}`);
+    const raw = await this.request<any[]>('GET', `/v1/runs/${runId}/steps${query}`);
+    return raw.map(s => this.mapStepResponse(s));
   }
 
   async getStep(runId: string, stepId: string): Promise<StepExecution | null> {
@@ -229,8 +230,29 @@ export class ApiClient {
     return steps.find(s => s.stepId === stepId) ?? null;
   }
 
+  /** Map snake_case server response to camelCase StepExecution. */
+  private mapStepResponse(s: any): StepExecution {
+    return {
+      id: s.id,
+      runId: s.run_id ?? s.runId,
+      stepId: s.step_id ?? s.stepId,
+      agentId: s.agent_id ?? s.agentId,
+      status: s.status,
+      sessionId: s.session_id ?? s.sessionId ?? null,
+      inputs: s.inputs ?? {},
+      outputs: s.outputs ?? {},
+      error: s.error ?? null,
+      retryCount: s.retry_count ?? s.retryCount ?? 0,
+      maxRetries: s.max_retries ?? s.maxRetries ?? 3,
+      startedAt: s.started_at ?? s.startedAt ?? null,
+      completedAt: s.completed_at ?? s.completedAt ?? null,
+      humanContext: s.human_context ?? s.humanContext ?? null,
+    };
+  }
+
   async createStep(runId: string, req: CreateStepRequest): Promise<StepExecution> {
-    return this.request<StepExecution>('POST', `/v1/runs/${runId}/steps`, req);
+    const raw = await this.request<any>('POST', `/v1/runs/${runId}/steps`, req);
+    return this.mapStepResponse(raw);
   }
 
   async updateStep(runId: string, stepId: string, updates: UpdateStepRequest): Promise<void> {
