@@ -149,6 +149,56 @@ final class VoiceLabelerViewModel: ObservableObject {
         }
     }
     
+    // MARK: - Segment Reassignment
+    
+    /// Reassign a single transcript segment to a different speaker.
+    func reassignSegment(_ segment: TranscriptSegment, toSpeakerID destinationID: String) {
+        guard let destSpeaker = detectedSpeakers.first(where: { $0.id == destinationID }) else { return }
+        
+        // Find current owner
+        let currentOwnerID = detectedSpeakers.first(where: { $0.segmentIDs.contains(segment.id) })?.id
+        
+        // Remove segment from current owner's list
+        if let ownerID = currentOwnerID,
+           let ownerIdx = detectedSpeakers.firstIndex(where: { $0.id == ownerID }) {
+            detectedSpeakers[ownerIdx].segmentIDs.removeAll { $0 == segment.id }
+        }
+        
+        // Add segment to destination speaker's list
+        if let destIdx = detectedSpeakers.firstIndex(where: { $0.id == destinationID }) {
+            if !detectedSpeakers[destIdx].segmentIDs.contains(segment.id) {
+                detectedSpeakers[destIdx].segmentIDs.append(segment.id)
+            }
+        }
+        
+        // Update the segment's speaker label and color in the recording
+        let colorIndex = destSpeaker.colorIndex
+        if let segIdx = recording.segments.firstIndex(where: { $0.id == segment.id }) {
+            recording.segments[segIdx].speakerLabel = destSpeaker.label
+            recording.segments[segIdx].speakerProfileID = destSpeaker.profileID
+            recording.segments[segIdx].speakerColorIndex = colorIndex
+        }
+        
+        // Also update in the diarization service's segment map
+        if let ownerID = currentOwnerID {
+            RecordingCoordinator.shared.diarizationService.relinkSegment(
+                id: segment.id,
+                from: ownerID,
+                to: destinationID
+            )
+        }
+        
+        persistRecording()
+        
+        let fromLabel = currentOwnerID.flatMap { id in detectedSpeakers.first(where: { $0.id == id })?.label } ?? "unknown"
+        saveMessage = "Reassigned segment to \(destSpeaker.label)"
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+            if self?.saveMessage == "Reassigned segment to \(destSpeaker.label)" {
+                self?.saveMessage = nil
+            }
+        }
+    }
+    
     /// Whether the selected speaker has a usable embedding for voice profile creation.
     var selectedSpeakerHasEmbedding: Bool {
         guard let speakerID = selectedSpeakerID,
@@ -387,36 +437,8 @@ struct PostMeetingVoiceLabelerView: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 6) {
                     ForEach(viewModel.selectedSpeakerSegments) { segment in
-                        HStack(alignment: .top, spacing: 8) {
-                            // Play button
-                            Button {
-                                viewModel.playSegment(segment)
-                            } label: {
-                                Image(systemName: "play.circle")
-                                    .foregroundStyle(.secondary)
-                            }
-                            .buttonStyle(.borderless)
-                            .frame(width: 20)
-                            
-                            // Timestamp
-                            Text(formatTime(segment.startTime))
-                                .font(.caption)
-                                .foregroundStyle(.tertiary)
-                                .frame(width: 50, alignment: .trailing)
-                            
-                            // Speaker label
-                            Text(segment.speakerLabel)
-                                .font(.caption)
-                                .fontWeight(.semibold)
-                                .foregroundStyle(speakerColor(for: segment.speakerColorIndex))
-                                .frame(width: 80, alignment: .trailing)
-                            
-                            // Text
-                            Text(segment.text)
-                                .font(.body)
-                                .textSelection(.enabled)
-                        }
-                        .padding(.horizontal, 12)
+                        segmentRow(segment)
+                            .padding(.horizontal, 12)
                     }
                 }
                 .padding(.vertical, 8)
@@ -433,6 +455,78 @@ struct PostMeetingVoiceLabelerView: View {
                 .padding(.horizontal, 12)
                 .padding(.vertical, 6)
                 .background(.ultraThinMaterial)
+            }
+        }
+    }
+    
+    // MARK: - Segment Row
+    
+    private func segmentRow(_ segment: TranscriptSegment) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            // Play button
+            Button {
+                viewModel.playSegment(segment)
+            } label: {
+                Image(systemName: "play.circle")
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.borderless)
+            .frame(width: 20)
+            
+            // Timestamp
+            Text(formatTime(segment.startTime))
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+                .frame(width: 50, alignment: .trailing)
+            
+            // Speaker label (clickable to reassign)
+            Menu {
+                ForEach(viewModel.detectedSpeakers) { speaker in
+                    Button {
+                        viewModel.reassignSegment(segment, toSpeakerID: speaker.id)
+                    } label: {
+                        HStack {
+                            Circle()
+                                .fill(speakerColor(for: speaker.colorIndex))
+                                .frame(width: 6, height: 6)
+                            Text(speaker.label)
+                            if segment.speakerLabel == speaker.label {
+                                Image(systemName: "checkmark")
+                            }
+                        }
+                    }
+                    .disabled(segment.speakerLabel == speaker.label)
+                }
+            } label: {
+                Text(segment.speakerLabel)
+                    .font(.caption)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(speakerColor(for: segment.speakerColorIndex))
+            }
+            .menuStyle(.borderlessButton)
+            .frame(width: 80, alignment: .trailing)
+            .help("Click to reassign this segment to a different speaker")
+            
+            // Text
+            Text(segment.text)
+                .font(.body)
+                .textSelection(.enabled)
+        }
+        .contextMenu {
+            Menu("Reassign to...") {
+                ForEach(viewModel.detectedSpeakers) { speaker in
+                    Button {
+                        viewModel.reassignSegment(segment, toSpeakerID: speaker.id)
+                    } label: {
+                        HStack {
+                            Text(speaker.label)
+                            if segment.speakerLabel == speaker.label {
+                                Image(systemName: "checkmark")
+                            }
+                        }
+                    }
+                    .disabled(segment.speakerLabel == speaker.label)
+                }
             }
         }
     }
