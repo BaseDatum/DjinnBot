@@ -79,6 +79,19 @@ export class AgentLifecycleManager {
     const now = Date.now();
     data.lifecycle.lastActivity = now;
 
+    // Deduplicate — don't re-queue or re-execute if this exact (runId, stepId) is
+    // already being worked on or is already in the queue. Prevents cascading duplicate
+    // execution from replayed Redis stream events after engine restart.
+    if (data.lifecycle.currentWork?.runId === runId && data.lifecycle.currentWork?.stepId === stepId) {
+      console.log(`[AgentLifecycleManager] Skipping duplicate work: ${stepId} for ${runId} (already executing)`);
+      return { queued: false, position: -1, executing: false };
+    }
+    const isDuplicate = data.lifecycle.queue.some(q => q.runId === runId && q.stepId === stepId);
+    if (isDuplicate) {
+      console.log(`[AgentLifecycleManager] Skipping duplicate queue: ${stepId} for ${runId} (already queued)`);
+      return { queued: false, position: -1, executing: false };
+    }
+
     if (data.lifecycle.state !== 'idle') {
       const position = data.lifecycle.queue.length + 1;
       data.lifecycle.queue.push({ runId, pipelineId, stepId, queuedAt: now });

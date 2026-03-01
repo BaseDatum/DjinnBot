@@ -45,6 +45,8 @@ export interface AgentExecutorConfig {
   getAgentDefaultModel?: (agentId: string) => string | undefined;
   /** Lookup a run-level model override (set via dashboard task execution). */
   getRunModelOverride?: (runId: string) => string | undefined | Promise<string | undefined>;
+  /** Lookup a step's current status (for idempotency checks before execution). */
+  getStepStatus?: (runId: string, stepId: string) => string | undefined | Promise<string | undefined>;
 }
 
 // Abstract interface for running agent sessions
@@ -139,6 +141,7 @@ export class AgentExecutor {
   private sessionPersister?: import('../sessions/session-persister.js').SessionPersister;
   private getAgentDefaultModel?: (agentId: string) => string | undefined;
   private getRunModelOverride?: AgentExecutorConfig['getRunModelOverride'];
+  private getStepStatus?: AgentExecutorConfig['getStepStatus'];
 
   constructor(config: AgentExecutorConfig) {
     this.eventBus = config.eventBus;
@@ -163,6 +166,7 @@ export class AgentExecutor {
     this.sessionPersister = config.sessionPersister;
     this.getAgentDefaultModel = config.getAgentDefaultModel;
     this.getRunModelOverride = config.getRunModelOverride;
+    this.getStepStatus = config.getStepStatus;
   }
 
   /** Get the underlying agent runner (for pulse sessions, etc.) */
@@ -271,8 +275,11 @@ export class AgentExecutor {
   /**
    * Subscribe to a specific run channel.
    * Called when a new run starts.
+   *
+   * @param fromId - Redis stream ID to start reading from. Use the latest stream
+   *   ID for resumed runs to avoid replaying historical STEP_QUEUED events.
    */
-  subscribeToRun(runId: string, pipelineId: string): void {
+  subscribeToRun(runId: string, pipelineId: string, fromId?: string): void {
     if (this.unsubscribers.has(runId)) {
       return; // Already subscribed
     }
@@ -280,7 +287,7 @@ export class AgentExecutor {
     const channel = runChannel(runId);
     const unsubscribe = this.eventBus.subscribe(channel, async (event) => {
       await this.handleEvent(runId, pipelineId, event);
-    });
+    }, fromId ? { fromId } : undefined);
 
     this.unsubscribers.set(runId, unsubscribe);
     this.activeRuns.add(runId);
@@ -336,6 +343,21 @@ export class AgentExecutor {
     // Validate this event is for our run
     if (event.runId !== runId) {
       return;
+    }
+
+    // Idempotency guard — skip if the step is already completed or actively running.
+    // Prevents duplicate execution from replayed Redis stream events (e.g. after engine restart).
+    if (this.getStepStatus) {
+      try {
+        const status = await this.getStepStatus(event.runId, event.stepId);
+        if (status === 'completed' || status === 'running') {
+          console.log(`[AgentExecutor] Skipping step ${event.stepId} for run ${event.runId} — already ${status}`);
+          return;
+        }
+      } catch (err) {
+        // Non-fatal — proceed with execution if status check fails
+        console.warn(`[AgentExecutor] Failed to check step status, proceeding:`, (err as Error).message);
+      }
     }
 
     // Use lifecycle manager if available for concurrency control

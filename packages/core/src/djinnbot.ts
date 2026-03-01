@@ -338,6 +338,10 @@ export class DjinnBot {
       sessionPersister: this.sessionPersister,
       apiBaseUrl: config.apiUrl || process.env.DJINNBOT_API_URL || process.env.DJINNBOT_API_URL?.replace(/\/api\/?$/, '') || 'http://api:8000',
       getAgentDefaultModel: (agentId: string) => this.agentRegistry.get(agentId)?.config.model,
+      getStepStatus: async (runId: string, stepId: string) => {
+        const step = await this.store.getStep(runId, stepId);
+        return step?.status;
+      },
     });
   }
 
@@ -1728,8 +1732,10 @@ Start now.`;
       throw new Error(`Run ${runId} not found`);
     }
 
-    // Subscribe executor BEFORE resuming so it catches the first STEP_QUEUED event
-    this.executor.subscribeToRun(runId, run.pipelineId);
+    // Subscribe executor BEFORE resuming so it catches the first STEP_QUEUED event.
+    // Capture the latest stream ID so we don't replay old events from a previous attempt.
+    const latestStreamId = await this.eventBus.getLatestStreamId(runChannel(runId));
+    this.executor.subscribeToRun(runId, run.pipelineId, latestStreamId);
 
     // Subscribe Slack bridge if it's active
     if (this.slackBridge) {

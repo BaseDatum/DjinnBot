@@ -284,8 +284,14 @@ export class PipelineEngine {
       timestamp: now,
     });
 
-    // Subscribe to events for this run
-    this.subscribeToRun(runId);
+    // Subscribe to events for this run.
+    // IMPORTANT: Capture the latest stream ID BEFORE subscribing so we don't replay
+    // historical events (old STEP_COMPLETE/STEP_QUEUED from a previous attempt).
+    // We'll publish a fresh STEP_QUEUED below, which will be the first event we process.
+    // Also trim the stream to prevent unbounded growth from previous attempts.
+    const latestStreamId = await this.eventBus.getLatestStreamId(runChannel(runId));
+    await this.eventBus.trimStream(runChannel(runId), 50);
+    this.subscribeToRun(runId, { fromId: latestStreamId });
 
     // Find the right step to resume from:
     // 1. Look for any step in 'queued' or 'running' state (was interrupted)
@@ -333,14 +339,14 @@ export class PipelineEngine {
   }
 
   // Subscribe to events for a specific run
-  private subscribeToRun(runId: string): void {
+  private subscribeToRun(runId: string, options?: { fromId?: string }): void {
     if (this.unsubscribers.has(runId)) {
       return; // Already subscribed
     }
 
     const unsubscribe = this.eventBus.subscribe(runChannel(runId), async (event) => {
       await this.handleEvent(runId, event);
-    });
+    }, options);
 
     this.unsubscribers.set(runId, unsubscribe);
   }
@@ -869,6 +875,12 @@ export class PipelineEngine {
     const run = await this.store.getRun(runId);
     if (!run) return;
 
+    // Don't queue steps for runs that are no longer active (completed/failed/cancelled)
+    if (run.status === 'completed' || run.status === 'failed' || run.status === 'cancelled') {
+      console.log(`[PipelineEngine] Skipping queue for step ${stepId} — run ${runId} is ${run.status}`);
+      return;
+    }
+
     const pipeline = this.pipelines.get(run.pipelineId);
     if (!pipeline) return;
 
@@ -878,8 +890,15 @@ export class PipelineEngine {
       return;
     }
 
-    // Check if step already exists (retry case)
+    // Guard against re-queuing a step that is already running or completed.
+    // This prevents cascading duplicate execution from replayed events.
     let step = await this.store.getStep(runId, stepId);
+    if (step && (step.status === 'running' || step.status === 'completed')) {
+      console.log(`[PipelineEngine] Skipping queue for step ${stepId} — already ${step.status}`);
+      return;
+    }
+
+    // Check if step already exists (retry case)
     if (!step) {
       step = await this.store.createStep({
         id: `${runId}_${stepId}`,

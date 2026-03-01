@@ -93,12 +93,41 @@ export class ContainerRunner implements AgentRunner {
   private eventReceiver: EventReceiver;
   private config: ContainerRunnerConfig;
 
+  /**
+   * Per-runId mutex — ensures only one container lifecycle (create → run → destroy)
+   * is active at a time for a given runId. Prevents two concurrent steps from
+   * colliding on the shared container name `djinn-run-{runId}`.
+   */
+  private containerLocks = new Map<string, Promise<void>>();
+
   constructor(config: ContainerRunnerConfig) {
     this.config = config;
     this.redis = new Redis(config.redisUrl);
     this.containerManager = new ContainerManager(this.redis);
     this.commandSender = new CommandSender(this.redis);
     this.eventReceiver = new EventReceiver(() => new Redis(config.redisUrl));
+  }
+
+  /**
+   * Acquire a per-runId lock. The returned release function MUST be called in a
+   * finally block to avoid deadlocks.
+   */
+  private async acquireContainerLock(runId: string): Promise<() => void> {
+    // Wait for any existing lock on this runId to be released
+    while (this.containerLocks.has(runId)) {
+      await this.containerLocks.get(runId);
+    }
+
+    let releaseFn: () => void;
+    const lockPromise = new Promise<void>(resolve => {
+      releaseFn = resolve;
+    });
+    this.containerLocks.set(runId, lockPromise);
+
+    return () => {
+      this.containerLocks.delete(runId);
+      releaseFn!();
+    };
   }
 
   /** Map from provider_id → canonical env var name (imported from constants.ts) */
@@ -284,6 +313,11 @@ export class ContainerRunner implements AgentRunner {
     let eventHandler: ((evtRunId: string, msg: EventMessage) => void) | undefined;
     let statusHandler: ((evtRunId: string, msg: StatusMessage) => void) | undefined;
     let errorHandler: ((evtRunId: string, err: Error) => void) | undefined;
+
+    // Acquire per-runId container lock — ensures only one container lifecycle
+    // (create → run → destroy) is active at a time for this runId.
+    // Prevents concurrent steps from colliding on `djinn-run-{runId}`.
+    const releaseContainerLock = await this.acquireContainerLock(runId);
 
     try {
       // 1. Create container
@@ -634,6 +668,9 @@ export class ContainerRunner implements AgentRunner {
         console.error(`[ContainerRunner] Failed to stop container for run ${runId}:`, err);
       });
       this.config.onContainerEvent?.(runId, { type: 'CONTAINER_DESTROYED', timestamp: Date.now() });
+
+      // Release the per-runId container lock so the next step can proceed
+      releaseContainerLock();
     }
   }
 

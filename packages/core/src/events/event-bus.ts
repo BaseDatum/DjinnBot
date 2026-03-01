@@ -66,10 +66,14 @@ export class EventBus {
     return id ?? '';
   }
 
-  subscribe(channel: string, callback: (event: PipelineEvent) => void | Promise<void>): () => void {
+  subscribe(
+    channel: string,
+    callback: (event: PipelineEvent) => void | Promise<void>,
+    options?: { fromId?: string },
+  ): () => void {
     if (!this.subscriptions.has(channel)) {
       this.subscriptions.set(channel, new Set());
-      this.startListening(channel);
+      this.startListening(channel, options?.fromId);
     }
 
     const callbacks = this.subscriptions.get(channel)!;
@@ -84,14 +88,31 @@ export class EventBus {
     };
   }
 
-  private async startListening(channel: string): Promise<void> {
+  /**
+   * Get the latest stream ID for a channel (the ID of the most recent message).
+   * Returns '$' if the stream is empty or doesn't exist.
+   * Useful for subscribing from "now" without replaying history.
+   */
+  async getLatestStreamId(channel: string): Promise<string> {
+    try {
+      const result = await this.redis.xrevrange(channel, '+', '-', 'COUNT', 1);
+      if (Array.isArray(result) && result.length > 0) {
+        return result[0][0];
+      }
+    } catch {
+      // Stream doesn't exist or Redis error — fall through
+    }
+    return '$';
+  }
+
+  private async startListening(channel: string, fromId?: string): Promise<void> {
     const abortController = new AbortController();
     this.abortControllers.set(channel, abortController);
 
-    // Start from '0' to catch events published between subscribe() and first xread().
-    // This prevents a race where STEP_QUEUED is published before the listener loop starts.
-    // Duplicate delivery is safe — handlers are idempotent (AgentExecutor ignores non-STEP_QUEUED).
-    let lastId = '0';
+    // Default: start from '0' to catch events published between subscribe() and
+    // first xread(). For resumed runs, callers should pass fromId (e.g. the latest
+    // stream ID) to avoid replaying historical events that were already processed.
+    let lastId = fromId ?? '0';
 
     const listen = async (): Promise<void> => {
       while (!abortController.signal.aborted && this.isRunning) {
@@ -253,6 +274,19 @@ export class EventBus {
 
   async ack(channel: string, groupName: string, messageId: string): Promise<void> {
     await this.redis.xack(channel, groupName, messageId);
+  }
+
+  /**
+   * Trim a stream to keep only the most recent N entries.
+   * Useful for cleaning up stale events on run resume to prevent unbounded growth.
+   */
+  async trimStream(channel: string, maxLen: number = 100): Promise<number> {
+    try {
+      const result = await this.redis.xtrim(channel, 'MAXLEN', '~', maxLen);
+      return result;
+    } catch {
+      return 0;
+    }
   }
 
   async close(): Promise<void> {
