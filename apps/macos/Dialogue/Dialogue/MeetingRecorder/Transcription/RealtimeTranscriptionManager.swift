@@ -40,17 +40,29 @@ actor RealtimeTranscriptionManager {
 
     // MARK: - Setup
 
-    /// Prepare the SpeechAnalyzer pipeline: download assets if needed, create
-    /// the transcriber and analyzer, and prepare the audio format.
-    func prepare() async throws {
-        logger.info("[ASR] Preparing SpeechAnalyzer for \(self.streamType.rawValue) stream")
+    /// Prepare the SpeechAnalyzer pipeline.
+    ///
+    /// - Parameter assetsPreloaded: When `true`, skips the asset download check
+    ///   because `ModelPreloader` already confirmed assets are installed. When
+    ///   `false` (default), falls back to the original download-if-needed path.
+    /// - Parameter preloadedLocale: A locale already matched by `ModelPreloader`.
+    ///   If nil, locale matching is performed here.
+    func prepare(assetsPreloaded: Bool = false, preloadedLocale: Locale? = nil) async throws {
+        logger.info("[ASR] Preparing SpeechAnalyzer for \(self.streamType.rawValue) stream (assetsPreloaded: \(assetsPreloaded))")
 
         // 1. Match locale
-        guard let locale = await SpeechTranscriber.supportedLocale(equivalentTo: .current) else {
-            logger.error("[ASR] No supported locale for current locale \(Locale.current.identifier)")
-            throw TranscriptionError.unsupportedLocale
+        let locale: Locale
+        if let preloaded = preloadedLocale {
+            locale = preloaded
+            logger.info("[ASR] Using pre-matched locale: \(locale.identifier)")
+        } else {
+            guard let matched = await SpeechTranscriber.supportedLocale(equivalentTo: .current) else {
+                logger.error("[ASR] No supported locale for current locale \(Locale.current.identifier)")
+                throw TranscriptionError.unsupportedLocale
+            }
+            locale = matched
+            logger.info("[ASR] Matched locale: \(locale.identifier)")
         }
-        logger.info("[ASR] Matched locale: \(locale.identifier)")
 
         // 2. Create transcriber
         let newTranscriber = SpeechTranscriber(
@@ -60,20 +72,24 @@ actor RealtimeTranscriptionManager {
         self.transcriber = newTranscriber
         logger.info("[ASR] Created SpeechTranscriber")
 
-        // 3. Download assets if needed using assetInstallationRequest
-        logger.info("[ASR] Checking asset installation status...")
-        if let downloader = try await AssetInventory.assetInstallationRequest(supporting: [newTranscriber]) {
-            logger.info("[ASR] Assets need downloading. Starting downloadAndInstall()...")
-            await MainActor.run {
-                RealtimeTranscriptionManager.downloadProgress = downloader.progress
-            }
-            try await downloader.downloadAndInstall()
-            await MainActor.run {
-                RealtimeTranscriptionManager.downloadProgress = nil
-            }
-            logger.info("[ASR] Assets downloaded and installed")
+        // 3. Download assets if needed (skipped when pre-loaded)
+        if assetsPreloaded {
+            logger.info("[ASR] Assets pre-loaded by ModelPreloader; skipping download check")
         } else {
-            logger.info("[ASR] Assets already installed")
+            logger.info("[ASR] Checking asset installation status...")
+            if let downloader = try await AssetInventory.assetInstallationRequest(supporting: [newTranscriber]) {
+                logger.info("[ASR] Assets need downloading. Starting downloadAndInstall()...")
+                await MainActor.run {
+                    RealtimeTranscriptionManager.downloadProgress = downloader.progress
+                }
+                try await downloader.downloadAndInstall()
+                await MainActor.run {
+                    RealtimeTranscriptionManager.downloadProgress = nil
+                }
+                logger.info("[ASR] Assets downloaded and installed")
+            } else {
+                logger.info("[ASR] Assets already installed")
+            }
         }
 
         // 4. Get best audio format

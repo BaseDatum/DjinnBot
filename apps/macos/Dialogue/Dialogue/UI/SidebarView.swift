@@ -8,6 +8,7 @@ import UniformTypeIdentifiers
 /// The header bar, alerts, and sheets remain SwiftUI.
 struct SidebarView: View {
     @ObservedObject var documentManager: DocumentManager
+    @ObservedObject var meetingStore: MeetingStore = .shared
     var onSelectDocument: (URL) -> Void
     var onSelectHome: () -> Void = {}
 
@@ -22,6 +23,7 @@ struct SidebarView: View {
     @State private var showRenameAlert = false
 
     var onSelectMeetingRecorder: () -> Void = {}
+    var onSelectMeeting: (SavedMeeting) -> Void = { _ in }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -47,6 +49,13 @@ struct SidebarView: View {
                 },
                 onDeleteItem: { url in documentManager.deleteItem(at: url) }
             )
+
+            // MARK: - Meetings Section
+            if !meetingStore.meetings.isEmpty {
+                Divider()
+                meetingsHeader
+                MeetingsListView(meetings: meetingStore.meetings, onSelect: onSelectMeeting)
+            }
         }
         .frame(minWidth: 200, idealWidth: 240, maxWidth: 320)
         .alert("New Folder", isPresented: $showNewFolderAlert) {
@@ -121,6 +130,24 @@ struct SidebarView: View {
         .buttonStyle(.plain)
     }
 
+    private var meetingsHeader: some View {
+        HStack {
+            Text("Meetings")
+                .font(.headline)
+                .foregroundStyle(.secondary)
+            Spacer()
+            Button {
+                NSWorkspace.shared.open(meetingStore.rootFolder)
+            } label: {
+                Image(systemName: "folder").font(.body)
+            }
+            .buttonStyle(.borderless)
+            .frame(width: 24)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+    }
+
     private var headerView: some View {
         HStack {
             Text("Notes")
@@ -164,6 +191,41 @@ struct SidebarView: View {
         if panel.runModal() == .OK, let url = panel.url {
             documentManager.setRootFolder(url)
         }
+    }
+}
+
+// MARK: - MeetingsListView
+
+/// A simple SwiftUI list showing saved meetings in the sidebar.
+struct MeetingsListView: View {
+    let meetings: [SavedMeeting]
+    var onSelect: (SavedMeeting) -> Void
+
+    var body: some View {
+        List(meetings) { meeting in
+            Button {
+                onSelect(meeting)
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: meeting.hasTranscript ? "text.bubble" : "waveform")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .frame(width: 16)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(meeting.displayName)
+                            .font(.subheadline)
+                            .lineLimit(1)
+                        Text(meeting.date, style: .relative)
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        }
+        .listStyle(.sidebar)
     }
 }
 

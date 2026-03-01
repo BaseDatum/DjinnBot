@@ -34,6 +34,9 @@ struct ContentView: View {
                         },
                         onSelectMeetingRecorder: {
                             appState.openMeetingRecorder()
+                        },
+                        onSelectMeeting: { meeting in
+                            appState.openMeeting(meeting)
                         }
                     )
                 } detail: {
@@ -52,9 +55,15 @@ struct ContentView: View {
                             Text("Meeting Recorder requires macOS 26.0 or later.")
                                 .frame(minWidth: 500, minHeight: 400)
                         }
+                    case .meetingDetail(let meeting):
+                        MeetingDetailView(meeting: meeting)
+                            .frame(minWidth: 500, minHeight: 400)
                     }
                 }
                 .navigationSplitViewStyle(.balanced)
+
+                // App-wide status footer (model download progress, etc.)
+                StatusFooterView()
             }
             
             // Phase 3: Mouse tracking layer (invisible, covers the whole window)
@@ -92,7 +101,7 @@ struct ContentView: View {
         .onAppear {
             // Start on the Home screen; pre-load the most recent document
             // so it's ready when the user navigates to it.
-            if appState.currentFileURL == nil && appState.activeScreen == .editor {
+            if appState.currentFileURL == nil && appState.activeScreen.isEditor {
                 if let recent = documentManager.mostRecentDocument() {
                     appState.openDocument(at: recent)
                 } else {

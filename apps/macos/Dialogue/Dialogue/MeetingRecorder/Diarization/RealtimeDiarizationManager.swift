@@ -36,8 +36,11 @@ actor RealtimeDiarizationManager {
 
     // MARK: - Setup
 
-    /// Download models and initialise the Sortformer streaming diarizer.
-    func prepare() async throws {
+    /// Initialise the Sortformer streaming diarizer.
+    ///
+    /// - Parameter preloadedModels: Models already downloaded by `ModelPreloader`.
+    ///   If nil, falls back to downloading from HuggingFace (slow path).
+    func prepare(preloadedModels: SortformerModels? = nil) async throws {
         logger.info("Preparing SortformerDiarizer for \(self.streamType.rawValue) stream")
 
         let config = SortformerConfig.default
@@ -45,9 +48,14 @@ actor RealtimeDiarizationManager {
 
         let sortformerDiarizer = SortformerDiarizer(config: config)
 
-        // Download and load models from HuggingFace (cached after first run).
-        let models = try await SortformerModels.loadFromHuggingFace(config: config)
-        sortformerDiarizer.initialize(models: models)
+        if let models = preloadedModels {
+            logger.info("Using pre-loaded Sortformer models for \(self.streamType.rawValue)")
+            sortformerDiarizer.initialize(models: models)
+        } else {
+            logger.info("No pre-loaded models; downloading from HuggingFace (slow path)")
+            let models = try await SortformerModels.loadFromHuggingFace(config: config)
+            sortformerDiarizer.initialize(models: models)
+        }
 
         self.diarizer = sortformerDiarizer
         logger.info("SortformerDiarizer ready for \(self.streamType.rawValue) stream")

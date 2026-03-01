@@ -1,5 +1,6 @@
 import AVFoundation
 import CoreMedia
+import FluidAudio
 import Foundation
 import OSLog
 
@@ -36,18 +37,31 @@ final class RealtimePipeline: Sendable {
 
     // MARK: - Lifecycle
 
-    /// Prepare both ASR and diarization sub-systems (downloads models if needed).
+    /// Prepare both ASR and diarization sub-systems using pre-loaded models
+    /// from `ModelPreloader`.
+    ///
+    /// When `ModelPreloader.shared` has already downloaded models, this skips
+    /// all network operations and initializes instantly. Falls back to downloading
+    /// if pre-loaded models are unavailable.
     ///
     /// ASR preparation is best-effort: if speech assets are missing, diarization
     /// still runs and the WAV is still recorded. ASR can be retried later on the file.
     func prepare() async throws {
-        logger.info("Preparing \(self.streamType.rawValue) pipeline")
+        let preloader = await ModelPreloader.shared
+        let sortformerModels = await preloader.sortformerModels
+        let asrAssetsPreloaded = await preloader.asrAssetsInstalled
+        let asrLocale = await preloader.asrLocale
+
+        logger.info("Preparing \(self.streamType.rawValue) pipeline (preloaded ASR: \(asrAssetsPreloaded), preloaded diarization: \(sortformerModels != nil))")
 
         // Diarization is required; ASR is best-effort
-        async let diarizationResult: () = diarizationManager.prepare()
+        async let diarizationResult: () = diarizationManager.prepare(preloadedModels: sortformerModels)
 
         do {
-            try await transcriptionManager.prepare()
+            try await transcriptionManager.prepare(
+                assetsPreloaded: asrAssetsPreloaded,
+                preloadedLocale: asrLocale
+            )
             try await transcriptionManager.start()
             asrFeedHandle = await transcriptionManager.feedHandle
             asrAvailable = true

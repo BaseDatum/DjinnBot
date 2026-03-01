@@ -48,6 +48,9 @@
 		FF00000E /* MeetingPipeline.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF00001E /* MeetingPipeline.swift */; };
 		FF00000F /* AudioConverter.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF00001F /* AudioConverter.swift */; };
 		FF000010 /* MeetingRecorderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF000020 /* MeetingRecorderView.swift */; };
+		GG000001 /* MeetingStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = GG000011 /* MeetingStore.swift */; };
+		GG000002 /* MeetingDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = GG000012 /* MeetingDetailView.swift */; };
+		HH000001 /* ModelPreloader.swift in Sources */ = {isa = PBXBuildFile; fileRef = HH000011 /* ModelPreloader.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -92,6 +95,9 @@
 		FF00001E /* MeetingPipeline.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingPipeline.swift; sourceTree = "<group>"; };
 		FF00001F /* AudioConverter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioConverter.swift; sourceTree = "<group>"; };
 		FF000020 /* MeetingRecorderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingRecorderView.swift; sourceTree = "<group>"; };
+		GG000011 /* MeetingStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingStore.swift; sourceTree = "<group>"; };
+		GG000012 /* MeetingDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingDetailView.swift; sourceTree = "<group>"; };
+		HH000011 /* ModelPreloader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelPreloader.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -174,6 +180,7 @@
 			children = (
 				BB000015 /* KeychainManager.swift */,
 				BB000016 /* DocumentManager.swift */,
+				GG000011 /* MeetingStore.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -186,6 +193,7 @@
 				BB000018 /* SettingsView.swift */,
 				CC00001A /* StatusFooterView.swift */,
 				DD000017 /* BottomEdgeDetector.swift */,
+				GG000012 /* MeetingDetailView.swift */,
 			);
 			path = UI;
 			sourceTree = "<group>";
@@ -214,6 +222,7 @@
 				FF000015 /* MixedWAVRecorder.swift */,
 				FF000016 /* MergeEngine.swift */,
 				FF000020 /* MeetingRecorderView.swift */,
+				HH000011 /* ModelPreloader.swift */,
 				FF000031 /* Models */,
 				FF000032 /* Transcription */,
 				FF000033 /* Diarization */,
@@ -410,6 +419,9 @@
 				FF00000E /* MeetingPipeline.swift in Sources */,
 				FF00000F /* AudioConverter.swift in Sources */,
 				FF000010 /* MeetingRecorderView.swift in Sources */,
+				GG000001 /* MeetingStore.swift in Sources */,
+				GG000002 /* MeetingDetailView.swift in Sources */,
+				HH000001 /* ModelPreloader.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

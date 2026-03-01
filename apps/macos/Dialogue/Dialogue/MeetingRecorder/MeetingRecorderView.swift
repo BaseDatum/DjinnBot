@@ -7,12 +7,13 @@ import SwiftUI
 @available(macOS 26.0, *)
 struct MeetingRecorderView: View {
     @StateObject private var recorder = MeetingRecorderController()
+    @ObservedObject private var preloader = ModelPreloader.shared
     @State private var autoScroll = true
 
     var body: some View {
         VStack(spacing: 0) {
             // MARK: - Header / Controls
-            RecordingControlBar(recorder: recorder)
+            RecordingControlBar(recorder: recorder, modelsReady: preloader.state.isReady)
 
             Divider()
 
@@ -45,10 +46,17 @@ struct MeetingRecorderView: View {
                 .font(.title2)
                 .fontWeight(.semibold)
                 .foregroundStyle(.secondary)
-            Text("Press Record to start capturing audio.\nMeeting apps will be detected automatically.")
-                .font(.subheadline)
-                .foregroundStyle(.tertiary)
-                .multilineTextAlignment(.center)
+            if preloader.state.isReady {
+                Text("Press Record to start capturing audio.\nMeeting apps will be detected automatically.")
+                    .font(.subheadline)
+                    .foregroundStyle(.tertiary)
+                    .multilineTextAlignment(.center)
+            } else {
+                Text("Waiting for models to finish downloading...")
+                    .font(.subheadline)
+                    .foregroundStyle(.tertiary)
+                    .multilineTextAlignment(.center)
+            }
             Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -60,6 +68,7 @@ struct MeetingRecorderView: View {
 @available(macOS 26.0, *)
 private struct RecordingControlBar: View {
     @ObservedObject var recorder: MeetingRecorderController
+    var modelsReady: Bool
 
     var body: some View {
         HStack(spacing: 12) {
@@ -98,7 +107,7 @@ private struct RecordingControlBar: View {
             }
             .buttonStyle(.borderedProminent)
             .tint(recorder.isRecording ? .red : .accentColor)
-            .disabled(recorder.isStarting)
+            .disabled(recorder.isStarting || !modelsReady)
 
             // Duration
             if recorder.isRecording {

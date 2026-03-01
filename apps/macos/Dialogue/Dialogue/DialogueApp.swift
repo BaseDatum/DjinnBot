@@ -10,6 +10,13 @@ struct DialogueApp: App {
             ContentView()
                 .environmentObject(documentManager)
                 .environmentObject(appState)
+                .onAppear {
+                    // Pre-download ASR and diarization models at app launch
+                    // so recording can start instantly.
+                    if #available(macOS 26.0, *) {
+                        ModelPreloader.shared.preload()
+                    }
+                }
         }
         .commands {
             CommandGroup(replacing: .newItem) {
@@ -72,13 +79,23 @@ final class AppState: ObservableObject {
         case home
         case editor
         case meetingRecorder
+        case meetingDetail(SavedMeeting)
+
+        var isHome: Bool {
+            if case .home = self { return true }
+            return false
+        }
+        var isEditor: Bool {
+            if case .editor = self { return true }
+            return false
+        }
     }
 
     @Published var activeScreen: DetailScreen = .home
 
     /// Whether the Home screen is currently shown instead of the editor.
     var showHome: Bool {
-        get { activeScreen == .home }
+        get { activeScreen.isHome }
         set { if newValue { activeScreen = .home } }
     }
 
@@ -100,6 +117,12 @@ final class AppState: ObservableObject {
     func openMeetingRecorder() {
         saveCurrentDocument()
         activeScreen = .meetingRecorder
+    }
+
+    /// Navigate to view a saved meeting's transcript.
+    func openMeeting(_ meeting: SavedMeeting) {
+        saveCurrentDocument()
+        activeScreen = .meetingDetail(meeting)
     }
 
     func openDocument(at url: URL) {
