@@ -11,6 +11,7 @@ struct SettingsView: View {
     @State private var agentId: String = UserDefaults.standard.string(forKey: "chatAgentId") ?? "chieko"
     @State private var selectedASREngine: ASREngine = ASREngine.current
     @State private var isReloadingASR: Bool = false
+    @State private var settingsDebounceTask: Task<Void, Never>?
     
     @ObservedObject private var autoRecordSettings = AutoRecordSettings.shared
     @ObservedObject private var diarizationSettings = DiarizationSettings.shared
@@ -340,13 +341,13 @@ struct SettingsView: View {
                         .foregroundStyle(.tertiary)
                 }
                 .onChange(of: diarizationSettings.clusteringThreshold) { _, _ in
-                    RecordingCoordinator.shared.diarizationService.applySettings()
+                    debouncedApplySettings()
                 }
                 .onChange(of: diarizationSettings.minSpeechDuration) { _, _ in
-                    RecordingCoordinator.shared.diarizationService.applySettings()
+                    debouncedApplySettings()
                 }
                 .onChange(of: diarizationSettings.chunkDuration) { _, _ in
-                    RecordingCoordinator.shared.diarizationService.applySettings()
+                    debouncedApplySettings()
                 }
             }
 
@@ -464,6 +465,17 @@ struct SettingsView: View {
         }
     }
 
+    /// Debounce diarization settings changes: wait 500ms after the last slider
+    /// movement before reinitializing the diarizer (avoids reinit spam while dragging).
+    private func debouncedApplySettings() {
+        settingsDebounceTask?.cancel()
+        settingsDebounceTask = Task {
+            try? await Task.sleep(nanoseconds: 500_000_000) // 500ms
+            guard !Task.isCancelled else { return }
+            RecordingCoordinator.shared.diarizationService.applySettings()
+        }
+    }
+    
     private func testConnection() {
         testStatus = .testing
 

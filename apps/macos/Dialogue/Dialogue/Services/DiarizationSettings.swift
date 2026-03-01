@@ -52,15 +52,22 @@ final class DiarizationSettings: ObservableObject {
 
     // MARK: - Defaults (match FluidAudio DiarizerConfig.default)
 
-    /// Default clustering threshold (matches FluidAudio DiarizerConfig.default).
-    /// The SpeakerManager derives:
-    ///   speakerThreshold = clusteringThreshold * 1.2 (speaker assignment)
-    ///   embeddingThreshold = clusteringThreshold * 0.8 (embedding updates)
+    /// Default speaker clustering threshold (cosine distance).
+    /// Used directly as SpeakerManager.speakerThreshold — the maximum cosine
+    /// distance for assigning audio to an existing speaker cluster.
     ///
-    /// This threshold controls DIARIZATION (clustering unknown speakers), not
+    /// FluidAudio cosine distance interpretation:
+    ///   < 0.3  = Very high confidence match
+    ///   0.3-0.5 = Strong match
+    ///   0.5-0.7 = Threshold zone
+    ///   0.7-0.9 = Should create new speaker
+    ///   > 0.9  = Clearly different
+    ///
+    /// SpeakerManager default: 0.65. We use the same.
+    /// Note: this controls DIARIZATION (clustering unknown speakers), not
     /// identification (matching enrolled profiles). Identification uses
     /// VoiceProfileManager's strict cosine similarity > 0.75 threshold.
-    static let defaultThreshold: Double = 0.7
+    static let defaultThreshold: Double = 0.70
 
     /// Allowed range for the clustering threshold slider.
     /// Lower = more aggressive splitting, higher = more aggressive merging.
@@ -74,12 +81,12 @@ final class DiarizationSettings: ObservableObject {
     static let minSpeechDurationRange: ClosedRange<Double> = 0.3...3.0
     
     /// Default chunk duration in seconds.
-    /// FluidAudio reference: 10.0s — longer chunks give more context for
-    /// accurate embedding extraction; shorter chunks reduce latency.
-    static let defaultChunkDuration: Double = 10.0
+    /// FluidAudio streaming reference: 5.0s with 3.0s skip (2s overlap).
+    /// 5s balances speaker slot capacity (3 per chunk) with latency.
+    static let defaultChunkDuration: Double = 5.0
     
     /// Allowed range for chunk duration.
-    static let chunkDurationRange: ClosedRange<Double> = 5.0...30.0
+    static let chunkDurationRange: ClosedRange<Double> = 3.0...15.0
 
     // MARK: - Published Properties
 

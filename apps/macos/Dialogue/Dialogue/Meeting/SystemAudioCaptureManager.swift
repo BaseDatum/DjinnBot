@@ -84,6 +84,12 @@ final class SystemAudioCaptureManager: NSObject, ObservableObject {
         
         let stream = SCStream(filter: filter, configuration: config, delegate: nil)
         
+        // IMPORTANT: Register BOTH .audio and .screen output handlers.
+        // Even though we only need audio, SCStream's internal video queue
+        // requires a handler. Without one, it logs continuous errors:
+        //   "_SCStream_RemoteVideoQueueOperationHandlerWithError: stream output NOT found. Dropping frame"
+        // This can destabilize the stream and cause audio frames to be lost too.
+        try stream.addStreamOutput(self, type: .screen, sampleHandlerQueue: processingQueue)
         try stream.addStreamOutput(self, type: .audio, sampleHandlerQueue: processingQueue)
         try await stream.startCapture()
         
