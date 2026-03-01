@@ -7,16 +7,11 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		2476FEF4A8BFAFA7F0E26D21 /* MeetingMetadata.swift in Sources */ = {isa = PBXBuildFile; fileRef = 35D9910B05B21FBA3BB5A0F2 /* MeetingMetadata.swift */; };
-		845C2B1FA634AD2401309ED2 /* MeetingStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = BCE7F88EA3AEAF223956AEAA /* MeetingStore.swift */; };
-		84CDE22FAAD5A254F69DD74D /* CallDetectionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = E66D5B84E35DEF296ADFDFDA /* CallDetectionService.swift */; };
-		91C725E89387BA88C77D6495 /* DiarizationSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE4D349CB721D0A1E4F126DE /* DiarizationSettings.swift */; };
 		AA000001 /* DialogueApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000011 /* DialogueApp.swift */; };
 		AA000002 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000012 /* ContentView.swift */; };
 		AA000003 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = AA000013 /* Assets.xcassets */; };
 		AA000004 /* Preview Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = AA000014 /* Preview Assets.xcassets */; };
 		AA000005 /* index.html in Resources */ = {isa = PBXBuildFile; fileRef = AA000015 /* index.html */; };
-		B833E5E0BF871DDB66948A04 /* AutoRecordSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = C04D98C408AF336E64CF99AF /* AutoRecordSettings.swift */; };
 		BB000001 /* BlockNoteEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB000011 /* BlockNoteEditorView.swift */; };
 		BB000002 /* BridgeMessages.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB000012 /* BridgeMessages.swift */; };
 		BB000003 /* BlockNoteDocument.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB000013 /* BlockNoteDocument.swift */; };
@@ -25,20 +20,8 @@
 		BB000006 /* DocumentManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB000016 /* DocumentManager.swift */; };
 		BB000007 /* SidebarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB000017 /* SidebarView.swift */; };
 		BB000008 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB000018 /* SettingsView.swift */; };
-		CC000001 /* VoiceProfileManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC000011 /* VoiceProfileManager.swift */; };
-		CC000002 /* AudioEngineManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC000012 /* AudioEngineManager.swift */; };
-		CC000003 /* StreamingTranscriptionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC000013 /* StreamingTranscriptionService.swift */; };
-		CC000004 /* RealTimeDiarizationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC000014 /* RealTimeDiarizationService.swift */; };
-		CC000005 /* MeetingTranscript.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC000015 /* MeetingTranscript.swift */; };
-		CC000006 /* LiveRecordingPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC000016 /* LiveRecordingPanel.swift */; };
-		CC000007 /* PostMeetingVoiceLabeler.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC000017 /* PostMeetingVoiceLabeler.swift */; };
-		CC000008 /* FirstLaunchManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC000018 /* FirstLaunchManager.swift */; };
-		CC000009 /* VoiceEnrollmentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC000019 /* VoiceEnrollmentView.swift */; };
 		CC00000A /* StatusFooterView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC00001A /* StatusFooterView.swift */; };
 		CC00000C /* FluidAudio in Frameworks */ = {isa = PBXBuildFile; productRef = CC000082 /* FluidAudio */; };
-		CC00000D /* SystemAudioCaptureManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC00001B /* SystemAudioCaptureManager.swift */; };
-		CC00000E /* TranscriptionServiceProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC00001C /* TranscriptionServiceProtocol.swift */; };
-		CC00000F /* AppleSpeechTranscriptionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC00001D /* AppleSpeechTranscriptionService.swift */; };
 		CC000090 /* Speech.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = CC000091 /* Speech.framework */; settings = {ATTRIBUTES = (Weak, ); }; };
 		DD000001 /* ChatModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD000011 /* ChatModels.swift */; };
 		DD000002 /* StreamingChatService.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD000012 /* StreamingChatService.swift */; };
@@ -48,14 +31,10 @@
 		DD000006 /* FloatingChatToolbar.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD000016 /* FloatingChatToolbar.swift */; };
 		DD000007 /* BottomEdgeDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD000017 /* BottomEdgeDetector.swift */; };
 		DD000090 /* MarkdownUI in Frameworks */ = {isa = PBXBuildFile; productRef = DD000091 /* MarkdownUI */; };
-		E313ED036CF48C0F15E32055 /* AutoRecordingOrchestrator.swift in Sources */ = {isa = PBXBuildFile; fileRef = BBDA635A7ECFED2F1831FBC5 /* AutoRecordingOrchestrator.swift */; };
 		EE000001 /* HomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE000002 /* HomeView.swift */; };
-		F2DC36B2B51342FE1DB157D9 /* MeetingDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E27529169248C35593D80BA /* MeetingDetailView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		35D9910B05B21FBA3BB5A0F2 /* MeetingMetadata.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MeetingMetadata.swift; sourceTree = "<group>"; };
-		4E27529169248C35593D80BA /* MeetingDetailView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MeetingDetailView.swift; sourceTree = "<group>"; };
 		AA000010 /* Dialogue.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Dialogue.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		AA000011 /* DialogueApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DialogueApp.swift; sourceTree = "<group>"; };
 		AA000012 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
@@ -71,22 +50,7 @@
 		BB000016 /* DocumentManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DocumentManager.swift; sourceTree = "<group>"; };
 		BB000017 /* SidebarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarView.swift; sourceTree = "<group>"; };
 		BB000018 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
-		BBDA635A7ECFED2F1831FBC5 /* AutoRecordingOrchestrator.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AutoRecordingOrchestrator.swift; sourceTree = "<group>"; };
-		BCE7F88EA3AEAF223956AEAA /* MeetingStore.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MeetingStore.swift; sourceTree = "<group>"; };
-		C04D98C408AF336E64CF99AF /* AutoRecordSettings.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AutoRecordSettings.swift; sourceTree = "<group>"; };
-		CC000011 /* VoiceProfileManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceProfileManager.swift; sourceTree = "<group>"; };
-		CC000012 /* AudioEngineManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioEngineManager.swift; sourceTree = "<group>"; };
-		CC000013 /* StreamingTranscriptionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamingTranscriptionService.swift; sourceTree = "<group>"; };
-		CC000014 /* RealTimeDiarizationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RealTimeDiarizationService.swift; sourceTree = "<group>"; };
-		CC000015 /* MeetingTranscript.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingTranscript.swift; sourceTree = "<group>"; };
-		CC000016 /* LiveRecordingPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveRecordingPanel.swift; sourceTree = "<group>"; };
-		CC000017 /* PostMeetingVoiceLabeler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PostMeetingVoiceLabeler.swift; sourceTree = "<group>"; };
-		CC000018 /* FirstLaunchManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FirstLaunchManager.swift; sourceTree = "<group>"; };
-		CC000019 /* VoiceEnrollmentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceEnrollmentView.swift; sourceTree = "<group>"; };
 		CC00001A /* StatusFooterView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusFooterView.swift; sourceTree = "<group>"; };
-		CC00001B /* SystemAudioCaptureManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemAudioCaptureManager.swift; sourceTree = "<group>"; };
-		CC00001C /* TranscriptionServiceProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptionServiceProtocol.swift; sourceTree = "<group>"; };
-		CC00001D /* AppleSpeechTranscriptionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleSpeechTranscriptionService.swift; sourceTree = "<group>"; };
 		CC000091 /* Speech.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Speech.framework; path = System/Library/Frameworks/Speech.framework; sourceTree = SDKROOT; };
 		DD000011 /* ChatModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatModels.swift; sourceTree = "<group>"; };
 		DD000012 /* StreamingChatService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamingChatService.swift; sourceTree = "<group>"; };
@@ -95,8 +59,6 @@
 		DD000015 /* ChatPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatPanelView.swift; sourceTree = "<group>"; };
 		DD000016 /* FloatingChatToolbar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FloatingChatToolbar.swift; sourceTree = "<group>"; };
 		DD000017 /* BottomEdgeDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BottomEdgeDetector.swift; sourceTree = "<group>"; };
-		DE4D349CB721D0A1E4F126DE /* DiarizationSettings.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = DiarizationSettings.swift; sourceTree = "<group>"; };
-		E66D5B84E35DEF296ADFDFDA /* CallDetectionService.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CallDetectionService.swift; sourceTree = "<group>"; };
 		EE000002 /* HomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -132,8 +94,6 @@
 				BB000032 /* Services */,
 				BB000033 /* UI */,
 				DD000030 /* Chat */,
-				CC000034 /* Meeting */,
-				CC000035 /* Onboarding */,
 				AA000016 /* Dialogue.entitlements */,
 				AA000013 /* Assets.xcassets */,
 				AA000033 /* Preview Content */,
@@ -181,12 +141,6 @@
 			children = (
 				BB000015 /* KeychainManager.swift */,
 				BB000016 /* DocumentManager.swift */,
-				CC000011 /* VoiceProfileManager.swift */,
-				BCE7F88EA3AEAF223956AEAA /* MeetingStore.swift */,
-				C04D98C408AF336E64CF99AF /* AutoRecordSettings.swift */,
-				E66D5B84E35DEF296ADFDFDA /* CallDetectionService.swift */,
-				BBDA635A7ECFED2F1831FBC5 /* AutoRecordingOrchestrator.swift */,
-				DE4D349CB721D0A1E4F126DE /* DiarizationSettings.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -203,33 +157,7 @@
 			path = UI;
 			sourceTree = "<group>";
 		};
-		CC000034 /* Meeting */ = {
-			isa = PBXGroup;
-			children = (
-				CC000012 /* AudioEngineManager.swift */,
-				CC000013 /* StreamingTranscriptionService.swift */,
-				CC000014 /* RealTimeDiarizationService.swift */,
-				CC000015 /* MeetingTranscript.swift */,
-				CC000016 /* LiveRecordingPanel.swift */,
-				CC000017 /* PostMeetingVoiceLabeler.swift */,
-				CC00001B /* SystemAudioCaptureManager.swift */,
-				CC00001C /* TranscriptionServiceProtocol.swift */,
-				CC00001D /* AppleSpeechTranscriptionService.swift */,
-				35D9910B05B21FBA3BB5A0F2 /* MeetingMetadata.swift */,
-				4E27529169248C35593D80BA /* MeetingDetailView.swift */,
-			);
-			path = Meeting;
-			sourceTree = "<group>";
-		};
-		CC000035 /* Onboarding */ = {
-			isa = PBXGroup;
-			children = (
-				CC000018 /* FirstLaunchManager.swift */,
-				CC000019 /* VoiceEnrollmentView.swift */,
-			);
-			path = Onboarding;
-			sourceTree = "<group>";
-		};
+
 		DD000030 /* Chat */ = {
 			isa = PBXGroup;
 			children = (
@@ -362,19 +290,7 @@
 				BB000007 /* SidebarView.swift in Sources */,
 				EE000001 /* HomeView.swift in Sources */,
 				BB000008 /* SettingsView.swift in Sources */,
-				CC000001 /* VoiceProfileManager.swift in Sources */,
-				CC000002 /* AudioEngineManager.swift in Sources */,
-				CC000003 /* StreamingTranscriptionService.swift in Sources */,
-				CC000004 /* RealTimeDiarizationService.swift in Sources */,
-				CC000005 /* MeetingTranscript.swift in Sources */,
-				CC000006 /* LiveRecordingPanel.swift in Sources */,
-				CC000007 /* PostMeetingVoiceLabeler.swift in Sources */,
-				CC000008 /* FirstLaunchManager.swift in Sources */,
-				CC000009 /* VoiceEnrollmentView.swift in Sources */,
 				CC00000A /* StatusFooterView.swift in Sources */,
-				CC00000D /* SystemAudioCaptureManager.swift in Sources */,
-				CC00000E /* TranscriptionServiceProtocol.swift in Sources */,
-				CC00000F /* AppleSpeechTranscriptionService.swift in Sources */,
 				DD000001 /* ChatModels.swift in Sources */,
 				DD000002 /* StreamingChatService.swift in Sources */,
 				DD000003 /* ChatSessionManager.swift in Sources */,
@@ -382,13 +298,6 @@
 				DD000005 /* ChatPanelView.swift in Sources */,
 				DD000006 /* FloatingChatToolbar.swift in Sources */,
 				DD000007 /* BottomEdgeDetector.swift in Sources */,
-				2476FEF4A8BFAFA7F0E26D21 /* MeetingMetadata.swift in Sources */,
-				F2DC36B2B51342FE1DB157D9 /* MeetingDetailView.swift in Sources */,
-				845C2B1FA634AD2401309ED2 /* MeetingStore.swift in Sources */,
-				B833E5E0BF871DDB66948A04 /* AutoRecordSettings.swift in Sources */,
-				84CDE22FAAD5A254F69DD74D /* CallDetectionService.swift in Sources */,
-				E313ED036CF48C0F15E32055 /* AutoRecordingOrchestrator.swift in Sources */,
-				91C725E89387BA88C77D6495 /* DiarizationSettings.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

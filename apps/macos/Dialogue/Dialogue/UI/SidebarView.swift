@@ -8,10 +8,8 @@ import UniformTypeIdentifiers
 /// The header bar, alerts, and sheets remain SwiftUI.
 struct SidebarView: View {
     @ObservedObject var documentManager: DocumentManager
-    @ObservedObject var meetingStore: MeetingStore = .shared
     var onSelectDocument: (URL) -> Void
     var onSelectHome: () -> Void = {}
-    var onSelectMeeting: (MeetingMetadata) -> Void = { _ in }
 
     @State private var showNewFolderAlert = false
     @State private var newFolderName = ""
@@ -46,11 +44,6 @@ struct SidebarView: View {
                 },
                 onDeleteItem: { url in documentManager.deleteItem(at: url) }
             )
-            
-            Divider()
-            meetingsHeaderView
-            Divider()
-            meetingsListView
         }
         .frame(minWidth: 200, idealWidth: 240, maxWidth: 320)
         .alert("New Folder", isPresented: $showNewFolderAlert) {
@@ -134,59 +127,6 @@ struct SidebarView: View {
         .padding(.vertical, 8)
     }
 
-    // MARK: - Meetings Section
-    
-    private var meetingsHeaderView: some View {
-        HStack {
-            Text("Meetings")
-                .font(.headline)
-                .foregroundStyle(.secondary)
-            Spacer()
-            Menu {
-                Button("Open in Finder") {
-                    NSWorkspace.shared.open(meetingStore.meetingsDirectory)
-                }
-            } label: {
-                Image(systemName: "ellipsis.circle").font(.body)
-            }
-            .menuStyle(.borderlessButton)
-            .frame(width: 24)
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-    }
-    
-    private var meetingsListView: some View {
-        List {
-            if meetingStore.meetings.isEmpty {
-                Text("No recordings yet")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
-                    .listRowSeparator(.hidden)
-            } else {
-                ForEach(meetingStore.meetings) { meeting in
-                    MeetingRowView(meeting: meeting)
-                        .contentShape(Rectangle())
-                        .onTapGesture {
-                            onSelectMeeting(meeting)
-                        }
-                        .contextMenu {
-                            Button("Show in Finder") {
-                                let dir = meetingStore.meetingsDirectory
-                                    .appendingPathComponent(meeting.directoryName, isDirectory: true)
-                                NSWorkspace.shared.activateFileViewerSelecting([dir])
-                            }
-                            Divider()
-                            Button("Delete", role: .destructive) {
-                                meetingStore.deleteMeeting(meeting)
-                            }
-                        }
-                }
-            }
-        }
-        .listStyle(.sidebar)
-    }
-    
     // MARK: - Document Helpers
 
     private func createDocumentInFolder(_ folder: URL) {
@@ -461,7 +401,6 @@ class FileTreeViewController: NSViewController, NSOutlineViewDataSource, NSOutli
     // MARK: - Context menu
 
     func outlineView(_ outlineView: NSOutlineView, menuForItem item: Any?) -> NSMenu? {
-        // This delegate method doesn't exist by default — we use a custom approach
         return nil
     }
 
@@ -571,67 +510,6 @@ extension FileTreeViewController: NSMenuDelegate {
     @objc private func contextDelete(_ sender: Any) {
         guard let item = clickedItem else { return }
         onDeleteItem?(item.url)
-    }
-}
-
-// MARK: - MeetingRowView
-
-/// A single row in the sidebar meetings list.
-struct MeetingRowView: View {
-    let meeting: MeetingMetadata
-    
-    var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: sourceIcon)
-                .font(.body)
-                .foregroundStyle(sourceColor)
-                .frame(width: 16)
-            
-            VStack(alignment: .leading, spacing: 2) {
-                Text(meeting.displayName)
-                    .font(.caption)
-                    .fontWeight(.medium)
-                    .lineLimit(1)
-                
-                HStack(spacing: 4) {
-                    if let app = meeting.sourceApp {
-                        Text(app)
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
-                    Text(formatDuration(meeting.duration))
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                }
-            }
-        }
-        .padding(.vertical, 2)
-    }
-    
-    private var sourceIcon: String {
-        switch meeting.sourceType {
-        case .manual: return "record.circle"
-        case .call: return "phone"
-        case .meetingApp: return "video"
-        }
-    }
-    
-    private var sourceColor: Color {
-        switch meeting.sourceType {
-        case .manual: return .red
-        case .call: return .green
-        case .meetingApp: return .blue
-        }
-    }
-    
-    private func formatDuration(_ seconds: TimeInterval) -> String {
-        let h = Int(seconds) / 3600
-        let m = (Int(seconds) % 3600) / 60
-        let s = Int(seconds) % 60
-        if h > 0 {
-            return String(format: "%dh %02dm", h, m)
-        }
-        return String(format: "%dm %02ds", m, s)
     }
 }
 

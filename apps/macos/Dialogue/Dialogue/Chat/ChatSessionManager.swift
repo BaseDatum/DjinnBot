@@ -76,11 +76,16 @@ final class ChatSessionManager: ObservableObject {
     /// Create a new chat session with the Djinn backend.
     /// Pass nil for model to let the backend use the agent's configured default.
     func createNewSession(model: String? = nil) {
-        guard !isStartingSession else { return }
+        guard !isStartingSession else {
+            print("[Chat] createNewSession: already starting, skipping")
+            return
+        }
         guard KeychainManager.shared.hasAPIKey else {
+            print("[Chat] createNewSession: NO API KEY")
             errorMessage = "No API key configured. Open Settings to add one."
             return
         }
+        print("[Chat] createNewSession: starting session with agent=\(defaultAgentId) model=\(model ?? "default")")
         
         isStartingSession = true
         errorMessage = nil
@@ -172,7 +177,12 @@ final class ChatSessionManager: ObservableObject {
     /// This is the preferred entry point from the UI — it never races.
     func sendMessageWhenReady(_ text: String) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
+        guard !trimmed.isEmpty else {
+            print("[Chat] sendMessageWhenReady: empty text, returning")
+            return
+        }
+        
+        print("[Chat] sendMessageWhenReady: '\(trimmed.prefix(40))' activeSession=\(activeSession?.id ?? "nil") status=\(activeSession?.status.rawValue ?? "n/a")")
         
         if let session = activeSession, (session.status == .running || session.status == .ready) {
             if session.isGenerating {

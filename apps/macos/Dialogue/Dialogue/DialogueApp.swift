@@ -1,15 +1,9 @@
 import SwiftUI
-import UserNotifications
 
 @main
 struct DialogueApp: App {
     @StateObject private var documentManager = DocumentManager.shared
     @StateObject private var appState = AppState.shared
-
-    init() {
-        // Set up notification delegate for auto-recording actions
-        UNUserNotificationCenter.current().delegate = NotificationDelegate.shared
-    }
 
     var body: some Scene {
         WindowGroup {
@@ -30,26 +24,6 @@ struct DialogueApp: App {
                     appState.saveCurrentDocument()
                 }
                 .keyboardShortcut("s", modifiers: .command)
-            }
-            
-            // Phase 2: Meeting recording commands
-            CommandMenu("Meeting") {
-                Button("Start Recording") {
-                    NotificationCenter.default.post(name: .startMeetingRecording, object: nil)
-                }
-                .keyboardShortcut("r", modifiers: [.command, .shift])
-                
-                Divider()
-                
-                Button("Show All Meetings") {
-                    NotificationCenter.default.post(name: .showAllMeetings, object: nil)
-                }
-                
-                Divider()
-                
-                Button("Re-enroll Voice...") {
-                    NotificationCenter.default.post(name: .reenrollVoice, object: nil)
-                }
             }
             
             // Phase 3: AI Chat commands
@@ -93,16 +67,12 @@ final class AppState: ObservableObject {
 
     /// The file URL of the currently open document (nil if unsaved).
     @Published var currentFileURL: URL?
-    
-    /// The currently selected meeting (nil when viewing a document or home).
-    @Published var selectedMeeting: MeetingMetadata?
 
     private init() {}
 
     /// Navigate to the Home screen.
     func navigateHome() {
         saveCurrentDocument()
-        selectedMeeting = nil
         showHome = true
     }
 
@@ -117,15 +87,6 @@ final class AppState: ObservableObject {
         }
         currentDocument = BlockNoteDocument(file: file)
         currentFileURL = url
-        selectedMeeting = nil
-        showHome = false
-    }
-    
-    /// Open a meeting in the detail view.
-    func openMeeting(_ meeting: MeetingMetadata) {
-        saveCurrentDocument()
-        currentFileURL = nil
-        selectedMeeting = meeting
         showHome = false
     }
 
@@ -146,16 +107,8 @@ final class AppState: ObservableObject {
 // MARK: - Notification Names
 
 extension Notification.Name {
-    static let startMeetingRecording = Notification.Name("dialogue.startMeetingRecording")
-    static let reenrollVoice = Notification.Name("dialogue.reenrollVoice")
-    
     // Phase 3: Chat panel notifications
     static let toggleChatPanel = Notification.Name("dialogue.toggleChatPanel")
     static let newChatSession = Notification.Name("dialogue.newChatSession")
     static let closeChatPanel = Notification.Name("dialogue.closeChatPanel")
-    
-    // Phase 4: Auto-recording notifications
-    static let showAllMeetings = Notification.Name("dialogue.showAllMeetings")
-    static let autoRecordingStarted = Notification.Name("dialogue.autoRecordingStarted")
-    static let autoRecordingStopped = Notification.Name("dialogue.autoRecordingStopped")
 }
