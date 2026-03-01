@@ -31,15 +31,27 @@ struct ContentView: View {
                         },
                         onSelectHome: {
                             appState.navigateHome()
+                        },
+                        onSelectMeetingRecorder: {
+                            appState.openMeetingRecorder()
                         }
                     )
                 } detail: {
-                    if appState.showHome {
+                    switch appState.activeScreen {
+                    case .home:
                         HomeView()
                             .frame(minWidth: 500, minHeight: 400)
-                    } else {
+                    case .editor:
                         BlockNoteEditorView(document: appState.currentDocument)
                             .frame(minWidth: 500, minHeight: 400)
+                    case .meetingRecorder:
+                        if #available(macOS 26.0, *) {
+                            MeetingRecorderView()
+                                .frame(minWidth: 500, minHeight: 400)
+                        } else {
+                            Text("Meeting Recorder requires macOS 26.0 or later.")
+                                .frame(minWidth: 500, minHeight: 400)
+                        }
                     }
                 }
                 .navigationSplitViewStyle(.balanced)
@@ -80,7 +92,7 @@ struct ContentView: View {
         .onAppear {
             // Start on the Home screen; pre-load the most recent document
             // so it's ready when the user navigates to it.
-            if appState.currentFileURL == nil && !appState.showHome {
+            if appState.currentFileURL == nil && appState.activeScreen == .editor {
                 if let recent = documentManager.mostRecentDocument() {
                     appState.openDocument(at: recent)
                 } else {

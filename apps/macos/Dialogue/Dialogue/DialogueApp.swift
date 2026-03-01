@@ -26,6 +26,14 @@ struct DialogueApp: App {
                 .keyboardShortcut("s", modifiers: .command)
             }
             
+            // Meeting Recorder
+            CommandMenu("Meeting") {
+                Button("Meeting Recorder") {
+                    AppState.shared.openMeetingRecorder()
+                }
+                .keyboardShortcut("r", modifiers: [.command, .shift])
+            }
+
             // Phase 3: AI Chat commands
             CommandMenu("AI Chat") {
                 Button("Toggle Chat Panel") {
@@ -59,8 +67,20 @@ struct DialogueApp: App {
 final class AppState: ObservableObject {
     static let shared = AppState()
 
+    /// Which screen is currently shown in the detail area.
+    enum DetailScreen {
+        case home
+        case editor
+        case meetingRecorder
+    }
+
+    @Published var activeScreen: DetailScreen = .home
+
     /// Whether the Home screen is currently shown instead of the editor.
-    @Published var showHome: Bool = true
+    var showHome: Bool {
+        get { activeScreen == .home }
+        set { if newValue { activeScreen = .home } }
+    }
 
     /// The document currently loaded in the editor.
     @Published var currentDocument: BlockNoteDocument = .init()
@@ -73,7 +93,13 @@ final class AppState: ObservableObject {
     /// Navigate to the Home screen.
     func navigateHome() {
         saveCurrentDocument()
-        showHome = true
+        activeScreen = .home
+    }
+
+    /// Navigate to the Meeting Recorder screen.
+    func openMeetingRecorder() {
+        saveCurrentDocument()
+        activeScreen = .meetingRecorder
     }
 
     func openDocument(at url: URL) {
@@ -87,7 +113,7 @@ final class AppState: ObservableObject {
         }
         currentDocument = BlockNoteDocument(file: file)
         currentFileURL = url
-        showHome = false
+        activeScreen = .editor
     }
 
     func createAndOpenNewDocument(in folder: URL? = nil) {

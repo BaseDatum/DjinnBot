@@ -21,9 +21,12 @@ struct SidebarView: View {
     @State private var renameText = ""
     @State private var showRenameAlert = false
 
+    var onSelectMeetingRecorder: () -> Void = {}
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             homeButton
+            meetingRecorderButton
             Divider()
             headerView
             Divider()
@@ -96,6 +99,23 @@ struct SidebarView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var meetingRecorderButton: some View {
+        Button(action: onSelectMeetingRecorder) {
+            HStack(spacing: 6) {
+                Image(systemName: "waveform.circle")
+                    .font(.body)
+                Text("Meeting Recorder")
+                    .font(.subheadline)
+            }
+            .foregroundStyle(.primary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

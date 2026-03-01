@@ -8,7 +8,7 @@ import Foundation
 /// - Session status polling
 ///
 /// Uses the same API key stored in KeychainManager (shared with BlockNote AI).
-final class StreamingChatService {
+final class StreamingChatService: @unchecked Sendable {
     static let shared = StreamingChatService()
     
     /// Base URL for the Djinn API (stored in UserDefaults, configurable in Settings).
@@ -267,7 +267,7 @@ final class StreamingChatService {
 // MARK: - SSE Stream Delegate
 
 /// URLSession delegate that parses raw SSE bytes into DjinnSSEEvent values.
-private class SSEStreamDelegate: NSObject, URLSessionDataDelegate {
+private final class SSEStreamDelegate: NSObject, URLSessionDataDelegate, @unchecked Sendable {
     private let onEvent: (DjinnSSEEvent) -> Void
     private var buffer = ""
     

@@ -32,6 +32,22 @@
 		DD000007 /* BottomEdgeDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD000017 /* BottomEdgeDetector.swift */; };
 		DD000090 /* MarkdownUI in Frameworks */ = {isa = PBXBuildFile; productRef = DD000091 /* MarkdownUI */; };
 		EE000001 /* HomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE000002 /* HomeView.swift */; };
+		FF000001 /* MeetingRecorderController.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF000011 /* MeetingRecorderController.swift */; };
+		FF000002 /* TimelineManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF000012 /* TimelineManager.swift */; };
+		FF000003 /* MeetingAppDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF000013 /* MeetingAppDetector.swift */; };
+		FF000004 /* DualAudioEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF000014 /* DualAudioEngine.swift */; };
+		FF000005 /* MixedWAVRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF000015 /* MixedWAVRecorder.swift */; };
+		FF000006 /* MergeEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF000016 /* MergeEngine.swift */; };
+		FF000007 /* TaggedSegment.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF000017 /* TaggedSegment.swift */; };
+		FF000008 /* SpeakerProfile.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF000018 /* SpeakerProfile.swift */; };
+		FF000009 /* RecordingMetadata.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF000019 /* RecordingMetadata.swift */; };
+		FF00000A /* RealtimeTranscriptionManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF00001A /* RealtimeTranscriptionManager.swift */; };
+		FF00000B /* RealtimeDiarizationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF00001B /* RealtimeDiarizationManager.swift */; };
+		FF00000C /* RealtimePipeline.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF00001C /* RealtimePipeline.swift */; };
+		FF00000D /* MicPipeline.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF00001D /* MicPipeline.swift */; };
+		FF00000E /* MeetingPipeline.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF00001E /* MeetingPipeline.swift */; };
+		FF00000F /* AudioConverter.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF00001F /* AudioConverter.swift */; };
+		FF000010 /* MeetingRecorderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF000020 /* MeetingRecorderView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -60,6 +76,22 @@
 		DD000016 /* FloatingChatToolbar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FloatingChatToolbar.swift; sourceTree = "<group>"; };
 		DD000017 /* BottomEdgeDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BottomEdgeDetector.swift; sourceTree = "<group>"; };
 		EE000002 /* HomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
+		FF000011 /* MeetingRecorderController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingRecorderController.swift; sourceTree = "<group>"; };
+		FF000012 /* TimelineManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimelineManager.swift; sourceTree = "<group>"; };
+		FF000013 /* MeetingAppDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingAppDetector.swift; sourceTree = "<group>"; };
+		FF000014 /* DualAudioEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DualAudioEngine.swift; sourceTree = "<group>"; };
+		FF000015 /* MixedWAVRecorder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MixedWAVRecorder.swift; sourceTree = "<group>"; };
+		FF000016 /* MergeEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MergeEngine.swift; sourceTree = "<group>"; };
+		FF000017 /* TaggedSegment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaggedSegment.swift; sourceTree = "<group>"; };
+		FF000018 /* SpeakerProfile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerProfile.swift; sourceTree = "<group>"; };
+		FF000019 /* RecordingMetadata.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingMetadata.swift; sourceTree = "<group>"; };
+		FF00001A /* RealtimeTranscriptionManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RealtimeTranscriptionManager.swift; sourceTree = "<group>"; };
+		FF00001B /* RealtimeDiarizationManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RealtimeDiarizationManager.swift; sourceTree = "<group>"; };
+		FF00001C /* RealtimePipeline.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RealtimePipeline.swift; sourceTree = "<group>"; };
+		FF00001D /* MicPipeline.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MicPipeline.swift; sourceTree = "<group>"; };
+		FF00001E /* MeetingPipeline.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingPipeline.swift; sourceTree = "<group>"; };
+		FF00001F /* AudioConverter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioConverter.swift; sourceTree = "<group>"; };
+		FF000020 /* MeetingRecorderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingRecorderView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -94,6 +126,7 @@
 				BB000032 /* Services */,
 				BB000033 /* UI */,
 				DD000030 /* Chat */,
+				FF000030 /* MeetingRecorder */,
 				AA000016 /* Dialogue.entitlements */,
 				AA000013 /* Assets.xcassets */,
 				AA000033 /* Preview Content */,
@@ -169,6 +202,69 @@
 				DD000016 /* FloatingChatToolbar.swift */,
 			);
 			path = Chat;
+			sourceTree = "<group>";
+		};
+		FF000030 /* MeetingRecorder */ = {
+			isa = PBXGroup;
+			children = (
+				FF000011 /* MeetingRecorderController.swift */,
+				FF000012 /* TimelineManager.swift */,
+				FF000013 /* MeetingAppDetector.swift */,
+				FF000014 /* DualAudioEngine.swift */,
+				FF000015 /* MixedWAVRecorder.swift */,
+				FF000016 /* MergeEngine.swift */,
+				FF000020 /* MeetingRecorderView.swift */,
+				FF000031 /* Models */,
+				FF000032 /* Transcription */,
+				FF000033 /* Diarization */,
+				FF000034 /* Pipelines */,
+				FF000035 /* Utils */,
+			);
+			path = MeetingRecorder;
+			sourceTree = "<group>";
+		};
+		FF000031 /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				FF000017 /* TaggedSegment.swift */,
+				FF000018 /* SpeakerProfile.swift */,
+				FF000019 /* RecordingMetadata.swift */,
+			);
+			path = Models;
+			sourceTree = "<group>";
+		};
+		FF000032 /* Transcription */ = {
+			isa = PBXGroup;
+			children = (
+				FF00001A /* RealtimeTranscriptionManager.swift */,
+			);
+			path = Transcription;
+			sourceTree = "<group>";
+		};
+		FF000033 /* Diarization */ = {
+			isa = PBXGroup;
+			children = (
+				FF00001B /* RealtimeDiarizationManager.swift */,
+			);
+			path = Diarization;
+			sourceTree = "<group>";
+		};
+		FF000034 /* Pipelines */ = {
+			isa = PBXGroup;
+			children = (
+				FF00001C /* RealtimePipeline.swift */,
+				FF00001D /* MicPipeline.swift */,
+				FF00001E /* MeetingPipeline.swift */,
+			);
+			path = Pipelines;
+			sourceTree = "<group>";
+		};
+		FF000035 /* Utils */ = {
+			isa = PBXGroup;
+			children = (
+				FF00001F /* AudioConverter.swift */,
+			);
+			path = Utils;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -298,6 +394,22 @@
 				DD000005 /* ChatPanelView.swift in Sources */,
 				DD000006 /* FloatingChatToolbar.swift in Sources */,
 				DD000007 /* BottomEdgeDetector.swift in Sources */,
+				FF000001 /* MeetingRecorderController.swift in Sources */,
+				FF000002 /* TimelineManager.swift in Sources */,
+				FF000003 /* MeetingAppDetector.swift in Sources */,
+				FF000004 /* DualAudioEngine.swift in Sources */,
+				FF000005 /* MixedWAVRecorder.swift in Sources */,
+				FF000006 /* MergeEngine.swift in Sources */,
+				FF000007 /* TaggedSegment.swift in Sources */,
+				FF000008 /* SpeakerProfile.swift in Sources */,
+				FF000009 /* RecordingMetadata.swift in Sources */,
+				FF00000A /* RealtimeTranscriptionManager.swift in Sources */,
+				FF00000B /* RealtimeDiarizationManager.swift in Sources */,
+				FF00000C /* RealtimePipeline.swift in Sources */,
+				FF00000D /* MicPipeline.swift in Sources */,
+				FF00000E /* MeetingPipeline.swift in Sources */,
+				FF00000F /* AudioConverter.swift in Sources */,
+				FF000010 /* MeetingRecorderView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -356,7 +468,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
@@ -412,7 +524,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				SDKROOT = macosx;
@@ -503,7 +615,7 @@
 			repositoryURL = "https://github.com/FluidInference/FluidAudio.git";
 			requirement = {
 				kind = upToNextMajorVersion;
-				minimumVersion = 0.7.9;
+				minimumVersion = 0.12.1;
 			};
 		};
 		DD000080 /* XCRemoteSwiftPackageReference "swift-markdown-ui" */ = {

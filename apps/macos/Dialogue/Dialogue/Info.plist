@@ -22,7 +22,9 @@
 		</dict>
 	</array>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Dialogue needs microphone access to record and transcribe meetings with speaker identification.</string>
+	<string>MeetingRecorder needs microphone access for local speaker capture and transcription.</string>
+	<key>NSAudioCaptureUsageDescription</key>
+	<string>MeetingRecorder needs audio capture to record meeting app audio from Zoom, Teams, and other conferencing apps.</string>
 	<key>NSAppleEventsUsageDescription</key>
 	<string>Dialogue uses Accessibility to detect active meeting tabs in your browser for automatic call recording.</string>
 	<key>UTExportedTypeDeclarations</key>
