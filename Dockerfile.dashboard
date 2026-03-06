@@ -1,0 +1,51 @@
+# Build stage - uses the CI runner's native arch ($BUILDPLATFORM) so native npm
+# binaries (esbuild, rollup) don't need QEMU emulation. The output is just
+# static files (HTML/CSS/JS), so the nginx runtime stage can be any platform.
+ARG BUILDPLATFORM
+FROM --platform=$BUILDPLATFORM node:20-alpine AS builder
+
+WORKDIR /build
+
+# VITE_API_URL is baked in at build time.
+# Pass via: docker build --build-arg VITE_API_URL=http://your-api-host:8000
+# Defaults to empty string (relative paths, nginx proxy fallback).
+ARG VITE_API_URL=""
+ENV VITE_API_URL=$VITE_API_URL
+
+# Version injected at build time by CI (git tag)
+ARG BUILD_VERSION=dev
+ENV VITE_APP_VERSION=$BUILD_VERSION
+
+# Copy root workspace files for dependency resolution
+COPY package.json package-lock.json ./
+COPY packages/dashboard/package.json ./packages/dashboard/
+
+# Install all deps then force-install rollup musl binary for amd64.
+# npm has a known bug with optional deps (npm/cli#4828) - the separate
+# --force install ensures the native binary actually lands in node_modules.
+RUN npm install && \
+    npm install --force @rollup/rollup-linux-x64-musl 2>/dev/null; \
+    ls node_modules/@rollup/ || true
+
+# Copy dashboard source
+COPY packages/dashboard ./packages/dashboard
+
+# Build (VITE_API_URL is read by vite.config.ts via process.env)
+RUN npm run build -w @djinnbot/dashboard
+
+# Production stage
+FROM nginx:alpine
+
+# Version injected at build time by CI (git tag)
+ARG BUILD_VERSION=dev
+ENV DJINNBOT_BUILD_VERSION=${BUILD_VERSION}
+
+COPY --from=builder /build/packages/dashboard/dist /usr/share/nginx/html
+COPY packages/dashboard/nginx.conf /etc/nginx/conf.d/default.conf
+COPY packages/dashboard/entrypoint.sh /docker-entrypoint.sh
+RUN chmod +x /docker-entrypoint.sh
+EXPOSE 80
+
+# Inject runtime config (VITE_API_URL) at container startup — no rebuild needed
+# for custom domains. See packages/dashboard/entrypoint.sh for details.
+ENTRYPOINT ["/docker-entrypoint.sh"]

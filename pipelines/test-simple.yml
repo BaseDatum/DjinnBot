@@ -1,0 +1,44 @@
+# Simple test pipeline — validates Phase 3 agent runtime
+id: test-simple
+name: Simple Test Pipeline
+version: 1.0.0
+description: Two-step pipeline to validate tool-based agent execution
+
+defaults:
+  model: openrouter/minimax/minimax-m2.5
+  tools: []
+  maxRetries: 1
+  timeout: 120
+
+agents:
+  - id: finn
+    name: Finn (Architect)
+    persona: agents/finn
+    model: openrouter/minimax/minimax-m2.5
+    tools: []
+
+steps:
+  - id: ANALYZE
+    agent: finn
+    input: |
+      Analyze this simple task and produce a brief plan.
+      
+      Task: {{task_description}}
+      
+      Produce a short 3-5 bullet point plan. Use the `complete` tool when done.
+    outputs:
+      - analysis
+      - plan
+    onComplete: SUMMARIZE
+
+  - id: SUMMARIZE
+    agent: finn
+    input: |
+      Summarize the analysis into a single paragraph.
+      
+      Analysis: {{analysis}}
+      Plan: {{plan}}
+      
+      Write a concise summary. Use the `complete` tool when done.
+    outputs:
+      - summary

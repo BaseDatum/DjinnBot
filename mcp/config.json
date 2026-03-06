@@ -1,0 +1,55 @@
+{
+  "mcpServers": {
+    "github": {
+      "command": "/usr/local/bin/github-mcp-server",
+      "args": [
+        "stdio",
+        "--read-only",
+        "--toolsets",
+        "context,repos,issues"
+      ],
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_TOKEN}"
+      }
+    },
+    "time": {
+      "command": "uvx",
+      "args": [
+        "mcp-server-time",
+        "--local-timezone=Europe/Lisbon"
+      ]
+    },
+    "grokipedia": {
+      "command": "uvx",
+      "args": [
+        "grokipedia-mcp"
+      ]
+    },
+    "fetch": {
+      "command": "npx",
+      "args": [
+        "mcp-fetch-server"
+      ],
+      "env": {
+        "DEFAULT_LIMIT": "50000"
+      }
+    },
+    "scrapling": {
+      "command": "uvx",
+      "args": [
+        "scrapling",
+        "mcp"
+      ]
+    },
+    "osint-tools": {
+      "command": "python3",
+      "args": [
+        "/mcp/osint_tools_mcp_server.py"
+      ],
+      "env": {
+        "PYTHONUNBUFFERED": "1",
+        "OSINT_OUTPUT_DIR": "/jfs/osint-outputs"
+      }
+    }
+  }
+}

@@ -1,0 +1,478 @@
+# Stage 0a: Build libsignal_jni.so for aarch64 Linux from Rust source.
+#
+# The upstream libsignal-client jar ships native libs for x86_64 Linux, macOS
+# (both archs) and Windows — but NOT aarch64 Linux. Without this lib the
+# GraalVM native binary prints "Missing required native library dependency:
+# libsignal-client" and exits immediately.
+#
+# We build only the JNI crate (libsignal-jni) in release mode for the host
+# aarch64-unknown-linux-gnu target.  On amd64 this stage is a no-op (the
+# pre-built release already bundles the lib).
+FROM rust:slim-bookworm AS libsignal-builder
+
+ARG TARGETARCH
+ARG LIBSIGNAL_VERSION=0.87.0
+
+RUN if [ "$TARGETARCH" = "arm64" ]; then \
+      apt-get update && apt-get install -y --no-install-recommends \
+        git protobuf-compiler libprotobuf-dev cmake make clang pkg-config && \
+      rm -rf /var/lib/apt/lists/* ; \
+    fi
+
+RUN if [ "$TARGETARCH" = "arm64" ]; then \
+      rustup toolchain install nightly-2025-09-24 && \
+      rustup default nightly-2025-09-24 ; \
+    fi
+
+RUN if [ "$TARGETARCH" = "arm64" ]; then \
+      git clone --depth 1 --branch v${LIBSIGNAL_VERSION} \
+        https://github.com/signalapp/libsignal.git /libsignal && \
+      cd /libsignal && \
+      CARGO_PROFILE_RELEASE_DEBUG=1 \
+      RUSTFLAGS="--cfg aes_armv8 --cfg tokio_unstable" \
+        cargo build -p libsignal-jni --release --target aarch64-unknown-linux-gnu && \
+      cp target/aarch64-unknown-linux-gnu/release/libsignal_jni.so \
+         /libsignal_jni_aarch64.so ; \
+    else \
+      touch /libsignal_jni_aarch64.so ; \
+    fi
+
+
+# Stage 0b: signal-cli native binary builder (arm64 only — amd64 uses pre-built release)
+FROM ghcr.io/graalvm/graalvm-community:21 AS signal-cli-builder
+
+ARG TARGETARCH
+ARG SIGNAL_CLI_VERSION=0.13.24
+
+# Copy the aarch64 libsignal_jni built from source (no-op on amd64)
+COPY --from=libsignal-builder /libsignal_jni_aarch64.so /tmp/libsignal_jni_aarch64.so
+
+# On arm64 there is no pre-built native binary, so compile from source.
+# On amd64 this stage produces a dummy file (the real binary is downloaded later).
+#
+# The GraalVM image ships *-static packages that pin exact dependency versions.
+# When repo packages are newer, microdnf can't resolve the conflict.
+# --nobest allows installing older compatible versions instead of failing.
+RUN if [ "$TARGETARCH" = "arm64" ]; then \
+      microdnf install -y --nobest git findutils tar gzip gcc glibc-devel zlib-devel unzip zip curl && \
+      git clone --depth 1 --branch v${SIGNAL_CLI_VERSION} \
+        https://github.com/AsamK/signal-cli.git /build && \
+      # Inject the aarch64 native lib into the libsignal-client jar so
+      # GraalVM's native-image bundles it as a resource.
+      # First, compileJava to force Gradle to download all dependency jars.
+      cd /build && ./gradlew --no-daemon compileJava && \
+      echo "[signal-cli-builder] Looking for libsignal-client jar..." && \
+      find /root/.gradle -name 'libsignal-client-*.jar' | head -5 && \
+      JARPATH=$(find /root/.gradle/caches -name 'libsignal-client-*.jar' ! -name '*testing*' -print -quit) && \
+      if [ -z "$JARPATH" ]; then echo "ERROR: libsignal-client jar not found in gradle cache" && exit 1; fi && \
+      echo "[signal-cli-builder] Injecting libsignal_jni_aarch64.so into ${JARPATH}" && \
+      cp /tmp/libsignal_jni_aarch64.so /tmp/libsignal_jni.so && \
+      cd /tmp && jar uf "${JARPATH}" libsignal_jni.so libsignal_jni_aarch64.so && \
+      echo "[signal-cli-builder] Verifying injection..." && \
+      jar tf "${JARPATH}" | grep signal_jni && \
+      # Apply JNI config fix for libsignal internal.PreKeyStore (upstream #1919).
+      # The v0.13.24 tag was cut before this fix; the official amd64 binary was re-uploaded with it.
+      # Download the fixed jni-config.json from the post-fix commit on master.
+      cd /build && \
+      curl -fsSL "https://raw.githubusercontent.com/AsamK/signal-cli/d9f5a573cdaeb52cb28a477fbe7d558005b7d1f6/graalvm-config-dir/jni-config.json" \
+        -o graalvm-config-dir/jni-config.json && \
+      echo "[signal-cli-builder] Applied JNI config fix (internal.PreKeyStore)" && \
+      ./gradlew --no-daemon nativeCompile ; \
+    else \
+      mkdir -p /build/build/native/nativeCompile && \
+      touch /build/build/native/nativeCompile/signal-cli ; \
+    fi
+
+# Stage 1: TypeScript Builder
+FROM node:22-slim AS ts-builder
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
+    ca-certificates \
+    build-essential \
+    cmake \
+    g++ \
+    python3 \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /build
+
+# Copy root workspace files for dependency resolution
+COPY package.json package-lock.json tsconfig.base.json .npmrc ./
+COPY packages/core/package.json ./packages/core/
+COPY packages/slack/package.json ./packages/slack/
+COPY packages/signal/package.json ./packages/signal/
+COPY packages/whatsapp/package.json ./packages/whatsapp/
+COPY packages/telegram/package.json ./packages/telegram/
+COPY packages/discord/package.json ./packages/discord/
+COPY packages/code-graph/package.json ./packages/code-graph/
+
+# Install all deps (workspace resolution needs root context)
+RUN npm install --include=dev
+
+# Install bun (still needed for some tooling)
+RUN npm install -g bun
+
+# Copy source
+COPY packages/core ./packages/core
+COPY packages/slack ./packages/slack
+COPY packages/signal ./packages/signal
+COPY packages/whatsapp ./packages/whatsapp
+COPY packages/telegram ./packages/telegram
+COPY packages/discord ./packages/discord
+COPY packages/code-graph ./packages/code-graph
+
+# Build TypeScript (clean dist first; code-graph before core since core depends on it)
+RUN rm -rf packages/core/dist packages/slack/dist packages/signal/dist packages/whatsapp/dist packages/telegram/dist packages/discord/dist packages/code-graph/dist
+RUN npm run build -w @djinnbot/code-graph
+RUN npm run build -w @djinnbot/core
+RUN npm run build -w @djinnbot/slack
+RUN npm run build -w @djinnbot/signal
+RUN npm run build -w @djinnbot/whatsapp
+RUN npm run build -w @djinnbot/telegram
+RUN npm run build -w @djinnbot/discord
+
+# Stage 2: Production Runtime
+FROM debian:bookworm-slim
+
+WORKDIR /app
+
+# SYSTEM PACKAGES - Everything a Linux engineering beast would want
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    # Python ecosystem
+    python3 \
+    python3-pip \
+    python3-venv \
+    python3-dev \
+    # Build tools
+    build-essential \
+    cmake \
+    ninja-build \
+    pkg-config \
+    autoconf \
+    automake \
+    libtool \
+    # Version control
+    git \
+    git-lfs \
+    # Shell & terminal
+    bash \
+    zsh \
+    tmux \
+    screen \
+    # Core utilities
+    coreutils \
+    findutils \
+    grep \
+    sed \
+    gawk \
+    # Network tools
+    curl \
+    wget \
+    httpie \
+    netcat-openbsd \
+    socat \
+    dnsutils \
+    iputils-ping \
+    net-tools \
+    iproute2 \
+    openssh-client \
+    rsync \
+    # Text processing & JSON
+    jq \
+    xmlstarlet \
+    # Compression
+    zip \
+    unzip \
+    gzip \
+    bzip2 \
+    xz-utils \
+    tar \
+    p7zip-full \
+    # File utilities
+    file \
+    tree \
+    less \
+    vim-tiny \
+    nano \
+    # Process & system monitoring
+    htop \
+    procps \
+    lsof \
+    strace \
+    # Crypto & SSL
+    openssl \
+    gnupg \
+    ca-certificates \
+    # Database clients
+    sqlite3 \
+    postgresql-client \
+    redis-tools \
+    # Image processing (for agents that work with images)
+    imagemagick \
+    # PDF tools
+    poppler-utils \
+    # FUSE — required for JuiceFS mount inside the engine container
+    fuse3 \
+    # Misc development
+    make \
+    patch \
+    diffutils \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install JuiceFS CE client — the engine mounts JuiceFS directly so that
+# pre-created subdirectories (e.g. /cookies/{agentId}) are written through
+# the real FUSE filesystem, not just the raw Docker named volume.
+RUN ARCH=$(dpkg --print-architecture) && \
+    JFS_VERSION="1.3.1" && \
+    curl -fsSL "https://github.com/juicedata/juicefs/releases/download/v${JFS_VERSION}/juicefs-${JFS_VERSION}-linux-${ARCH}.tar.gz" -o /tmp/juicefs.tar.gz && \
+    tar -xzf /tmp/juicefs.tar.gz -C /usr/local/bin juicefs && \
+    chmod +x /usr/local/bin/juicefs && \
+    rm /tmp/juicefs.tar.gz
+
+# Install Node.js 22 via NodeSource
+RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
+    apt-get install -y --no-install-recommends nodejs && \
+    rm -rf /var/lib/apt/lists/*
+
+# Install Go 1.23+ (detect architecture)
+RUN ARCH=$(uname -m) && \
+    if [ "$ARCH" = "x86_64" ]; then \
+        GO_ARCH="amd64"; \
+    elif [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then \
+        GO_ARCH="arm64"; \
+    else \
+        GO_ARCH="amd64"; \
+    fi && \
+    curl -fsSL "https://go.dev/dl/go1.23.5.linux-${GO_ARCH}.tar.gz" -o /tmp/go.tar.gz && \
+    tar -C /usr/local -xzf /tmp/go.tar.gz && \
+    rm /tmp/go.tar.gz
+
+# Set PATH for Go
+ENV PATH="/usr/local/go/bin:${PATH}"
+ENV GOPATH="/root/go"
+ENV PATH="${GOPATH}/bin:${PATH}"
+
+# MODERN CLI TOOLS (not in apt or need newer versions)
+
+# Detect architecture for downloads
+ARG TARGETARCH
+
+# Install Docker CLI + Compose plugin (for self-update via Docker socket)
+RUN install -m 0755 -d /etc/apt/keyrings && \
+    curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc && \
+    chmod a+r /etc/apt/keyrings/docker.asc && \
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian bookworm stable" | \
+      tee /etc/apt/sources.list.d/docker.list > /dev/null && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends docker-ce-cli docker-compose-plugin && \
+    rm -rf /var/lib/apt/lists/*
+
+# Install GitHub CLI (gh)
+RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg && \
+    chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg && \
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | tee /etc/apt/sources.list.d/github-cli.list > /dev/null && \
+    apt-get update && apt-get install -y gh && rm -rf /var/lib/apt/lists/*
+
+# Install yq (YAML processor, like jq for YAML)
+RUN ARCH=$(dpkg --print-architecture) && \
+    curl -fsSL "https://github.com/mikefarah/yq/releases/latest/download/yq_linux_${ARCH}" -o /usr/local/bin/yq && \
+    chmod +x /usr/local/bin/yq
+
+# Install ripgrep (rg) - available in apt
+RUN apt-get update && apt-get install -y --no-install-recommends ripgrep && rm -rf /var/lib/apt/lists/*
+
+# Install fd (faster find) - available in apt as fd-find
+RUN apt-get update && apt-get install -y --no-install-recommends fd-find && \
+    ln -sf /usr/lib/cargo/bin/fd /usr/bin/fd && \
+    rm -rf /var/lib/apt/lists/*
+
+# Install bat (better cat) - available in apt as bat
+RUN apt-get update && apt-get install -y --no-install-recommends bat && \
+    ln -sf /usr/bin/batcat /usr/bin/bat && \
+    rm -rf /var/lib/apt/lists/*
+
+# Install fzf (fuzzy finder)
+RUN ARCH=$(dpkg --print-architecture) && \
+    curl -fsSL "https://github.com/junegunn/fzf/releases/download/v0.56.3/fzf-0.56.3-linux_${ARCH}.tar.gz" -o /tmp/fzf.tar.gz && \
+    tar -xzf /tmp/fzf.tar.gz -C /usr/bin && \
+    rm /tmp/fzf.tar.gz
+
+# Install delta (better git diff)
+RUN ARCH=$(dpkg --print-architecture) && \
+    if [ "$ARCH" = "amd64" ]; then DELTA_ARCH="x86_64-unknown-linux-gnu"; \
+    else DELTA_ARCH="aarch64-unknown-linux-gnu"; fi && \
+    curl -fsSL "https://github.com/dandavison/delta/releases/download/0.18.2/delta-0.18.2-${DELTA_ARCH}.tar.gz" -o /tmp/delta.tar.gz && \
+    tar -xzf /tmp/delta.tar.gz -C /tmp && \
+    cp /tmp/delta-*/delta /usr/local/bin/ && \
+    rm -rf /tmp/delta.tar.gz /tmp/delta-*
+
+# Install eza (modern ls replacement)
+RUN ARCH=$(dpkg --print-architecture) && \
+    if [ "$ARCH" = "amd64" ]; then EZA_ARCH="x86_64"; else EZA_ARCH="aarch64"; fi && \
+    curl -fsSL "https://github.com/eza-community/eza/releases/download/v0.20.14/eza_${EZA_ARCH}-unknown-linux-gnu.tar.gz" -o /tmp/eza.tar.gz && \
+    tar -xzf /tmp/eza.tar.gz -C /usr/local/bin && \
+    rm /tmp/eza.tar.gz
+
+# Install dust (better du)
+RUN ARCH=$(dpkg --print-architecture) && \
+    if [ "$ARCH" = "amd64" ]; then DUST_ARCH="x86_64-unknown-linux-gnu"; \
+    else DUST_ARCH="aarch64-unknown-linux-gnu"; fi && \
+    curl -fsSL "https://github.com/bootandy/dust/releases/download/v1.1.1/dust-v1.1.1-${DUST_ARCH}.tar.gz" -o /tmp/dust.tar.gz && \
+    tar -xzf /tmp/dust.tar.gz -C /tmp && \
+    cp /tmp/dust-*/dust /usr/local/bin/ && \
+    rm -rf /tmp/dust.tar.gz /tmp/dust-*
+
+# Alias python → python3 (agents/LLMs frequently use bare "python")
+RUN ln -sf /usr/bin/python3 /usr/bin/python
+
+# Install uv (fast Python package manager — agents use it to install pytest, dependencies, etc.)
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+ENV PATH="/root/.local/bin:${PATH}"
+
+# Install Rust/Cargo (for agents to use cargo install)
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal
+ENV PATH="/root/.cargo/bin:${PATH}"
+
+# Install signal-cli (native binary for amd64, compiled from source for arm64)
+ARG SIGNAL_CLI_VERSION=0.13.24
+RUN ARCH=$(dpkg --print-architecture) && \
+    if [ "$ARCH" = "amd64" ]; then \
+      curl -fsSL "https://github.com/AsamK/signal-cli/releases/download/v${SIGNAL_CLI_VERSION}/signal-cli-${SIGNAL_CLI_VERSION}-Linux-native.tar.gz" -o /tmp/signal-cli.tar.gz && \
+      tar -xzf /tmp/signal-cli.tar.gz -C /usr/local/bin && \
+      chmod +x /usr/local/bin/signal-cli && \
+      rm /tmp/signal-cli.tar.gz ; \
+    fi
+COPY --from=signal-cli-builder /build/build/native/nativeCompile/signal-cli /tmp/signal-cli-arm64
+RUN ARCH=$(dpkg --print-architecture) && \
+    if [ "$ARCH" = "arm64" ]; then \
+      mv /tmp/signal-cli-arm64 /usr/local/bin/signal-cli && \
+      chmod +x /usr/local/bin/signal-cli ; \
+    else \
+      rm -f /tmp/signal-cli-arm64 ; \
+    fi
+
+# Copy root workspace files
+COPY package.json package-lock.json .npmrc ./
+COPY packages/core/package.json ./packages/core/
+COPY packages/slack/package.json ./packages/slack/
+COPY packages/signal/package.json ./packages/signal/
+COPY packages/whatsapp/package.json ./packages/whatsapp/
+COPY packages/telegram/package.json ./packages/telegram/
+COPY packages/discord/package.json ./packages/discord/
+COPY packages/code-graph/package.json ./packages/code-graph/
+
+# Install production deps only
+RUN npm install --omit=dev
+
+# Install Bun 1.3.6 (required for QMDR - 1.3.7+ has sqlite-vec segfault)
+RUN curl -fsSL https://bun.sh/install | bash -s "bun-v1.3.6"
+ENV PATH="/root/.bun/bin:${PATH}"
+
+# Install QMDR via Bun (remote-first qmd fork - uses cloud APIs instead of local GGUF)
+# Bun install properly resolves sqlite-vec native dependencies
+# Note: Must use Bun ≤1.3.6 due to sqlite-vec segfault in 1.3.7+
+RUN bun install -g github:uf-hy/qmdr && \
+    ln -sf /root/.bun/bin/qmd /usr/local/bin/qmd && \
+    echo "QMDR installed via Bun"
+
+# Patch QMDR to fix embedding model mismatch when using remote embeddings
+# When QMD_EMBED_PROVIDER=openai, the local GGUF model name was being passed to the
+# remote API, causing "Model openai/embeddinggemma does not exist" errors.
+# This patch removes the 'model' parameter from remote.embed() calls, allowing
+# the remoteLLM's configured embedModel to be used instead.
+RUN sed -i 's/await remote.embed(formattedText, { model, isQuery })/await remote.embed(formattedText, { isQuery })/' /root/.bun/install/global/node_modules/qmdr/src/store.ts
+
+# Patch QMDR embed command to support QMD_EMBED_PROVIDER=openai
+# The embed command only checked for 'siliconflow', not 'openai', causing:
+# - Indexing: local embeddinggemma (768 dims)
+# - Searching: OpenAI text-embedding-3-small (1536 dims)
+# This dimension mismatch breaks vector search. The patch adds openai support.
+RUN sed -i "s/process.env.QMD_EMBED_PROVIDER === 'siliconflow'/process.env.QMD_EMBED_PROVIDER === 'siliconflow' || process.env.QMD_EMBED_PROVIDER === 'openai'/" /root/.bun/install/global/node_modules/qmdr/src/qmd.ts && \
+    sed -i "s/const remoteModel = process.env.QMD_SILICONFLOW_EMBED_MODEL || 'Qwen\/Qwen3-Embedding-8B'/const remoteModel = process.env.QMD_EMBED_PROVIDER === 'openai' ? (process.env.QMD_OPENAI_EMBED_MODEL || 'text-embedding-3-small') : (process.env.QMD_SILICONFLOW_EMBED_MODEL || 'Qwen\/Qwen3-Embedding-8B')/" /root/.bun/install/global/node_modules/qmdr/src/qmd.ts && \
+    sed -i "s/Using remote embedding: SiliconFlow/Using remote embedding:/" /root/.bun/install/global/node_modules/qmdr/src/qmd.ts
+
+# Create qmd config directory (env vars take precedence, but this allows .env file)
+RUN mkdir -p /root/.config/qmd
+
+# Install tsx locally so `node --import tsx` resolves from /app/node_modules
+RUN npm install tsx
+
+# QMDR environment (enables sqlite extensions)
+ENV QMD_ALLOW_SQLITE_EXTENSIONS=1
+
+# Make clawvault CLI globally available to agents
+RUN ln -sf /app/node_modules/.bin/clawvault /usr/local/bin/clawvault
+
+# Copy built code from ts-builder
+COPY --from=ts-builder /build/packages/core/dist ./packages/core/dist
+COPY --from=ts-builder /build/packages/slack/dist ./packages/slack/dist
+COPY --from=ts-builder /build/packages/signal/dist ./packages/signal/dist
+COPY --from=ts-builder /build/packages/whatsapp/dist ./packages/whatsapp/dist
+COPY --from=ts-builder /build/packages/telegram/dist ./packages/telegram/dist
+COPY --from=ts-builder /build/packages/discord/dist ./packages/discord/dist
+COPY --from=ts-builder /build/packages/code-graph/dist ./packages/code-graph/dist
+
+# Create mount point for JuiceFS FUSE and static config directories.
+# /jfs is the JuiceFS mount point — all persistent data lives here.
+# Subdirectories (vaults, signal, etc.) are created by JuiceFS at runtime.
+RUN mkdir -p /jfs /pipelines /agents
+
+# VERIFY ALL TOOLS
+RUN echo "=== Core Languages ===" && \
+    python3 --version && \
+    node --version && \
+    go version && \
+    rustc --version && \
+    cargo --version && \
+    echo "=== Package Managers ===" && \
+    uv --version && \
+    pip3 --version && \
+    npm --version && \  
+    bun --version && \
+    echo "=== Version Control ===" && \
+    git --version && \
+    gh --version && \
+    echo "=== Modern CLI Tools ===" && \
+    rg --version && \
+    fd --version && \
+    bat --version && \
+    fzf --version && \
+    delta --version && \
+    eza --version && \
+    dust --version && \
+    yq --version && \
+    jq --version && \
+    docker --version && \
+    docker compose version && \
+    juicefs version && \
+    signal-cli --version && \
+    echo "=== Network Tools ===" && \
+    curl --version | head -1 && \
+    wget --version | head -1 && \
+    ssh -V 2>&1 && \
+    rsync --version | head -1 && \
+    echo "=== Utilities ===" && \
+    test -x /usr/local/bin/qmd && echo "qmd (QMDR): OK" && \
+    sqlite3 --version && \
+    convert --version | head -1 && \
+    echo "=== All tools verified! ==="
+
+# Version injected at build time by CI (git tag)
+ARG BUILD_VERSION=dev
+ENV DJINNBOT_BUILD_VERSION=${BUILD_VERSION}
+
+ENV NODE_ENV=production
+ENV REDIS_URL=redis://localhost:6379
+ENV DATA_DIR=/jfs
+ENV VAULTS_DIR=/jfs/vaults
+ENV PIPELINES_DIR=/pipelines
+ENV AGENTS_DIR=/agents
+
+# Allow git to work with directories owned by other users (JuiceFS FUSE mounts).
+# Use --system (/etc/gitconfig) instead of --global (~/.gitconfig) because
+# the engine runs with HOME=/jfs, so --global would write to /jfs/.gitconfig
+# which is on the JuiceFS volume and not guaranteed to have the setting.
+RUN git config --system --add safe.directory '*'
+
+CMD ["node", "packages/core/dist/main.js"]

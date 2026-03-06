@@ -1,0 +1,1239 @@
+"""Admin panel API — user management, key sharing, approvals, instance secrets, logs.
+
+All endpoints require admin access (``get_current_admin`` dependency).
+
+Endpoints:
+  User management:
+    GET    /v1/admin/users                            list all users
+    POST   /v1/admin/users                            create a new user
+    PUT    /v1/admin/users/{user_id}                  update user (role, active)
+    DELETE /v1/admin/users/{user_id}                  deactivate user
+
+   Key sharing:
+    GET    /v1/admin/shared-providers                 list admin's shared provider grants
+    POST   /v1/admin/shared-providers                 share provider key with user(s)
+    PATCH  /v1/admin/shared-providers/{grant_id}      update restrictions on a share
+    DELETE /v1/admin/shared-providers/{grant_id}      revoke a share
+    GET    /v1/admin/shared-providers/usage            today's usage stats per share
+
+  Approval workflow:
+    GET    /v1/admin/pending-approvals                list pending skills + MCP servers
+    PATCH  /v1/admin/skills/{skill_id}/approve        approve a skill
+    PATCH  /v1/admin/skills/{skill_id}/reject         reject a skill
+    PATCH  /v1/admin/mcp/{server_id}/approve          approve an MCP server
+    PATCH  /v1/admin/mcp/{server_id}/reject           reject an MCP server
+
+  Instance secrets:
+    POST   /v1/admin/secrets/{secret_id}/grant-user/{user_id}   grant instance secret to user
+    DELETE /v1/admin/secrets/{secret_id}/grant-user/{user_id}   revoke
+
+  Container logs:
+    GET    /v1/admin/logs/containers                  list tracked containers
+    GET    /v1/admin/logs/stream/{container_name}     SSE stream for single container
+    GET    /v1/admin/logs/stream/merged               SSE merged stream for all containers
+"""
+
+import uuid
+import json
+import asyncio
+import os
+from typing import Optional, List, AsyncGenerator, Dict
+
+from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel, Field
+from sqlalchemy import select, func
+from sqlalchemy.ext.asyncio import AsyncSession
+import redis.asyncio as aioredis
+
+from app.database import get_async_session
+from app.auth.dependencies import get_current_admin, get_service_or_user, AuthUser
+from app.auth.passwords import hash_password
+from app.models.auth import User
+from app.models.user_provider import AdminSharedProvider, UserSecretGrant
+from app.models.secret import Secret
+from app.models.skill import Skill
+from app.models.mcp import McpServer
+from app.models.admin_notification import AdminNotification
+from app.models.base import now_ms
+from app.logging_config import get_logger
+
+logger = get_logger(__name__)
+
+# Redis stream constants (must match packages/core/src/container/log-streamer.ts)
+_LOG_STREAM_PREFIX = "djinnbot:logs:"
+_MERGED_LOG_STREAM = "djinnbot:logs:merged"
+_CONTAINER_LIST_KEY = "djinnbot:logs:containers"
+
+router = APIRouter()
+
+
+# ── Schemas ───────────────────────────────────────────────────────────────────
+
+
+class CreateUserRequest(BaseModel):
+    email: str
+    password: str = Field(min_length=8)
+    displayName: Optional[str] = None
+    isAdmin: bool = False
+
+
+class UpdateUserRequest(BaseModel):
+    displayName: Optional[str] = None
+    isAdmin: Optional[bool] = None
+    isActive: Optional[bool] = None
+
+
+class UserResponse(BaseModel):
+    id: str
+    email: str
+    displayName: Optional[str]
+    isAdmin: bool
+    isActive: bool
+    slackId: Optional[str]
+    totpEnabled: bool
+    createdAt: int
+    updatedAt: int
+
+
+class ShareProviderRequest(BaseModel):
+    """Share a provider key with a specific user or all users."""
+
+    providerId: str
+    # NULL = share with all users (broadcast)
+    targetUserId: Optional[str] = None
+    # Granularity controls
+    expiresAt: Optional[int] = None  # Unix ms timestamp — NULL = never expires
+    allowedModels: Optional[list] = None  # e.g. ["claude-sonnet-4", "claude-haiku-3-5"]
+    dailyLimit: Optional[int] = None  # Max requests per day — NULL = unlimited
+    dailyCostLimitUsd: Optional[float] = None  # Max USD cost per day — NULL = unlimited
+
+
+class UpdateShareProviderRequest(BaseModel):
+    """Update restrictions on an existing provider share."""
+
+    expiresAt: Optional[int] = None
+    allowedModels: Optional[list] = None
+    dailyLimit: Optional[int] = None
+    dailyCostLimitUsd: Optional[float] = None
+    # Sentinel: use explicit "clear" for fields you want to set to NULL.
+    # If a field is omitted (None), it is NOT updated.
+    clearExpiresAt: bool = False
+    clearAllowedModels: bool = False
+    clearDailyLimit: bool = False
+    clearDailyCostLimitUsd: bool = False
+
+
+class SharedProviderResponse(BaseModel):
+    id: str
+    adminUserId: str
+    providerId: str
+    targetUserId: Optional[str]
+    createdAt: int
+    expiresAt: Optional[int] = None
+    allowedModels: Optional[list] = None
+    dailyLimit: Optional[int] = None
+    dailyCostLimitUsd: Optional[float] = None
+
+
+class PendingApprovalItem(BaseModel):
+    id: str
+    type: str  # 'skill' or 'mcp'
+    name: str
+    description: str
+    submittedByUserId: Optional[str]
+    createdAt: int
+
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+
+def _user_to_response(u: User) -> UserResponse:
+    return UserResponse(
+        id=u.id,
+        email=u.email,
+        displayName=u.display_name,
+        isAdmin=u.is_admin,
+        isActive=u.is_active,
+        slackId=u.slack_id,
+        totpEnabled=u.totp_enabled,
+        createdAt=u.created_at,
+        updatedAt=u.updated_at,
+    )
+
+
+def _gen_id(prefix: str) -> str:
+    return f"{prefix}_{uuid.uuid4().hex[:12]}"
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+#  USER MANAGEMENT
+# ═════════════════════════════════════════════════════════════════════════════
+
+
+@router.get("/users", response_model=List[UserResponse])
+async def list_users(
+    admin: AuthUser = Depends(get_current_admin),
+    session: AsyncSession = Depends(get_async_session),
+) -> List[UserResponse]:
+    """List all users."""
+    result = await session.execute(select(User).order_by(User.created_at.desc()))
+    return [_user_to_response(u) for u in result.scalars().all()]
+
+
+@router.post("/users", response_model=UserResponse, status_code=201)
+async def create_user(
+    body: CreateUserRequest,
+    admin: AuthUser = Depends(get_current_admin),
+    session: AsyncSession = Depends(get_async_session),
+) -> UserResponse:
+    """Create a new user account (admin only)."""
+    # Check email uniqueness
+    existing = await session.execute(
+        select(User).where(User.email == body.email.lower().strip())
+    )
+    if existing.scalar_one_or_none():
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"User with email '{body.email}' already exists",
+        )
+
+    now = now_ms()
+    user = User(
+        id=_gen_id("usr"),
+        email=body.email.lower().strip(),
+        display_name=body.displayName or body.email.split("@")[0],
+        password_hash=hash_password(body.password),
+        is_active=True,
+        is_admin=body.isAdmin,
+        totp_enabled=False,
+        created_at=now,
+        updated_at=now,
+    )
+    session.add(user)
+    await session.commit()
+    await session.refresh(user)
+    logger.info(f"Admin {admin.id} created user {user.id} ({user.email})")
+    return _user_to_response(user)
+
+
+@router.put("/users/{user_id}", response_model=UserResponse)
+async def update_user(
+    user_id: str,
+    body: UpdateUserRequest,
+    admin: AuthUser = Depends(get_current_admin),
+    session: AsyncSession = Depends(get_async_session),
+) -> UserResponse:
+    """Update a user's role or active status."""
+    user = await session.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    if body.displayName is not None:
+        user.display_name = body.displayName.strip()
+    if body.isAdmin is not None:
+        # Prevent admin from removing their own admin status
+        if user_id == admin.id and not body.isAdmin:
+            raise HTTPException(
+                status_code=400,
+                detail="Cannot remove your own admin privileges",
+            )
+        user.is_admin = body.isAdmin
+    if body.isActive is not None:
+        # Prevent admin from deactivating themselves
+        if user_id == admin.id and not body.isActive:
+            raise HTTPException(
+                status_code=400,
+                detail="Cannot deactivate your own account",
+            )
+        user.is_active = body.isActive
+    user.updated_at = now_ms()
+
+    await session.commit()
+    await session.refresh(user)
+    logger.info(f"Admin {admin.id} updated user {user_id}")
+    return _user_to_response(user)
+
+
+@router.delete("/users/{user_id}")
+async def deactivate_user(
+    user_id: str,
+    admin: AuthUser = Depends(get_current_admin),
+    session: AsyncSession = Depends(get_async_session),
+) -> dict:
+    """Deactivate a user (soft delete)."""
+    if user_id == admin.id:
+        raise HTTPException(
+            status_code=400, detail="Cannot deactivate your own account"
+        )
+    user = await session.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    user.is_active = False
+    user.updated_at = now_ms()
+    await session.commit()
+    logger.info(f"Admin {admin.id} deactivated user {user_id}")
+    return {"status": "deactivated", "userId": user_id}
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+#  KEY SHARING
+# ═════════════════════════════════════════════════════════════════════════════
+
+
+@router.get("/shared-providers", response_model=List[SharedProviderResponse])
+async def list_shared_providers(
+    admin: AuthUser = Depends(get_current_admin),
+    session: AsyncSession = Depends(get_async_session),
+) -> List[SharedProviderResponse]:
+    """List all provider key shares."""
+    result = await session.execute(
+        select(AdminSharedProvider).order_by(AdminSharedProvider.created_at.desc())
+    )
+    import json as _json
+
+    return [
+        SharedProviderResponse(
+            id=row.id,
+            adminUserId=row.admin_user_id,
+            providerId=row.provider_id,
+            targetUserId=row.target_user_id,
+            createdAt=row.created_at,
+            expiresAt=row.expires_at,
+            allowedModels=_json.loads(row.allowed_models)
+            if row.allowed_models
+            else None,
+            dailyLimit=row.daily_limit,
+            dailyCostLimitUsd=row.daily_cost_limit_usd,
+        )
+        for row in result.scalars().all()
+    ]
+
+
+@router.post(
+    "/shared-providers", response_model=SharedProviderResponse, status_code=201
+)
+async def share_provider(
+    body: ShareProviderRequest,
+    admin: AuthUser = Depends(get_current_admin),
+    session: AsyncSession = Depends(get_async_session),
+) -> SharedProviderResponse:
+    """Share an instance-level provider key with a specific user or all users.
+
+    If target_user_id is None, this is a broadcast share (all users can use
+    this provider's instance key).
+    """
+    # Validate target user exists if specified
+    if body.targetUserId:
+        target = await session.get(User, body.targetUserId)
+        if not target:
+            raise HTTPException(status_code=404, detail="Target user not found")
+
+    # Check for duplicate
+    existing = await session.execute(
+        select(AdminSharedProvider).where(
+            AdminSharedProvider.provider_id == body.providerId,
+            AdminSharedProvider.target_user_id == body.targetUserId,
+        )
+    )
+    if existing.scalar_one_or_none():
+        raise HTTPException(
+            status_code=409,
+            detail="This provider is already shared with this user/broadcast",
+        )
+
+    import json as _json
+
+    now = now_ms()
+    share = AdminSharedProvider(
+        id=_gen_id("asp"),
+        admin_user_id=admin.id,
+        provider_id=body.providerId,
+        target_user_id=body.targetUserId,
+        created_at=now,
+        expires_at=body.expiresAt,
+        allowed_models=_json.dumps(body.allowedModels) if body.allowedModels else None,
+        daily_limit=body.dailyLimit,
+        daily_cost_limit_usd=body.dailyCostLimitUsd,
+    )
+    session.add(share)
+    await session.commit()
+    await session.refresh(share)
+
+    target_desc = body.targetUserId or "all users"
+    logger.info(
+        f"Admin {admin.id} shared provider '{body.providerId}' with {target_desc}"
+    )
+    return SharedProviderResponse(
+        id=share.id,
+        adminUserId=share.admin_user_id,
+        providerId=share.provider_id,
+        targetUserId=share.target_user_id,
+        createdAt=share.created_at,
+        expiresAt=share.expires_at,
+        allowedModels=_json.loads(share.allowed_models)
+        if share.allowed_models
+        else None,
+        dailyLimit=share.daily_limit,
+        dailyCostLimitUsd=share.daily_cost_limit_usd,
+    )
+
+
+@router.patch(
+    "/shared-providers/{grant_id}",
+    response_model=SharedProviderResponse,
+)
+async def update_shared_provider(
+    grant_id: str,
+    body: UpdateShareProviderRequest,
+    admin: AuthUser = Depends(get_current_admin),
+    session: AsyncSession = Depends(get_async_session),
+) -> SharedProviderResponse:
+    """Update restrictions on an existing provider key share.
+
+    Fields set to a value are updated; fields left as None are untouched.
+    Use the ``clear*`` booleans to explicitly set a field to NULL.
+    """
+    import json as _json
+
+    share = await session.get(AdminSharedProvider, grant_id)
+    if not share:
+        raise HTTPException(status_code=404, detail="Share not found")
+
+    # Apply updates
+    if body.clearExpiresAt:
+        share.expires_at = None
+    elif body.expiresAt is not None:
+        share.expires_at = body.expiresAt
+
+    if body.clearAllowedModels:
+        share.allowed_models = None
+    elif body.allowedModels is not None:
+        share.allowed_models = _json.dumps(body.allowedModels)
+
+    if body.clearDailyLimit:
+        share.daily_limit = None
+    elif body.dailyLimit is not None:
+        share.daily_limit = body.dailyLimit
+
+    if body.clearDailyCostLimitUsd:
+        share.daily_cost_limit_usd = None
+    elif body.dailyCostLimitUsd is not None:
+        share.daily_cost_limit_usd = body.dailyCostLimitUsd
+
+    await session.commit()
+    await session.refresh(share)
+
+    logger.info(f"Admin {admin.id} updated provider share {grant_id}")
+    return SharedProviderResponse(
+        id=share.id,
+        adminUserId=share.admin_user_id,
+        providerId=share.provider_id,
+        targetUserId=share.target_user_id,
+        createdAt=share.created_at,
+        expiresAt=share.expires_at,
+        allowedModels=_json.loads(share.allowed_models)
+        if share.allowed_models
+        else None,
+        dailyLimit=share.daily_limit,
+        dailyCostLimitUsd=share.daily_cost_limit_usd,
+    )
+
+
+@router.delete("/shared-providers/{grant_id}")
+async def revoke_shared_provider(
+    grant_id: str,
+    admin: AuthUser = Depends(get_current_admin),
+    session: AsyncSession = Depends(get_async_session),
+) -> dict:
+    """Revoke a provider key share."""
+    share = await session.get(AdminSharedProvider, grant_id)
+    if not share:
+        raise HTTPException(status_code=404, detail="Share not found")
+    await session.delete(share)
+    await session.commit()
+    logger.info(f"Admin {admin.id} revoked provider share {grant_id}")
+    return {"status": "revoked", "id": grant_id}
+
+
+@router.get("/shared-providers/usage")
+async def get_share_usage(
+    admin: AuthUser = Depends(get_current_admin),
+    session: AsyncSession = Depends(get_async_session),
+) -> dict:
+    """Get today's usage stats for all admin-shared providers.
+
+    Returns per-share usage (call count, cost) so the admin dashboard
+    can display usage gauges alongside each share's limits.
+    """
+    from sqlalchemy import or_
+    from app.utils import now_ms as _now_ms
+    from app.share_limits import check_share_limits
+
+    _now = _now_ms()
+    # Load all non-expired shares
+    result = await session.execute(
+        select(AdminSharedProvider).where(
+            or_(
+                AdminSharedProvider.expires_at == None,
+                AdminSharedProvider.expires_at > _now,
+            ),
+        )
+    )
+    all_shares = list(result.scalars().all())
+
+    # Group shares by target_user_id to check per-user usage
+    from collections import defaultdict
+
+    by_user: dict[str | None, list] = defaultdict(list)
+    for share in all_shares:
+        by_user[share.target_user_id].append(share)
+
+    # For broadcast shares (target=None), we'd need to check ALL users.
+    # For now, return the share metadata with limits but no per-user breakdown.
+    # Per-user breakdown is available via the existing API usage panel.
+
+    usage_by_share: dict[str, dict] = {}
+    for share in all_shares:
+        usage_by_share[share.id] = {
+            "id": share.id,
+            "providerId": share.provider_id,
+            "targetUserId": share.target_user_id,
+            "dailyLimit": share.daily_limit,
+            "dailyCostLimitUsd": share.daily_cost_limit_usd,
+            "allowedModels": (
+                json.loads(share.allowed_models) if share.allowed_models else None
+            ),
+        }
+
+    # For targeted shares, check the specific user's usage
+    for target_user_id, shares in by_user.items():
+        if target_user_id is None:
+            continue  # Broadcast shares — skip per-user check for now
+        share_usage = await check_share_limits(session, target_user_id, shares)
+        for provider_id, info in share_usage.items():
+            # Find the matching share row
+            for share in shares:
+                if share.provider_id == provider_id:
+                    usage_by_share[share.id].update(
+                        {
+                            "callsToday": info.calls_today,
+                            "costTodayUsd": round(info.cost_today_usd, 6),
+                            "limitExceeded": info.limit_exceeded,
+                            "exceededReason": info.exceeded_reason,
+                        }
+                    )
+
+    return {"shares": list(usage_by_share.values())}
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+#  APPROVAL WORKFLOW
+# ═════════════════════════════════════════════════════════════════════════════
+
+
+@router.get("/pending-approvals", response_model=List[PendingApprovalItem])
+async def list_pending_approvals(
+    admin: AuthUser = Depends(get_current_admin),
+    session: AsyncSession = Depends(get_async_session),
+) -> List[PendingApprovalItem]:
+    """List all pending skills and MCP servers awaiting admin approval."""
+    items: List[PendingApprovalItem] = []
+
+    # Pending skills
+    result = await session.execute(
+        select(Skill).where(Skill.approval_status == "pending")
+    )
+    for s in result.scalars().all():
+        items.append(
+            PendingApprovalItem(
+                id=s.id,
+                type="skill",
+                name=s.id,
+                description=s.description,
+                submittedByUserId=s.submitted_by_user_id,
+                createdAt=s.created_at,
+            )
+        )
+
+    # Pending MCP servers
+    result = await session.execute(
+        select(McpServer).where(McpServer.approval_status == "pending")
+    )
+    for m in result.scalars().all():
+        items.append(
+            PendingApprovalItem(
+                id=m.id,
+                type="mcp",
+                name=m.name,
+                description=m.description,
+                submittedByUserId=m.submitted_by_user_id,
+                createdAt=m.created_at,
+            )
+        )
+
+    return items
+
+
+@router.patch("/skills/{skill_id}/approve")
+async def approve_skill(
+    skill_id: str,
+    admin: AuthUser = Depends(get_current_admin),
+    session: AsyncSession = Depends(get_async_session),
+) -> dict:
+    """Approve a pending skill."""
+    skill = await session.get(Skill, skill_id)
+    if not skill:
+        raise HTTPException(status_code=404, detail="Skill not found")
+    if skill.approval_status != "pending":
+        raise HTTPException(status_code=400, detail="Skill is not pending approval")
+    skill.approval_status = "approved"
+    skill.updated_at = now_ms()
+    await session.commit()
+    logger.info(f"Admin {admin.id} approved skill '{skill_id}'")
+    return {"status": "approved", "id": skill_id}
+
+
+@router.patch("/skills/{skill_id}/reject")
+async def reject_skill(
+    skill_id: str,
+    admin: AuthUser = Depends(get_current_admin),
+    session: AsyncSession = Depends(get_async_session),
+) -> dict:
+    """Reject a pending skill."""
+    skill = await session.get(Skill, skill_id)
+    if not skill:
+        raise HTTPException(status_code=404, detail="Skill not found")
+    if skill.approval_status != "pending":
+        raise HTTPException(status_code=400, detail="Skill is not pending approval")
+    skill.approval_status = "rejected"
+    skill.updated_at = now_ms()
+    await session.commit()
+    logger.info(f"Admin {admin.id} rejected skill '{skill_id}'")
+    return {"status": "rejected", "id": skill_id}
+
+
+@router.patch("/mcp/{server_id}/approve")
+async def approve_mcp_server(
+    server_id: str,
+    admin: AuthUser = Depends(get_current_admin),
+    session: AsyncSession = Depends(get_async_session),
+) -> dict:
+    """Approve a pending MCP server."""
+    server = await session.get(McpServer, server_id)
+    if not server:
+        raise HTTPException(status_code=404, detail="MCP server not found")
+    if server.approval_status != "pending":
+        raise HTTPException(status_code=400, detail="Server is not pending approval")
+    server.approval_status = "approved"
+    server.updated_at = now_ms()
+    await session.commit()
+    logger.info(f"Admin {admin.id} approved MCP server '{server_id}'")
+    return {"status": "approved", "id": server_id}
+
+
+@router.patch("/mcp/{server_id}/reject")
+async def reject_mcp_server(
+    server_id: str,
+    admin: AuthUser = Depends(get_current_admin),
+    session: AsyncSession = Depends(get_async_session),
+) -> dict:
+    """Reject a pending MCP server."""
+    server = await session.get(McpServer, server_id)
+    if not server:
+        raise HTTPException(status_code=404, detail="MCP server not found")
+    if server.approval_status != "pending":
+        raise HTTPException(status_code=400, detail="Server is not pending approval")
+    server.approval_status = "rejected"
+    server.updated_at = now_ms()
+    await session.commit()
+    logger.info(f"Admin {admin.id} rejected MCP server '{server_id}'")
+    return {"status": "rejected", "id": server_id}
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+#  INSTANCE SECRET GRANTS (admin → user)
+# ═════════════════════════════════════════════════════════════════════════════
+
+
+@router.post("/secrets/{secret_id}/grant-user/{user_id}", status_code=201)
+async def grant_instance_secret_to_user(
+    secret_id: str,
+    user_id: str,
+    admin: AuthUser = Depends(get_current_admin),
+    session: AsyncSession = Depends(get_async_session),
+) -> dict:
+    """Grant an instance-level secret to a user."""
+    secret = await session.get(Secret, secret_id)
+    if not secret:
+        raise HTTPException(status_code=404, detail="Secret not found")
+    if secret.scope != "instance":
+        raise HTTPException(
+            status_code=400,
+            detail="Only instance-level secrets can be granted to users",
+        )
+
+    target = await session.get(User, user_id)
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    # Check for existing grant (idempotent)
+    existing = await session.execute(
+        select(UserSecretGrant).where(
+            UserSecretGrant.secret_id == secret_id,
+            UserSecretGrant.user_id == user_id,
+        )
+    )
+    if existing.scalar_one_or_none():
+        return {"status": "already_granted", "secretId": secret_id, "userId": user_id}
+
+    grant = UserSecretGrant(
+        id=_gen_id("usg"),
+        secret_id=secret_id,
+        user_id=user_id,
+        granted_at=now_ms(),
+        granted_by=admin.id,
+    )
+    session.add(grant)
+    await session.commit()
+    logger.info(
+        f"Admin {admin.id} granted instance secret {secret_id} to user {user_id}"
+    )
+    return {"status": "granted", "secretId": secret_id, "userId": user_id}
+
+
+@router.delete("/secrets/{secret_id}/grant-user/{user_id}", status_code=204)
+async def revoke_instance_secret_from_user(
+    secret_id: str,
+    user_id: str,
+    admin: AuthUser = Depends(get_current_admin),
+    session: AsyncSession = Depends(get_async_session),
+) -> None:
+    """Revoke an instance-level secret from a user."""
+    result = await session.execute(
+        select(UserSecretGrant).where(
+            UserSecretGrant.secret_id == secret_id,
+            UserSecretGrant.user_id == user_id,
+        )
+    )
+    grant = result.scalar_one_or_none()
+    if not grant:
+        raise HTTPException(status_code=404, detail="Grant not found")
+    await session.delete(grant)
+    await session.commit()
+    logger.info(
+        f"Admin {admin.id} revoked instance secret {secret_id} from user {user_id}"
+    )
+
+
+# ── Container Logs ────────────────────────────────────────────────────────────
+
+
+def _get_redis_url() -> str:
+    """Return the Redis URL from environment (same as used by the engine)."""
+    return os.environ.get("REDIS_URL", "redis://redis:6379")
+
+
+@router.get("/logs/containers")
+async def list_log_containers(
+    admin: AuthUser = Depends(get_current_admin),
+):
+    """List all containers currently being tracked by the log streamer.
+
+    Returns the container list published by the engine's ContainerLogStreamer.
+    """
+    redis_url = _get_redis_url()
+    r = aioredis.from_url(redis_url, decode_responses=True)
+    try:
+        data = await r.get(_CONTAINER_LIST_KEY)
+        if not data:
+            return {"containers": []}
+        containers = json.loads(data)
+        return {"containers": containers}
+    except Exception as e:
+        logger.warning(f"Failed to read container list: {e}")
+        return {"containers": []}
+    finally:
+        await r.aclose()
+
+
+@router.get("/logs/stream/merged")
+async def stream_merged_logs(
+    admin: AuthUser = Depends(get_current_admin),
+    tail: int = Query(
+        200, ge=0, le=5000, description="Number of recent lines to backfill"
+    ),
+):
+    """SSE stream of merged logs from all containers.
+
+    Each container's log lines are interleaved in arrival order.
+    Uses a dedicated Redis connection per SSE client — no impact on engine.
+    """
+    redis_url = _get_redis_url()
+
+    async def event_generator() -> AsyncGenerator[str, None]:
+        r = aioredis.from_url(redis_url, decode_responses=True)
+        try:
+            # Send initial connected event
+            yield "event: connected\ndata: {}\n\n"
+
+            last_id = "$"
+
+            # Backfill: read the last N entries
+            if tail > 0:
+                try:
+                    entries = await r.xrevrange(
+                        _MERGED_LOG_STREAM, "+", "-", count=tail
+                    )
+                    # xrevrange returns newest-first, reverse for chronological order
+                    for msg_id, fields in reversed(entries):
+                        last_id = msg_id
+                        payload = json.dumps(
+                            {
+                                "line": fields.get("line", ""),
+                                "level": fields.get("level", "info"),
+                                "ts": fields.get("ts", ""),
+                                "container": fields.get("container", ""),
+                                "service": fields.get("service", ""),
+                            }
+                        )
+                        yield f"event: log\ndata: {payload}\n\n"
+                except Exception as e:
+                    logger.warning(f"Log backfill failed: {e}")
+
+            # Live stream
+            while True:
+                try:
+                    messages = await r.xread(
+                        {_MERGED_LOG_STREAM: last_id}, count=50, block=3000
+                    )
+                    if not messages:
+                        yield ": keepalive\n\n"
+                        continue
+
+                    for _stream_name, stream_messages in messages:
+                        for msg_id, fields in stream_messages:
+                            last_id = msg_id
+                            payload = json.dumps(
+                                {
+                                    "line": fields.get("line", ""),
+                                    "level": fields.get("level", "info"),
+                                    "ts": fields.get("ts", ""),
+                                    "container": fields.get("container", ""),
+                                    "service": fields.get("service", ""),
+                                }
+                            )
+                            yield f"event: log\ndata: {payload}\n\n"
+
+                except asyncio.CancelledError:
+                    break
+                except Exception as e:
+                    logger.warning(f"Merged log SSE error: {e}")
+                    yield f"event: error\ndata: {json.dumps({'error': str(e)})}\n\n"
+                    await asyncio.sleep(2)
+        finally:
+            await r.aclose()
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@router.get("/logs/stream/{container_name}")
+async def stream_container_logs(
+    container_name: str,
+    admin: AuthUser = Depends(get_current_admin),
+    tail: int = Query(
+        200, ge=0, le=5000, description="Number of recent lines to backfill"
+    ),
+):
+    """SSE stream of logs for a single container.
+
+    Uses a dedicated Redis connection per SSE client — no impact on engine.
+    """
+    redis_url = _get_redis_url()
+    stream_key = f"{_LOG_STREAM_PREFIX}{container_name}"
+
+    async def event_generator() -> AsyncGenerator[str, None]:
+        r = aioredis.from_url(redis_url, decode_responses=True)
+        try:
+            # Send initial connected event
+            yield "event: connected\ndata: {}\n\n"
+
+            last_id = "$"
+
+            # Backfill
+            if tail > 0:
+                try:
+                    entries = await r.xrevrange(stream_key, "+", "-", count=tail)
+                    for msg_id, fields in reversed(entries):
+                        last_id = msg_id
+                        payload = json.dumps(
+                            {
+                                "line": fields.get("line", ""),
+                                "level": fields.get("level", "info"),
+                                "ts": fields.get("ts", ""),
+                                "container": fields.get("container", container_name),
+                                "service": fields.get("service", ""),
+                            }
+                        )
+                        yield f"event: log\ndata: {payload}\n\n"
+                except Exception as e:
+                    logger.warning(f"Container log backfill failed: {e}")
+
+            # Live stream
+            while True:
+                try:
+                    messages = await r.xread(
+                        {stream_key: last_id}, count=50, block=3000
+                    )
+                    if not messages:
+                        yield ": keepalive\n\n"
+                        continue
+
+                    for _stream_name, stream_messages in messages:
+                        for msg_id, fields in stream_messages:
+                            last_id = msg_id
+                            payload = json.dumps(
+                                {
+                                    "line": fields.get("line", ""),
+                                    "level": fields.get("level", "info"),
+                                    "ts": fields.get("ts", ""),
+                                    "container": fields.get(
+                                        "container", container_name
+                                    ),
+                                    "service": fields.get("service", ""),
+                                }
+                            )
+                            yield f"event: log\ndata: {payload}\n\n"
+
+                except asyncio.CancelledError:
+                    break
+                except Exception as e:
+                    logger.warning(f"Container log SSE error: {e}")
+                    yield f"event: error\ndata: {json.dumps({'error': str(e)})}\n\n"
+                    await asyncio.sleep(2)
+        finally:
+            await r.aclose()
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+# ── Admin notifications ──────────────────────────────────────────────────────
+
+
+class CreateNotificationRequest(BaseModel):
+    level: str = "info"  # info, warning, error
+    title: str
+    detail: Optional[str] = None
+
+
+class NotificationResponse(BaseModel):
+    id: str
+    level: str
+    title: str
+    detail: Optional[str]
+    read: bool
+    createdAt: int
+
+
+@router.post("/notifications", response_model=NotificationResponse)
+async def create_admin_notification(
+    request: CreateNotificationRequest,
+    _caller: AuthUser = Depends(get_service_or_user),
+    session: AsyncSession = Depends(get_async_session),
+):
+    """Create a system notification visible to admins.
+
+    Called by the engine (via ENGINE_INTERNAL_TOKEN) when infrastructure-level
+    issues occur — e.g. failed image pull, resource exhaustion.
+    """
+    notif = AdminNotification(
+        id=AdminNotification.generate_id(),
+        level=request.level,
+        title=request.title,
+        detail=request.detail,
+        read=False,
+        created_at=now_ms(),
+    )
+    session.add(notif)
+    await session.commit()
+    logger.info(f"Admin notification created: [{notif.level}] {notif.title}")
+    return NotificationResponse(
+        id=notif.id,
+        level=notif.level,
+        title=notif.title,
+        detail=notif.detail,
+        read=notif.read,
+        createdAt=notif.created_at,
+    )
+
+
+@router.get("/notifications", response_model=list[NotificationResponse])
+async def list_admin_notifications(
+    unread_only: bool = False,
+    limit: int = 50,
+    admin: AuthUser = Depends(get_current_admin),
+    session: AsyncSession = Depends(get_async_session),
+):
+    """List admin notifications, newest first."""
+    stmt = select(AdminNotification).order_by(AdminNotification.created_at.desc())
+    if unread_only:
+        stmt = stmt.where(AdminNotification.read == False)
+    stmt = stmt.limit(limit)
+    result = await session.execute(stmt)
+    notifications = result.scalars().all()
+    return [
+        NotificationResponse(
+            id=n.id,
+            level=n.level,
+            title=n.title,
+            detail=n.detail,
+            read=n.read,
+            createdAt=n.created_at,
+        )
+        for n in notifications
+    ]
+
+
+@router.patch("/notifications/{notification_id}/read")
+async def mark_notification_read(
+    notification_id: str,
+    admin: AuthUser = Depends(get_current_admin),
+    session: AsyncSession = Depends(get_async_session),
+):
+    """Mark a notification as read."""
+    result = await session.execute(
+        select(AdminNotification).where(AdminNotification.id == notification_id)
+    )
+    notif = result.scalar_one_or_none()
+    if not notif:
+        raise HTTPException(status_code=404, detail="Notification not found")
+    notif.read = True
+    await session.commit()
+    return {"ok": True}
+
+
+@router.post("/notifications/mark-all-read")
+async def mark_all_notifications_read(
+    admin: AuthUser = Depends(get_current_admin),
+    session: AsyncSession = Depends(get_async_session),
+):
+    """Mark all unread notifications as read."""
+    from sqlalchemy import update
+
+    await session.execute(
+        update(AdminNotification)
+        .where(AdminNotification.read == False)
+        .values(read=True)
+    )
+    await session.commit()
+    return {"ok": True}
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+#  API USAGE — unified view of all sessions & runs with key resolution
+# ═════════════════════════════════════════════════════════════════════════════
+
+
+class UsageItem(BaseModel):
+    """A single usage entry (either a chat session or a pipeline run)."""
+
+    id: str
+    type: str  # "chat" or "run"
+    agentId: str
+    userId: Optional[str] = None
+    userEmail: Optional[str] = None
+    userDisplayName: Optional[str] = None
+    source: Optional[str] = (
+        None  # how session started: "dashboard", "slack", "api", etc.
+    )
+    model: Optional[str] = None
+    status: str
+    keyResolution: Optional[dict] = None
+    createdAt: int
+    completedAt: Optional[int] = None
+
+
+class UsageListResponse(BaseModel):
+    items: List[UsageItem]
+    total: int
+    hasMore: bool
+
+
+@router.get("/usage", response_model=UsageListResponse)
+async def list_api_usage(
+    admin: AuthUser = Depends(get_current_admin),
+    session: AsyncSession = Depends(get_async_session),
+    user_id: Optional[str] = Query(None, description="Filter by user ID"),
+    key_source: Optional[str] = Query(
+        None,
+        description="Filter by key source type: personal, admin_shared, instance, system",
+    ),
+    status_filter: Optional[str] = Query(
+        None, alias="status", description="Filter by status"
+    ),
+    item_type: Optional[str] = Query(
+        None, alias="type", description="Filter by type: chat or run"
+    ),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+) -> UsageListResponse:
+    """List all API usage across all users — chat sessions and pipeline runs.
+
+    Provides a unified admin view of:
+    - Who initiated each session/run
+    - Which API keys were used (personal / admin-shared / instance)
+    - Masked key hints per provider
+    - Model, status, and timing info
+    """
+    from app.models.chat import ChatSession
+    from app.models.run import Run
+
+    items: List[UsageItem] = []
+
+    # ── Fetch chat sessions ──────────────────────────────────────────────
+    if item_type is None or item_type == "chat":
+        chat_query = select(ChatSession).order_by(ChatSession.created_at.desc())
+        if status_filter:
+            chat_query = chat_query.where(ChatSession.status == status_filter)
+
+        chat_result = await session.execute(chat_query)
+        chat_sessions = chat_result.scalars().all()
+
+        for cs in chat_sessions:
+            kr = None
+            cs_user_id = None
+            if cs.key_resolution:
+                try:
+                    kr = json.loads(cs.key_resolution)
+                    cs_user_id = kr.get("userId")
+                except (json.JSONDecodeError, TypeError):
+                    pass
+
+            # Apply user filter
+            if user_id and cs_user_id != user_id:
+                continue
+
+            # Apply key source filter
+            if key_source and kr:
+                provider_sources = kr.get("providerSources", {})
+                if provider_sources and not any(
+                    ps.get("source") == key_source for ps in provider_sources.values()
+                ):
+                    continue
+                elif not provider_sources:
+                    # Legacy format: check top-level source
+                    top_source = kr.get("source", "")
+                    if key_source == "instance" and top_source != "system":
+                        continue
+                    elif key_source == "personal" and top_source != "executing_user":
+                        continue
+                    elif key_source not in ("instance", "personal"):
+                        continue
+
+            items.append(
+                UsageItem(
+                    id=cs.id,
+                    type="chat",
+                    agentId=cs.agent_id,
+                    userId=cs_user_id,
+                    source="dashboard",
+                    model=cs.model,
+                    status=cs.status,
+                    keyResolution=kr,
+                    createdAt=cs.created_at,
+                    completedAt=cs.completed_at,
+                )
+            )
+
+    # ── Fetch pipeline runs ──────────────────────────────────────────────
+    if item_type is None or item_type == "run":
+        run_query = select(Run).order_by(Run.created_at.desc())
+        if status_filter:
+            run_query = run_query.where(Run.status == status_filter)
+        if user_id:
+            run_query = run_query.where(Run.initiated_by_user_id == user_id)
+
+        run_result = await session.execute(run_query)
+        runs = run_result.scalars().all()
+
+        for r in runs:
+            kr = None
+            if r.key_resolution:
+                try:
+                    kr = json.loads(r.key_resolution)
+                except (json.JSONDecodeError, TypeError):
+                    pass
+
+            run_user_id = getattr(r, "initiated_by_user_id", None) or (
+                kr.get("userId") if kr else None
+            )
+
+            # Apply key source filter
+            if key_source and kr:
+                provider_sources = kr.get("providerSources", {})
+                if provider_sources and not any(
+                    ps.get("source") == key_source for ps in provider_sources.values()
+                ):
+                    continue
+                elif not provider_sources:
+                    top_source = kr.get("source", "")
+                    if key_source == "instance" and top_source != "system":
+                        continue
+                    elif key_source == "personal" and top_source != "executing_user":
+                        continue
+                    elif key_source not in ("instance", "personal"):
+                        continue
+
+            items.append(
+                UsageItem(
+                    id=r.id,
+                    type="run",
+                    agentId=r.pipeline_id,
+                    userId=run_user_id,
+                    source="pipeline",
+                    model=getattr(r, "model_override", None),
+                    status=r.status,
+                    keyResolution=kr,
+                    createdAt=r.created_at,
+                    completedAt=r.completed_at,
+                )
+            )
+
+    # ── Sort combined results by created_at desc ─────────────────────────
+    items.sort(key=lambda x: x.createdAt, reverse=True)
+    total = len(items)
+
+    # ── Resolve user emails/names for the page of results ────────────────
+    page_items = items[offset : offset + limit]
+
+    user_ids = {i.userId for i in page_items if i.userId}
+    user_map: Dict[str, User] = {}
+    if user_ids:
+        user_result = await session.execute(select(User).where(User.id.in_(user_ids)))
+        user_map = {u.id: u for u in user_result.scalars().all()}
+
+    for item in page_items:
+        if item.userId and item.userId in user_map:
+            u = user_map[item.userId]
+            item.userEmail = u.email
+            item.userDisplayName = u.display_name
+
+    return UsageListResponse(
+        items=page_items,
+        total=total,
+        hasMore=(offset + len(page_items)) < total,
+    )

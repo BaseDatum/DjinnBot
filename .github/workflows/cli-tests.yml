@@ -1,0 +1,29 @@
+name: CLI Tests
+
+on:
+  pull_request:
+    paths:
+      - "cli/**"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cli-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+
+      - name: Install dependencies
+        working-directory: cli
+        run: uv sync --all-extras
+
+      - name: Run tests
+        working-directory: cli
+        run: uv run pytest tests/ -v

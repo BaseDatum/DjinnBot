@@ -1,0 +1,85 @@
+FROM ghcr.io/open-webui/mcpo:main AS base
+
+FROM golang:1.25-alpine AS github-mcp-builder
+ARG GITHUB_MCP_VERSION=latest
+
+WORKDIR /build
+
+RUN apk add --no-cache git
+
+RUN git clone https://github.com/github/github-mcp-server.git . && \
+  if [ "$GITHUB_MCP_VERSION" != "latest" ]; then \
+  git checkout "$GITHUB_MCP_VERSION"; \
+  fi
+
+RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /github-mcp-server cmd/github-mcp-server/main.go
+
+FROM base
+
+USER root
+
+RUN groupadd -r app -g 1000 && \
+  useradd -r -u 1000 -g app -m -s /bin/bash app
+
+COPY --from=github-mcp-builder /github-mcp-server /usr/local/bin/github-mcp-server
+RUN chmod +x /usr/local/bin/github-mcp-server && \
+  github-mcp-server --version || echo "GitHub MCP Server installed"
+
+# Camoufox/Firefox system dependencies (needed by Scrapling's stealth browser)
+# + git for cloning OSINT tool repos
+# + fuse3 for JuiceFS FUSE mount (persistent OSINT output storage)
+# + curl for JuiceFS download
+RUN apt-get update && apt-get install -y --no-install-recommends \
+  libgtk-3-0 \
+  libdbus-glib-1-2 \
+  libxt6 \
+  libx11-xcb1 \
+  git \
+  fuse3 \
+  curl \
+  && rm -rf /var/lib/apt/lists/*
+
+# Install JuiceFS CE client — the mcpo container mounts JuiceFS at /jfs so
+# OSINT tool outputs (sherlock, maigret, etc.) persist across container restarts
+# and are accessible to other services.
+RUN ARCH=$(dpkg --print-architecture) && \
+    JFS_VERSION="1.3.1" && \
+    curl -fsSL "https://github.com/juicedata/juicefs/releases/download/v${JFS_VERSION}/juicefs-${JFS_VERSION}-linux-${ARCH}.tar.gz" -o /tmp/juicefs.tar.gz && \
+    tar -xzf /tmp/juicefs.tar.gz -C /usr/local/bin juicefs && \
+    chmod +x /usr/local/bin/juicefs && \
+    rm /tmp/juicefs.tar.gz
+
+# Create JuiceFS mount point
+RUN mkdir -p /jfs
+
+# ── OSINT Tools: clone repos that need to run from a fixed path ──
+RUN git clone --depth 1 https://github.com/smicallef/spiderfoot.git /opt/spiderfoot && \
+  git clone --depth 1 https://github.com/p1ngul1n0/blackbird.git /opt/blackbird
+
+RUN chown -R app:app /app /home/app /opt/spiderfoot /opt/blackbird
+
+USER app
+
+# Ensure uv tool binaries are on PATH
+ENV PATH="/home/app/.local/bin:${PATH}"
+
+WORKDIR /app
+
+RUN npx -y @modelcontextprotocol/server-memory --version || echo "memory server cached" && \
+  npx -y mcp-fetch-server --version || echo "fetch server cached" && \
+  npx -y @brave/brave-search-mcp-server --version || echo "brave server cached" && \
+  npx -y searxng-mul-mcp --version || echo "searxng mcp cached" && \
+  uv tool install mcp-server-time || echo "time server installed" && \
+  uv tool install git+https://github.com/skymoore/perplexica-mcp-open-webui.git || echo "perplexica-mcp installed" && \
+  uv tool install grokipedia-mcp || echo "grokipedia-mcp installed" && \
+  uv tool install "scrapling[ai]" || echo "scrapling installed" && \
+  scrapling install || echo "scrapling browsers installed" && \
+  uv tool install sherlock-project || echo "sherlock installed" && \
+  uv tool install holehe || echo "holehe installed" && \
+  uv tool install maigret || echo "maigret installed" && \
+  uv tool install git+https://github.com/laramies/theHarvester.git || echo "theharvester installed" && \
+  uv tool install ghunt || echo "ghunt installed" && \
+  uv pip install -r /opt/spiderfoot/requirements.txt || echo "spiderfoot deps installed" && \
+  uv pip install -r /opt/blackbird/requirements.txt || echo "blackbird deps installed"
+
+CMD ["mcpo"]

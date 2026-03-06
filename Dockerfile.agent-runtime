@@ -1,0 +1,329 @@
+# Agent Runtime Container
+# This is where agents actually execute - full toolbox for coding/engineering tasks
+
+# Build stage
+FROM node:22-slim AS builder
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
+    ca-certificates \
+    build-essential \
+    python3 \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /build
+
+# Copy root workspace files
+COPY package.json package-lock.json tsconfig.base.json ./
+COPY packages/code-graph/package.json ./packages/code-graph/
+COPY packages/core/package.json ./packages/core/
+COPY packages/agent-runtime/package.json ./packages/agent-runtime/
+
+# Install all deps
+RUN npm install --include=dev
+
+# Copy source
+COPY packages/code-graph ./packages/code-graph
+COPY packages/core ./packages/core
+COPY packages/agent-runtime ./packages/agent-runtime
+
+# Build TypeScript
+RUN npm run build -w @djinnbot/code-graph
+RUN npm run build -w @djinnbot/core
+RUN npm run build -w @djinnbot/agent-runtime
+
+# Runtime stage - Full engineering toolbox
+FROM debian:bookworm-slim
+
+WORKDIR /app
+
+# SYSTEM PACKAGES - Everything an agent needs for coding/engineering
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    # Python ecosystem
+    python3 \
+    python3-pip \
+    python3-venv \
+    python3-dev \
+    # Build tools
+    build-essential \
+    cmake \
+    ninja-build \
+    pkg-config \
+    autoconf \
+    automake \
+    libtool \
+    # Version control
+    git \
+    git-lfs \
+    # Shell & terminal
+    bash \
+    zsh \
+    tmux \
+    screen \
+    # Core utilities
+    coreutils \
+    findutils \
+    grep \
+    sed \
+    gawk \
+    # Network tools
+    curl \
+    wget \
+    httpie \
+    netcat-openbsd \
+    socat \
+    dnsutils \
+    iputils-ping \
+    net-tools \
+    iproute2 \
+    openssh-client \
+    rsync \
+    # Text processing & JSON
+    jq \
+    xmlstarlet \
+    # Compression
+    zip \
+    unzip \
+    gzip \
+    bzip2 \
+    xz-utils \
+    tar \
+    p7zip-full \
+    # File utilities
+    file \
+    tree \
+    less \
+    vim-tiny \
+    nano \
+    # Process & system monitoring
+    htop \
+    procps \
+    lsof \
+    strace \
+    # Crypto & SSL
+    openssl \
+    gnupg \
+    ca-certificates \
+    # Database clients
+    sqlite3 \
+    postgresql-client \
+    redis-tools \
+    # Image processing
+    imagemagick \
+    # PDF tools
+    poppler-utils \
+    # FUSE — required for JuiceFS in-container mounts
+    fuse3 \
+    # Misc development
+    make \
+    patch \
+    diffutils \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install JuiceFS CE client — each container mounts its own subdirectories
+# directly over the network (Redis metadata + RustFS S3), providing true
+# filesystem-level isolation between agents.
+RUN ARCH=$(dpkg --print-architecture) && \
+    JFS_VERSION="1.3.1" && \
+    curl -fsSL "https://github.com/juicedata/juicefs/releases/download/v${JFS_VERSION}/juicefs-${JFS_VERSION}-linux-${ARCH}.tar.gz" -o /tmp/juicefs.tar.gz && \
+    tar -xzf /tmp/juicefs.tar.gz -C /usr/local/bin juicefs && \
+    chmod +x /usr/local/bin/juicefs && \
+    rm /tmp/juicefs.tar.gz
+
+# Install Node.js 22
+RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
+    apt-get install -y --no-install-recommends nodejs && \
+    rm -rf /var/lib/apt/lists/*
+
+# Install Go 1.23+
+RUN ARCH=$(uname -m) && \
+    if [ "$ARCH" = "x86_64" ]; then GO_ARCH="amd64"; \
+    elif [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then GO_ARCH="arm64"; \
+    else GO_ARCH="amd64"; fi && \
+    curl -fsSL "https://go.dev/dl/go1.23.5.linux-${GO_ARCH}.tar.gz" -o /tmp/go.tar.gz && \
+    tar -C /usr/local -xzf /tmp/go.tar.gz && \
+    rm /tmp/go.tar.gz
+ENV PATH="/usr/local/go/bin:/root/go/bin:${PATH}"
+ENV GOPATH="/root/go"
+
+# Install GitHub CLI
+RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg && \
+    chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg && \
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | tee /etc/apt/sources.list.d/github-cli.list > /dev/null && \
+    apt-get update && apt-get install -y gh && rm -rf /var/lib/apt/lists/*
+
+# Install yq
+RUN ARCH=$(dpkg --print-architecture) && \
+    curl -fsSL "https://github.com/mikefarah/yq/releases/latest/download/yq_linux_${ARCH}" -o /usr/local/bin/yq && \
+    chmod +x /usr/local/bin/yq
+
+# Install ripgrep, fd, bat
+RUN apt-get update && apt-get install -y --no-install-recommends ripgrep fd-find bat && \
+    ln -sf /usr/lib/cargo/bin/fd /usr/bin/fd && \
+    ln -sf /usr/bin/batcat /usr/bin/bat && \
+    rm -rf /var/lib/apt/lists/*
+
+# Install fzf
+RUN ARCH=$(dpkg --print-architecture) && \
+    curl -fsSL "https://github.com/junegunn/fzf/releases/download/v0.56.3/fzf-0.56.3-linux_${ARCH}.tar.gz" -o /tmp/fzf.tar.gz && \
+    tar -xzf /tmp/fzf.tar.gz -C /usr/bin && rm /tmp/fzf.tar.gz
+
+# Install delta
+RUN ARCH=$(dpkg --print-architecture) && \
+    if [ "$ARCH" = "amd64" ]; then DELTA_ARCH="x86_64-unknown-linux-gnu"; \
+    else DELTA_ARCH="aarch64-unknown-linux-gnu"; fi && \
+    curl -fsSL "https://github.com/dandavison/delta/releases/download/0.18.2/delta-0.18.2-${DELTA_ARCH}.tar.gz" -o /tmp/delta.tar.gz && \
+    tar -xzf /tmp/delta.tar.gz -C /tmp && cp /tmp/delta-*/delta /usr/local/bin/ && rm -rf /tmp/delta*
+
+# Install eza
+RUN ARCH=$(dpkg --print-architecture) && \
+    if [ "$ARCH" = "amd64" ]; then EZA_ARCH="x86_64"; else EZA_ARCH="aarch64"; fi && \
+    curl -fsSL "https://github.com/eza-community/eza/releases/download/v0.20.14/eza_${EZA_ARCH}-unknown-linux-gnu.tar.gz" -o /tmp/eza.tar.gz && \
+    tar -xzf /tmp/eza.tar.gz -C /usr/local/bin && rm /tmp/eza.tar.gz
+
+# Install dust
+RUN ARCH=$(dpkg --print-architecture) && \
+    if [ "$ARCH" = "amd64" ]; then DUST_ARCH="x86_64-unknown-linux-gnu"; \
+    else DUST_ARCH="aarch64-unknown-linux-gnu"; fi && \
+    curl -fsSL "https://github.com/bootandy/dust/releases/download/v1.1.1/dust-v1.1.1-${DUST_ARCH}.tar.gz" -o /tmp/dust.tar.gz && \
+    tar -xzf /tmp/dust.tar.gz -C /tmp && cp /tmp/dust-*/dust /usr/local/bin/ && rm -rf /tmp/dust*
+
+# Install Rust
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal
+ENV PATH="/root/.cargo/bin:${PATH}"
+
+# Alias python → python3 (agents/LLMs frequently use bare "python")
+RUN ln -sf /usr/bin/python3 /usr/bin/python
+
+# Install uv (fast Python package manager — agents use it to install pytest, dependencies, etc.)
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+ENV PATH="/root/.local/bin:${PATH}"
+
+# Headless Chromium for Playwright browser automation (testing only)
+# Agents use Chromium for automated testing, screenshots, PDF generation, etc.
+# --with-deps auto-installs all required system libraries (libnss3, libgbm1, fonts, etc.)
+# We only install Chromium (skip Firefox/WebKit) to save ~800MB of image size.
+RUN npm install -g playwright && \
+    playwright install --with-deps chromium && \
+    rm -rf /var/lib/apt/lists/*
+
+# ── Camofox: Anti-detection browser for real web browsing ─────────────────
+# Camoufox is a Firefox fork that patches fingerprinting at the C++ level
+# (navigator, WebGL, AudioContext, screen geometry, WebRTC — all spoofed
+# before JavaScript ever sees them). Agents use this for all real web
+# browsing; Playwright/Chromium stays for automated testing only.
+# Firefox/Camoufox system dependencies not already installed by Playwright
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libgtk-3-0 \
+    libdbus-glib-1-2 \
+    libxt6 \
+    libx11-xcb1 \
+    xxd \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install camofox-browser server (REST API wrapper around Camoufox)
+# The camoufox-js dependency's postinstall fetches the correct Camoufox
+# binary for the current platform automatically.
+RUN mkdir -p /opt/camofox && \
+    cd /opt/camofox && \
+    npm init -y > /dev/null 2>&1 && \
+    npm install --omit=dev @askjo/camofox-browser && \
+    npx camoufox-js fetch && \
+    cp -r /root/.cache/camoufox /opt/camofox/.camoufox-cache && \
+    rm -rf /tmp/* /root/.npm/_cacache
+
+# Install yt-dlp for YouTube transcript extraction (used by camofox)
+RUN curl -fsSL -o /usr/local/bin/yt-dlp \
+    https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp && \
+    chmod +x /usr/local/bin/yt-dlp
+
+# Install Bun 1.3.6 (for QMDR - 1.3.7+ has sqlite-vec segfault)
+RUN curl -fsSL https://bun.sh/install | bash -s "bun-v1.3.6"
+ENV PATH="/root/.bun/bin:${PATH}"
+
+# Install QMDR (semantic search CLI)
+RUN bun install -g github:uf-hy/qmdr && \
+    ln -sf /root/.bun/bin/qmd /usr/local/bin/qmd
+
+# Patch QMDR for remote embeddings
+RUN sed -i 's/await remote.embed(formattedText, { model, isQuery })/await remote.embed(formattedText, { isQuery })/' /root/.bun/install/global/node_modules/qmdr/src/store.ts && \
+    sed -i "s/process.env.QMD_EMBED_PROVIDER === 'siliconflow'/process.env.QMD_EMBED_PROVIDER === 'siliconflow' || process.env.QMD_EMBED_PROVIDER === 'openai'/" /root/.bun/install/global/node_modules/qmdr/src/qmd.ts && \
+    sed -i "s/const remoteModel = process.env.QMD_SILICONFLOW_EMBED_MODEL || 'Qwen\/Qwen3-Embedding-8B'/const remoteModel = process.env.QMD_EMBED_PROVIDER === 'openai' ? (process.env.QMD_OPENAI_EMBED_MODEL || 'text-embedding-3-small') : (process.env.QMD_SILICONFLOW_EMBED_MODEL || 'Qwen\/Qwen3-Embedding-8B')/" /root/.bun/install/global/node_modules/qmdr/src/qmd.ts
+
+# Copy root workspace for npm
+COPY package.json package-lock.json ./
+COPY packages/code-graph/package.json ./packages/code-graph/
+COPY packages/core/package.json ./packages/core/
+COPY packages/agent-runtime/package.json ./packages/agent-runtime/
+
+# Install production deps
+RUN npm install --omit=dev
+
+# Copy built code
+COPY --from=builder /build/packages/code-graph/dist ./packages/code-graph/dist
+COPY --from=builder /build/packages/core/dist ./packages/core/dist
+COPY --from=builder /build/packages/agent-runtime/dist ./packages/agent-runtime/dist
+
+# Make clawvault CLI available (if it exists in node_modules)
+RUN test -f /app/node_modules/.bin/clawvault && \
+    ln -sf /app/node_modules/.bin/clawvault /usr/local/bin/clawvault || true
+
+# Create mount points for JuiceFS subdirectory mounts.
+# Each directory becomes an independent FUSE mount point at container startup,
+# giving the agent access only to its own data (true filesystem isolation).
+# The shared vault is NOT mounted — agents access it via the DjinnBot API.
+RUN mkdir -p /home/agent /home/agent/clawvault \
+    /home/agent/run-workspace /home/agent/project-workspace \
+    /home/agent/cookies
+
+# Version injected at build time by CI (git tag)
+ARG BUILD_VERSION=dev
+ENV DJINNBOT_BUILD_VERSION=${BUILD_VERSION}
+
+# Environment
+ENV NODE_ENV=production
+ENV WORKSPACE_PATH=/home/agent/run-workspace
+ENV HOME=/home/agent
+ENV QMD_ALLOW_SQLITE_EXTENSIONS=1
+# Camofox configuration — server runs inside the container as a sidecar process
+ENV CAMOFOX_PORT=9377
+ENV CAMOFOX_COOKIES_DIR=/home/agent/cookies
+ENV CAMOFOX_URL=http://127.0.0.1:9377
+
+# Allow git to work with directories owned by other users (JuiceFS FUSE mounts).
+# Use --system (/etc/gitconfig) so the setting applies globally.
+RUN git config --system --add safe.directory '*'
+
+# ── Git credential helper (baked into image) ────────────────────────────────
+# Reads DJINNBOT_API_URL and AGENT_ID from env vars at runtime so no
+# boot-time script generation is needed.
+RUN printf '#!/bin/sh\n\
+[ "$1" = "get" ] || exit 0\n\
+INPUT=$(cat)\n\
+HOST=$(printf "%%s" "$INPUT" | grep "^host=" | cut -d= -f2-)\n\
+[ "$HOST" = "github.com" ] || exit 0\n\
+RESP=$(curl -sf "$DJINNBOT_API_URL/v1/github/git-credential?agent_id=$AGENT_ID" 2>/dev/null || true)\n\
+[ -n "$RESP" ] || exit 1\n\
+TOKEN=$(printf "%%s" "$RESP" | sed '"'"'s/.*"token":"\\([^"]*\\)".*/\\1/'"'"')\n\
+[ -n "$TOKEN" ] || exit 1\n\
+printf "username=x-access-token\\npassword=%%s\\n" "$TOKEN"\n' \
+    > /usr/local/bin/djinnbot-git-credential && \
+    chmod +x /usr/local/bin/djinnbot-git-credential && \
+    git config --system credential.helper /usr/local/bin/djinnbot-git-credential
+
+# Verify tools
+RUN echo "=== Agent Runtime Tools ===" && \
+    node --version && python3 --version && uv --version && go version && \
+    git --version && gh --version | head -1 && \
+    rg --version | head -1 && fd --version && bat --version | head -1 && \
+    jq --version && yq --version | head -1 && \
+    bun --version && playwright --version && \
+    juicefs version && \
+    qmd --version 2>/dev/null || echo "qmd: installed" && \
+    ls /opt/camofox/node_modules/@askjo/camofox-browser/server.js > /dev/null && echo "camofox-browser: installed" && \
+    yt-dlp --version && \
+    echo "=== All tools verified! ==="
+
+# Use CMD instead of ENTRYPOINT so that manager.ts can provide a Cmd that
+# runs JuiceFS mounts + git credential setup before starting the node process.
+CMD ["node", "/app/packages/agent-runtime/dist/entrypoint.js"]

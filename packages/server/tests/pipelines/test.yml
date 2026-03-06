@@ -1,0 +1,7 @@
+id: test-pipeline
+name: Test Pipeline
+description: A test pipeline
+version: "1.0"
+steps:
+  - id: step1
+    name: First Step

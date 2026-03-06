@@ -1,0 +1,52 @@
+# DjinnBot
+
+> Deploy a team of autonomous AI agents that collaborate on any workflow — engineering, research, content, operations, finance. Each agent has a distinct persona, persistent memory, a full toolbox inside an isolated Docker container, and can be reached from Slack, Discord, Telegram, WhatsApp, Signal, or the built-in chat. Self-hosted and free.
+
+## Getting Started
+
+- [Installation](https://docs.djinn.bot/docs/getting-started/installation/): One-line installer, Docker Compose setup, prerequisites, and environment configuration.
+- [First Run](https://docs.djinn.bot/docs/getting-started/first-run/): Creating your admin account, running your first pipeline, and basic usage.
+- [Dashboard Tour](https://docs.djinn.bot/docs/getting-started/dashboard-tour/): Overview of the real-time dashboard — activity feed, kanban boards, pipeline views, and admin panel.
+
+## Core Concepts
+
+- [Agents](https://docs.djinn.bot/docs/concepts/agents/): Agent anatomy (IDENTITY, SOUL, AGENTS, DECISION, PULSE, config.yml), the default team of 11 agents, and how to create custom agents.
+- [Architecture](https://docs.djinn.bot/docs/concepts/architecture/): System architecture — FastAPI server, Pipeline Engine, Redis Streams, PostgreSQL, agent containers, JuiceFS, and messaging bridges.
+- [Pipelines](https://docs.djinn.bot/docs/concepts/pipelines/): YAML-defined multi-agent workflows with steps, branching, loops, retries, structured output, and per-step model overrides.
+- [Memory](https://docs.djinn.bot/docs/concepts/memory/): ClawVault persistent memory with semantic search (QMDR), wiki-linked knowledge graph, memory scoring, and 3D visualization.
+- [Pulse](https://docs.djinn.bot/docs/concepts/pulse/): Named pulse routines — autonomous wake-up schedules, blackout windows, stagger offsets, and wake guardrails.
+- [Storage](https://docs.djinn.bot/docs/concepts/storage/): JuiceFS FUSE mount with RustFS (S3-compatible object store) for shared POSIX filesystem across containers.
+- [Containers](https://docs.djinn.bot/docs/concepts/containers/): Ephemeral Docker agent containers with Node 22, Python 3, Go, Rust, Camoufox browser, and 30+ tools.
+- [Workspaces](https://docs.djinn.bot/docs/concepts/workspaces/): Multi-workspace support for organizing projects and agents.
+- [Code Knowledge Graph](https://docs.djinn.bot/docs/concepts/code-knowledge-graph/): Tree-sitter-based structural codebase understanding stored in KuzuDB — functions, classes, call chains, and clusters queryable by agents.
+- [Programmatic Tool Calling](https://docs.djinn.bot/docs/concepts/programmatic-tool-calling/): Compact Python function signatures replace verbose JSON schemas, reducing prompt overhead by 12x.
+- [Event-Driven Wakes](https://docs.djinn.bot/docs/concepts/event-driven-wakes/): Agents waking each other based on events and coordination triggers.
+- [MCP Tools](https://docs.djinn.bot/docs/concepts/mcp-tools/): Model Context Protocol tool server integration via mcpo proxy with hot-reload.
+- [Skills](https://docs.djinn.bot/docs/concepts/skills/): Reusable skill packages with references and templates that agents can use.
+- [Secrets](https://docs.djinn.bot/docs/concepts/secrets/): Encrypted secret management for agents and pipelines.
+
+## Guides
+
+- [Slack Setup](https://docs.djinn.bot/docs/guides/slack-setup/): Configuring per-agent Slack bots using Bolt.js and Socket Mode.
+- [Discord Setup](https://docs.djinn.bot/docs/guides/discord-setup/): Setting up per-agent Discord bots with discord.js and Gateway API.
+- [Telegram Setup](https://docs.djinn.bot/docs/guides/telegram-setup/): Configuring per-agent Telegram bots using grammY.
+- [WhatsApp Setup](https://docs.djinn.bot/docs/guides/whatsapp-setup/): WhatsApp integration via Baileys with shared number and smart routing.
+- [Signal Setup](https://docs.djinn.bot/docs/guides/signal-setup/): Signal integration via signal-cli daemon with shared number.
+- [Custom Agents](https://docs.djinn.bot/docs/guides/custom-agents/): Creating custom agents by adding a directory with markdown personality files and YAML config.
+- [Custom Pipelines](https://docs.djinn.bot/docs/guides/custom-pipelines/): Writing YAML pipeline definitions with steps, agents, branching, and structured output.
+- [Projects](https://docs.djinn.bot/docs/guides/projects/): Managing projects with kanban boards, task dependencies, and agent assignment.
+- [GitHub Integration](https://docs.djinn.bot/docs/guides/github-integration/): Connecting agents to GitHub repositories for commits, PRs, and issue management.
+
+## Reference
+
+- [Configuration](https://docs.djinn.bot/docs/reference/configuration/): All environment variables, agent config.yml options, and system settings.
+- [CLI](https://docs.djinn.bot/docs/reference/cli/): Complete CLI reference — djinn setup, login, chat, cookies, provider, and all subcommands.
+- [API](https://docs.djinn.bot/docs/reference/api/): REST API endpoints for agents, pipelines, projects, memory, chat, and admin operations.
+- [Pipeline YAML](https://docs.djinn.bot/docs/reference/pipeline-yaml/): Pipeline YAML schema — steps, template variables, conditional branching, loops, retries, and output schemas.
+
+## Advanced
+
+- [LLM Providers](https://docs.djinn.bot/docs/advanced/llm-providers/): Supported providers (OpenRouter, Anthropic, OpenAI, Google, xAI, Groq, Mistral, Azure, Bedrock, Vertex, custom) and per-agent model configuration.
+- [Security](https://docs.djinn.bot/docs/advanced/security/): Container isolation, TOTP 2FA, encrypted secrets, auto SSL via Let's Encrypt, OIDC SSO, and API key management.
+- [Bot Interfaces](https://docs.djinn.bot/docs/advanced/bot-interfaces/): Architecture of the Slack, Discord, Telegram, Signal, and WhatsApp messaging bridges.
+- [Local Development](https://docs.djinn.bot/docs/advanced/local-development/): Running the full stack locally for development — Node.js, Python, PostgreSQL, Redis, and hot-reload.

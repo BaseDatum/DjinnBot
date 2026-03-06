@@ -1,0 +1,631 @@
+/**
+ * ChatSessionContext
+ *
+ * Provides a global store of open chat panes so both the main ChatWorkspace
+ * and the FloatingChatWidget share the same live sessions.  Any component
+ * can open, close, or focus a chat pane without prop-drilling.
+ */
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+} from 'react';
+import { fetchAgents, listChatSessions, endChatSession, startChatSession, restartChatSession, getChatSessionStatus, getChatSession, updateChatModel, API_BASE, type AgentListItem } from '@/lib/api';
+import { useSSE } from '@/hooks/useSSE';
+
+// ── Types ─────────────────────────────────────────────────────────────────────
+
+export type SessionStatus = 'idle' | 'starting' | 'running' | 'stopping';
+
+export interface ChatPane {
+  /** Stable UI identifier (not the backend session id) */
+  paneId: string;
+  agentId: string;
+  agentName: string;
+  agentEmoji: string | null;
+  model: string;
+  /** Backend session id — null while the session is being started */
+  sessionId: string | null;
+  sessionStatus: SessionStatus;
+  /** Whether this pane is currently "visible" in the tiled layout */
+  visible: boolean;
+  /** Key resolution info — which API keys are powering this session */
+  keyResolution?: {
+    source?: string;
+    userId?: string | null;
+    resolvedProviders?: string[];
+    providerSources?: Record<string, { source: string; masked_key: string }>;
+  } | null;
+}
+
+interface ChatSessionContextValue {
+  panes: ChatPane[];
+  agents: AgentListItem[];
+  /** Open a new chat (starts session immediately) */
+  openChat: (agentId: string, model: string, resumeSessionId?: string) => void;
+  /** Close + end a pane */
+  closePane: (paneId: string) => void;
+  /** Bring a pane into the visible set */
+  showPane: (paneId: string) => void;
+  /** Hide a pane without ending the session */
+  hidePane: (paneId: string) => void;
+  /** Update session id once backend call resolves */
+  setPaneSessionId: (paneId: string, sessionId: string) => void;
+  /** Update session status */
+  setPaneStatus: (paneId: string, status: SessionStatus) => void;
+  /** Restart a session whose container was reaped */
+  restartPane: (paneId: string) => void;
+  /**
+   * Switch the model for a running session mid-conversation.
+   * Calls the backend API to hot-swap the model seamlessly —
+   * full conversation context is preserved.
+   */
+  updatePaneModel: (paneId: string, model: string) => void;
+  /** Whether the floating widget is open */
+  widgetOpen: boolean;
+  setWidgetOpen: (open: boolean) => void;
+  /** Whether initial session restore has run */
+  restored: boolean;
+
+  // ── Cross-mount persistence ─────────────────────────────────────────────
+  // These survive when AgentChat remounts (e.g. navigating from floating
+  // widget to /chat page). The floating widget now uses CSS visibility
+  // instead of unmounting, but the /chat page still creates new AgentChat
+  // instances that benefit from this cache.
+
+  /** Get the draft input text for a session (survives remounts). */
+  getDraft: (sessionId: string) => string;
+  /** Save draft input text for a session. */
+  setDraft: (sessionId: string, text: string) => void;
+  /** Get cached messages for a session (survives remounts). */
+  getMessageCache: (sessionId: string) => any[] | undefined;
+  /** Save messages to the cache for a session. */
+  setMessageCache: (sessionId: string, messages: any[]) => void;
+  /** Clear the message cache for a session (e.g. on session end). */
+  clearMessageCache: (sessionId: string) => void;
+  /** Get cached token stats for a session. */
+  getTokenStats: (sessionId: string) => any | undefined;
+  /** Save token stats to the cache for a session. */
+  setTokenStats: (sessionId: string, stats: any) => void;
+}
+
+const ChatSessionContext = createContext<ChatSessionContextValue | null>(null);
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+let paneCounter = 0;
+function nextPaneId() {
+  return `pane_${++paneCounter}`;
+}
+
+const MAX_VISIBLE = 3;
+
+// ── localStorage persistence ─────────────────────────────────────────────────
+
+const STORAGE_KEY = 'djinnbot:chat_panes';
+const WIDGET_KEY = 'djinnbot:chat_widget_open';
+
+/** Minimal shape we persist — everything else is re-derived on restore. */
+interface PersistedPane {
+  sessionId: string;
+  agentId: string;
+  agentName: string;
+  agentEmoji: string | null;
+  model: string;
+  visible: boolean;
+}
+
+function savePanesToStorage(panes: ChatPane[]) {
+  try {
+    // Only persist panes that have a backend session id
+    const serializable: PersistedPane[] = panes
+      .filter(p => p.sessionId)
+      .map(p => ({
+        sessionId: p.sessionId!,
+        agentId: p.agentId,
+        agentName: p.agentName,
+        agentEmoji: p.agentEmoji,
+        model: p.model,
+        visible: p.visible,
+      }));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(serializable));
+  } catch {
+    // localStorage may be unavailable (private browsing, quota)
+  }
+}
+
+function loadPanesFromStorage(): PersistedPane[] {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed;
+  } catch {
+    return [];
+  }
+}
+
+function clearPanesStorage() {
+  try { localStorage.removeItem(STORAGE_KEY); } catch { /* */ }
+}
+
+function saveWidgetState(open: boolean) {
+  try { localStorage.setItem(WIDGET_KEY, open ? '1' : '0'); } catch { /* */ }
+}
+
+function loadWidgetState(): boolean {
+  try { return localStorage.getItem(WIDGET_KEY) === '1'; } catch { return false; }
+}
+
+// ── Provider ──────────────────────────────────────────────────────────────────
+
+export function ChatSessionProvider({ children }: { children: React.ReactNode }) {
+  const [panes, setPanes] = useState<ChatPane[]>([]);
+  const [agents, setAgents] = useState<AgentListItem[]>([]);
+  const [widgetOpen, setWidgetOpen] = useState(loadWidgetState);
+  const [restored, setRestored] = useState(false);
+
+  // Keep a ref so callbacks don't need panes in their dep arrays
+  const panesRef = useRef(panes);
+  panesRef.current = panes;
+
+  // ── Cross-mount caches ──────────────────────────────────────────────────
+  // These Maps persist in the Provider (lives at the root layout) even when
+  // AgentChat instances remount (e.g. navigating between floating widget and
+  // /chat page). Uses refs instead of state because writes should NOT trigger
+  // re-renders of the entire provider tree.
+  const draftCacheRef = useRef(new Map<string, string>());
+  const messageCacheRef = useRef(new Map<string, any[]>());
+  const tokenStatsCacheRef = useRef(new Map<string, any>());
+
+  const getDraft = useCallback((sessionId: string) => draftCacheRef.current.get(sessionId) ?? '', []);
+  const setDraft = useCallback((sessionId: string, text: string) => {
+    if (text) {
+      draftCacheRef.current.set(sessionId, text);
+    } else {
+      draftCacheRef.current.delete(sessionId);
+    }
+  }, []);
+  const getMessageCache = useCallback((sessionId: string) => messageCacheRef.current.get(sessionId), []);
+  const setMessageCache = useCallback((sessionId: string, messages: any[]) => {
+    messageCacheRef.current.set(sessionId, messages);
+  }, []);
+  const clearMessageCache = useCallback((sessionId: string) => {
+    messageCacheRef.current.delete(sessionId);
+    draftCacheRef.current.delete(sessionId);
+    tokenStatsCacheRef.current.delete(sessionId);
+  }, []);
+  const getTokenStats = useCallback((sessionId: string) => tokenStatsCacheRef.current.get(sessionId), []);
+  const setTokenStats = useCallback((sessionId: string, stats: any) => {
+    tokenStatsCacheRef.current.set(sessionId, stats);
+  }, []);
+
+  // Persist panes to localStorage on every change (skip the initial empty state
+  // before restore completes — otherwise we'd wipe the saved panes).
+  const restoredRef = useRef(false);
+  useEffect(() => {
+    if (!restoredRef.current) return;
+    savePanesToStorage(panes);
+  }, [panes]);
+
+  // Persist widget open/close state
+  useEffect(() => {
+    saveWidgetState(widgetOpen);
+  }, [widgetOpen]);
+
+  // Load agents once
+  useEffect(() => {
+    fetchAgents().then(setAgents).catch(console.error);
+  }, []);
+
+  // ── Restore: localStorage first, reconcile with backend ───────────────────
+  //
+  // 1. Read persisted panes from localStorage (the sessions the user had open).
+  // 2. For each, check backend status — running → running, anything else → idle.
+  // 3. Also discover any running sessions NOT in localStorage (e.g. started from
+  //    another tab or via the API) and add them as hidden panes.
+  // 4. The result: every session the user had open is restored (even if its
+  //    container was reaped — it shows as idle with a Restart button), plus any
+  //    new running sessions they haven't seen yet.
+  useEffect(() => {
+    if (agents.length === 0 || restored) return;
+
+    const restore = async () => {
+      try {
+        const persisted = loadPanesFromStorage();
+        const seenSessionIds = new Set<string>();
+
+        // ── Phase 1: reconcile persisted panes with backend status ─────────
+        const reconciledPanes: ChatPane[] = [];
+
+        if (persisted.length > 0) {
+          const statusResults = await Promise.allSettled(
+            persisted.map(p =>
+              getChatSessionStatus(p.agentId, p.sessionId)
+                .then(s => ({ persisted: p, status: s })),
+            ),
+          );
+
+          for (const result of statusResults) {
+            if (result.status !== 'fulfilled') continue;
+            const { persisted: p, status: s } = result.value;
+
+            // Session was deleted or doesn't exist — drop it
+            if (!s.exists) continue;
+
+            seenSessionIds.add(p.sessionId);
+
+            const backendStatus = s.status;
+            let sessionStatus: SessionStatus = 'idle';
+            if (backendStatus === 'running' || backendStatus === 'ready') {
+              sessionStatus = 'running';
+            } else if (backendStatus === 'starting') {
+              sessionStatus = 'starting';
+            }
+            // completed, failed, idle → 'idle' (shows restart button)
+
+            reconciledPanes.push({
+              paneId: nextPaneId(),
+              agentId: p.agentId,
+              agentName: p.agentName,
+              agentEmoji: p.agentEmoji,
+              model: p.model,
+              sessionId: p.sessionId,
+              sessionStatus,
+              visible: p.visible && reconciledPanes.filter(rp => rp.visible).length < MAX_VISIBLE,
+            });
+          }
+        }
+
+        // ── Phase 2: discover running sessions not in localStorage ─────────
+        // (e.g. started from another tab, CLI, or API call)
+        const discoveryResults = await Promise.allSettled(
+          agents.map(agent =>
+            listChatSessions(agent.id, { limit: 20 }).then(r => ({
+              agent,
+              sessions: r.sessions.filter(
+                s => (s.status === 'running' || s.status === 'starting' || (s.status as string) === 'ready')
+                  && !seenSessionIds.has(s.id),
+              ),
+            })),
+          ),
+        );
+
+        for (const result of discoveryResults) {
+          if (result.status !== 'fulfilled') continue;
+          const { agent, sessions } = result.value;
+          for (const session of sessions) {
+            const visibleCount = reconciledPanes.filter(p => p.visible).length;
+            reconciledPanes.push({
+              paneId: nextPaneId(),
+              agentId: agent.id,
+              agentName: agent.name,
+              agentEmoji: agent.emoji,
+              model: session.model,
+              sessionId: session.id,
+              sessionStatus: 'running',
+              visible: visibleCount < MAX_VISIBLE,
+              keyResolution: session.key_resolution ?? null,
+            });
+          }
+        }
+
+        if (reconciledPanes.length > 0) {
+          setPanes(reconciledPanes);
+
+          // Fetch key_resolution for restored panes that don't have it yet.
+          // key_resolution lives on the backend and is not persisted in localStorage.
+          for (const pane of reconciledPanes) {
+            if (pane.sessionId && !pane.keyResolution) {
+              getChatSession(pane.sessionId)
+                .then(session => {
+                  if (session.key_resolution) {
+                    setPanes(prev =>
+                      prev.map(p =>
+                        p.sessionId === pane.sessionId
+                          ? { ...p, keyResolution: session.key_resolution }
+                          : p,
+                      ),
+                    );
+                  }
+                })
+                .catch(() => {}); // Non-fatal
+            }
+          }
+        } else {
+          // No panes to restore — clear stale localStorage
+          clearPanesStorage();
+        }
+      } catch (err) {
+        console.error('Failed to restore chat sessions:', err);
+      } finally {
+        restoredRef.current = true;
+        setRestored(true);
+      }
+    };
+
+    restore();
+  }, [agents, restored]);
+
+  // ── SSE: fetch key_resolution when a chat session changes status ──────────
+  //
+  // The engine writes key_resolution asynchronously after resolving provider
+  // keys.  Rather than relying on blind timeout-based polling, we listen to
+  // the chat session SSE stream.  When a session we have open transitions to
+  // a new status (typically starting → running), we fetch its detail to pick
+  // up key_resolution.
+  const handleChatSessionSSE = useCallback((event: any) => {
+    const type = event?.type || event?.event;
+    const sessionId = event?.sessionId;
+    if (!sessionId) return;
+
+    if (type === 'status_changed' || type === 'created') {
+      // Check if we have a pane for this session that's missing keyResolution
+      const pane = panesRef.current.find(p => p.sessionId === sessionId);
+      if (pane && !pane.keyResolution) {
+        // Small delay to let the key_resolution PATCH complete
+        setTimeout(() => {
+          getChatSession(sessionId)
+            .then(session => {
+              if (session.key_resolution) {
+                setPanes(prev =>
+                  prev.map(p =>
+                    p.sessionId === sessionId
+                      ? { ...p, keyResolution: session.key_resolution }
+                      : p,
+                  ),
+                );
+              }
+            })
+            .catch(() => {}); // Non-fatal
+        }, 500);
+      }
+    }
+  }, []);
+
+  useSSE({
+    url: `${API_BASE}/events/chat-sessions`,
+    onMessage: handleChatSessionSSE,
+    enabled: restored,
+  });
+
+  const openChat = useCallback(
+    (agentId: string, model: string, _resumeSessionId?: string) => {
+      // Guard: if a pane for this exact sessionId is already open, just make it
+      // visible instead of opening a duplicate window.
+      if (_resumeSessionId) {
+        const existing = panesRef.current.find(p => p.sessionId === _resumeSessionId);
+        if (existing) {
+          setPanes(prev =>
+            prev.map(p => (p.paneId === existing.paneId ? { ...p, visible: true } : p)),
+          );
+          return;
+        }
+      }
+
+      const agent = agents.find(a => a.id === agentId);
+      const visibleCount = panesRef.current.filter(p => p.visible).length;
+      const paneId = nextPaneId();
+
+      const newPane: ChatPane = {
+        paneId,
+        agentId,
+        agentName: agent?.name || agentId,
+        agentEmoji: agent?.emoji || null,
+        model,
+        sessionId: _resumeSessionId || null,
+        sessionStatus: _resumeSessionId ? 'running' : 'starting',
+        visible: visibleCount < MAX_VISIBLE,
+      };
+
+      setPanes(prev => [...prev, newPane]);
+
+      // If no session id was provided, start a new one on the backend now.
+      // Update the pane with the real session id once the API responds.
+      if (!_resumeSessionId) {
+        startChatSession(agentId, model || undefined)
+          .then(result => {
+            setPanes(prev =>
+              prev.map(p =>
+                p.paneId === paneId
+                  ? { ...p, sessionId: result.sessionId, sessionStatus: 'running' }
+                  : p,
+              ),
+            );
+            // key_resolution is fetched reactively via the chat-sessions SSE
+            // listener (handleChatSessionSSE) when the session status changes.
+            // As a fallback in case the SSE event was missed, do a single
+            // delayed fetch.
+            setTimeout(() => {
+              const pane = panesRef.current.find(p => p.paneId === paneId);
+              if (pane && !pane.keyResolution) {
+                getChatSession(result.sessionId)
+                  .then(s => {
+                    if (s.key_resolution) {
+                      setPanes(prev =>
+                        prev.map(p =>
+                          p.paneId === paneId
+                            ? { ...p, keyResolution: s.key_resolution }
+                            : p,
+                        ),
+                      );
+                    }
+                  })
+                  .catch(() => {});
+              }
+            }, 5000);
+          })
+          .catch(err => {
+            console.error('Failed to start chat session:', err);
+            // Mark as idle so the UI shows an error state rather than spinning forever
+            setPanes(prev =>
+              prev.map(p =>
+                p.paneId === paneId ? { ...p, sessionStatus: 'idle' } : p,
+              ),
+            );
+          });
+      }
+    },
+    [agents],
+  );
+
+  const closePane = useCallback((paneId: string) => {
+    // Find the pane before removing it so we can call the backend
+    const pane = panesRef.current.find(p => p.paneId === paneId);
+    // Remove from UI immediately — don't wait for the backend call
+    setPanes(prev => prev.filter(p => p.paneId !== paneId));
+    // Clear cross-mount caches for this session
+    if (pane?.sessionId) {
+      clearMessageCache(pane.sessionId);
+    }
+    // End the backend session (kill container, mark completed) — fire and forget
+    if (pane?.sessionId && pane.sessionStatus !== 'idle' && pane.sessionStatus !== 'stopping') {
+      endChatSession(pane.agentId, pane.sessionId).catch(err =>
+        console.error(`Failed to end session ${pane.sessionId}:`, err),
+      );
+    }
+  }, [clearMessageCache]);
+
+  const showPane = useCallback((paneId: string) => {
+    setPanes(prev =>
+      prev.map(p => (p.paneId === paneId ? { ...p, visible: true } : p)),
+    );
+  }, []);
+
+  const hidePane = useCallback((paneId: string) => {
+    setPanes(prev =>
+      prev.map(p => (p.paneId === paneId ? { ...p, visible: false } : p)),
+    );
+  }, []);
+
+  const setPaneSessionId = useCallback((paneId: string, sessionId: string) => {
+    setPanes(prev =>
+      prev.map(p =>
+        p.paneId === paneId ? { ...p, sessionId, sessionStatus: 'running' } : p,
+      ),
+    );
+  }, []);
+
+  const setPaneStatus = useCallback((paneId: string, status: SessionStatus) => {
+    setPanes(prev =>
+      prev.map(p => (p.paneId === paneId ? { ...p, sessionStatus: status } : p)),
+    );
+  }, []);
+
+  const restartPane = useCallback((paneId: string) => {
+    const pane = panesRef.current.find(p => p.paneId === paneId);
+    if (!pane || !pane.sessionId) return;
+    if (pane.sessionStatus !== 'idle') return; // Only restart ended sessions
+
+    // Optimistically update to starting
+    setPanes(prev =>
+      prev.map(p =>
+        p.paneId === paneId ? { ...p, sessionStatus: 'starting' } : p,
+      ),
+    );
+
+    const sessionId = pane.sessionId;
+    restartChatSession(pane.agentId, sessionId)
+      .then(() => {
+        setPanes(prev =>
+          prev.map(p =>
+            p.paneId === paneId ? { ...p, sessionStatus: 'starting', keyResolution: null } : p,
+          ),
+        );
+        // key_resolution will be picked up by the SSE listener.
+        // Single fallback fetch after 5s in case SSE was missed.
+        setTimeout(() => {
+          const current = panesRef.current.find(p => p.paneId === paneId);
+          if (current && !current.keyResolution) {
+            getChatSession(sessionId)
+              .then(s => {
+                if (s.key_resolution) {
+                  setPanes(prev =>
+                    prev.map(p =>
+                      p.paneId === paneId
+                        ? { ...p, keyResolution: s.key_resolution }
+                        : p,
+                    ),
+                  );
+                }
+              })
+              .catch(() => {});
+          }
+        }, 5000);
+      })
+      .catch(err => {
+        console.error('Failed to restart session:', err);
+        // Revert to idle on failure
+        setPanes(prev =>
+          prev.map(p =>
+            p.paneId === paneId ? { ...p, sessionStatus: 'idle' } : p,
+          ),
+        );
+      });
+  }, []);
+
+  /**
+   * Switch the model for a running session mid-conversation.
+   * Optimistically updates the pane UI, then calls the backend API
+   * which sends a changeModel command to the container for seamless hot-swap.
+   */
+  const updatePaneModel = useCallback((paneId: string, model: string) => {
+    const pane = panesRef.current.find(p => p.paneId === paneId);
+    if (!pane || !pane.sessionId) return;
+
+    const previousModel = pane.model;
+
+    // Optimistic update — show new model immediately
+    setPanes(prev =>
+      prev.map(p => (p.paneId === paneId ? { ...p, model } : p)),
+    );
+
+    // Call backend API to hot-swap the model in the running container
+    updateChatModel(pane.agentId, pane.sessionId, model).catch(err => {
+      console.error(`Failed to update model for session ${pane.sessionId}:`, err);
+      // Revert on failure
+      setPanes(prev =>
+        prev.map(p => (p.paneId === paneId ? { ...p, model: previousModel } : p)),
+      );
+    });
+  }, []);
+
+  return (
+    <ChatSessionContext.Provider
+      value={{
+        panes,
+        agents,
+        openChat,
+        closePane,
+        showPane,
+        hidePane,
+        setPaneSessionId,
+        setPaneStatus,
+        restartPane,
+        updatePaneModel,
+        widgetOpen,
+        setWidgetOpen,
+        restored,
+        getDraft,
+        setDraft,
+        getMessageCache,
+        setMessageCache,
+        clearMessageCache,
+        getTokenStats,
+        setTokenStats,
+      }}
+    >
+      {children}
+    </ChatSessionContext.Provider>
+  );
+}
+
+export function useChatSessions() {
+  const ctx = useContext(ChatSessionContext);
+  if (!ctx) throw new Error('useChatSessions must be used inside ChatSessionProvider');
+  return ctx;
+}

@@ -1,0 +1,710 @@
+import { Type, type Static } from '@sinclair/typebox';
+import type { AgentTool, AgentToolResult } from '@mariozechner/pi-agent-core';
+import { authFetch } from '../../api/auth-fetch.js';
+
+// ── Schemas ────────────────────────────────────────────────────────────────
+
+const CreateTaskParamsSchema = Type.Object({
+  projectId: Type.String({ description: 'Project ID to create the task in' }),
+  title: Type.String({ description: 'Task title (concise, action-oriented)' }),
+  description: Type.Optional(Type.String({ description: 'Detailed task description (markdown). Include acceptance criteria when possible.' })),
+  priority: Type.Optional(Type.String({ description: 'Priority: P0 (critical), P1 (high), P2 (normal, default), P3 (low)' })),
+  tags: Type.Optional(Type.Array(Type.String(), { description: 'Tags for categorization (e.g. ["backend", "auth"])' })),
+  estimatedHours: Type.Optional(Type.Number({ description: 'Estimated hours to complete' })),
+  workType: Type.Optional(Type.String({
+    description: 'Task work type that determines which SDLC stages apply. ' +
+      'Values: feature (full SDLC), bugfix (implement→test), test (implement→test, no deploy), ' +
+      'refactor (implement→review→test), docs (implement only), infrastructure (implement→review→deploy), ' +
+      'design (spec→design→ux), custom (all stages optional). ' +
+      'If not set, auto-inferred from title/tags.',
+  })),
+});
+type CreateTaskParams = Static<typeof CreateTaskParamsSchema>;
+
+const CreateSubtaskParamsSchema = Type.Object({
+  projectId: Type.String({ description: 'Project ID to create the subtask in' }),
+  parentTaskId: Type.String({ description: 'Task ID of the parent task this subtask belongs to' }),
+  title: Type.String({ description: 'Subtask title (concise, action-oriented)' }),
+  description: Type.Optional(Type.String({ description: 'Detailed subtask description (markdown). Include acceptance criteria, scope boundary, and verification steps.' })),
+  priority: Type.Optional(Type.String({ description: 'Priority: P0 (critical), P1 (high), P2 (normal, default), P3 (low)' })),
+  tags: Type.Optional(Type.Array(Type.String(), { description: 'Tags for categorization (e.g. ["backend", "auth"])' })),
+  estimatedHours: Type.Optional(Type.Number({ description: 'Estimated hours to complete (subtasks should be 1-4 hours)' })),
+  workType: Type.Optional(Type.String({
+    description: 'Task work type: feature, bugfix, test, refactor, docs, infrastructure, design, custom. ' +
+      'Determines which SDLC stages apply. Auto-inferred if not set.',
+  })),
+});
+type CreateSubtaskParams = Static<typeof CreateSubtaskParamsSchema>;
+
+const AddDependencyParamsSchema = Type.Object({
+  projectId: Type.String({ description: 'Project ID containing both tasks' }),
+  taskId: Type.String({ description: 'The task that DEPENDS ON another (the blocked task)' }),
+  dependsOnTaskId: Type.String({ description: 'The task that must complete FIRST (the blocker)' }),
+  type: Type.Optional(Type.String({ description: '"blocks" (default) = hard dependency, "informs" = soft/informational' })),
+});
+type AddDependencyParams = Static<typeof AddDependencyParamsSchema>;
+
+const ExecuteTaskParamsSchema = Type.Object({
+  projectId: Type.String({ description: 'Project ID containing the task' }),
+  taskId: Type.String({ description: 'Task ID to execute' }),
+  pipelineId: Type.Optional(Type.String({ description: 'Optional: specific pipeline ID to use for execution' })),
+});
+type ExecuteTaskParams = Static<typeof ExecuteTaskParamsSchema>;
+
+const TransitionTaskParamsSchema = Type.Object({
+  projectId: Type.String({ description: 'Project ID' }),
+  taskId: Type.String({ description: 'Task ID' }),
+  status: Type.String({ description: 'Target status: in_progress | review | done | failed | blocked | ready | backlog | planning' }),
+  note: Type.Optional(Type.String({ description: 'Optional note explaining the transition' })),
+});
+type TransitionTaskParams = Static<typeof TransitionTaskParamsSchema>;
+
+// ── Types ──────────────────────────────────────────────────────────────────
+
+interface VoidDetails {}
+
+export interface PulseTasksToolsConfig {
+  agentId: string;
+  apiBaseUrl?: string;
+}
+
+// ── Tool factories ─────────────────────────────────────────────────────────
+
+export function createPulseTasksTools(config: PulseTasksToolsConfig): AgentTool[] {
+  const { agentId } = config;
+
+  const getApiBase = () =>
+    config.apiBaseUrl || process.env.DJINNBOT_API_URL || 'http://api:8000';
+
+  return [
+    {
+      name: 'create_task',
+      description:
+        'Create a new task in a project. The task is placed in the Ready column (or Backlog if ' +
+        'it has dependencies). Use this when you identify work that needs to be done — such as ' +
+        'bugs found during development, follow-up work, or breaking a large task into subtasks. ' +
+        'Returns the new task ID so you can add dependencies or claim it immediately.',
+      label: 'create_task',
+      parameters: CreateTaskParamsSchema,
+      execute: async (
+        _toolCallId: string,
+        params: unknown,
+        signal?: AbortSignal,
+      ): Promise<AgentToolResult<VoidDetails>> => {
+        const p = params as CreateTaskParams;
+        const apiBase = getApiBase();
+        try {
+          const url = `${apiBase}/v1/projects/${p.projectId}/tasks`;
+          const body: Record<string, unknown> = {
+            title: p.title,
+            description: p.description ?? '',
+            priority: p.priority ?? 'P2',
+          };
+          if (p.tags) body.tags = p.tags;
+          if (p.estimatedHours !== undefined) body.estimatedHours = p.estimatedHours;
+          if (p.workType) body.workType = p.workType;
+
+          const response = await authFetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+            signal,
+          });
+          const data = (await response.json()) as any;
+          if (!response.ok) throw new Error(data.detail || `${response.status} ${response.statusText}`);
+
+          return {
+            content: [{
+              type: 'text',
+              text: [
+                `Task created successfully.`, ``,
+                `**Task ID**: ${data.id}`,
+                `**Title**: ${data.title}`,
+                `**Status**: ${data.status}`,
+                `**Work Type**: ${data.work_type || 'unclassified'}`,
+                `**Column**: ${data.column_id}`, ``,
+                `You can now:`,
+                `- \`claim_task(projectId, "${data.id}")\` to start working on it`,
+                `- \`get_task_context(projectId, "${data.id}")\` to view full details`,
+                `- \`transition_task(projectId, "${data.id}", status)\` to change its status`,
+              ].join('\n'),
+            }],
+            details: {},
+          };
+        } catch (err) {
+          return { content: [{ type: 'text', text: `Error creating task: ${err instanceof Error ? err.message : String(err)}` }], details: {} };
+        }
+      },
+    },
+
+    {
+      name: 'create_subtask',
+      description:
+        'Create a subtask under an existing parent task. Subtasks represent bite-sized work ' +
+        '(1-4 hours) that collectively implement the parent task. Returns the subtask ID ' +
+        'so you can add dependencies between subtasks using add_dependency.',
+      label: 'create_subtask',
+      parameters: CreateSubtaskParamsSchema,
+      execute: async (
+        _toolCallId: string,
+        params: unknown,
+        signal?: AbortSignal,
+      ): Promise<AgentToolResult<VoidDetails>> => {
+        const p = params as CreateSubtaskParams;
+        const apiBase = getApiBase();
+        try {
+          const url = `${apiBase}/v1/projects/${p.projectId}/tasks`;
+          const body: Record<string, unknown> = {
+            title: p.title,
+            description: p.description ?? '',
+            priority: p.priority ?? 'P2',
+            parentTaskId: p.parentTaskId,
+          };
+          if (p.tags) body.tags = p.tags;
+          if (p.estimatedHours !== undefined) body.estimatedHours = p.estimatedHours;
+          if (p.workType) body.workType = p.workType;
+
+          const response = await authFetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+            signal,
+          });
+          const data = (await response.json()) as any;
+          if (!response.ok) throw new Error(data.detail || `${response.status} ${response.statusText}`);
+
+          return {
+            content: [{
+              type: 'text',
+              text: [
+                `Subtask created.`,
+                `**Subtask ID**: ${data.id}`,
+                `**Parent**: ${p.parentTaskId}`,
+                `**Title**: ${data.title}`,
+                `**Status**: ${data.status}`,
+              ].join('\n'),
+            }],
+            details: {},
+          };
+        } catch (err) {
+          return { content: [{ type: 'text', text: `Error creating subtask: ${err instanceof Error ? err.message : String(err)}` }], details: {} };
+        }
+      },
+    },
+
+    {
+      name: 'add_dependency',
+      description:
+        'Add a dependency between two tasks: the "dependsOnTaskId" task must complete ' +
+        'before "taskId" can start. Works for both tasks and subtasks. ' +
+        'Validates that no circular dependencies are created. ' +
+        'Use this after creating tasks to wire up the dependency graph.',
+      label: 'add_dependency',
+      parameters: AddDependencyParamsSchema,
+      execute: async (
+        _toolCallId: string,
+        params: unknown,
+        signal?: AbortSignal,
+      ): Promise<AgentToolResult<VoidDetails>> => {
+        const p = params as AddDependencyParams;
+        const apiBase = getApiBase();
+        try {
+          const url = `${apiBase}/v1/projects/${p.projectId}/tasks/${p.taskId}/dependencies`;
+          const body = {
+            fromTaskId: p.dependsOnTaskId,
+            type: p.type ?? 'blocks',
+          };
+
+          const response = await authFetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+            signal,
+          });
+          const data = (await response.json()) as any;
+          if (!response.ok) throw new Error(data.detail || `${response.status} ${response.statusText}`);
+
+          return {
+            content: [{
+              type: 'text',
+              text: `Dependency added: ${p.dependsOnTaskId} → ${p.taskId} (${body.type})`,
+            }],
+            details: {},
+          };
+        } catch (err) {
+          return { content: [{ type: 'text', text: `Error adding dependency: ${err instanceof Error ? err.message : String(err)}` }], details: {} };
+        }
+      },
+    },
+
+    {
+      name: 'claim_task',
+      description:
+        'Atomically claim an unassigned task so no other agent picks it up simultaneously. ' +
+        'Provisions an authenticated git workspace at /home/agent/task-workspaces/{taskId}/ ' +
+        'so you can commit and push immediately. Call this BEFORE starting work on a task.',
+      label: 'claim_task',
+      parameters: Type.Object({
+        projectId: Type.String({ description: 'Project ID' }),
+        taskId: Type.String({ description: 'Task ID to claim' }),
+      }),
+      execute: async (
+        _toolCallId: string,
+        params: unknown,
+        signal?: AbortSignal,
+      ): Promise<AgentToolResult<VoidDetails>> => {
+        const { projectId, taskId } = params as { projectId: string; taskId: string };
+        const apiBase = getApiBase();
+        try {
+          const claimUrl = `${apiBase}/v1/projects/${projectId}/tasks/${taskId}/claim`;
+          const claimResp = await authFetch(claimUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ agentId }),
+            signal,
+          });
+          const claimData = (await claimResp.json()) as any;
+          if (!claimResp.ok) throw new Error(claimData.detail || `${claimResp.status} ${claimResp.statusText}`);
+          const branch: string = claimData.branch;
+
+          let worktreePath = `/home/agent/task-workspaces/${taskId}`;
+          let workspaceNote = '';
+          try {
+            const wsUrl = `${apiBase}/v1/projects/${projectId}/tasks/${taskId}/workspace`;
+            const wsResp = await authFetch(wsUrl, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ agentId }),
+              signal,
+            });
+            const wsData = (await wsResp.json()) as any;
+            if (wsResp.ok) {
+              worktreePath = wsData.worktree_path ?? worktreePath;
+              workspaceNote = wsData.already_existed
+                ? ' (workspace already existed — prior work is preserved)'
+                : ' (new workspace provisioned)';
+            } else {
+              workspaceNote = ` (workspace setup failed: ${wsData.detail ?? wsResp.status} — you may need to set up git manually)`;
+            }
+          } catch (wsErr) {
+            workspaceNote = ` (workspace setup error: ${wsErr instanceof Error ? wsErr.message : String(wsErr)})`;
+          }
+
+          return {
+            content: [{
+              type: 'text',
+              text: [
+                `Task claimed successfully.`, ``,
+                `**Task ID**: ${taskId}`,
+                `**Branch**: ${branch}`,
+                `**Workspace**: ${worktreePath}${workspaceNote}`, ``,
+              `Your workspace is a git worktree already checked out on branch \`${branch}\`.`,
+              `Git credentials are configured — you can push directly:`, ``,
+              '```bash',
+              `cd ${worktreePath}`,
+              `# ... make your changes ...`,
+              `git add -A && git commit -m "your message"`,
+              `git push`,
+              '```', ``,
+              `Call \`get_board_columns(projectId)\` to see available columns, then use`,
+              `\`transition_task\` to move the task to the appropriate status for your role.`,
+              ].join('\n'),
+            }],
+            details: {},
+          };
+        } catch (err) {
+          return { content: [{ type: 'text', text: `Error claiming task: ${err instanceof Error ? err.message : String(err)}` }], details: {} };
+        }
+      },
+    },
+
+    {
+      name: 'get_task_context',
+      description:
+        'Get full details of a specific task: description, status, priority, assigned agent, git branch, PR info. ' +
+        'Use this to understand what a task requires before starting work.',
+      label: 'get_task_context',
+      parameters: Type.Object({
+        projectId: Type.String({ description: 'Project ID' }),
+        taskId: Type.String({ description: 'Task ID' }),
+      }),
+      execute: async (
+        _toolCallId: string,
+        params: unknown,
+        signal?: AbortSignal,
+      ): Promise<AgentToolResult<VoidDetails>> => {
+        const { projectId, taskId } = params as { projectId: string; taskId: string };
+        const apiBase = getApiBase();
+        try {
+          const url = `${apiBase}/v1/projects/${projectId}/tasks/${taskId}`;
+          const response = await authFetch(url, { signal });
+          const data = (await response.json()) as any;
+          if (!response.ok) throw new Error(data.detail || `${response.status} ${response.statusText}`);
+          const meta = data.metadata || {};
+          const lines = [
+            `**Task**: ${data.title} (${taskId})`,
+            `**Status**: ${data.status}  **Priority**: ${data.priority}`,
+            `**Assigned**: ${data.assigned_agent || 'unassigned'}`,
+            `**Estimated**: ${data.estimated_hours ? `${data.estimated_hours}h` : 'unknown'}`,
+            `**Branch**: ${meta.git_branch || 'not yet created (call get_task_branch)'}`,
+            `**PR**: ${meta.pr_url || 'none'}`,
+            `\n**Description**:\n${data.description || '(no description)'}`,
+          ];
+          return { content: [{ type: 'text', text: lines.join('\n') }], details: {} };
+        } catch (err) {
+          return { content: [{ type: 'text', text: `Error fetching task: ${err instanceof Error ? err.message : String(err)}` }], details: {} };
+        }
+      },
+    },
+
+    {
+      name: 'open_pull_request',
+      description:
+        'Open a GitHub pull request for a task branch (feat/{taskId}) targeting main. ' +
+        'Call this when your implementation is ready for review. ' +
+        'Returns the PR URL and number. Stores the PR link in the task metadata.',
+      label: 'open_pull_request',
+      parameters: Type.Object({
+        projectId: Type.String({ description: 'Project ID' }),
+        taskId: Type.String({ description: 'Task ID' }),
+        title: Type.String({ description: 'PR title' }),
+        body: Type.Optional(Type.String({ description: 'PR description (markdown)' })),
+        draft: Type.Optional(Type.Boolean({ description: 'Open as draft PR (default false)' })),
+      }),
+      execute: async (
+        _toolCallId: string,
+        params: unknown,
+        signal?: AbortSignal,
+      ): Promise<AgentToolResult<VoidDetails>> => {
+        const { projectId, taskId, title, body, draft } = params as {
+          projectId: string; taskId: string; title: string; body?: string; draft?: boolean;
+        };
+        const apiBase = getApiBase();
+        try {
+          const url = `${apiBase}/v1/projects/${projectId}/tasks/${taskId}/pull-request`;
+          const response = await authFetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ agentId, title, body: body ?? '', draft: draft ?? false }),
+            signal,
+          });
+          const data = (await response.json()) as any;
+          if (!response.ok) throw new Error(data.detail || `${response.status} ${response.statusText}`);
+          return {
+            content: [{
+              type: 'text',
+              text: [
+                `Pull request opened.`, ``,
+                `**PR #${data.pr_number}**: ${data.title}`,
+                `**URL**: ${data.pr_url}`,
+                `**Status**: ${data.draft ? 'Draft' : 'Ready for review'}`, ``,
+                `The PR link has been saved to the task. Call transition_task with status 'review' to move the task to the review column.`,
+              ].join('\n'),
+            }],
+            details: {},
+          };
+        } catch (err) {
+          return { content: [{ type: 'text', text: `Error opening PR: ${err instanceof Error ? err.message : String(err)}` }], details: {} };
+        }
+      },
+    },
+
+    {
+      name: 'get_task_pr_status',
+      description:
+        'Check the current status of a task\'s pull request on GitHub. ' +
+        'Returns PR state (open/closed/merged), review status, CI checks, ' +
+        'and whether the PR is ready to merge (approved + CI green + no conflicts). ' +
+        'Use this during pulse to check if any of your PRs need attention.',
+      label: 'get_task_pr_status',
+      parameters: Type.Object({
+        projectId: Type.String({ description: 'Project ID' }),
+        taskId: Type.String({ description: 'Task ID' }),
+      }),
+      execute: async (
+        _toolCallId: string,
+        params: unknown,
+        signal?: AbortSignal,
+      ): Promise<AgentToolResult<VoidDetails>> => {
+        const { projectId, taskId } = params as { projectId: string; taskId: string };
+        const apiBase = getApiBase();
+        try {
+          const url = `${apiBase}/v1/projects/${projectId}/tasks/${taskId}/pr-status`;
+          const response = await authFetch(url, { signal });
+          const data = (await response.json()) as any;
+          if (!response.ok) throw new Error(data.detail || `${response.status} ${response.statusText}`);
+
+          const lines = [
+            `**PR #${data.pr_number}**: ${data.title}`,
+            `**URL**: ${data.pr_url}`,
+            `**State**: ${data.state}${data.merged ? ' (merged)' : ''}${data.draft ? ' (draft)' : ''}`,
+            `**Branch**: ${data.head_branch} → ${data.base_branch}`,
+            `**Changes**: +${data.additions} -${data.deletions} across ${data.changed_files} files`,
+            ``, `**CI Status**: ${data.ci_status}`,
+          ];
+          if (data.checks?.length > 0) {
+            for (const check of data.checks) {
+              const icon = check.conclusion === 'success' ? 'PASS' : check.status === 'completed' ? 'FAIL' : 'PENDING';
+              lines.push(`  - ${icon}: ${check.name}`);
+            }
+          }
+          lines.push(``, `**Reviews**:`);
+          if (data.reviews?.length > 0) {
+            for (const review of data.reviews) lines.push(`  - ${review.user}: ${review.state}`);
+          } else {
+            lines.push(`  No reviews yet`);
+          }
+          lines.push(``, `**Mergeable**: ${data.mergeable === true ? 'Yes' : data.mergeable === false ? 'No (conflicts)' : 'Unknown'}`);
+          lines.push(`**Ready to merge**: ${data.ready_to_merge ? 'YES — approved, CI green, no conflicts' : 'No'}`);
+          if (data.ready_to_merge) {
+            lines.push(``, `You can merge this PR by calling: github_merge_pr(pr_number=${data.pr_number})`);
+            lines.push(`Then transition the task: transition_task(projectId, taskId, "done")`);
+          }
+          return { content: [{ type: 'text', text: lines.join('\n') }], details: {} };
+        } catch (err) {
+          return { content: [{ type: 'text', text: `Error checking PR status: ${err instanceof Error ? err.message : String(err)}` }], details: {} };
+        }
+      },
+    },
+
+    {
+      name: 'transition_task',
+      description:
+        'Move a task to a new kanban status (e.g. in_progress → review, review → done). ' +
+        'Also cascades dependency unblocking when status is "done". ' +
+        'Valid statuses: backlog, planning, ready, in_progress, review, blocked, done, failed. ' +
+        'IMPORTANT: If the project has a workflow policy, transitions to skipped stages will be ' +
+        'rejected. Call get_task_workflow first to see which stages are valid for this task type. ' +
+        'The response includes next_valid_stages and completed_stages to guide your decisions.',
+      label: 'transition_task',
+      parameters: TransitionTaskParamsSchema,
+      execute: async (
+        _toolCallId: string,
+        params: unknown,
+        signal?: AbortSignal,
+      ): Promise<AgentToolResult<VoidDetails>> => {
+        const { projectId, taskId, status, note } = params as TransitionTaskParams;
+        const apiBase = getApiBase();
+        try {
+          const url = `${apiBase}/v1/projects/${projectId}/tasks/${taskId}/transition`;
+          const response = await authFetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status, note }),
+            signal,
+          });
+          const data = (await response.json()) as any;
+          if (!response.ok) throw new Error(data.detail || `${response.status} ${response.statusText}`);
+          return {
+            content: [{ type: 'text', text: `Task transitioned: ${data.from_status} → ${data.to_status}${note ? `\nNote: ${note}` : ''}` }],
+            details: {},
+          };
+        } catch (err) {
+          return { content: [{ type: 'text', text: `Error transitioning task: ${err instanceof Error ? err.message : String(err)}` }], details: {} };
+        }
+      },
+    },
+
+    {
+      name: 'get_task_workflow',
+      description:
+        'Get the required workflow stages for a task based on its work type and the project\'s workflow policy. ' +
+        'Returns which stages are required/optional/skipped, what stages have been completed, ' +
+        'the current stage, and the next valid transition targets. ' +
+        'ALWAYS call this before deciding where to transition a task — it tells you exactly ' +
+        'which stages to skip and where the task should go next.',
+      label: 'get_task_workflow',
+      parameters: Type.Object({
+        projectId: Type.String({ description: 'Project ID' }),
+        taskId: Type.String({ description: 'Task ID' }),
+      }),
+      execute: async (
+        _toolCallId: string,
+        params: unknown,
+        signal?: AbortSignal,
+      ): Promise<AgentToolResult<VoidDetails>> => {
+        const { projectId, taskId } = params as { projectId: string; taskId: string };
+        const apiBase = getApiBase();
+        try {
+          const url = `${apiBase}/v1/projects/${projectId}/tasks/${taskId}/workflow`;
+          const response = await authFetch(url, { signal });
+          const data = (await response.json()) as any;
+          if (!response.ok) throw new Error(data.detail || `${response.status} ${response.statusText}`);
+
+          if (!data.has_policy) {
+            return {
+              content: [{
+                type: 'text',
+                text: [
+                  `**Task**: ${taskId}`,
+                  `**Work Type**: ${data.work_type || 'unclassified'}`,
+                  `**Current Stage**: ${data.current_stage || 'unknown'}`,
+                  `**Current Status**: ${data.current_status}`,
+                  ``,
+                  `No workflow policy configured — all transitions are allowed.`,
+                  `Use your judgment based on the task type.`,
+                ].join('\n'),
+              }],
+              details: {},
+            };
+          }
+
+          const lines = [
+            `**Task**: ${taskId}`,
+            `**Work Type**: ${data.work_type}`,
+            `**Current Stage**: ${data.current_stage || 'none'}`,
+            `**Current Status**: ${data.current_status}`,
+            ``,
+            `**Required stages**: ${data.required_stages.join(', ') || 'none'}`,
+            `**Optional stages**: ${data.optional_stages.join(', ') || 'none'}`,
+            `**Skipped stages**: ${data.skipped_stages.join(', ') || 'none'}`,
+            `**Completed stages**: ${data.completed_stages.join(', ') || 'none'}`,
+            ``,
+            `**Next required stage**: ${data.next_required_stage || 'none (all required stages done)'}`,
+            `**Valid next stages**: ${data.next_valid_stages.join(', ') || 'done'}`,
+          ];
+
+          if (data.next_required_stage) {
+            lines.push(``, `Transition to **${data.next_required_stage}** next (required).`);
+          } else if (data.next_valid_stages.includes('done')) {
+            lines.push(``, `All required stages complete. You can transition to **done**.`);
+          }
+
+          return {
+            content: [{ type: 'text', text: lines.join('\n') }],
+            details: {},
+          };
+        } catch (err) {
+          return { content: [{ type: 'text', text: `Error getting task workflow: ${err instanceof Error ? err.message : String(err)}` }], details: {} };
+        }
+      },
+    },
+
+    {
+      name: 'get_task_executor_runs',
+      description:
+        'Get the history of executor runs for a specific task. Returns each run\'s status, ' +
+        'structured outputs (commit hashes, files changed, summary, deviations), and timestamps. ' +
+        'Use this at the start of a pulse cycle to check if a previously spawned executor has ' +
+        'completed — then open a PR and transition the task based on the results.',
+      label: 'get_task_executor_runs',
+      parameters: Type.Object({
+        projectId: Type.String({ description: 'Project ID' }),
+        taskId: Type.String({ description: 'Task ID' }),
+        limit: Type.Optional(Type.Number({ description: 'Max runs to return (default 5)', default: 5 })),
+      }),
+      execute: async (
+        _toolCallId: string,
+        params: unknown,
+        signal?: AbortSignal,
+      ): Promise<AgentToolResult<VoidDetails>> => {
+        const { projectId, taskId, limit } = params as { projectId: string; taskId: string; limit?: number };
+        const apiBase = getApiBase();
+        try {
+          const url = `${apiBase}/v1/projects/${projectId}/tasks/${taskId}/executor-runs?limit=${limit || 5}`;
+          const response = await authFetch(url, { signal });
+          if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+          const data = (await response.json()) as any;
+          const runs: any[] = data.runs || [];
+
+          if (runs.length === 0) {
+            return {
+              content: [{ type: 'text', text: `No executor runs found for task ${taskId}.` }],
+              details: {},
+            };
+          }
+
+          const lines = [`**Executor runs for task ${taskId}** (${runs.length} found):\n`];
+          for (const run of runs) {
+            const outputs = run.outputs || {};
+            const age = run.completed_at
+              ? `completed ${Math.round((Date.now() - run.completed_at) / 60000)}m ago`
+              : `started ${Math.round((Date.now() - run.created_at) / 60000)}m ago`;
+
+            lines.push(`### ${run.run_id} — **${run.status}** (${age})`);
+
+            if (outputs.summary) lines.push(`  Summary: ${outputs.summary}`);
+            if (outputs.commit_hashes) lines.push(`  Commits: ${outputs.commit_hashes}`);
+            if (outputs.files_changed) lines.push(`  Files: ${outputs.files_changed}`);
+            if (outputs.deviations) lines.push(`  Deviations: ${outputs.deviations}`);
+            if (outputs.blocked_by) lines.push(`  **Blocked by**: ${outputs.blocked_by}`);
+            if (outputs.error) lines.push(`  **Error**: ${outputs.error}`);
+            if (outputs.raw_output) lines.push(`  Raw output: ${outputs.raw_output.slice(0, 300)}...`);
+            if (run.task_branch) lines.push(`  Branch: ${run.task_branch}`);
+            lines.push('');
+          }
+
+          // Add guidance for the planner
+          const latestRun = runs[0];
+          if (latestRun.status === 'completed' && latestRun.outputs?.commit_hashes) {
+            lines.push(
+              `The latest executor run completed successfully with commits. You should:`,
+              `1. Call \`open_pull_request()\` to create a PR for this task`,
+              `2. Call \`transition_task()\` to move it to the appropriate review/test column`,
+              `3. Call \`release_work_lock()\` if you hold one`,
+            );
+          } else if (latestRun.status === 'failed') {
+            lines.push(
+              `The latest executor run failed. Review the error and decide:`,
+              `- Retry with a revised execution prompt via \`spawn_executor()\``,
+              `- Transition the task to failed/blocked if unrecoverable`,
+            );
+          } else if (latestRun.status === 'running') {
+            lines.push(`An executor is currently running. Wait for it to complete.`);
+          }
+
+          return {
+            content: [{ type: 'text', text: lines.join('\n') }],
+            details: {},
+          };
+        } catch (err) {
+          return {
+            content: [{ type: 'text', text: `Error fetching executor runs: ${err instanceof Error ? err.message : String(err)}` }],
+            details: {},
+          };
+        }
+      },
+    },
+
+    {
+      name: 'execute_task',
+      description:
+        'Start executing a task by triggering its pipeline. This creates a new pipeline run and transitions the task to in_progress state. Use this to kick off structured multi-agent work during pulse.',
+      label: 'execute_task',
+      parameters: ExecuteTaskParamsSchema,
+      execute: async (
+        _toolCallId: string,
+        params: unknown,
+        signal?: AbortSignal,
+      ): Promise<AgentToolResult<VoidDetails>> => {
+        const p = params as ExecuteTaskParams;
+        const apiBase = getApiBase();
+        try {
+          const url = `${apiBase}/v1/projects/${p.projectId}/tasks/${p.taskId}/execute`;
+          const body: any = {};
+          if (p.pipelineId) body.pipelineId = p.pipelineId;
+          const response = await authFetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+            signal,
+          });
+          if (!response.ok) {
+            const errorData = (await response.json().catch(() => ({}))) as { detail?: string };
+            throw new Error(errorData.detail || `${response.status} ${response.statusText}`);
+          }
+          const data = (await response.json()) as { run_id?: string };
+          return {
+            content: [{
+              type: 'text',
+              text: `Task execution started!\n\nRun ID: ${data.run_id}\nTask: ${p.taskId}\nProject: ${p.projectId}\n\nThe pipeline is now running autonomously in the engine. Check the dashboard or call get_task_context to follow progress.`,
+            }],
+            details: {},
+          };
+        } catch (err) {
+          return { content: [{ type: 'text', text: `Error executing task: ${err instanceof Error ? err.message : String(err)}` }], details: {} };
+        }
+      },
+    },
+  ];
+}

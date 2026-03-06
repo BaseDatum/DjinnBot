@@ -1,0 +1,2394 @@
+import { createFileRoute, useNavigate } from '@tanstack/react-router';
+import { useState, useEffect, useCallback } from 'react';
+import { useAuth } from '@/hooks/useAuth';
+import { API_BASE } from '@/lib/api';
+import { authFetch } from '@/lib/auth';
+import { toast } from 'sonner';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Button } from '@/components/ui/button';
+import {
+  ShieldCheck,
+  Users,
+  Share2,
+  CheckCircle,
+  Container,
+  Lock,
+  Plus,
+  Trash2,
+  Loader2,
+  UserPlus,
+  Eye,
+  EyeOff,
+  Layers,
+  ClipboardList,
+  Mail,
+  Send,
+  Clock,
+  Check,
+  X,
+  Database,
+  Cpu,
+  Brain,
+  MessageSquare,
+  ScrollText,
+  Bell,
+  AlertTriangle,
+  Info,
+  AlertCircle,
+  Activity,
+  Zap,
+  Volume2,
+} from 'lucide-react';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from '@/components/ui/dialog';
+import { Switch } from '@/components/ui/switch';
+import { SecretsSettings } from '@/components/settings/SecretsSettings';
+import { ModelProvidersSettings } from '@/components/settings/ModelProvidersSettings';
+import { MemorySearchSettings } from '@/components/settings/MemorySearchSettings';
+import { MemoryScoringSettings } from '@/components/settings/MemoryScoringSettings';
+import { NestedSidebar } from '@/components/layout/NestedSidebar';
+import type { NestedSidebarItem } from '@/components/layout/NestedSidebar';
+import { SearchableCombobox } from '@/components/ui/SearchableCombobox';
+import type { ComboboxOption } from '@/components/ui/SearchableCombobox';
+import { fetchModelProviders, type ModelProvider } from '@/lib/api';
+import { ProviderModelSelector } from '@/components/ui/ProviderModelSelector';
+import { useAutoSave } from '@/hooks/useAutoSave';
+import { ContainerLogs } from '@/components/admin/ContainerLogs';
+import { ApiUsagePanel } from '@/components/admin/ApiUsagePanel';
+
+export const Route = createFileRoute('/admin')({
+  component: AdminPage,
+});
+
+type AdminTab = 'users' | 'providers' | 'sharing' | 'memory' | 'memory-scoring' | 'models' | 'approvals' | 'runtime' | 'secrets' | 'waitlist' | 'email' | 'logs' | 'notifications' | 'usage' | 'pulse' | 'tts';
+
+const NAV_ITEMS: NestedSidebarItem[] = [
+  { key: 'notifications', label: 'Notifications', icon: Bell },
+  { key: 'usage', label: 'API Usage', icon: Activity },
+  { key: 'pulse', label: 'Pulse System', icon: Zap },
+  { key: 'users', label: 'Users', icon: Users },
+  { key: 'waitlist', label: 'Waitlist', icon: ClipboardList },
+  { key: 'email', label: 'Email Settings', icon: Mail },
+  { key: 'providers', label: 'Instance Providers', icon: Layers },
+  { key: 'sharing', label: 'Key Sharing', icon: Share2 },
+  { key: 'tts', label: 'Text-to-Speech', icon: Volume2 },
+  { key: 'memory', label: 'Memory Search', icon: Database },
+  { key: 'memory-scoring', label: 'Memory Scoring', icon: Brain },
+  { key: 'models', label: 'Default Models', icon: Cpu },
+  { key: 'approvals', label: 'Approvals', icon: CheckCircle },
+  { key: 'runtime', label: 'Agent Runtime', icon: Container },
+  { key: 'secrets', label: 'Instance Secrets', icon: Lock },
+  { key: 'logs', label: 'Container Logs', icon: ScrollText },
+];
+
+interface UserItem {
+  id: string;
+  email: string;
+  displayName: string | null;
+  isAdmin: boolean;
+  isActive: boolean;
+  slackId: string | null;
+  createdAt: number;
+}
+
+interface PendingItem {
+  id: string;
+  type: 'skill' | 'mcp';
+  name: string;
+  description: string;
+  submittedByUserId: string | null;
+  createdAt: number;
+}
+
+interface AdminNotification {
+  id: string;
+  level: string;
+  title: string;
+  detail: string | null;
+  read: boolean;
+  createdAt: number;
+}
+
+const VALID_TABS = new Set<AdminTab>([
+  'notifications', 'usage', 'pulse', 'users', 'providers', 'sharing', 'memory',
+  'memory-scoring', 'models', 'approvals', 'runtime', 'secrets', 'waitlist',
+  'email', 'logs', 'tts',
+]);
+
+function getTabFromHash(): AdminTab {
+  const hash = window.location.hash.replace('#', '');
+  return VALID_TABS.has(hash as AdminTab) ? (hash as AdminTab) : 'notifications';
+}
+
+function AdminPage() {
+  const { user } = useAuth();
+  const navigate = useNavigate();
+  const [activeTab, setActiveTabRaw] = useState<AdminTab>(getTabFromHash);
+  const [users, setUsers] = useState<UserItem[]>([]);
+
+  // Persist active tab in URL hash so it survives page refresh
+  const setActiveTab = useCallback((tab: AdminTab) => {
+    setActiveTabRaw(tab);
+    window.location.hash = tab;
+  }, []);
+
+  // Notification state
+  const [notifications, setNotifications] = useState<AdminNotification[]>([]);
+  const [notificationsLoading, setNotificationsLoading] = useState(false);
+  const [pendingItems, setPendingItems] = useState<PendingItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [sharedProviders, setSharedProviders] = useState<Array<{id: string; adminUserId: string; providerId: string; targetUserId: string | null; createdAt: number; expiresAt?: number | null; allowedModels?: string[] | null; dailyLimit?: number | null; dailyCostLimitUsd?: number | null}>>([]);
+  const [runtimeImage, setRuntimeImage] = useState('');
+  const [runtimeSaving, setRuntimeSaving] = useState(false);
+  const [newShareProvider, setNewShareProvider] = useState('');
+  const [newShareUser, setNewShareUser] = useState('');
+  const [newShareExpiry, setNewShareExpiry] = useState('');
+  const [newShareModels, setNewShareModels] = useState('');
+  const [newShareDailyLimit, setNewShareDailyLimit] = useState('');
+  const [newShareCostLimit, setNewShareCostLimit] = useState('');
+  const [editingShareId, setEditingShareId] = useState<string | null>(null);
+  const [editShareModels, setEditShareModels] = useState('');
+  const [editShareDailyLimit, setEditShareDailyLimit] = useState('');
+  const [editShareCostLimit, setEditShareCostLimit] = useState('');
+  const [editShareExpiry, setEditShareExpiry] = useState('');
+  const [sharingLoading, setShareLoading] = useState(false);
+  const [providerOptions, setProviderOptions] = useState<ComboboxOption[]>([]);
+  const [userOptions, setUserOptions] = useState<ComboboxOption[]>([]);
+
+  // Waitlist state
+  const [waitlistEntries, setWaitlistEntries] = useState<Array<{id: string; email: string; status: string; invitedAt: number | null; registeredAt: number | null; createdAt: number}>>([]);
+  const [waitlistLoading, setWaitlistLoading] = useState(false);
+  const [invitingId, setInvitingId] = useState<string | null>(null);
+
+  // Email settings state
+  const [emailSettings, setEmailSettings] = useState({
+    smtpHost: '',
+    smtpPort: 587,
+    smtpUsername: '',
+    smtpPassword: '',
+    smtpUseTls: true,
+    fromEmail: '',
+    fromName: 'DjinnBot',
+    configured: false,
+  });
+  const [emailLoading, setEmailLoading] = useState(false);
+  const [emailSaving, setEmailSaving] = useState(false);
+  const [testEmailAddr, setTestEmailAddr] = useState('');
+  const [testingSend, setTestingSend] = useState(false);
+
+  // Default models state (moved from Settings to Admin)
+  interface GlobalSettings {
+    defaultWorkingModel: string;
+    defaultPlanningModel: string;
+    defaultExecutorModel: string;
+    defaultThinkingModel: string;
+    defaultSlackDecisionModel: string;
+    defaultWorkingModelThinkingLevel: string;
+    defaultThinkingModelThinkingLevel: string;
+    defaultSlackDecisionModelThinkingLevel: string;
+    pulseIntervalMinutes: number;
+    pulseEnabled: boolean;
+    userSlackId: string;
+    agentRuntimeImage: string;
+    ptcEnabled: boolean;
+    // Container Resources
+    containerMemoryLimitMb: number;
+    containerCpuLimit: number;
+    containerShmSizeMb: number;
+    jfsAgentCacheSizeMb: number;
+    containerReadyTimeoutSec: number;
+    // Pipeline Execution
+    defaultStepTimeoutSec: number;
+    // Chat Session Reaper
+    chatIdleTimeoutMin: number;
+    reaperIntervalSec: number;
+    // Wake System Guardrails
+    wakeEnabled: boolean;
+    wakeCooldownSec: number;
+    maxWakesPerDay: number;
+    maxWakesPerPairPerDay: number;
+    // Pulse Execution
+    maxConcurrentPulseSessions: number;
+    defaultPulseTimeoutSec: number;
+    // Autonomous Agent Execution
+    chatInactivityTimeoutSec: number;
+    chatHardTimeoutSec: number;
+    maxAutoContinuations: number;
+  }
+  const [globalSettings, setGlobalSettings] = useState<GlobalSettings | null>(null);
+  const [globalSettingsEdited, setGlobalSettingsEdited] = useState(false);
+
+  // Add user dialog state
+  const [addUserOpen, setAddUserOpen] = useState(false);
+  const [newUserEmail, setNewUserEmail] = useState('');
+  const [newUserPassword, setNewUserPassword] = useState('');
+  const [newUserDisplayName, setNewUserDisplayName] = useState('');
+  const [newUserIsAdmin, setNewUserIsAdmin] = useState(false);
+  const [addUserLoading, setAddUserLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+
+  // Redirect non-admins
+  useEffect(() => {
+    if (user && !user.isAdmin) {
+      navigate({ to: '/' as any });
+    }
+  }, [user, navigate]);
+
+  // Load notifications
+  useEffect(() => {
+    if (activeTab === 'notifications') {
+      setNotificationsLoading(true);
+      authFetch(`${API_BASE}/admin/notifications`)
+        .then((res) => res.json())
+        .then(setNotifications)
+        .catch(() => toast.error('Failed to load notifications'))
+        .finally(() => setNotificationsLoading(false));
+    }
+  }, [activeTab]);
+
+  // Load users
+  useEffect(() => {
+    if (activeTab === 'users') {
+      authFetch(`${API_BASE}/admin/users`)
+        .then((res) => res.json())
+        .then(setUsers)
+        .catch(() => toast.error('Failed to load users'))
+        .finally(() => setLoading(false));
+    }
+  }, [activeTab]);
+
+  // Load shared providers + provider options + user options
+  useEffect(() => {
+    if (activeTab === 'sharing') {
+      setShareLoading(true);
+      Promise.all([
+        authFetch(`${API_BASE}/admin/shared-providers`).then((r) => r.json()),
+        fetchModelProviders(),
+        authFetch(`${API_BASE}/admin/users`).then((r) => r.json()),
+      ])
+        .then(([shares, providers, allUsers]) => {
+          setSharedProviders(shares);
+          setProviderOptions(
+            (providers as ModelProvider[])
+              .filter((p: ModelProvider) => p.configured)
+              .map((p: ModelProvider) => ({
+                value: p.providerId,
+                label: p.name,
+                sublabel: p.configured ? 'Configured' : 'Not configured',
+              })),
+          );
+          setUserOptions([
+            { value: '', label: 'All users (broadcast)', sublabel: 'Share with everyone' },
+            ...(allUsers as UserItem[]).map((u: UserItem) => ({
+              value: u.id,
+              label: u.displayName || u.email,
+              sublabel: u.email,
+            })),
+          ]);
+        })
+        .catch(() => toast.error('Failed to load sharing data'))
+        .finally(() => setShareLoading(false));
+    }
+  }, [activeTab]);
+
+  // Load global settings (used by runtime, default models, pulse tabs)
+  useEffect(() => {
+    if (activeTab === 'runtime' || activeTab === 'models' || activeTab === 'pulse') {
+      authFetch(`${API_BASE}/settings/`)
+        .then((res) => res.json())
+        .then((data: any) => {
+          setRuntimeImage(data.agentRuntimeImage || '');
+          setGlobalSettings(data);
+        })
+        .catch(() => {});
+    }
+  }, [activeTab]);
+
+  // Auto-save global settings (default models)
+  const { saveState: settingsSaveState } = useAutoSave({
+    value: globalSettingsEdited ? globalSettings : null,
+    onSave: async (value) => {
+      if (!value) return;
+      const res = await authFetch(`${API_BASE}/settings/`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(value),
+      });
+      if (!res.ok) throw new Error('Failed to save');
+    },
+    delay: 600,
+  });
+
+  const handleGlobalSettingsChange = (updated: GlobalSettings) => {
+    setGlobalSettings(updated);
+    setGlobalSettingsEdited(true);
+  };
+
+  // Load waitlist entries
+  useEffect(() => {
+    if (activeTab === 'waitlist') {
+      setWaitlistLoading(true);
+      authFetch(`${API_BASE}/waitlist/`)
+        .then((res) => res.json())
+        .then(setWaitlistEntries)
+        .catch(() => toast.error('Failed to load waitlist'))
+        .finally(() => setWaitlistLoading(false));
+    }
+  }, [activeTab]);
+
+  // Load email settings
+  useEffect(() => {
+    if (activeTab === 'email') {
+      setEmailLoading(true);
+      authFetch(`${API_BASE}/waitlist/email-settings`)
+        .then((res) => res.json())
+        .then(setEmailSettings)
+        .catch(() => toast.error('Failed to load email settings'))
+        .finally(() => setEmailLoading(false));
+    }
+  }, [activeTab]);
+
+  // Load pending approvals
+  useEffect(() => {
+    if (activeTab === 'approvals') {
+      setLoading(true);
+      authFetch(`${API_BASE}/admin/pending-approvals`)
+        .then((res) => res.json())
+        .then(setPendingItems)
+        .catch(() => toast.error('Failed to load pending approvals'))
+        .finally(() => setLoading(false));
+    }
+  }, [activeTab]);
+
+  const handleMarkNotificationRead = async (id: string) => {
+    try {
+      await authFetch(`${API_BASE}/admin/notifications/${id}/read`, { method: 'PATCH' });
+      setNotifications((prev) => prev.map((n) => (n.id === id ? { ...n, read: true } : n)));
+    } catch {
+      toast.error('Failed to mark notification as read');
+    }
+  };
+
+  const handleMarkAllNotificationsRead = async () => {
+    try {
+      await authFetch(`${API_BASE}/admin/notifications/mark-all-read`, { method: 'POST' });
+      setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+    } catch {
+      toast.error('Failed to mark all as read');
+    }
+  };
+
+  const handleApprove = async (type: string, id: string) => {
+    try {
+      const res = await authFetch(`${API_BASE}/admin/${type === 'skill' ? 'skills' : 'mcp'}/${id}/approve`, {
+        method: 'PATCH',
+      });
+      if (res.ok) {
+        setPendingItems((items) => items.filter((i) => i.id !== id));
+        toast.success(`${type === 'skill' ? 'Skill' : 'MCP server'} approved`);
+      }
+    } catch {
+      toast.error('Failed to approve');
+    }
+  };
+
+  const handleReject = async (type: string, id: string) => {
+    try {
+      const res = await authFetch(`${API_BASE}/admin/${type === 'skill' ? 'skills' : 'mcp'}/${id}/reject`, {
+        method: 'PATCH',
+      });
+      if (res.ok) {
+        setPendingItems((items) => items.filter((i) => i.id !== id));
+        toast.success(`${type === 'skill' ? 'Skill' : 'MCP server'} rejected`);
+      }
+    } catch {
+      toast.error('Failed to reject');
+    }
+  };
+
+  const handleToggleActive = async (userId: string, isActive: boolean) => {
+    try {
+      const res = await authFetch(`${API_BASE}/admin/users/${userId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ isActive }),
+      });
+      if (res.ok) {
+        setUsers((prev) => prev.map((u) => (u.id === userId ? { ...u, isActive } : u)));
+        toast.success(`User ${isActive ? 'activated' : 'deactivated'}`);
+      }
+    } catch {
+      toast.error('Failed to update user');
+    }
+  };
+
+  const handleAddUser = async () => {
+    const email = newUserEmail.trim();
+    const password = newUserPassword;
+    if (!email || !password) {
+      toast.error('Email and password are required');
+      return;
+    }
+    if (password.length < 8) {
+      toast.error('Password must be at least 8 characters');
+      return;
+    }
+    setAddUserLoading(true);
+    try {
+      const res = await authFetch(`${API_BASE}/admin/users`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email,
+          password,
+          displayName: newUserDisplayName.trim() || null,
+          isAdmin: newUserIsAdmin,
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.detail || 'Failed to create user');
+      }
+      const created = await res.json();
+      setUsers((prev) => [created, ...prev]);
+      setAddUserOpen(false);
+      setNewUserEmail('');
+      setNewUserPassword('');
+      setNewUserDisplayName('');
+      setNewUserIsAdmin(false);
+      setShowPassword(false);
+      toast.success(`User ${created.email} created`);
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to create user');
+    } finally {
+      setAddUserLoading(false);
+    }
+  };
+
+  const handleToggleAdmin = async (userId: string, isAdmin: boolean) => {
+    try {
+      const res = await authFetch(`${API_BASE}/admin/users/${userId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ isAdmin }),
+      });
+      if (res.ok) {
+        setUsers((prev) => prev.map((u) => (u.id === userId ? { ...u, isAdmin } : u)));
+        toast.success(`User role updated`);
+      }
+    } catch {
+      toast.error('Failed to update user');
+    }
+  };
+
+  const handleInvite = async (entryId: string) => {
+    setInvitingId(entryId);
+    try {
+      const res = await authFetch(`${API_BASE}/waitlist/${entryId}/invite`, { method: 'POST' });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.detail || 'Failed to invite');
+      }
+      setWaitlistEntries((prev) => prev.map((e) => e.id === entryId ? { ...e, status: 'invited', invitedAt: Date.now() } : e));
+      toast.success('Invite sent!');
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to send invite');
+    } finally {
+      setInvitingId(null);
+    }
+  };
+
+  const handleDeleteWaitlistEntry = async (entryId: string) => {
+    try {
+      await authFetch(`${API_BASE}/waitlist/${entryId}`, { method: 'DELETE' });
+      setWaitlistEntries((prev) => prev.filter((e) => e.id !== entryId));
+      toast.success('Entry removed');
+    } catch {
+      toast.error('Failed to remove entry');
+    }
+  };
+
+  const handleSaveEmailSettings = async () => {
+    setEmailSaving(true);
+    try {
+      const res = await authFetch(`${API_BASE}/waitlist/email-settings`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(emailSettings),
+      });
+      if (!res.ok) throw new Error('Failed to save');
+      toast.success('Email settings saved');
+      // Reload to get masked password
+      const updated = await authFetch(`${API_BASE}/waitlist/email-settings`).then((r) => r.json());
+      setEmailSettings(updated);
+    } catch {
+      toast.error('Failed to save email settings');
+    } finally {
+      setEmailSaving(false);
+    }
+  };
+
+  const handleTestEmail = async () => {
+    if (!testEmailAddr.trim()) {
+      toast.error('Enter a recipient email address');
+      return;
+    }
+    setTestingSend(true);
+    try {
+      const res = await authFetch(`${API_BASE}/waitlist/email-settings/test`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ recipientEmail: testEmailAddr.trim() }),
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.detail || 'Test email failed');
+      }
+      toast.success(`Test email sent to ${testEmailAddr}`);
+    } catch (err: any) {
+      toast.error(err?.message || 'Test email failed');
+    } finally {
+      setTestingSend(false);
+    }
+  };
+
+  if (!user?.isAdmin) return null;
+
+  return (
+    <div className="flex flex-col h-full">
+      <div className="p-4 md:px-8 md:pt-8 md:pb-4 shrink-0">
+        <div className="flex items-center gap-3">
+          <ShieldCheck className="h-8 w-8" />
+          <div>
+            <h1 className="text-2xl md:text-3xl font-bold tracking-tight">Admin Panel</h1>
+            <p className="text-muted-foreground">Manage users, key sharing, and system settings</p>
+          </div>
+        </div>
+      </div>
+
+      <NestedSidebar
+        items={NAV_ITEMS}
+        activeKey={activeTab}
+        onSelect={(key) => setActiveTab(key as AdminTab)}
+      >
+        {/* ── Notifications ── */}
+        {activeTab === 'notifications' && (
+          <div className="max-w-5xl mx-auto space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-lg font-semibold flex items-center gap-2">
+                  <Bell className="h-5 w-5" />
+                  System Notifications
+                </h2>
+                <p className="text-sm text-muted-foreground">Infrastructure alerts and system events</p>
+              </div>
+              {notifications.some((n) => !n.read) && (
+                <Button variant="outline" size="sm" onClick={handleMarkAllNotificationsRead}>
+                  <Check className="h-4 w-4 mr-1" /> Mark all read
+                </Button>
+              )}
+            </div>
+            {notificationsLoading ? (
+              <div className="flex justify-center py-12"><Loader2 className="h-6 w-6 animate-spin" /></div>
+            ) : notifications.length === 0 ? (
+              <div className="text-center py-12 text-muted-foreground">No notifications</div>
+            ) : (
+              <div className="space-y-2">
+                {notifications.map((n) => (
+                  <div
+                    key={n.id}
+                    className={`flex items-start gap-3 rounded-lg border p-4 ${n.read ? 'opacity-60' : 'bg-card'}`}
+                  >
+                    <div className="mt-0.5">
+                      {n.level === 'error' ? (
+                        <AlertCircle className="h-5 w-5 text-red-400" />
+                      ) : n.level === 'warning' ? (
+                        <AlertTriangle className="h-5 w-5 text-yellow-400" />
+                      ) : (
+                        <Info className="h-5 w-5 text-blue-400" />
+                      )}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium">{n.title}</span>
+                        <span className="text-xs text-muted-foreground">
+                          {new Date(n.createdAt).toLocaleString()}
+                        </span>
+                      </div>
+                      {n.detail && (
+                        <p className="text-sm text-muted-foreground mt-1 whitespace-pre-wrap break-words">{n.detail}</p>
+                      )}
+                    </div>
+                    {!n.read && (
+                      <Button variant="ghost" size="sm" onClick={() => handleMarkNotificationRead(n.id)}>
+                        <Check className="h-4 w-4" />
+                      </Button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── API Usage ── */}
+        {activeTab === 'usage' && <ApiUsagePanel />}
+
+        {/* ── Text-to-Speech ── */}
+        {activeTab === 'tts' && <AdminTtsPanel />}
+
+        {/* ── Pulse System Kill Switch ── */}
+        {activeTab === 'pulse' && (
+          <div className="max-w-5xl mx-auto space-y-6">
+            <div>
+              <h2 className="text-lg font-semibold flex items-center gap-2">
+                <Zap className="h-5 w-5" />
+                Pulse System
+              </h2>
+              <p className="text-sm text-muted-foreground mt-1">
+                Master control for the autonomous pulse system across all agents.
+              </p>
+            </div>
+
+            {/* Kill Switch Card */}
+            <div className={`border-2 rounded-lg p-6 transition-colors ${
+              globalSettings?.pulseEnabled
+                ? 'border-green-500/30 bg-green-500/5'
+                : 'border-red-500/30 bg-red-500/5'
+            }`}>
+              <div className="flex items-center justify-between">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-3">
+                    <h3 className="text-lg font-semibold">Master Pulse Kill Switch</h3>
+                    <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${
+                      globalSettings?.pulseEnabled
+                        ? 'bg-green-500/15 text-green-600'
+                        : 'bg-red-500/15 text-red-600'
+                    }`}>
+                      {globalSettings?.pulseEnabled ? 'ACTIVE' : 'KILLED'}
+                    </span>
+                  </div>
+                  <p className="text-sm text-muted-foreground max-w-lg">
+                    {globalSettings?.pulseEnabled
+                      ? 'The pulse system is running. All agents with pulse routines will execute on their configured schedules.'
+                      : 'The pulse system is disabled. No agents will pulse, regardless of their individual settings. Wake-on-message is also suppressed.'}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={globalSettings?.pulseEnabled ?? false}
+                  onClick={async () => {
+                    if (!globalSettings) return;
+                    const newValue = !globalSettings.pulseEnabled;
+                    const updated = { ...globalSettings, pulseEnabled: newValue };
+                    setGlobalSettings(updated);
+                    setGlobalSettingsEdited(true);
+                    try {
+                      const res = await authFetch(`${API_BASE}/settings/`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(updated),
+                      });
+                      if (!res.ok) throw new Error('Failed to save');
+                      toast.success(newValue ? 'Pulse system enabled' : 'Pulse system disabled');
+                    } catch {
+                      // Revert on failure
+                      setGlobalSettings(globalSettings);
+                      toast.error('Failed to update pulse setting');
+                    }
+                  }}
+                  className={`relative inline-flex h-8 w-14 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ${
+                    globalSettings?.pulseEnabled ? 'bg-green-500' : 'bg-red-500'
+                  }`}
+                >
+                  <span
+                    className={`pointer-events-none block h-7 w-7 rounded-full bg-background shadow-lg ring-0 transition-transform ${
+                      globalSettings?.pulseEnabled ? 'translate-x-6' : 'translate-x-0'
+                    }`}
+                  />
+                </button>
+              </div>
+            </div>
+
+            {/* Pulse Interval */}
+            {globalSettings && (
+              <div className="border rounded-lg p-4 space-y-3">
+                <div className="flex items-center gap-2">
+                  <Clock className="h-4 w-4 text-muted-foreground" />
+                  <Label className="font-medium">Default Pulse Interval</Label>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Fallback interval (in minutes) for agents without explicit routine schedules.
+                  Individual routines can override this with their own interval.
+                </p>
+                <div className="flex items-center gap-3 max-w-xs">
+                  <Input
+                    type="number"
+                    min={1}
+                    max={1440}
+                    value={globalSettings.pulseIntervalMinutes}
+                    onChange={(e) => {
+                      const val = parseInt(e.target.value, 10);
+                      if (!isNaN(val) && val > 0) {
+                        handleGlobalSettingsChange({ ...globalSettings, pulseIntervalMinutes: val });
+                      }
+                    }}
+                    className="w-24"
+                  />
+                  <span className="text-sm text-muted-foreground">minutes</span>
+                  {settingsSaveState === 'saving' && (
+                    <span className="text-xs text-muted-foreground animate-pulse">Saving...</span>
+                  )}
+                  {settingsSaveState === 'saved' && (
+                    <span className="text-xs text-green-500">Saved</span>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Info */}
+            <div className="flex items-start gap-3 rounded-lg border border-blue-500/20 bg-blue-500/5 p-4">
+              <Info className="h-5 w-5 text-blue-400 mt-0.5 shrink-0" />
+              <div className="text-sm text-muted-foreground space-y-1">
+                <p>
+                  The kill switch overrides all per-agent <code className="text-xs bg-muted px-1 rounded">pulse_enabled</code> settings
+                  and routine schedules. When disabled, no scheduled pulses fire and wake-on-message notifications are suppressed.
+                </p>
+                <p>
+                  Individual agent pulse settings and routines can still be configured while the system is disabled --
+                  they will resume automatically when you re-enable the master switch.
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ── Users ── */}
+        {activeTab === 'users' && (
+          <div className="max-w-5xl mx-auto space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-lg font-semibold flex items-center gap-2">
+                  <Users className="h-5 w-5" />
+                  Users
+                </h2>
+                <p className="text-sm text-muted-foreground mt-1">
+                  Manage user accounts, roles, and access.
+                </p>
+              </div>
+              <Dialog open={addUserOpen} onOpenChange={(open) => {
+                setAddUserOpen(open);
+                if (!open) {
+                  setNewUserEmail('');
+                  setNewUserPassword('');
+                  setNewUserDisplayName('');
+                  setNewUserIsAdmin(false);
+                  setShowPassword(false);
+                }
+              }}>
+                <DialogTrigger asChild>
+                  <Button size="sm">
+                    <UserPlus className="h-4 w-4 mr-1" />
+                    Add User
+                  </Button>
+                </DialogTrigger>
+                <DialogContent>
+                  <DialogHeader>
+                    <DialogTitle>Add User</DialogTitle>
+                    <DialogDescription>
+                      Create a new user account. They can sign in with the email and password you set here.
+                    </DialogDescription>
+                  </DialogHeader>
+                  <form
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      handleAddUser();
+                    }}
+                    className="space-y-4"
+                  >
+                    <div className="space-y-2">
+                      <Label htmlFor="newUserEmail">Email</Label>
+                      <Input
+                        id="newUserEmail"
+                        type="email"
+                        required
+                        placeholder="user@example.com"
+                        value={newUserEmail}
+                        onChange={(e) => setNewUserEmail(e.target.value)}
+                        autoFocus
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="newUserDisplayName">Display Name</Label>
+                      <Input
+                        id="newUserDisplayName"
+                        placeholder="Optional"
+                        value={newUserDisplayName}
+                        onChange={(e) => setNewUserDisplayName(e.target.value)}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="newUserPassword">Password</Label>
+                      <div className="relative">
+                        <Input
+                          id="newUserPassword"
+                          type={showPassword ? 'text' : 'password'}
+                          required
+                          minLength={8}
+                          placeholder="Min 8 characters"
+                          value={newUserPassword}
+                          onChange={(e) => setNewUserPassword(e.target.value)}
+                          className="pr-10"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowPassword((v) => !v)}
+                          className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                          tabIndex={-1}
+                        >
+                          {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                        </button>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        role="switch"
+                        aria-checked={newUserIsAdmin}
+                        onClick={() => setNewUserIsAdmin((v) => !v)}
+                        className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ${newUserIsAdmin ? 'bg-primary' : 'bg-muted'}`}
+                      >
+                        <span
+                          className={`pointer-events-none block h-4 w-4 rounded-full bg-background shadow-lg ring-0 transition-transform ${newUserIsAdmin ? 'translate-x-4' : 'translate-x-0'}`}
+                        />
+                      </button>
+                      <Label className="cursor-pointer" onClick={() => setNewUserIsAdmin((v) => !v)}>
+                        Admin role
+                      </Label>
+                    </div>
+                    <DialogFooter>
+                      <Button type="submit" disabled={addUserLoading}>
+                        {addUserLoading ? (
+                          <Loader2 className="h-4 w-4 animate-spin mr-1" />
+                        ) : (
+                          <UserPlus className="h-4 w-4 mr-1" />
+                        )}
+                        Create User
+                      </Button>
+                    </DialogFooter>
+                  </form>
+                </DialogContent>
+              </Dialog>
+            </div>
+
+            <div className="border rounded-lg overflow-hidden">
+              <table className="w-full text-sm">
+                <thead className="bg-muted/50">
+                  <tr>
+                    <th className="text-left px-4 py-3 font-medium">User</th>
+                    <th className="text-left px-4 py-3 font-medium">Role</th>
+                    <th className="text-left px-4 py-3 font-medium">Status</th>
+                    <th className="text-left px-4 py-3 font-medium">Slack ID</th>
+                    <th className="text-right px-4 py-3 font-medium">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {users.map((u) => (
+                    <tr key={u.id} className="hover:bg-muted/30">
+                      <td className="px-4 py-3">
+                        <div className="font-medium">{u.displayName || u.email}</div>
+                        <div className="text-xs text-muted-foreground">{u.email}</div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <button
+                          onClick={() => handleToggleAdmin(u.id, !u.isAdmin)}
+                          disabled={u.id === user?.id}
+                          className="text-xs px-2 py-0.5 rounded-full border hover:bg-accent disabled:opacity-50"
+                        >
+                          {u.isAdmin ? 'Admin' : 'User'}
+                        </button>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className={`text-xs px-2 py-0.5 rounded-full ${u.isActive ? 'bg-green-500/10 text-green-600' : 'bg-red-500/10 text-red-600'}`}>
+                          {u.isActive ? 'Active' : 'Inactive'}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 font-mono text-xs text-muted-foreground">
+                        {u.slackId || '-'}
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        {u.id !== user?.id && (
+                          <button
+                            onClick={() => handleToggleActive(u.id, !u.isActive)}
+                            className="text-xs px-2 py-1 rounded border hover:bg-accent"
+                          >
+                            {u.isActive ? 'Deactivate' : 'Activate'}
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {/* ── Instance Providers ── */}
+        {activeTab === 'providers' && (
+          <div className="max-w-5xl mx-auto space-y-2">
+            <div>
+              <h2 className="text-lg font-semibold flex items-center gap-2">
+                <Layers className="h-5 w-5" />
+                Instance Providers
+              </h2>
+              <p className="text-sm text-muted-foreground mt-1">
+                Configure instance-level API keys for AI model providers.
+                These keys can be shared with users via Key Sharing.
+              </p>
+            </div>
+            <ModelProvidersSettings />
+          </div>
+        )}
+
+        {/* ── Memory Search ── */}
+        {activeTab === 'memory' && (
+          <div className="max-w-5xl mx-auto space-y-4">
+            <div>
+              <h2 className="text-lg font-semibold flex items-center gap-2">
+                <Database className="h-5 w-5" />
+                Memory Search
+              </h2>
+              <p className="text-sm text-muted-foreground mt-1">
+                Configure the embedding and reranking provider for agent memory (ClawVault semantic recall).
+                Requires an OpenAI-compatible embeddings API —{' '}
+                <strong>OpenRouter</strong> is recommended and reuses the key you already configured above.
+              </p>
+            </div>
+            <MemorySearchSettings />
+          </div>
+        )}
+
+        {/* ── Memory Scoring ── */}
+        {activeTab === 'memory-scoring' && (
+          <div className="max-w-5xl mx-auto space-y-4">
+            <div>
+              <h2 className="text-lg font-semibold flex items-center gap-2">
+                <Brain className="h-5 w-5" />
+                Adaptive Memory Scoring
+              </h2>
+              <p className="text-sm text-muted-foreground mt-1">
+                Control how the retrieval outcome tracking system scores and re-ranks memories.
+                These parameters govern the learning rate, decay behavior, safety limits, and
+                blend formula used when agents recall memories.
+              </p>
+            </div>
+            <MemoryScoringSettings />
+          </div>
+        )}
+
+        {/* ── Default Models ── */}
+        {activeTab === 'models' && globalSettings && (
+          <div className="max-w-5xl mx-auto space-y-6">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h2 className="text-lg font-semibold flex items-center gap-2">
+                  <Cpu className="h-5 w-5" />
+                  Default Models
+                </h2>
+                <p className="text-sm text-muted-foreground mt-1">
+                  Fallback models used when agents don't have explicit configuration.
+                  Choose a configured provider, then pick a model.
+                </p>
+              </div>
+              {settingsSaveState === 'saving' && (
+                <span className="text-xs text-muted-foreground animate-pulse shrink-0 mt-1">Saving...</span>
+              )}
+              {settingsSaveState === 'saved' && (
+                <span className="text-xs text-green-500 shrink-0 mt-1">&#x2713; Saved</span>
+              )}
+              {settingsSaveState === 'error' && (
+                <span className="text-xs text-destructive shrink-0 mt-1">Failed to save</span>
+              )}
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="workingModel" className="flex items-center gap-2">
+                <Brain className="h-4 w-4" />
+                Default Working Model
+              </Label>
+              <p className="text-xs text-muted-foreground mb-2">
+                The universal fallback model — used for pipeline steps, chat, and any role without an explicit model set.
+              </p>
+              <ProviderModelSelector
+                value={globalSettings.defaultWorkingModel}
+                onChange={(v) => handleGlobalSettingsChange({ ...globalSettings, defaultWorkingModel: v })}
+                thinkingLevel={globalSettings.defaultWorkingModelThinkingLevel as any}
+                onThinkingLevelChange={(l) => handleGlobalSettingsChange({ ...globalSettings, defaultWorkingModelThinkingLevel: l })}
+                className="w-full sm:w-full"
+                placeholder="Select working model..."
+              />
+              <p className="text-xs text-muted-foreground font-mono mt-1">{globalSettings.defaultWorkingModel}</p>
+            </div>
+
+            <div className="space-y-2">
+              <Label className="flex items-center gap-2">
+                <Brain className="h-4 w-4" />
+                Default Planning Model
+              </Label>
+              <p className="text-xs text-muted-foreground mb-2">
+                Used during pulse routines for strategic work — claiming tasks, writing execution prompts, reviewing results.
+                Should be your smartest model. Falls back to Working Model if not set.
+              </p>
+              <ProviderModelSelector
+                value={globalSettings.defaultPlanningModel}
+                onChange={(v) => handleGlobalSettingsChange({ ...globalSettings, defaultPlanningModel: v })}
+                className="w-full sm:w-full"
+                placeholder="Defaults to working model if not set..."
+              />
+              {globalSettings.defaultPlanningModel && (
+                <p className="text-xs text-muted-foreground font-mono mt-1">{globalSettings.defaultPlanningModel}</p>
+              )}
+              {!globalSettings.defaultPlanningModel && globalSettings.defaultWorkingModel && (
+                <p className="text-xs text-muted-foreground mt-1">
+                  Using working model: <span className="font-mono">{globalSettings.defaultWorkingModel}</span>
+                </p>
+              )}
+            </div>
+
+            <div className="space-y-2">
+              <Label className="flex items-center gap-2">
+                <Brain className="h-4 w-4" />
+                Default Executor Model
+              </Label>
+              <p className="text-xs text-muted-foreground mb-2">
+                Used when agents spawn executors via <code className="text-xs bg-muted px-1 rounded">spawn_executor()</code> — implements tasks in a fresh context window.
+                Use a fast/cheap model here to optimize cost. Falls back to Working Model if not set.
+              </p>
+              <ProviderModelSelector
+                value={globalSettings.defaultExecutorModel}
+                onChange={(v) => handleGlobalSettingsChange({ ...globalSettings, defaultExecutorModel: v })}
+                className="w-full sm:w-full"
+                placeholder="Defaults to working model if not set..."
+              />
+              {globalSettings.defaultExecutorModel && (
+                <p className="text-xs text-muted-foreground font-mono mt-1">{globalSettings.defaultExecutorModel}</p>
+              )}
+              {!globalSettings.defaultExecutorModel && globalSettings.defaultWorkingModel && (
+                <p className="text-xs text-muted-foreground mt-1">
+                  Using working model: <span className="font-mono">{globalSettings.defaultWorkingModel}</span>
+                </p>
+              )}
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="thinkingModel" className="flex items-center gap-2">
+                <MessageSquare className="h-4 w-4" />
+                Default Thinking Model
+              </Label>
+              <p className="text-xs text-muted-foreground mb-2">
+                Used for quick decisions, classification, and triage tasks
+              </p>
+              <ProviderModelSelector
+                value={globalSettings.defaultThinkingModel}
+                onChange={(v) => handleGlobalSettingsChange({ ...globalSettings, defaultThinkingModel: v })}
+                thinkingLevel={globalSettings.defaultThinkingModelThinkingLevel as any}
+                onThinkingLevelChange={(l) => handleGlobalSettingsChange({ ...globalSettings, defaultThinkingModelThinkingLevel: l })}
+                className="w-full sm:w-full"
+                placeholder="Select thinking model..."
+              />
+              <p className="text-xs text-muted-foreground font-mono mt-1">{globalSettings.defaultThinkingModel}</p>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="slackModel" className="flex items-center gap-2">
+                <MessageSquare className="h-4 w-4" />
+                Default Slack Decision Model
+              </Label>
+              <p className="text-xs text-muted-foreground mb-2">
+                Used when agents need to decide how to respond to Slack messages
+              </p>
+              <ProviderModelSelector
+                value={globalSettings.defaultSlackDecisionModel}
+                onChange={(v) => handleGlobalSettingsChange({ ...globalSettings, defaultSlackDecisionModel: v })}
+                thinkingLevel={globalSettings.defaultSlackDecisionModelThinkingLevel as any}
+                onThinkingLevelChange={(l) => handleGlobalSettingsChange({ ...globalSettings, defaultSlackDecisionModelThinkingLevel: l })}
+                className="w-full sm:w-full"
+                placeholder="Select Slack decision model..."
+              />
+              <p className="text-xs text-muted-foreground font-mono mt-1">{globalSettings.defaultSlackDecisionModel}</p>
+            </div>
+          </div>
+        )}
+
+        {/* ── Key Sharing ── */}
+        {activeTab === 'sharing' && (
+          <div className="max-w-5xl mx-auto space-y-4">
+            <div>
+              <h2 className="text-lg font-semibold flex items-center gap-2">
+                <Share2 className="h-5 w-5" />
+                Key Sharing
+              </h2>
+              <p className="text-sm text-muted-foreground mt-1">
+                Share your instance-level provider API keys with users.
+                Users can then use these keys for their sessions.
+              </p>
+            </div>
+            {/* Add new share */}
+            <div className="border rounded-lg p-4 space-y-3">
+              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                New Share
+              </p>
+              <div className="flex gap-2 items-end">
+                <div className="flex-1 space-y-1">
+                  <Label className="text-xs">Provider</Label>
+                  <SearchableCombobox
+                    options={providerOptions}
+                    value={newShareProvider}
+                    onChange={setNewShareProvider}
+                    placeholder="Select a provider..."
+                    searchPlaceholder="Search providers..."
+                  />
+                </div>
+                <div className="flex-1 space-y-1">
+                  <Label className="text-xs">Target User</Label>
+                  <SearchableCombobox
+                    options={userOptions}
+                    value={newShareUser}
+                    onChange={setNewShareUser}
+                    placeholder="All users (broadcast)"
+                    searchPlaceholder="Search by name or email..."
+                  />
+                </div>
+              </div>
+              <div className="flex gap-2 items-end">
+                <div className="flex-1 space-y-1">
+                  <Label className="text-xs">Expires</Label>
+                  <Input
+                    type="date"
+                    value={newShareExpiry}
+                    onChange={(e) => setNewShareExpiry(e.target.value)}
+                    className="h-8 text-xs"
+                  />
+                </div>
+                <div className="flex-1 space-y-1">
+                  <Label className="text-xs">Allowed Models</Label>
+                  <Input
+                    type="text"
+                    value={newShareModels}
+                    onChange={(e) => setNewShareModels(e.target.value)}
+                    placeholder="e.g. claude-sonnet-4, gpt-4o"
+                    className="h-8 text-xs font-mono"
+                  />
+                </div>
+                <div className="w-24 space-y-1">
+                  <Label className="text-xs">Daily Limit</Label>
+                  <Input
+                    type="number"
+                    value={newShareDailyLimit}
+                    onChange={(e) => setNewShareDailyLimit(e.target.value)}
+                    placeholder="No limit"
+                    className="h-8 text-xs"
+                  />
+                </div>
+                <div className="w-28 space-y-1">
+                  <Label className="text-xs">Cost/Day (USD)</Label>
+                  <Input
+                    type="number"
+                    step="0.01"
+                    value={newShareCostLimit}
+                    onChange={(e) => setNewShareCostLimit(e.target.value)}
+                    placeholder="No limit"
+                    className="h-8 text-xs"
+                  />
+                </div>
+                <Button
+                  size="sm"
+                  disabled={!newShareProvider.trim()}
+                  onClick={async () => {
+                    try {
+                      const expiresAt = newShareExpiry ? new Date(newShareExpiry).getTime() : null;
+                      const allowedModels = newShareModels.trim()
+                        ? newShareModels.split(',').map(m => m.trim()).filter(Boolean)
+                        : null;
+                      const dailyLimit = newShareDailyLimit ? parseInt(newShareDailyLimit, 10) : null;
+                      const dailyCostLimitUsd = newShareCostLimit ? parseFloat(newShareCostLimit) : null;
+                      const res = await authFetch(`${API_BASE}/admin/shared-providers`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                          providerId: newShareProvider.trim(),
+                          targetUserId: newShareUser.trim() || null,
+                          expiresAt,
+                          allowedModels,
+                          dailyLimit: dailyLimit && !isNaN(dailyLimit) ? dailyLimit : null,
+                          dailyCostLimitUsd: dailyCostLimitUsd && !isNaN(dailyCostLimitUsd) ? dailyCostLimitUsd : null,
+                        }),
+                      });
+                      if (!res.ok) {
+                        const err = await res.json();
+                        throw new Error(err.detail || 'Failed');
+                      }
+                      const data = await res.json();
+                      setSharedProviders((prev) => [data, ...prev]);
+                      setNewShareProvider('');
+                      setNewShareUser('');
+                      setNewShareExpiry('');
+                      setNewShareModels('');
+                      setNewShareDailyLimit('');
+                      setNewShareCostLimit('');
+                      toast.success('Provider shared');
+                    } catch (err: any) {
+                      toast.error(err?.message || 'Failed to share');
+                    }
+                  }}
+                >
+                  <Plus className="h-4 w-4 mr-1" />
+                  Share
+                </Button>
+              </div>
+            </div>
+
+            {/* Active shares */}
+            {sharingLoading ? (
+              <div className="text-sm text-muted-foreground py-4 text-center">Loading...</div>
+            ) : sharedProviders.length === 0 ? (
+              <p className="text-sm text-muted-foreground py-4 text-center">
+                No provider keys shared yet.
+              </p>
+            ) : (
+              <div className="border rounded-lg overflow-hidden">
+                <table className="w-full text-sm">
+                   <thead className="bg-muted/50">
+                    <tr>
+                      <th className="text-left px-4 py-2 font-medium">Provider</th>
+                      <th className="text-left px-4 py-2 font-medium">Target</th>
+                      <th className="text-left px-4 py-2 font-medium">Restrictions</th>
+                      <th className="text-right px-4 py-2 font-medium">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y">
+                    {sharedProviders.map((sp) => {
+                      const providerLabel = providerOptions.find((p) => p.value === sp.providerId)?.label ?? sp.providerId;
+                      const targetLabel = sp.targetUserId
+                        ? userOptions.find((u) => u.value === sp.targetUserId)?.label ?? sp.targetUserId
+                        : null;
+                      const isExpired = sp.expiresAt && sp.expiresAt < Date.now();
+                      const isEditing = editingShareId === sp.id;
+                      const hasAnyRestriction = sp.expiresAt || sp.allowedModels?.length || sp.dailyLimit || sp.dailyCostLimitUsd;
+                      return (
+                      <tr key={sp.id} className={`hover:bg-muted/30 ${isExpired ? 'opacity-50' : ''}`}>
+                        <td className="px-4 py-2 text-xs">
+                          <span className="font-medium">{providerLabel}</span>
+                          <span className="text-muted-foreground ml-1 font-mono">({sp.providerId})</span>
+                        </td>
+                        <td className="px-4 py-2 text-xs">
+                          {targetLabel || <span className="text-blue-500">All users</span>}
+                        </td>
+                        <td className="px-4 py-2 text-xs space-y-0.5">
+                          {isEditing ? (
+                            <div className="space-y-1.5 py-1">
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-muted-foreground w-16 shrink-0">Expires:</span>
+                                <Input type="date" value={editShareExpiry} onChange={(e) => setEditShareExpiry(e.target.value)} className="h-6 text-xs w-32" />
+                              </div>
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-muted-foreground w-16 shrink-0">Models:</span>
+                                <Input type="text" value={editShareModels} onChange={(e) => setEditShareModels(e.target.value)} placeholder="e.g. claude-sonnet-4, gpt-4o" className="h-6 text-xs font-mono flex-1" />
+                              </div>
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-muted-foreground w-16 shrink-0">Req/day:</span>
+                                <Input type="number" value={editShareDailyLimit} onChange={(e) => setEditShareDailyLimit(e.target.value)} placeholder="No limit" className="h-6 text-xs w-24" />
+                              </div>
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-muted-foreground w-16 shrink-0">$/day:</span>
+                                <Input type="number" step="0.01" value={editShareCostLimit} onChange={(e) => setEditShareCostLimit(e.target.value)} placeholder="No limit" className="h-6 text-xs w-24" />
+                              </div>
+                            </div>
+                          ) : (
+                            <>
+                              {isExpired && (
+                                <span className="text-red-500 font-medium">Expired</span>
+                              )}
+                              {sp.expiresAt && !isExpired && (
+                                <div className="text-muted-foreground">
+                                  Expires {new Date(sp.expiresAt).toLocaleDateString()}
+                                </div>
+                              )}
+                              {sp.allowedModels && sp.allowedModels.length > 0 && (
+                                <div className="text-muted-foreground" title={sp.allowedModels.join(', ')}>
+                                  Models: <span className="font-mono">{sp.allowedModels.join(', ')}</span>
+                                </div>
+                              )}
+                              {sp.dailyLimit != null && (
+                                <div className="text-muted-foreground">{sp.dailyLimit} requests/day</div>
+                              )}
+                              {sp.dailyCostLimitUsd != null && (
+                                <div className="text-muted-foreground">${sp.dailyCostLimitUsd.toFixed(2)}/day</div>
+                              )}
+                              {!hasAnyRestriction && (
+                                <span className="text-muted-foreground">Unrestricted</span>
+                              )}
+                            </>
+                          )}
+                        </td>
+                        <td className="px-4 py-2 text-right space-x-2">
+                          {isEditing ? (
+                            <>
+                              <button
+                                onClick={async () => {
+                                  try {
+                                    const expiresAt = editShareExpiry ? new Date(editShareExpiry).getTime() : undefined;
+                                    const allowedModels = editShareModels.trim()
+                                      ? editShareModels.split(',').map(m => m.trim()).filter(Boolean)
+                                      : undefined;
+                                    const dailyLimit = editShareDailyLimit ? parseInt(editShareDailyLimit, 10) : undefined;
+                                    const dailyCostLimitUsd = editShareCostLimit ? parseFloat(editShareCostLimit) : undefined;
+
+                                    const body: Record<string, unknown> = {};
+                                    if (expiresAt !== undefined) body.expiresAt = expiresAt;
+                                    else body.clearExpiresAt = !editShareExpiry;
+                                    if (allowedModels !== undefined) body.allowedModels = allowedModels;
+                                    else body.clearAllowedModels = !editShareModels.trim();
+                                    if (dailyLimit !== undefined && !isNaN(dailyLimit)) body.dailyLimit = dailyLimit;
+                                    else body.clearDailyLimit = !editShareDailyLimit;
+                                    if (dailyCostLimitUsd !== undefined && !isNaN(dailyCostLimitUsd)) body.dailyCostLimitUsd = dailyCostLimitUsd;
+                                    else body.clearDailyCostLimitUsd = !editShareCostLimit;
+
+                                    const res = await authFetch(`${API_BASE}/admin/shared-providers/${sp.id}`, {
+                                      method: 'PATCH',
+                                      headers: { 'Content-Type': 'application/json' },
+                                      body: JSON.stringify(body),
+                                    });
+                                    if (!res.ok) throw new Error((await res.json()).detail || 'Failed');
+                                    const updated = await res.json();
+                                    setSharedProviders((prev) => prev.map((s) => s.id === sp.id ? updated : s));
+                                    setEditingShareId(null);
+                                    toast.success('Share updated');
+                                  } catch (err: any) {
+                                    toast.error(err?.message || 'Failed to update');
+                                  }
+                                }}
+                                className="text-green-600 hover:underline text-xs inline-flex items-center gap-1"
+                              >
+                                Save
+                              </button>
+                              <button
+                                onClick={() => setEditingShareId(null)}
+                                className="text-muted-foreground hover:underline text-xs"
+                              >
+                                Cancel
+                              </button>
+                            </>
+                          ) : (
+                            <>
+                              <button
+                                onClick={() => {
+                                  setEditingShareId(sp.id);
+                                  setEditShareExpiry(sp.expiresAt ? new Date(sp.expiresAt).toISOString().split('T')[0] : '');
+                                  setEditShareModels(sp.allowedModels?.join(', ') ?? '');
+                                  setEditShareDailyLimit(sp.dailyLimit != null ? String(sp.dailyLimit) : '');
+                                  setEditShareCostLimit(sp.dailyCostLimitUsd != null ? String(sp.dailyCostLimitUsd) : '');
+                                }}
+                                className="text-blue-600 hover:underline text-xs inline-flex items-center gap-1"
+                              >
+                                Edit
+                              </button>
+                              <button
+                                onClick={async () => {
+                                  try {
+                                    await authFetch(`${API_BASE}/admin/shared-providers/${sp.id}`, { method: 'DELETE' });
+                                    setSharedProviders((prev) => prev.filter((s) => s.id !== sp.id));
+                                    toast.success('Share revoked');
+                                  } catch {
+                                    toast.error('Failed to revoke');
+                                  }
+                                }}
+                                className="text-destructive hover:underline text-xs inline-flex items-center gap-1"
+                              >
+                                <Trash2 className="h-3 w-3" />
+                                Revoke
+                              </button>
+                            </>
+                          )}
+                        </td>
+                      </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── Approvals ── */}
+        {activeTab === 'approvals' && (
+          <div className="max-w-5xl mx-auto space-y-4">
+            <div>
+              <h2 className="text-lg font-semibold flex items-center gap-2">
+                <CheckCircle className="h-5 w-5" />
+                Pending Approvals
+              </h2>
+              <p className="text-sm text-muted-foreground mt-1">
+                Skills and MCP servers submitted by users awaiting your review.
+              </p>
+            </div>
+
+            {pendingItems.length === 0 ? (
+              <p className="text-sm text-muted-foreground py-8 text-center">
+                No pending approvals.
+              </p>
+            ) : (
+              <div className="space-y-3">
+                {pendingItems.map((item) => (
+                  <div key={`${item.type}-${item.id}`} className="border rounded-lg p-4 flex items-start justify-between gap-4">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs px-2 py-0.5 rounded-full bg-muted font-medium uppercase">
+                          {item.type}
+                        </span>
+                        <span className="font-medium">{item.name}</span>
+                      </div>
+                      <p className="text-sm text-muted-foreground mt-1">{item.description}</p>
+                    </div>
+                    <div className="flex gap-2 shrink-0">
+                      <button
+                        onClick={() => handleApprove(item.type, item.id)}
+                        className="text-xs px-3 py-1.5 rounded bg-green-600 text-white hover:bg-green-700"
+                      >
+                        Approve
+                      </button>
+                      <button
+                        onClick={() => handleReject(item.type, item.id)}
+                        className="text-xs px-3 py-1.5 rounded bg-red-600 text-white hover:bg-red-700"
+                      >
+                        Reject
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── Agent Runtime ── */}
+        {activeTab === 'runtime' && (
+          <div className="max-w-5xl mx-auto space-y-6">
+            <div>
+              <h2 className="text-lg font-semibold flex items-center gap-2">
+                <Container className="h-5 w-5" />
+                Agent Runtime
+              </h2>
+              <p className="text-sm text-muted-foreground mt-1">
+                Configure container resources, timeouts, and runtime behavior for all agent sessions.
+                Changes take effect on the next agent execution.
+              </p>
+            </div>
+
+            {/* Runtime Image */}
+            <div className="border rounded-lg p-4 space-y-3">
+              <h3 className="font-medium text-sm">Runtime Image</h3>
+              <p className="text-xs text-muted-foreground">
+                Docker image reference for agent containers.
+                When empty, the engine uses the default GHCR image.
+              </p>
+              <div className="flex gap-2 max-w-lg">
+                <Input
+                  id="adminRuntimeImage"
+                  value={runtimeImage}
+                  onChange={(e) => setRuntimeImage(e.target.value)}
+                  placeholder="ghcr.io/basedatum/djinnbot/agent-runtime:latest"
+                  className="font-mono text-sm"
+                />
+                <Button
+                  disabled={runtimeSaving}
+                  onClick={async () => {
+                    setRuntimeSaving(true);
+                    try {
+                      const res = await authFetch(`${API_BASE}/settings/`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ agentRuntimeImage: runtimeImage }),
+                      });
+                      if (!res.ok) throw new Error('Failed');
+                      toast.success('Runtime image updated');
+                    } catch {
+                      toast.error('Failed to save');
+                    } finally {
+                      setRuntimeSaving(false);
+                    }
+                  }}
+                >
+                  {runtimeSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Save'}
+                </Button>
+              </div>
+            </div>
+
+            {/* Programmatic Tool Calling */}
+            <div className="border rounded-lg p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <Cpu className="h-4 w-4 text-muted-foreground" />
+                    <Label className="font-medium">Programmatic Tool Calling (PTC)</Label>
+                    <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${
+                      globalSettings?.ptcEnabled
+                        ? 'bg-green-500/15 text-green-400'
+                        : 'bg-zinc-500/15 text-zinc-500'
+                    }`}>
+                      {globalSettings?.ptcEnabled ? 'ON' : 'OFF'}
+                    </span>
+                  </div>
+                  <p className="text-xs text-muted-foreground max-w-lg">
+                    When enabled, agents write Python code to call tools instead of using JSON tool calls.
+                    Reduces context usage by 30-40%.
+                  </p>
+                </div>
+                <Switch
+                  checked={globalSettings?.ptcEnabled ?? false}
+                  onCheckedChange={async (checked) => {
+                    if (!globalSettings) return;
+                    const updated = { ...globalSettings, ptcEnabled: checked };
+                    setGlobalSettings(updated);
+                    setGlobalSettingsEdited(true);
+                    try {
+                      const res = await authFetch(`${API_BASE}/settings/`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(updated),
+                      });
+                      if (!res.ok) throw new Error('Failed to save');
+                      toast.success(checked ? 'PTC enabled' : 'PTC disabled');
+                    } catch {
+                      setGlobalSettings(globalSettings);
+                      toast.error('Failed to update PTC setting');
+                    }
+                  }}
+                />
+              </div>
+              {globalSettings?.ptcEnabled && (
+                <div className="flex items-start gap-2 p-3 bg-blue-950/20 border border-blue-900/30 rounded-md mt-3">
+                  <Info className="h-4 w-4 text-blue-400 flex-shrink-0 mt-0.5" />
+                  <p className="text-xs text-blue-200">
+                    PTC starts an IPC bridge in each agent container. The agent writes Python code
+                    that calls tool functions via <code className="bg-blue-900/30 px-1 rounded">exec_code</code>, filtering
+                    results before they enter context. Requires Python 3 in the runtime image.
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {/* Container Resources */}
+            {globalSettings && (
+              <div className="border rounded-lg p-4 space-y-4">
+                <h3 className="font-medium text-sm">Container Resources</h3>
+                <p className="text-xs text-muted-foreground">
+                  Resource limits applied to every agent sandbox container.
+                </p>
+                <div className="grid grid-cols-2 gap-4 max-w-lg">
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">Memory Limit (MB)</Label>
+                    <Input
+                      type="number"
+                      min={512}
+                      max={32768}
+                      value={globalSettings.containerMemoryLimitMb}
+                      onChange={(e) => handleGlobalSettingsChange({ ...globalSettings, containerMemoryLimitMb: parseInt(e.target.value) || 2048 })}
+                      className="h-8 text-sm"
+                    />
+                    <p className="text-[10px] text-muted-foreground">Min 512 MB. Default: 2048</p>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">CPU Limit (cores)</Label>
+                    <Input
+                      type="number"
+                      min={0.5}
+                      max={16}
+                      step={0.5}
+                      value={globalSettings.containerCpuLimit}
+                      onChange={(e) => handleGlobalSettingsChange({ ...globalSettings, containerCpuLimit: parseFloat(e.target.value) || 2 })}
+                      className="h-8 text-sm"
+                    />
+                    <p className="text-[10px] text-muted-foreground">Min 0.5. Default: 2</p>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">Shared Memory (MB)</Label>
+                    <Input
+                      type="number"
+                      min={64}
+                      max={4096}
+                      value={globalSettings.containerShmSizeMb}
+                      onChange={(e) => handleGlobalSettingsChange({ ...globalSettings, containerShmSizeMb: parseInt(e.target.value) || 256 })}
+                      className="h-8 text-sm"
+                    />
+                    <p className="text-[10px] text-muted-foreground">/dev/shm for Chromium. Min 64. Default: 256</p>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">JuiceFS Cache (MB)</Label>
+                    <Input
+                      type="number"
+                      min={256}
+                      max={16384}
+                      value={globalSettings.jfsAgentCacheSizeMb}
+                      onChange={(e) => handleGlobalSettingsChange({ ...globalSettings, jfsAgentCacheSizeMb: parseInt(e.target.value) || 2048 })}
+                      className="h-8 text-sm"
+                    />
+                    <p className="text-[10px] text-muted-foreground">Per-container JuiceFS cache. Default: 2048</p>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">Container Ready Timeout (sec)</Label>
+                    <Input
+                      type="number"
+                      min={10}
+                      max={300}
+                      value={globalSettings.containerReadyTimeoutSec}
+                      onChange={(e) => handleGlobalSettingsChange({ ...globalSettings, containerReadyTimeoutSec: parseInt(e.target.value) || 30 })}
+                      className="h-8 text-sm"
+                    />
+                    <p className="text-[10px] text-muted-foreground">How long to wait for container to boot. Default: 30</p>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">Default Step Timeout (sec)</Label>
+                    <Input
+                      type="number"
+                      min={30}
+                      max={3600}
+                      value={globalSettings.defaultStepTimeoutSec}
+                      onChange={(e) => handleGlobalSettingsChange({ ...globalSettings, defaultStepTimeoutSec: parseInt(e.target.value) || 300 })}
+                      className="h-8 text-sm"
+                    />
+                    <p className="text-[10px] text-muted-foreground">Max execution time per pipeline step. Default: 300</p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Chat Session Reaper */}
+            {globalSettings && (
+              <div className="border rounded-lg p-4 space-y-4">
+                <h3 className="font-medium text-sm">Chat Session Reaper</h3>
+                <p className="text-xs text-muted-foreground">
+                  Automatically stops idle chat sessions to free container resources.
+                </p>
+                <div className="grid grid-cols-2 gap-4 max-w-lg">
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">Idle Timeout (minutes)</Label>
+                    <Input
+                      type="number"
+                      min={5}
+                      max={480}
+                      value={globalSettings.chatIdleTimeoutMin}
+                      onChange={(e) => handleGlobalSettingsChange({ ...globalSettings, chatIdleTimeoutMin: parseInt(e.target.value) || 30 })}
+                      className="h-8 text-sm"
+                    />
+                    <p className="text-[10px] text-muted-foreground">Stop sessions after this idle time. Default: 30</p>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">Reaper Check Interval (sec)</Label>
+                    <Input
+                      type="number"
+                      min={10}
+                      max={600}
+                      value={globalSettings.reaperIntervalSec}
+                      onChange={(e) => handleGlobalSettingsChange({ ...globalSettings, reaperIntervalSec: parseInt(e.target.value) || 60 })}
+                      className="h-8 text-sm"
+                    />
+                    <p className="text-[10px] text-muted-foreground">How often to check for idle sessions. Default: 60</p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Wake System Guardrails */}
+            {globalSettings && (
+              <div className="border rounded-lg p-4 space-y-4">
+                <div className="flex items-center justify-between">
+                  <div className="space-y-1">
+                    <h3 className="font-medium text-sm">Wake System</h3>
+                    <p className="text-xs text-muted-foreground max-w-lg">
+                      Controls inter-agent wake-ups. When one agent wakes another, these guardrails prevent runaway loops.
+                    </p>
+                  </div>
+                  <Switch
+                    checked={globalSettings.wakeEnabled}
+                    onCheckedChange={(checked) => handleGlobalSettingsChange({ ...globalSettings, wakeEnabled: checked })}
+                  />
+                </div>
+                {globalSettings.wakeEnabled && (
+                  <div className="grid grid-cols-3 gap-4 max-w-lg">
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">Cooldown (sec)</Label>
+                      <Input
+                        type="number"
+                        min={0}
+                        max={3600}
+                        value={globalSettings.wakeCooldownSec}
+                        onChange={(e) => handleGlobalSettingsChange({ ...globalSettings, wakeCooldownSec: parseInt(e.target.value) || 300 })}
+                        className="h-8 text-sm"
+                      />
+                      <p className="text-[10px] text-muted-foreground">Min time between wakes. Default: 300</p>
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">Max Wakes / Day</Label>
+                      <Input
+                        type="number"
+                        min={1}
+                        max={100}
+                        value={globalSettings.maxWakesPerDay}
+                        onChange={(e) => handleGlobalSettingsChange({ ...globalSettings, maxWakesPerDay: parseInt(e.target.value) || 12 })}
+                        className="h-8 text-sm"
+                      />
+                      <p className="text-[10px] text-muted-foreground">Per agent per day. Default: 12</p>
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">Max Wakes / Pair / Day</Label>
+                      <Input
+                        type="number"
+                        min={1}
+                        max={50}
+                        value={globalSettings.maxWakesPerPairPerDay}
+                        onChange={(e) => handleGlobalSettingsChange({ ...globalSettings, maxWakesPerPairPerDay: parseInt(e.target.value) || 5 })}
+                        className="h-8 text-sm"
+                      />
+                      <p className="text-[10px] text-muted-foreground">Prevents A-to-B loops. Default: 5</p>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Pulse Execution */}
+            {globalSettings && (
+              <div className="border rounded-lg p-4 space-y-4">
+                <h3 className="font-medium text-sm">Pulse Execution</h3>
+                <p className="text-xs text-muted-foreground">
+                  Controls how pulse (scheduled) sessions run. Per-agent and per-routine overrides take priority.
+                </p>
+                <div className="grid grid-cols-2 gap-4 max-w-lg">
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">Max Concurrent Sessions</Label>
+                    <Input
+                      type="number"
+                      min={1}
+                      max={10}
+                      value={globalSettings.maxConcurrentPulseSessions}
+                      onChange={(e) => handleGlobalSettingsChange({ ...globalSettings, maxConcurrentPulseSessions: parseInt(e.target.value) || 2 })}
+                      className="h-8 text-sm"
+                    />
+                    <p className="text-[10px] text-muted-foreground">Per agent. Default: 2</p>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">Default Pulse Timeout (sec)</Label>
+                    <Input
+                      type="number"
+                      min={30}
+                      max={3600}
+                      value={globalSettings.defaultPulseTimeoutSec}
+                      onChange={(e) => handleGlobalSettingsChange({ ...globalSettings, defaultPulseTimeoutSec: parseInt(e.target.value) || 120 })}
+                      className="h-8 text-sm"
+                    />
+                    <p className="text-[10px] text-muted-foreground">Container timeout for pulses. Default: 120</p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Autonomous Agent Execution */}
+            {globalSettings && (
+              <div className="border rounded-lg p-4 space-y-4">
+                <h3 className="font-medium text-sm">Autonomous Agent Execution</h3>
+                <p className="text-xs text-muted-foreground">
+                  Controls how long agents can run autonomously during chat sessions.
+                  The inactivity timeout aborts stuck agents; the hard timeout caps total execution time.
+                  Auto-continuations keep agents working when they have pending tool calls.
+                </p>
+                <div className="grid grid-cols-3 gap-4 max-w-2xl">
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">Inactivity Timeout (sec)</Label>
+                    <Input
+                      type="number"
+                      min={30}
+                      max={600}
+                      value={globalSettings.chatInactivityTimeoutSec}
+                      onChange={(e) => handleGlobalSettingsChange({ ...globalSettings, chatInactivityTimeoutSec: parseInt(e.target.value) || 180 })}
+                      className="h-8 text-sm"
+                    />
+                    <p className="text-[10px] text-muted-foreground">Abort if no activity for this long. Default: 180</p>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">Hard Timeout (sec)</Label>
+                    <Input
+                      type="number"
+                      min={60}
+                      max={3600}
+                      value={globalSettings.chatHardTimeoutSec}
+                      onChange={(e) => handleGlobalSettingsChange({ ...globalSettings, chatHardTimeoutSec: parseInt(e.target.value) || 900 })}
+                      className="h-8 text-sm"
+                    />
+                    <p className="text-[10px] text-muted-foreground">Max wall-clock time per turn. Default: 900 (15 min)</p>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">Max Auto-Continuations</Label>
+                    <Input
+                      type="number"
+                      min={5}
+                      max={200}
+                      value={globalSettings.maxAutoContinuations}
+                      onChange={(e) => handleGlobalSettingsChange({ ...globalSettings, maxAutoContinuations: parseInt(e.target.value) || 50 })}
+                      className="h-8 text-sm"
+                    />
+                    <p className="text-[10px] text-muted-foreground">Safety cap on re-engagements per turn. Default: 50</p>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── Instance Secrets ── */}
+        {activeTab === 'secrets' && (
+          <div className="max-w-5xl mx-auto space-y-4">
+            <div>
+              <h2 className="text-lg font-semibold flex items-center gap-2">
+                <Lock className="h-5 w-5" />
+                Instance Secrets
+              </h2>
+              <p className="text-sm text-muted-foreground mt-1">
+                Create and manage instance-level secrets, then grant them to users.
+                Users can then grant these secrets to agents.
+              </p>
+            </div>
+            <SecretsSettings />
+          </div>
+        )}
+
+        {/* ── Waitlist ── */}
+        {activeTab === 'waitlist' && (
+          <div className="max-w-5xl mx-auto space-y-4">
+            <div>
+              <h2 className="text-lg font-semibold flex items-center gap-2">
+                <ClipboardList className="h-5 w-5" />
+                Waitlist
+              </h2>
+              <p className="text-sm text-muted-foreground mt-1">
+                People who signed up to join DjinnBot. Send invites to grant access.
+              </p>
+            </div>
+
+            {waitlistLoading ? (
+              <div className="text-sm text-muted-foreground py-4 text-center">Loading...</div>
+            ) : waitlistEntries.length === 0 ? (
+              <p className="text-sm text-muted-foreground py-8 text-center">
+                No waitlist signups yet.
+              </p>
+            ) : (
+              <div className="border rounded-lg overflow-hidden">
+                <table className="w-full text-sm">
+                  <thead className="bg-muted/50">
+                    <tr>
+                      <th className="text-left px-4 py-3 font-medium">Email</th>
+                      <th className="text-left px-4 py-3 font-medium">Status</th>
+                      <th className="text-left px-4 py-3 font-medium">Signed Up</th>
+                      <th className="text-right px-4 py-3 font-medium">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y">
+                    {waitlistEntries.map((entry) => (
+                      <tr key={entry.id} className="hover:bg-muted/30">
+                        <td className="px-4 py-3 font-medium">{entry.email}</td>
+                        <td className="px-4 py-3">
+                          <span className={`text-xs px-2 py-0.5 rounded-full ${
+                            entry.status === 'invited'
+                              ? 'bg-blue-500/10 text-blue-600'
+                              : entry.status === 'registered'
+                                ? 'bg-green-500/10 text-green-600'
+                                : 'bg-yellow-500/10 text-yellow-600'
+                          }`}>
+                            {entry.status === 'waiting' && (
+                              <span className="inline-flex items-center gap-1"><Clock className="h-3 w-3" /> Waiting</span>
+                            )}
+                            {entry.status === 'invited' && (
+                              <span className="inline-flex items-center gap-1"><Send className="h-3 w-3" /> Invited</span>
+                            )}
+                            {entry.status === 'registered' && (
+                              <span className="inline-flex items-center gap-1"><Check className="h-3 w-3" /> Registered</span>
+                            )}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-xs text-muted-foreground">
+                          {new Date(entry.createdAt).toLocaleDateString()}
+                        </td>
+                        <td className="px-4 py-3 text-right space-x-2">
+                          {entry.status === 'waiting' && (
+                            <button
+                              onClick={() => handleInvite(entry.id)}
+                              disabled={invitingId === entry.id}
+                              className="text-xs px-3 py-1.5 rounded bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 inline-flex items-center gap-1"
+                            >
+                              {invitingId === entry.id ? (
+                                <Loader2 className="h-3 w-3 animate-spin" />
+                              ) : (
+                                <Send className="h-3 w-3" />
+                              )}
+                              Invite
+                            </button>
+                          )}
+                          <button
+                            onClick={() => handleDeleteWaitlistEntry(entry.id)}
+                            className="text-destructive hover:underline text-xs inline-flex items-center gap-1"
+                          >
+                            <X className="h-3 w-3" />
+                            Remove
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            <div className="text-xs text-muted-foreground">
+              {waitlistEntries.length} total &middot;{' '}
+              {waitlistEntries.filter((e) => e.status === 'waiting').length} waiting &middot;{' '}
+              {waitlistEntries.filter((e) => e.status === 'invited').length} invited
+            </div>
+          </div>
+        )}
+
+        {/* ── Email Settings ── */}
+        {activeTab === 'email' && (
+          <div className="max-w-5xl mx-auto space-y-6">
+            <div>
+              <h2 className="text-lg font-semibold flex items-center gap-2">
+                <Mail className="h-5 w-5" />
+                Email Settings
+              </h2>
+              <p className="text-sm text-muted-foreground mt-1">
+                Configure SMTP settings for sending invite emails and other notifications.
+              </p>
+            </div>
+
+            {emailLoading ? (
+              <div className="text-sm text-muted-foreground py-4 text-center">Loading...</div>
+            ) : (
+              <>
+                <div className="space-y-4 max-w-lg">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="smtpHost">SMTP Host</Label>
+                      <Input
+                        id="smtpHost"
+                        value={emailSettings.smtpHost}
+                        onChange={(e) => setEmailSettings((s) => ({ ...s, smtpHost: e.target.value }))}
+                        placeholder="smtp.gmail.com"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="smtpPort">Port</Label>
+                      <Input
+                        id="smtpPort"
+                        type="number"
+                        value={emailSettings.smtpPort}
+                        onChange={(e) => setEmailSettings((s) => ({ ...s, smtpPort: parseInt(e.target.value) || 587 }))}
+                        placeholder="587"
+                      />
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="smtpUsername">Username</Label>
+                    <Input
+                      id="smtpUsername"
+                      value={emailSettings.smtpUsername}
+                      onChange={(e) => setEmailSettings((s) => ({ ...s, smtpUsername: e.target.value }))}
+                      placeholder="your-email@gmail.com"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="smtpPassword">Password / App Password</Label>
+                    <Input
+                      id="smtpPassword"
+                      type="password"
+                      value={emailSettings.smtpPassword}
+                      onChange={(e) => setEmailSettings((s) => ({ ...s, smtpPassword: e.target.value }))}
+                      placeholder="Enter password"
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="fromEmail">From Email</Label>
+                      <Input
+                        id="fromEmail"
+                        type="email"
+                        value={emailSettings.fromEmail}
+                        onChange={(e) => setEmailSettings((s) => ({ ...s, fromEmail: e.target.value }))}
+                        placeholder="noreply@yourdomain.com"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="fromName">From Name</Label>
+                      <Input
+                        id="fromName"
+                        value={emailSettings.fromName}
+                        onChange={(e) => setEmailSettings((s) => ({ ...s, fromName: e.target.value }))}
+                        placeholder="DjinnBot"
+                      />
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={emailSettings.smtpUseTls}
+                      onClick={() => setEmailSettings((s) => ({ ...s, smtpUseTls: !s.smtpUseTls }))}
+                      className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ${emailSettings.smtpUseTls ? 'bg-primary' : 'bg-muted'}`}
+                    >
+                      <span
+                        className={`pointer-events-none block h-4 w-4 rounded-full bg-background shadow-lg ring-0 transition-transform ${emailSettings.smtpUseTls ? 'translate-x-4' : 'translate-x-0'}`}
+                      />
+                    </button>
+                    <Label className="cursor-pointer" onClick={() => setEmailSettings((s) => ({ ...s, smtpUseTls: !s.smtpUseTls }))}>
+                      Use TLS (STARTTLS)
+                    </Label>
+                  </div>
+                  <Button onClick={handleSaveEmailSettings} disabled={emailSaving}>
+                    {emailSaving ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null}
+                    Save Settings
+                  </Button>
+                </div>
+
+                {/* Test Send */}
+                <div className="border-t pt-6 max-w-lg">
+                  <h3 className="text-sm font-semibold mb-2 flex items-center gap-2">
+                    <Send className="h-4 w-4" />
+                    Test Email
+                  </h3>
+                  <p className="text-xs text-muted-foreground mb-3">
+                    Send a test email to verify your SMTP settings are working.
+                  </p>
+                  <div className="flex gap-2">
+                    <Input
+                      type="email"
+                      value={testEmailAddr}
+                      onChange={(e) => setTestEmailAddr(e.target.value)}
+                      placeholder="recipient@example.com"
+                      className="flex-1"
+                    />
+                    <Button
+                      onClick={handleTestEmail}
+                      disabled={testingSend || !testEmailAddr.trim()}
+                      variant="outline"
+                    >
+                      {testingSend ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <Send className="h-4 w-4 mr-1" />}
+                      Send Test
+                    </Button>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
+        {/* ── Container Logs ── */}
+        {activeTab === 'logs' && (
+          <div className="max-w-full mx-auto">
+            <ContainerLogs />
+          </div>
+        )}
+      </NestedSidebar>
+    </div>
+  );
+}
+
+
+// ── Admin TTS Panel ──────────────────────────────────────────────────────────
+
+function AdminTtsPanel() {
+  const [ttsSettings, setTtsSettings] = useState({
+    ttsEnabled: true,
+    ttsCharacterThreshold: 1000,
+    ttsMaxConcurrentRequests: 5,
+    defaultTtsProvider: 'fish-audio',
+    voiceboxUrl: 'http://localhost:8000',
+  });
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [providers, setProviders] = useState<any[]>([]);
+  const [apiKey, setApiKey] = useState('');
+  const [voiceboxHealth, setVoiceboxHealth] = useState<{ reachable: boolean; modelLoaded?: boolean; gpuType?: string } | null>(null);
+  const [checkingVoicebox, setCheckingVoicebox] = useState(false);
+
+  useEffect(() => {
+    loadAll();
+  }, []);
+
+  const loadAll = async () => {
+    try {
+      const [settingsRes, providersRes] = await Promise.all([
+        authFetch(`${API_BASE}/admin/tts-settings`),
+        authFetch(`${API_BASE}/settings/tts-providers`),
+      ]);
+      if (settingsRes.ok) setTtsSettings(await settingsRes.json());
+      if (providersRes.ok) setProviders(await providersRes.json());
+    } catch (err) {
+      console.error('Failed to load TTS settings:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSaveSettings = async () => {
+    setSaving(true);
+    try {
+      const res = await authFetch(`${API_BASE}/admin/tts-settings`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(ttsSettings),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setTtsSettings(data);
+        toast.success('TTS settings saved');
+      } else {
+        toast.error('Failed to save TTS settings');
+      }
+    } catch {
+      toast.error('Failed to save TTS settings');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleSaveProviderKey = async (providerId: string) => {
+    if (!apiKey.trim()) return;
+    try {
+      const res = await authFetch(`${API_BASE}/settings/tts-providers/${providerId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ providerId, enabled: true, apiKey: apiKey.trim() }),
+      });
+      if (res.ok) {
+        toast.success('API key saved');
+        setApiKey('');
+        loadAll();
+      } else {
+        toast.error('Failed to save API key');
+      }
+    } catch {
+      toast.error('Failed to save API key');
+    }
+  };
+
+  const checkVoiceboxHealth = async () => {
+    setCheckingVoicebox(true);
+    try {
+      const urlParam = encodeURIComponent(ttsSettings.voiceboxUrl);
+      const res = await authFetch(`${API_BASE}/tts/voicebox/health?url=${urlParam}`);
+      if (res.ok) {
+        setVoiceboxHealth(await res.json());
+      }
+    } catch {
+      setVoiceboxHealth({ reachable: false });
+    } finally {
+      setCheckingVoicebox(false);
+    }
+  };
+
+  if (loading) {
+    return <div className="max-w-5xl mx-auto"><Loader2 className="h-5 w-5 animate-spin mx-auto mt-8" /></div>;
+  }
+
+  return (
+    <div className="max-w-5xl mx-auto space-y-6">
+      <div>
+        <h2 className="text-lg font-semibold flex items-center gap-2">
+          <Volume2 className="h-5 w-5" />
+          Text-to-Speech
+        </h2>
+        <p className="text-sm text-muted-foreground mt-1">
+          Configure TTS providers, default provider, and instance-level settings.
+        </p>
+      </div>
+
+      {/* Global TTS Settings */}
+      <div className="border rounded-lg p-4 space-y-4">
+        <h3 className="font-medium text-sm">Global Settings</h3>
+
+        <div className="flex items-center justify-between">
+          <div>
+            <Label className="text-sm font-medium">Enable TTS</Label>
+            <p className="text-xs text-muted-foreground">
+              Master switch for text-to-speech across all agents
+            </p>
+          </div>
+          <Switch
+            checked={ttsSettings.ttsEnabled}
+            onCheckedChange={(checked) => setTtsSettings({ ...ttsSettings, ttsEnabled: checked })}
+          />
+        </div>
+
+        <div>
+          <Label className="text-sm font-medium">Default TTS Provider</Label>
+          <p className="text-xs text-muted-foreground mb-2">
+            The default provider used for text-to-speech when not overridden by agent or user settings.
+          </p>
+          <select
+            value={ttsSettings.defaultTtsProvider}
+            onChange={(e) => setTtsSettings({ ...ttsSettings, defaultTtsProvider: e.target.value })}
+            className="flex h-9 w-64 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          >
+            <option value="fish-audio">Fish Audio (Cloud)</option>
+            <option value="voicebox">Voicebox (Local)</option>
+          </select>
+        </div>
+
+        <div>
+          <Label className="text-sm font-medium">Character Threshold</Label>
+          <p className="text-xs text-muted-foreground mb-2">
+            Maximum response length (characters) for generating TTS audio.
+            Responses longer than this will be text-only.
+          </p>
+          <Input
+            type="number"
+            value={ttsSettings.ttsCharacterThreshold}
+            onChange={(e) => setTtsSettings({
+              ...ttsSettings,
+              ttsCharacterThreshold: parseInt(e.target.value) || 1000,
+            })}
+            className="w-32"
+            min={100}
+            max={10000}
+          />
+        </div>
+
+        <div>
+          <Label className="text-sm font-medium">Max Concurrent Requests</Label>
+          <p className="text-xs text-muted-foreground mb-2">
+            Maximum number of simultaneous TTS requests.
+          </p>
+          <Input
+            type="number"
+            value={ttsSettings.ttsMaxConcurrentRequests}
+            onChange={(e) => setTtsSettings({
+              ...ttsSettings,
+              ttsMaxConcurrentRequests: parseInt(e.target.value) || 5,
+            })}
+            className="w-32"
+            min={1}
+            max={50}
+          />
+        </div>
+
+        <Button onClick={handleSaveSettings} disabled={saving} size="sm">
+          {saving ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : null}
+          Save Settings
+        </Button>
+      </div>
+
+      {/* Voicebox Configuration */}
+      <div className="border rounded-lg p-4 space-y-4">
+        <h3 className="font-medium text-sm">Voicebox (Local TTS)</h3>
+        <p className="text-xs text-muted-foreground">
+          Voicebox runs locally on your machine. No API key required.
+          Download from <a href="https://github.com/jamiepine/voicebox" target="_blank" rel="noopener noreferrer" className="underline hover:text-foreground">github.com/jamiepine/voicebox</a>.
+        </p>
+
+        <div>
+          <Label className="text-sm font-medium">Voicebox URL</Label>
+          <p className="text-xs text-muted-foreground mb-2">
+            Base URL for the Voicebox API server.
+          </p>
+          <div className="flex items-center gap-2">
+            <Input
+              type="text"
+              value={ttsSettings.voiceboxUrl}
+              onChange={(e) => setTtsSettings({ ...ttsSettings, voiceboxUrl: e.target.value })}
+              className="w-80 text-sm"
+              placeholder="http://localhost:8000"
+            />
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={checkVoiceboxHealth}
+              disabled={checkingVoicebox}
+              className="h-9"
+            >
+              {checkingVoicebox ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : null}
+              Test Connection
+            </Button>
+          </div>
+          {voiceboxHealth && (
+            <div className={`mt-2 text-xs flex items-center gap-1.5 ${voiceboxHealth.reachable ? 'text-green-500' : 'text-red-500'}`}>
+              {voiceboxHealth.reachable ? (
+                <>
+                  <Check className="h-3 w-3" />
+                  Connected
+                  {voiceboxHealth.modelLoaded && ' — model loaded'}
+                  {voiceboxHealth.gpuType && ` (${voiceboxHealth.gpuType})`}
+                </>
+              ) : (
+                <>
+                  <X className="h-3 w-3" />
+                  Not reachable — make sure Voicebox is running
+                </>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Instance TTS Provider Keys (Fish Audio) */}
+      <div className="border rounded-lg p-4 space-y-4">
+        <h3 className="font-medium text-sm">Fish Audio (Cloud TTS)</h3>
+        <p className="text-xs text-muted-foreground">
+          Configure the instance-level Fish Audio API key. This can be shared
+          with users via the Key Sharing mechanism, or users can provide their own.
+        </p>
+
+        {providers.filter((p: any) => p.providerId === 'fish-audio').map((provider: any) => (
+          <div key={provider.providerId} className="flex items-center gap-3 p-3 border rounded-md">
+            <div className="flex-1">
+              <div className="font-medium text-sm">{provider.name}</div>
+              <div className="text-xs text-muted-foreground">{provider.description}</div>
+              {provider.configured && provider.maskedApiKey && (
+                <div className="text-xs text-muted-foreground mt-1 font-mono">
+                  Key: {provider.maskedApiKey}
+                </div>
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="relative">
+                <Input
+                  type="password"
+                  placeholder="API key..."
+                  value={apiKey}
+                  onChange={(e) => setApiKey(e.target.value)}
+                  className="text-sm w-48 h-8"
+                />
+              </div>
+              <Button
+                size="sm"
+                onClick={() => handleSaveProviderKey(provider.providerId)}
+                disabled={!apiKey.trim()}
+                className="h-8"
+              >
+                Save
+              </Button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}

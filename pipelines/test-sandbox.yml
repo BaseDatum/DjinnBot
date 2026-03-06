@@ -1,0 +1,79 @@
+# Sandbox End-to-End Test Pipeline
+# Verifies sandbox isolation, persistence, and toolchain functionality
+
+id: test-sandbox
+name: Sandbox End-to-End Test
+version: 1.0.0
+description: Verifies sandbox isolation, persistence, and toolchain functionality
+
+defaults:
+  model: openrouter/moonshotai/kimi-k2.5
+  timeout: 120
+
+agents:
+  - id: eric
+    name: Eric (Sandbox Tester)
+    persona: agents/eric
+    model: openrouter/moonshotai/kimi-k2.5
+
+steps:
+  - id: PYTHON_TEST
+    agent: eric
+    input: |
+      Test Python sandboxing. Run these commands and report the results:
+      1. pip install requests
+      2. python3 -c "import requests; print('requests version:', requests.__version__)"
+      
+      Call complete() with the output.
+    outputs:
+      - result
+
+  - id: NODE_TEST
+    agent: eric
+    dependsOn: [PYTHON_TEST]
+    input: |
+      Test Node.js sandboxing. Run these commands and report results:
+      1. npm install -g typescript
+      2. tsc --version
+      
+      Call complete() with the output.
+    outputs:
+      - result
+
+  - id: GO_TEST
+    agent: eric
+    dependsOn: [NODE_TEST]
+    input: |
+      Test Go sandboxing. Create a simple Go program and build it:
+      1. Create /workspace/hello.go with: package main; import "fmt"; func main() { fmt.Println("Hello from Go sandbox") }
+      2. Run: go build -o /workspace/hello /workspace/hello.go
+      3. Run: /workspace/hello
+      
+      Call complete() with the output.
+    outputs:
+      - result
+
+  - id: PERSISTENCE_TEST
+    agent: eric
+    dependsOn: [GO_TEST]
+    input: |
+      Verify tools persist from earlier steps:
+      1. python3 -c "import requests; print('Persistence OK:', requests.__version__)"
+      2. tsc --version
+      
+      Both should work without reinstalling. Call complete() with the output.
+    outputs:
+      - result
+
+  - id: ISOLATION_TEST
+    agent: eric
+    dependsOn: [PERSISTENCE_TEST]
+    input: |
+      Test sandbox isolation:
+      1. Try: cat /app/package.json (should fail — /app is not mounted)
+      2. Try: ls /proc (should show only sandbox processes, not host)
+      3. Try: ls /data/agent-envs/ (should fail — can't see other agents)
+      
+      Report which commands succeeded and which failed. Call complete() with results.
+    outputs:
+      - result

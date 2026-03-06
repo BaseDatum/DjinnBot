@@ -1,0 +1,2014 @@
+import { authFetch } from './api/auth-fetch.js';
+import { EventBus } from './events/event-bus.js';
+import { Store } from './db/store.js';
+import { ApiStore } from './db/api-store.js';
+import { PipelineEngine } from './engine/pipeline-engine.js';
+import { AgentExecutor, type AgentRunner } from './runtime/agent-executor.js';
+import { PersonaLoader } from './runtime/persona-loader.js';
+import { MockRunner } from './runtime/mock-runner.js';
+import { PiMonoRunner } from './runtime/pi-mono-runner.js';
+import type { PiMonoRunnerConfig } from './runtime/pi-mono-runner.js';
+import { ContainerRunner, type RuntimeSettings, DEFAULT_RUNTIME_SETTINGS } from './container/runner.js';
+import { ProgressFileManager } from './memory/progress-file.js';
+import { KnowledgeStore } from './memory/knowledge-store.js';
+import { ContextAssembler } from './memory/context-assembler.js';
+import { AgentMemoryManager, AgentMemory } from './memory/agent-memory.js';
+import { AgentLifecycleTracker } from './lifecycle/agent-lifecycle-tracker.js';
+import { parsePipeline } from './pipeline/parser.js';
+import { readdir } from 'node:fs/promises';
+import { readdirSync } from 'node:fs';
+import { join } from 'node:path';
+import type { PipelineConfig } from './types/pipeline.js';
+import type { PipelineRun } from './types/state.js';
+import { runChannel } from './events/channels.js';
+import { AgentRegistry } from './agents/index.js';
+import { GitWorktreeWorkspaceManager } from './runtime/workspace-manager.js';
+import { PersistentDirectoryWorkspaceManager } from './runtime/simple-workspace-manager.js';
+import { WorkspaceManagerFactory } from './runtime/workspace-manager-factory.js';
+import type { IWorkspaceManager } from './runtime/workspace-types.js';
+import { AgentLifecycleManager } from './runtime/agent-lifecycle.js';
+import { AgentInbox } from './events/agent-inbox.js';
+import { AgentPulse } from './runtime/agent-pulse.js';
+import { AgentWake } from './runtime/agent-wake.js';
+import { StandaloneSessionRunner } from './runtime/standalone-session.js';
+import type { StandaloneSessionOptions, StandaloneSessionResult } from './runtime/standalone-session.js';
+import { Redis } from 'ioredis';
+import { TaskRunTracker } from './task/task-run-tracker.js';
+import { SessionPersister } from './sessions/session-persister.js';
+
+// Dynamic imports for channel bridges to avoid circular dependency
+type SlackBridgeType = any;
+type SignalBridgeType = any;
+type WhatsAppBridgeType = any;
+type TelegramBridgeManagerType = any;
+type DiscordBridgeType = any;
+
+export interface DjinnBotConfig {
+  redisUrl: string;
+  databasePath: string;
+  dataDir: string;           // For progress files
+  agentsDir: string;          // Agent persona directory
+  pipelinesDir: string;       // Pipeline YAML directory
+  agentRunner?: AgentRunner;  // Custom agent runner (defaults to PiMonoRunner or ContainerRunner)
+  useApiStore?: boolean;      // Use HTTP API instead of SQLite
+  apiUrl?: string;            // API base URL when useApiStore is true
+  useContainerRunner?: boolean; // Use container-based agent runner (spawns containers per run)
+  /** Runtime settings from the admin panel (fetched by main.ts at startup). */
+  runtimeSettings?: RuntimeSettings;
+}
+
+export class DjinnBot {
+  private eventBus: EventBus;
+  private store: Store;
+  private engine: PipelineEngine;
+  private executor: AgentExecutor;
+  private personaLoader: PersonaLoader;
+  private progressFiles: ProgressFileManager;
+  private knowledgeStore: KnowledgeStore;
+  private contextAssembler: ContextAssembler;
+  private pipelines: Map<string, PipelineConfig> = new Map();
+  private agentRegistry: AgentRegistry;
+  slackBridge?: SlackBridgeType;
+  signalBridge?: SignalBridgeType;
+  whatsappBridge?: WhatsAppBridgeType;
+  telegramBridgeManager?: TelegramBridgeManagerType;
+  discordBridge?: DiscordBridgeType;
+  private agentMemoryManager?: AgentMemoryManager;
+  private lifecycleManager: AgentLifecycleManager;
+  private lifecycleTracker?: AgentLifecycleTracker;
+  private agentInbox: AgentInbox;
+  private agentPulse?: AgentPulse;
+  private agentWake?: AgentWake;
+  private sessionRunner?: StandaloneSessionRunner;
+  private taskRunTracker: TaskRunTracker | null = null;
+  private redis?: Redis;
+  private sessionPersister?: SessionPersister;
+  /** Tracks the global pulse master switch (from admin settings). */
+  private _pulseEnabled: boolean = true;
+
+  private workspaceManager: IWorkspaceManager;
+  private workspaceManagerFactory: WorkspaceManagerFactory;
+
+  /**
+   * Route an inter-agent message through the inbox system.
+   * Delivers to the target agent's inbox — they'll see it on their next pulse.
+   * Does NOT trigger a wake. Use wake_agent tool / wakeAgent event for that.
+   */
+  async routeAgentMessage(
+    fromAgentId: string,
+    to: string,
+    message: string,
+    priority: string,
+    messageType: string,
+  ): Promise<string> {
+    console.log(`[DjinnBot] routeAgentMessage: from=${fromAgentId}, to=${to}, priority=${priority}, messageType=${messageType}`);
+    const msgId = await this.agentInbox.send({
+      from: fromAgentId,
+      to,
+      message,
+      priority: priority as any,
+      type: messageType as any,
+      timestamp: Date.now(),
+    });
+    console.log(`[DjinnBot] Agent message delivered to ${to}'s inbox: "${message.slice(0, 80)}" (${msgId})`);
+
+    return msgId;
+  }
+
+  /**
+   * Start a session for a target agent in response to a wake.
+   *
+   * This is the single code path for ALL wake-triggered sessions:
+   * - wake_agent tool (via wakeAgent event → onWakeAgent callback)
+   * - AgentWake Redis subscriber (djinnbot:agent:*:wake)
+   *
+   * Enforces guardrails (cooldown, daily cap, per-pair limit) via AgentWake,
+   * loads the target agent's persona, and runs a standalone session.
+   * The session is persisted to DB by StandaloneSessionRunner, so it
+   * appears in the sessions tab and activity tab.
+   */
+  async runWakeSession(
+    targetAgentId: string,
+    fromAgentId: string,
+    message: string,
+  ): Promise<void> {
+    if (!this.sessionRunner) {
+      console.warn(`[DjinnBot] Cannot wake ${targetAgentId}: session runner not initialized`);
+      return;
+    }
+
+    // Check if agent exists in registry
+    const agent = this.agentRegistry.get(targetAgentId);
+    if (!agent) {
+      console.warn(`[DjinnBot] Cannot wake ${targetAgentId}: not found in agent registry`);
+      return;
+    }
+
+    // ── Guardrails ──────────────────────────────────────────────────────
+    // All wakes go through guardrails (cooldown, daily cap, per-pair limit).
+    if (this.agentWake) {
+      const result = await this.agentWake.checkWakeGuardrails(targetAgentId, fromAgentId);
+      if (!result.allowed) {
+        console.log(`[DjinnBot] Wake suppressed for ${targetAgentId}: ${result.reason}`);
+        return;
+      }
+      console.log(`[DjinnBot] Wake guardrails passed for ${targetAgentId} (from: ${fromAgentId})`);
+    } else {
+      console.warn(`[DjinnBot] Wake guardrails not enforced for ${targetAgentId} — AgentWake not initialized`);
+    }
+
+    console.log(`[DjinnBot] Starting wake session for ${targetAgentId} (from: ${fromAgentId}, message: "${message.slice(0, 80)}")`);
+
+    try {
+      // Load the target agent's persona
+      const persona = await this.personaLoader.loadPersonaForSession(targetAgentId, {
+        sessionType: 'wake',
+      });
+
+      // Build user prompt with the wake context
+      const userPrompt =
+        `You are being woken by agent "${fromAgentId}" with the following message:\n\n` +
+        `${message}\n\n` +
+        `Respond to this message. Check your inbox for any additional context ` +
+        `with the recall or context_query tools if needed.`;
+
+      // Resolve model: agent config → fallback
+      const model = agent.config?.model || 'openrouter/minimax/minimax-m2.5';
+      const executorModel = agent.config?.executorModel || model;
+      const timeout = agent.config?.pulseContainerTimeoutMs ?? 120000;
+
+      const result = await this.sessionRunner.runSession({
+        agentId: targetAgentId,
+        systemPrompt: persona.systemPrompt,
+        userPrompt,
+        model,
+        maxTurns: 999,
+        timeout,
+        source: 'wake',
+        executorModel,
+      });
+
+      console.log(`[DjinnBot] Wake session for ${targetAgentId} completed: success=${result.success}`);
+    } catch (err) {
+      console.error(`[DjinnBot] Wake session failed for ${targetAgentId}:`, err);
+    }
+  }
+
+  constructor(private config: DjinnBotConfig) {
+    // Initialize store (SQLite or API-based)
+    if (config.useApiStore) {
+      this.store = new ApiStore({ apiUrl: config.apiUrl || 'http://api:8000' }) as unknown as Store;
+    } else {
+      this.store = new Store({ databasePath: config.databasePath });
+    }
+    this.store.initialize();
+
+    // Initialize workspace managers via factory
+    const gitWm = new GitWorktreeWorkspaceManager({
+      getProjectRepository: (projectId: string) => this.store.getProjectRepository(projectId)
+    });
+    const persistentDirWm = new PersistentDirectoryWorkspaceManager();
+
+    this.workspaceManagerFactory = new WorkspaceManagerFactory();
+    this.workspaceManagerFactory.register(gitWm);
+    this.workspaceManagerFactory.register(persistentDirWm);
+    this.workspaceManagerFactory.setDefault(gitWm);
+
+    // Default workspace manager — used for task worktrees, merge, and
+    // any operations that don't have per-project resolution context.
+    this.workspaceManager = gitWm;
+
+    this.eventBus = new EventBus({ redisUrl: config.redisUrl });
+
+    this.personaLoader = new PersonaLoader(config.agentsDir);
+    this.agentRegistry = new AgentRegistry(config.agentsDir);
+    this.progressFiles = new ProgressFileManager(config.dataDir);
+    this.knowledgeStore = new KnowledgeStore(this.store);
+    this.lifecycleManager = new AgentLifecycleManager(this.eventBus);
+    this.agentInbox = new AgentInbox(config.redisUrl);
+    
+    this.contextAssembler = new ContextAssembler({
+      progressFiles: this.progressFiles,
+      getKnowledge: async (runId: string) => {
+        const entries = await this.knowledgeStore.getAll(runId);
+        return entries.map(e => ({
+          category: e.category,
+          content: e.content,
+          importance: e.importance,
+        }));
+      },
+      getOutputs: (runId: string) => this.store.getOutputs(runId),
+      // NEW: Agent memory context
+      getAgentMemoryContext: async (agentId, runId, stepId, taskDescription) => {
+        if (!this.agentMemoryManager) return '';
+        try {
+          const memory = await this.agentMemoryManager.get(agentId);
+          return await memory.wake({ runId, stepId, taskDescription });
+        } catch (err) {
+          console.error('[DjinnBot] Agent memory wake failed:', err);
+          return '';
+        }
+      },
+      // Phase 9: Inbox messages injected into agent context
+      getUnreadMessages: async (agentId: string) => {
+        try {
+          return await this.agentInbox.getUnread(agentId);
+        } catch (err) {
+          console.error('[DjinnBot] Failed to get unread messages:', err);
+          return [];
+        }
+      },
+      markMessagesRead: async (agentId: string, lastMessageId: string) => {
+        try {
+          await this.agentInbox.markRead(agentId, lastMessageId);
+        } catch (err) {
+          console.error('[DjinnBot] Failed to mark messages read:', err);
+        }
+      },
+      // Phase 9: Installed tools injected into agent context
+      getInstalledTools: (agentId: string) => {
+        return this.lifecycleManager.getInstalledTools(agentId);
+      },
+      // Workspace context — branch/commit info for git workspaces, empty for others
+      getWorkspaceGitContext: (runId: string) => {
+        return this.workspaceManager.getWorkspaceContext(runId);
+      },
+    });
+    
+    // Create TaskRunTracker before engine so we can pass callbacks
+    this.taskRunTracker = new TaskRunTracker({
+      store: this.store,
+      eventBus: this.eventBus,
+    });
+
+    this.engine = new PipelineEngine({
+      eventBus: this.eventBus,
+      store: this.store,
+      workspaceManager: this.workspaceManager,
+      workspaceManagerFactory: this.workspaceManagerFactory,
+      onRunCompleted: async (runId, outputs) => {
+        await this.taskRunTracker?.handleRunCompleted(runId, outputs);
+      },
+      onRunFailed: async (runId, error) => {
+        await this.taskRunTracker?.handleRunFailed(runId, error);
+      },
+      reloadPipeline: (pipelineId) => this.reloadPipelineFromDisk(pipelineId),
+    });
+    
+    // Initialize session persister BEFORE creating runner (requires DJINNBOT_API_URL)
+    const apiBaseUrl = process.env.DJINNBOT_API_URL;
+    if (apiBaseUrl && config.redisUrl) {
+      // Need Redis connection for session persister - create temporary one
+      const tempRedis = new Redis(config.redisUrl);
+      this.sessionPersister = new SessionPersister(apiBaseUrl, tempRedis);
+      console.log('[DjinnBot] Session persister initialized with API:', apiBaseUrl);
+    }
+
+    // Create agent runner - either ContainerRunner or PiMonoRunner
+    const agentRunner = config.agentRunner ?? this.createAgentRunner(config);
+    
+    this.executor = new AgentExecutor({
+      eventBus: this.eventBus,
+      agentRunner,
+      agentMemoryManager: undefined as any, // Set after initialize()
+      personaLoader: this.personaLoader,
+      pipelines: this.pipelines,
+      getOutputs: (runId: string) => this.store.getOutputs(runId),
+      getRunTask: async (runId: string) => (await this.store.getRun(runId))?.taskDescription || '',
+      getRunHumanContext: async (runId: string) => (await this.store.getRun(runId))?.humanContext,
+      getLoopState: (runId: string, stepId: string) => {
+        const state = this.store.getLoopState(runId, stepId);
+        if (!state) return null;
+        return {
+          currentIndex: state.currentIndex,
+          items: state.items.map(item => ({
+            data: item.data,
+            status: item.status,
+          })),
+        };
+      },
+      contextAssembler: this.contextAssembler,
+      progressFiles: this.progressFiles,
+      workspaceManager: this.workspaceManager,
+      workspaceManagerFactory: this.workspaceManagerFactory,
+      getRunWorkspaceType: async (runId: string) => (await this.store.getRun(runId))?.workspaceType,
+      lifecycleManager: this.lifecycleManager,
+      getRunProjectId: async (runId: string) => (await this.store.getRun(runId))?.projectId,
+      getRunUserId: async (runId: string) => (await this.store.getRun(runId))?.userId,
+      getRunModelOverride: async (runId: string) => (await this.store.getRun(runId))?.modelOverride,
+      getRunTaskBranch: async (runId: string) => (await this.store.getRun(runId))?.taskBranch,
+      sessionPersister: this.sessionPersister,
+      apiBaseUrl: config.apiUrl || process.env.DJINNBOT_API_URL || process.env.DJINNBOT_API_URL?.replace(/\/api\/?$/, '') || 'http://api:8000',
+      getAgentDefaultModel: (agentId: string) => this.agentRegistry.get(agentId)?.config.model,
+      getStepStatus: async (runId: string, stepId: string) => {
+        const step = await this.store.getStep(runId, stepId);
+        return step?.status;
+      },
+    });
+  }
+
+  /**
+   * Create the agent runner based on config.
+   * Uses ContainerRunner if useContainerRunner is true, otherwise PiMonoRunner.
+   */
+  private createAgentRunner(config: DjinnBotConfig): AgentRunner {
+    if (config.useContainerRunner) {
+      console.log('[DjinnBot] Using ContainerRunner (container-based execution)');
+      return new ContainerRunner({
+        redisUrl: config.redisUrl,
+        dataPath: config.dataDir,
+        apiBaseUrl: config.apiUrl || process.env.DJINNBOT_API_URL || process.env.DJINNBOT_API_URL || 'http://api:8000',
+        onStreamChunk: (agentId, runId, stepId, chunk) => {
+          // Publish to EventBus for SSE streaming
+          this.eventBus.publish(runChannel(runId), {
+            type: 'STEP_OUTPUT',
+            runId,
+            stepId,
+            chunk,
+            timestamp: Date.now(),
+          }).catch(err => console.error('[DjinnBot] Failed to publish stream chunk:', err));
+          
+          // Persist to session database.
+          // Standalone/pulse sessions use runId as the session key directly.
+          // Pipeline step sessions use the compound key runId_stepId.
+          if (this.sessionPersister) {
+            const sessionKey = runId.startsWith('standalone_') ? runId : `${runId}_${stepId}`;
+            this.sessionPersister.addEvent(sessionKey, {
+              type: 'output',
+              timestamp: Date.now(),
+              data: {
+                stream: 'stdout',
+                content: chunk,
+              },
+            }).catch(err => console.error('[DjinnBot] Failed to persist output event:', err));
+          }
+        },
+        onThinkingChunk: (agentId, runId, stepId, chunk) => {
+          // Publish to EventBus for SSE streaming
+          this.eventBus.publish(runChannel(runId), {
+            type: 'STEP_THINKING',
+            runId,
+            stepId,
+            chunk,
+            timestamp: Date.now(),
+          }).catch(err => console.error('[DjinnBot] Failed to publish thinking chunk:', err));
+          
+          // Persist to session database.
+          // Standalone/pulse sessions use runId as the session key directly.
+          // Pipeline step sessions use the compound key runId_stepId.
+          if (this.sessionPersister) {
+            const sessionKey = runId.startsWith('standalone_') ? runId : `${runId}_${stepId}`;
+            this.sessionPersister.addEvent(sessionKey, {
+              type: 'thinking',
+              timestamp: Date.now(),
+              data: {
+                thinking: chunk,
+              },
+            }).catch(err => console.error('[DjinnBot] Failed to persist thinking event:', err));
+          }
+        },
+        onToolCallStart: (agentId, runId, stepId, toolName, toolCallId, args) => {
+          // Publish to EventBus for SSE streaming
+          this.eventBus.publish(runChannel(runId), {
+            type: 'TOOL_CALL_START',
+            runId, stepId, toolName, toolCallId,
+            args: JSON.stringify(args),
+            timestamp: Date.now(),
+          }).catch(err => console.error('[DjinnBot] Failed to publish TOOL_CALL_START:', err));
+          
+          // Persist to session database.
+          // Standalone/pulse sessions use runId as the session key directly.
+          // Pipeline step sessions use the compound key runId_stepId.
+          if (this.sessionPersister) {
+            const sessionKey = runId.startsWith('standalone_') ? runId : `${runId}_${stepId}`;
+            this.sessionPersister.addEvent(sessionKey, {
+              type: 'tool_start',
+              timestamp: Date.now(),
+              data: {
+                toolName,
+                toolCallId,
+                args,
+              },
+            }).catch(err => console.error('[DjinnBot] Failed to persist tool_start event:', err));
+          }
+        },
+        onToolCallEnd: (agentId, runId, stepId, toolName, toolCallId, result, isError, durationMs) => {
+          // Publish to EventBus for SSE streaming
+          this.eventBus.publish(runChannel(runId), {
+            type: 'TOOL_CALL_END',
+            runId, stepId, toolName, toolCallId,
+            result: result.slice(0, 10000),
+            isError, durationMs,
+            timestamp: Date.now(),
+          }).catch(err => console.error('[DjinnBot] Failed to publish TOOL_CALL_END:', err));
+          
+          // Persist to session database.
+          // Standalone/pulse sessions use runId as the session key directly.
+          // Pipeline step sessions use the compound key runId_stepId.
+          if (this.sessionPersister) {
+            const sessionKey = runId.startsWith('standalone_') ? runId : `${runId}_${stepId}`;
+            this.sessionPersister.addEvent(sessionKey, {
+              type: 'tool_end',
+              timestamp: Date.now(),
+              data: {
+                toolName,
+                toolCallId,
+                result,
+                success: !isError,
+                durationMs,
+              },
+            }).catch(err => console.error('[DjinnBot] Failed to persist tool_end event:', err));
+          }
+        },
+        onMessageAgent: async (agentId, _runId, _stepId, to, message, priority, messageType) => {
+          console.log(`[DjinnBot] onMessageAgent callback: ${agentId} → ${to} (priority: ${priority}, type: ${messageType})`);
+          return this.routeAgentMessage(agentId, to, message, priority, messageType);
+        },
+        onWakeAgent: async (agentId, _runId, _stepId, to, message, reason) => {
+          console.log(`[DjinnBot] onWakeAgent callback: ${agentId} → ${to} (reason: ${reason})`);
+          await this.runWakeSession(to, agentId, message);
+        },
+        onSlackDm: async (agentId, runId, stepId, message, urgent) => {
+          if (!this.slackBridge) {
+            return 'Slack bridge not started - cannot send DM to user.';
+          }
+          try {
+            await this.slackBridge.sendDmToUser(agentId, message, urgent);
+            console.log(`[DjinnBot] Container agent ${agentId} sent Slack DM: "${message.slice(0, 80)}..."`);
+            return `Message sent to user via Slack DM${urgent ? ' (marked urgent)' : ''}.`;
+          } catch (err) {
+            console.error(`[DjinnBot] Failed to send Slack DM from container:`, err);
+            return `Failed to send Slack DM: ${(err as Error).message}`;
+          }
+        },
+        onWhatsAppSend: async (agentId: string, _runId: string, _stepId: string, phoneNumber: string, message: string, urgent: boolean) => {
+          if (!this.whatsappBridge) {
+            return 'WhatsApp bridge not started - cannot send message.';
+          }
+          try {
+            const prefix = urgent ? 'URGENT: ' : '';
+            await this.whatsappBridge.sendToUser(agentId, phoneNumber, `${prefix}${message}`);
+            console.log(`[DjinnBot] Container agent ${agentId} sent WhatsApp message to ${phoneNumber}: "${message.slice(0, 80)}..."`);
+            return `Message sent to ${phoneNumber} via WhatsApp${urgent ? ' (marked urgent)' : ''}.`;
+          } catch (err) {
+            console.error(`[DjinnBot] Failed to send WhatsApp message from container:`, err);
+            return `Failed to send WhatsApp message: ${(err as Error).message}`;
+          }
+        },
+        onContainerEvent: (runId, event) => {
+          this.eventBus.publish(runChannel(runId), {
+            type: event.type as any,
+            runId,
+            detail: event.detail,
+            timestamp: event.timestamp,
+          }).catch(err => console.error('[DjinnBot] Failed to publish container event:', err));
+        },
+      });
+    }
+
+    // Default: PiMonoRunner (in-process execution)
+    console.log('[DjinnBot] Using PiMonoRunner (in-process execution)');
+    return new PiMonoRunner({
+      // Provide API base URL so keys set via UI are fetched fresh on every run.
+      apiBaseUrl: config.apiUrl || process.env.DJINNBOT_API_URL || process.env.DJINNBOT_API_URL?.replace(/\/api\/?$/, '') || 'http://api:8000',
+      onStreamChunk: (agentId, runId, stepId, chunk) => {
+        this.eventBus.publish(runChannel(runId), {
+          type: 'STEP_OUTPUT',
+          runId,
+          stepId,
+          chunk,
+          timestamp: Date.now(),
+        }).catch(err => console.error('[DjinnBot] Failed to publish stream chunk:', err));
+      },
+      onThinkingChunk: (agentId, runId, stepId, chunk) => {
+        this.eventBus.publish(runChannel(runId), {
+          type: 'STEP_THINKING',
+          runId,
+          stepId,
+          chunk,
+          timestamp: Date.now(),
+        }).catch(err => console.error('[DjinnBot] Failed to publish thinking chunk:', err));
+      },
+      onShareKnowledge: async (agentId, runId, stepId, entry) => {
+        await this.knowledgeStore.share(runId, agentId, entry.content, {
+          category: entry.category as any,
+          importance: entry.importance as any,
+        });
+        if (this.agentMemoryManager && (entry.importance === 'high' || entry.importance === 'critical')) {
+          try {
+            const memory = await this.agentMemoryManager.get(agentId);
+            await memory.remember(
+              entry.category === 'decision' ? 'decision' : entry.category === 'issue' ? 'lesson' : 'fact',
+              `[${entry.category}] ${entry.content.slice(0, 80)}`,
+              entry.content,
+              { shared: true, importance: entry.importance, runId }
+            );
+          } catch (err) {
+            console.error('[DjinnBot] Failed to persist knowledge to agent memory:', err);
+          }
+        }
+      },
+      onRemember: async (agentId, runId, stepId, entry) => {
+        if (!this.agentMemoryManager) return;
+        console.log(`[DjinnBot] ${agentId} remember(${entry.type}, "${entry.title}", shared=${!!entry.shared})`);
+        try {
+          const memory = await this.agentMemoryManager.get(agentId);
+          await memory.remember(
+            entry.type as any,
+            entry.title,
+            entry.content,
+            { shared: entry.shared, runId }
+          );
+        } catch (err) {
+          console.error('[DjinnBot] Failed to remember:', err);
+        }
+      },
+      onRecall: async (agentId, runId, stepId, query, scope, profile, budget) => {
+        if (!this.agentMemoryManager) return 'Memory not initialized.';
+        try {
+          const memory = await this.agentMemoryManager.get(agentId);
+          const results = await memory.recall(query, {
+            limit: 5,
+            personalOnly: scope === 'personal',
+            profile: profile as any,
+            budget,
+          });
+          if (results.length === 0) return 'No relevant memories found.';
+          return results.map(r => {
+            let result = `**[${r.category}] ${r.title}** (score: ${r.score.toFixed(2)})`;
+            if (r.source) result += ` [source: ${r.source}]`;
+            result += `\n${r.snippet || r.content.slice(0, 200)}`;
+            if (r.graphConnections && r.graphConnections.length > 0) {
+              result += `\n_Connected to: ${r.graphConnections.slice(0, 3).join(', ')}_`;
+            }
+            return result;
+          }).join('\n\n');
+        } catch (err) {
+          console.error('[DjinnBot] Failed to recall:', err);
+          return 'Memory search failed.';
+        }
+      },
+      onGraphQuery: async (agentId, runId, stepId, action, nodeId, query, maxHops, scope) => {
+        if (!this.agentMemoryManager) return 'Memory not initialized.';
+        try {
+          const memory = await this.agentMemoryManager.get(agentId);
+          const graphScope = scope || 'personal';
+          
+          if (action === 'summary') {
+            const graph = await memory.queryGraph({ scope: graphScope });
+            return JSON.stringify(graph.stats, null, 2) + '\n\nTop nodes:\n' +
+              graph.nodes.sort((a, b) => b.degree - a.degree).slice(0, 10)
+                .map(n => `- ${n.id} (${n.type}, ${n.degree} connections)`).join('\n');
+          } else if (action === 'neighbors' && nodeId) {
+            const neighbors = await memory.getNeighbors(nodeId, maxHops || 1, graphScope);
+            return `Neighbors of ${nodeId} (${maxHops || 1} hops):\n` +
+              neighbors.nodes.map(n => `- ${n.id} [${n.type}] "${n.title}"`).join('\n') + '\n\nEdges:\n' +
+              neighbors.edges.map(e => `- ${e.source} → ${e.target} (${e.type})`).join('\n');
+          } else if (action === 'search' && query) {
+            const graph = await memory.queryGraph({ scope: graphScope });
+            const needle = query.toLowerCase();
+            const matches = graph.nodes.filter(n =>
+              n.title.toLowerCase().includes(needle) ||
+              n.id.toLowerCase().includes(needle) ||
+              n.tags?.some(t => t.toLowerCase().includes(needle))
+            );
+            return matches.length === 0 ? 'No matching nodes found.' :
+              matches.map(n => `- ${n.id} [${n.type}] "${n.title}" (${n.degree} connections)`).join('\n');
+          }
+          return 'Invalid graph query action.';
+        } catch (err) {
+          console.error('[DjinnBot] Failed to query graph:', err);
+          return 'Graph query failed.';
+        }
+      },
+      onLinkMemory: async (agentId, runId, stepId, fromId, toId, relationType) => {
+        if (!this.agentMemoryManager) return;
+        try {
+          const memory = await this.agentMemoryManager.get(agentId);
+          await memory.linkMemories(fromId, toId, relationType as any);
+        } catch (err) {
+          console.error('[DjinnBot] Failed to link memories:', err);
+        }
+      },
+      onCheckpoint: async (agentId, runId, stepId, workingOn, focus, decisions) => {
+        if (!this.agentMemoryManager) return;
+        try {
+          const memory = await this.agentMemoryManager.get(agentId);
+          const note = `Checkpoint: ${workingOn}${focus ? ` | Focus: ${focus}` : ''}${decisions?.length ? ` | Decisions: ${decisions.join(', ')}` : ''}`;
+          await memory.capture(note);
+        } catch (err) {
+          console.error('[DjinnBot] Failed to save checkpoint:', err);
+        }
+      },
+      onToolCallStart: (agentId, runId, stepId, toolName, toolCallId, args) => {
+        this.eventBus.publish(runChannel(runId), {
+          type: 'TOOL_CALL_START',
+          runId, stepId, toolName, toolCallId, args,
+          timestamp: Date.now(),
+        }).catch(err => console.error('[DjinnBot] Failed to publish TOOL_CALL_START:', err));
+      },
+      onToolCallEnd: (agentId, runId, stepId, toolName, toolCallId, result, isError, durationMs) => {
+        this.eventBus.publish(runChannel(runId), {
+          type: 'TOOL_CALL_END',
+          runId, stepId, toolName, toolCallId,
+          result: result.slice(0, 10000),
+          isError, durationMs,
+          timestamp: Date.now(),
+        }).catch(err => console.error('[DjinnBot] Failed to publish TOOL_CALL_END:', err));
+      },
+      onAgentState: (agentId, runId, stepId, state, toolName) => {
+        this.eventBus.publish(runChannel(runId), {
+          type: 'AGENT_STATE',
+          runId, stepId, state, toolName,
+          timestamp: Date.now(),
+        }).catch(err => console.error('[DjinnBot] Failed to publish AGENT_STATE:', err));
+      },
+      onMessageAgent: async (agentId, _runId, _stepId, to, message, priority, type) => {
+        return this.routeAgentMessage(agentId, to, message, priority, type);
+      },
+      onSlackDm: async (agentId, runId, stepId, message, urgent) => {
+        if (!this.slackBridge) {
+          return 'Slack bridge not started - cannot send DM to user.';
+        }
+        try {
+          await this.slackBridge.sendDmToUser(agentId, message, urgent);
+          console.log(`[DjinnBot] Agent ${agentId} sent Slack DM to user: "${message.slice(0, 80)}..."`);
+          return `Message sent to user via Slack DM${urgent ? ' (marked urgent)' : ''}.`;
+        } catch (err) {
+          console.error(`[DjinnBot] Failed to send Slack DM to user:`, err);
+          return `Failed to send Slack DM: ${(err as Error).message}`;
+        }
+      },
+      onWhatsAppSend: async (agentId: string, _runId: string, _stepId: string, phoneNumber: string, message: string, urgent: boolean) => {
+        if (!this.whatsappBridge) {
+          return 'WhatsApp bridge not started - cannot send message.';
+        }
+        try {
+          const prefix = urgent ? 'URGENT: ' : '';
+          await this.whatsappBridge.sendToUser(agentId, phoneNumber, `${prefix}${message}`);
+          console.log(`[DjinnBot] Agent ${agentId} sent WhatsApp message to ${phoneNumber}: "${message.slice(0, 80)}..."`);
+          return `Message sent to ${phoneNumber} via WhatsApp${urgent ? ' (marked urgent)' : ''}.`;
+        } catch (err) {
+          console.error(`[DjinnBot] Failed to send WhatsApp message:`, err);
+          return `Failed to send WhatsApp message: ${(err as Error).message}`;
+        }
+      },
+      onResearch: async (_agentId, _runId, _stepId, query, focus, model) => {
+        const { performResearch } = await import('./runtime/research.js');
+        return performResearch(query, focus, model);
+      },
+      onOnboardingHandoff: async (agentId, runId, _stepId, nextAgent, summary, context) => {
+        // runId for onboarding sessions is the chat_session_id (e.g. "onb_stas_<onb_id>_<ts>")
+        // Extract onboarding_session_id from the runId format: onb_<agentId>_<onbSessionId>_<ts>
+        const parts = runId.split('_');
+        // Format: onb_{agentId}_{onbSessionId}_{ts} — but onbSessionId itself has underscores
+        // We stored it as: onb_<agentId>_<onb_session_id>_<timestamp>
+        // The onboarding_session_id starts with "onb_" so find it by index
+        const onboardingSessionId = parts.slice(2, -1).join('_');
+        if (!onboardingSessionId) {
+          console.warn(`[DjinnBot] onboarding_handoff: could not extract session ID from runId ${runId}`);
+          return 'Handoff recorded — passing you to the next agent now.';
+        }
+        try {
+          const apiUrl = process.env.DJINNBOT_API_URL || 'http://localhost:8000';
+          const response = await authFetch(`${apiUrl}/v1/onboarding/sessions/${onboardingSessionId}/handoff`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              next_agent_id: nextAgent,
+              context_update: context,
+              summary,
+            }),
+          });
+          if (!response.ok) {
+            const text = await response.text();
+            console.error(`[DjinnBot] Handoff API call failed: ${response.status} ${text}`);
+          }
+          console.log(`[DjinnBot] Agent ${agentId} handed off to ${nextAgent} in onboarding session ${onboardingSessionId}`);
+        } catch (err) {
+          console.error(`[DjinnBot] onboarding_handoff failed:`, err);
+        }
+        return `Handing off to ${nextAgent}. ${summary}`;
+      },
+    });
+  }
+
+  /** Initialize the bot - call after construction to discover agents */
+  async initialize(): Promise<void> {
+    await this.agentRegistry.discover();
+
+    // Create workspace directories
+    const workspacesDir = join(this.config.dataDir, 'workspaces');
+    const { mkdirSync, existsSync } = await import('node:fs');
+    const agentIds = this.agentRegistry.getIds();
+    for (const agentId of agentIds) {
+      const agentWorkspace = join(workspacesDir, agentId);
+      if (!existsSync(agentWorkspace)) {
+        mkdirSync(agentWorkspace, { recursive: true });
+      }
+    }
+    console.log('[DjinnBot] Agent workspaces initialized');
+
+    // Initialize agent memory vaults
+    const vaultsDir = join(this.config.dataDir, 'vaults');
+    this.agentMemoryManager = new AgentMemoryManager(vaultsDir);
+    await this.agentMemoryManager.initialize(this.agentRegistry.getIds());
+    console.log('[DjinnBot] Agent memory vaults initialized');
+
+    // NOTE: VaultEmbedWatcher is intentionally NOT started here.
+    // main.ts creates and starts a single VaultEmbedWatcher instance after DjinnBot
+    // initializes. Starting a second instance here caused concurrent qmd processes
+    // hitting the same SQLite index file, producing "initializeDatabase" lock errors
+    // and silently failing to index shared vault memories written by onboarding agents.
+
+    // Wire memory manager into executor
+    (this.executor as any).agentMemoryManager = this.agentMemoryManager;
+
+    // Initialize lifecycle tracker (needs Redis for Activity tab)
+    this.redis = new Redis(this.config.redisUrl);
+    this.lifecycleTracker = new AgentLifecycleTracker({
+      redis: this.redis,
+    });
+    // Wire lifecycle tracker into executor
+    (this.executor as any).lifecycleTracker = this.lifecycleTracker;
+    console.log('[DjinnBot] Agent lifecycle tracker initialized');
+
+    // Session persister was initialized in constructor (before runner creation)
+    // Here we just update to use the main redis connection if available
+    if (this.sessionPersister && this.redis) {
+      this.sessionPersister = new SessionPersister(process.env.DJINNBOT_API_URL!, this.redis);
+      console.log('[DjinnBot] Session persister reconnected to main Redis');
+    } else if (!this.sessionPersister) {
+      console.log('[DjinnBot] Session persistence disabled (DJINNBOT_API_URL not set)');
+    }
+
+    // Phase 9: Initialize lifecycle manager for all agents
+    for (const agentId of this.agentRegistry.getIds()) {
+      this.lifecycleManager.initAgent(agentId);
+    }
+    console.log('[DjinnBot] Agent lifecycle manager initialized');
+
+    // Phase 9: Connect agent inbox
+    await this.agentInbox.connect();
+    console.log('[DjinnBot] Agent inbox connected');
+
+    // Phase 9a: Start wake system (independent of pulse)
+    const rs = this.config.runtimeSettings ?? DEFAULT_RUNTIME_SETTINGS;
+    // Initialize the global pulse master switch from runtime settings
+    this._pulseEnabled = rs.pulseEnabled;
+    this.agentWake = new AgentWake(
+      {
+        redisUrl: this.config.redisUrl,
+        agentIds: this.agentRegistry.getIds(),
+        wakeGuardrails: {
+          cooldownSeconds: rs.wakeCooldownSec,
+          maxWakesPerDay: rs.maxWakesPerDay,
+          maxWakesPerPairPerDay: rs.maxWakesPerPairPerDay,
+        },
+      },
+      {
+        onWakeAgent: (targetAgentId, fromAgentId, message) => {
+          if (!rs.wakeEnabled) {
+            console.log(`[DjinnBot] Wake system disabled — ignoring wake for ${targetAgentId} from ${fromAgentId}`);
+            return Promise.resolve();
+          }
+          return this.runWakeSession(targetAgentId, fromAgentId, message);
+        },
+      },
+    );
+    await this.agentWake.start();
+    console.log('[DjinnBot] Agent wake system started');
+
+    // Phase 9b: Start pulse system with advanced scheduling
+    this.agentPulse = new AgentPulse(
+      {
+        intervalMs: 30 * 60 * 1000, // 30 minutes (default fallback)
+        timeoutMs: 60 * 1000,       // 60 seconds per agent
+        agentIds: this.agentRegistry.getIds(),
+      },
+      {
+        getAgentState: (agentId) => this.lifecycleManager.getState(agentId),
+        getUnreadCount: (agentId) => this.agentInbox.getUnreadCount(agentId),
+        getUnreadMessages: (agentId) => this.agentInbox.getUnread(agentId) as any,
+        runPulseSession: (agentId, context) => this.runPulseSession(agentId, context),
+        getAgentPulseSchedule: async (agentId) => this.loadAgentPulseSchedule(agentId),
+        getAgentPulseRoutines: async (agentId) => this.fetchAgentPulseRoutines(agentId),
+        getAssignedTasks: async (agentId) => this.fetchAssignedTasks(agentId),
+        startPulseSession: (agentId, sessionId) => {
+          // Load per-agent maxConcurrent from config.yml coordination settings
+          const maxConcurrent = this.getAgentMaxConcurrentPulseSessions(agentId);
+          return this.lifecycleManager.startPulseSession(agentId, sessionId, maxConcurrent);
+        },
+        endPulseSession: (agentId, sessionId) => this.lifecycleManager.endPulseSession(agentId, sessionId),
+        maxConcurrentPulseSessions: rs.maxConcurrentPulseSessions,
+        onRoutinePulseComplete: (routineId) => this.updateRoutineStats(routineId),
+        isGlobalPulseEnabled: () => this.isGlobalPulseEnabled(),
+      },
+    );
+    await this.agentPulse.start();
+    console.log('[DjinnBot] Agent pulse system started');
+
+    // Subscribe to pulse schedule updates from dashboard
+    await this.subscribeToPulseScheduleUpdates();
+    console.log('[DjinnBot] Pulse schedule update listener started');
+
+    // Initialize standalone session runner
+    this.sessionRunner = new StandaloneSessionRunner(
+      this.executor.getAgentRunner(),
+      {
+        dataDir: this.config.dataDir,
+        agentsDir: this.config.agentsDir,
+        sessionPersister: this.sessionPersister,
+        lifecycleTracker: this.lifecycleTracker,
+      }
+    );
+    console.log('[DjinnBot] Standalone session runner initialized');
+  }
+
+  /** Get the agent registry */
+  getAgentRegistry(): AgentRegistry {
+    return this.agentRegistry;
+  }
+
+  /** Expose the default workspace manager for engine-level operations (e.g. task worktree creation). */
+  getWorkspaceManager(): IWorkspaceManager {
+    return this.workspaceManager;
+  }
+
+  /** Expose the workspace manager factory for per-project resolution. */
+  getWorkspaceManagerFactory(): WorkspaceManagerFactory {
+    return this.workspaceManagerFactory;
+  }
+
+  /** Check whether the global pulse master switch is enabled. */
+  private isGlobalPulseEnabled(): boolean {
+    return this._pulseEnabled;
+  }
+
+  /** Update the global pulse master switch (called when admin settings change). */
+  setGlobalPulseEnabled(enabled: boolean): void {
+    const changed = this._pulseEnabled !== enabled;
+    this._pulseEnabled = enabled;
+    if (changed) {
+      console.log(`[DjinnBot] Global pulse master switch ${enabled ? 'ENABLED' : 'DISABLED'}`);
+    }
+  }
+
+  /** Get the pulse timeline for all agents */
+  getPulseTimeline(hours: number = 24): import('./runtime/pulse-types.js').PulseTimelineResponse | null {
+    if (!this.agentPulse) {
+      return null;
+    }
+    return this.agentPulse.getTimeline(hours);
+  }
+
+  /**
+   * Read maxConcurrentPulseSessions from an agent's config.yml coordination section.
+   * Returns the configured value, or 2 as default.
+   */
+  private getAgentMaxConcurrentPulseSessions(agentId: string): number {
+    try {
+      const configPath = join(this.config.agentsDir, agentId, 'config.yml');
+      const fs = require('node:fs');
+      const yaml = require('yaml');
+      const content = fs.readFileSync(configPath, 'utf-8');
+      const config = yaml.parse(content) || {};
+      return config?.coordination?.max_concurrent_pulse_sessions ?? 2;
+    } catch {
+      return 2; // Default
+    }
+  }
+
+  /** Load pulse schedule config for an agent from config.yml */
+  private async loadAgentPulseSchedule(agentId: string): Promise<Partial<import('./runtime/pulse-types.js').PulseScheduleConfig>> {
+    const configPath = join(this.config.agentsDir, agentId, 'config.yml');
+    
+    try {
+      const { readFile } = await import('node:fs/promises');
+      const { parse: parseYaml } = await import('yaml');
+      const content = await readFile(configPath, 'utf-8');
+      const config = parseYaml(content) || {};
+      
+      // Parse blackouts from YAML format
+      const blackouts: import('./runtime/pulse-types.js').PulseBlackout[] = [];
+      const rawBlackouts = config.pulse_blackouts || [];
+      for (const b of rawBlackouts) {
+        blackouts.push({
+          type: b.type || 'recurring',
+          label: b.label,
+          startTime: b.start_time || b.startTime,
+          endTime: b.end_time || b.endTime,
+          daysOfWeek: b.days_of_week || b.daysOfWeek,
+          start: b.start,
+          end: b.end,
+        });
+      }
+      
+      return {
+        enabled: config.pulse_enabled !== false,
+        intervalMinutes: config.pulse_interval_minutes || 30,
+        offsetMinutes: config.pulse_offset_minutes || 0,
+        blackouts,
+        oneOffs: config.pulse_one_offs || [],
+        maxConsecutiveSkips: config.pulse_max_consecutive_skips || 5,
+      };
+    } catch {
+      // Return defaults if config doesn't exist
+      return {};
+    }
+  }
+
+  /** Trigger a manual pulse for an agent */
+  async triggerPulse(agentId: string): Promise<{ skipped: boolean; unreadCount: number; errors: string[]; actions?: string[]; output?: string } | null> {
+    if (!this.agentPulse) {
+      return null;
+    }
+    return this.agentPulse.triggerPulse(agentId);
+  }
+
+  /**
+   * Subscribe to pulse schedule update events from the dashboard.
+   * When dashboard updates an agent's pulse schedule (enable/disable, change interval, etc.),
+   * the Python API publishes to Redis and we reload the schedule here.
+   */
+  private async subscribeToPulseScheduleUpdates(): Promise<void> {
+    if (!this.redis) {
+      console.warn('[DjinnBot] Redis not available, pulse schedule hot-reload disabled');
+      return;
+    }
+
+    // Create a dedicated subscriber for pulse schedule updates
+    const subscriber = this.redis.duplicate();
+    
+    subscriber.on('error', (err) => {
+      console.error('[DjinnBot] Pulse schedule subscriber error:', err.message);
+    });
+
+    subscriber.on('message', async (channel, message) => {
+      try {
+        const data = JSON.parse(message);
+        
+        if (channel === 'djinnbot:pulse:schedule-updated') {
+          const agentId = data.agentId;
+          if (agentId && this.agentPulse) {
+            console.log(`[DjinnBot] Pulse schedule updated for ${agentId}, reloading...`);
+            await this.agentPulse.reloadAgentSchedule(agentId);
+          }
+        } else if (channel === 'djinnbot:pulse:offsets-updated') {
+          // Auto-spread was called, reload all schedules
+          console.log('[DjinnBot] Pulse offsets updated, reloading all schedules...');
+          for (const agentId of this.agentRegistry.getIds()) {
+            if (this.agentPulse) {
+              await this.agentPulse.reloadAgentSchedule(agentId);
+            }
+          }
+        } else if (channel === 'djinnbot:pulse:routine-updated') {
+          // A specific routine was created/updated/deleted — reload the agent
+          const agentId = data.agentId;
+          if (agentId && this.agentPulse) {
+            console.log(`[DjinnBot] Pulse routine updated for ${agentId}, reloading...`);
+            await this.agentPulse.reloadAgentSchedule(agentId);
+          }
+        } else if (channel === 'djinnbot:pulse:trigger-routine') {
+          // Manual trigger of a specific routine
+          const { agentId, routineId, routineName } = data;
+          if (agentId && routineId && this.agentPulse) {
+            console.log(`[DjinnBot] Manual trigger for routine ${routineName || routineId}`);
+            await this.agentPulse.triggerRoutine(agentId, routineId);
+          }
+        } else if (channel === 'djinnbot:settings:pulse-master') {
+          // Global pulse master switch toggled from admin settings
+          const enabled = data.pulseEnabled === true;
+          this.setGlobalPulseEnabled(enabled);
+        }
+      } catch (err) {
+        console.error('[DjinnBot] Failed to process pulse schedule update:', err);
+      }
+    });
+
+    await subscriber.subscribe(
+      'djinnbot:pulse:schedule-updated',
+      'djinnbot:pulse:offsets-updated',
+      'djinnbot:pulse:routine-updated',
+      'djinnbot:pulse:trigger-routine',
+      'djinnbot:settings:pulse-master',
+    );
+    console.log('[DjinnBot] Subscribed to pulse schedule update channels');
+  }
+
+  /**
+   * Fetch tasks currently assigned to (or in progress for) an agent across all projects.
+   * Used to pre-populate PulseContext.assignedTasks so the agent wakes up aware of its work.
+   */
+  private async fetchAssignedTasks(agentId: string): Promise<Array<{ id: string; title: string; status: string; project: string }>> {
+    const apiUrl = process.env.DJINNBOT_API_URL || 'http://api:8000';
+    try {
+      // Get projects this agent is assigned to
+      const projectsRes = await authFetch(`${apiUrl}/v1/agents/${agentId}/projects`);
+      if (!projectsRes.ok) return [];
+      const rawProjects = await projectsRes.json() as any;
+      const projects: Array<{ project_id: string; project_name: string; project_status: string }> =
+        Array.isArray(rawProjects) ? rawProjects : (rawProjects.projects || []);
+
+      const activeTasks: Array<{ id: string; title: string; status: string; project: string }> = [];
+
+      for (const p of projects) {
+        if (p.project_status === 'archived') continue;
+        try {
+          // Fetch tasks assigned to this agent in non-terminal statuses
+          const tasksRes = await authFetch(
+            `${apiUrl}/v1/projects/${p.project_id}/tasks?agent=${encodeURIComponent(agentId)}`
+          );
+          if (!tasksRes.ok) continue;
+          const tasks = await tasksRes.json() as any[];
+          for (const t of tasks) {
+            if (t.status && !['done', 'failed'].includes(t.status)) {
+              activeTasks.push({
+                id: t.id,
+                title: t.title,
+                status: t.status,
+                project: p.project_name ?? p.project_id,
+              });
+            }
+          }
+        } catch {
+          // Individual project fetch failure should not abort the whole list
+        }
+      }
+
+      return activeTasks;
+    } catch (err) {
+      console.warn(`[DjinnBot] fetchAssignedTasks failed for ${agentId}:`, err);
+      return [];
+    }
+  }
+
+  /** Load pulse_columns from an agent's config.yml */
+  private async loadAgentPulseColumns(agentId: string): Promise<string[]> {
+    const configPath = join(this.config.agentsDir, agentId, 'config.yml');
+    try {
+      const { readFile } = await import('node:fs/promises');
+      const { parse: parseYaml } = await import('yaml');
+      const content = await readFile(configPath, 'utf-8');
+      const config = parseYaml(content) || {};
+      return Array.isArray(config.pulse_columns) ? config.pulse_columns : [];
+    } catch {
+      return [];
+    }
+  }
+
+  /** Run a pulse session - agent "wakes up" and reviews their workspace with tools.
+   *  When context.routineId is set, uses the routine's custom instructions from the DB.
+   */
+  private async runPulseSession(
+    agentId: string, 
+    context: import('./runtime/agent-pulse.js').PulseContext
+  ): Promise<import('./runtime/agent-pulse.js').PulseSessionResult> {
+    const label = context.routineName ? `${agentId}/${context.routineName}` : agentId;
+    console.log(`[DjinnBot] Running pulse session for ${label}...`);
+    
+    if (!this.sessionRunner) {
+      return {
+        success: false,
+        actions: [],
+        output: 'Session runner not initialized',
+      };
+    }
+
+    // Record pulse started in the agent's activity timeline.
+    if (this.lifecycleTracker) {
+      this.lifecycleTracker.recordPulseStarted(agentId).catch(err =>
+        console.warn(`[DjinnBot] Failed to record pulse_started for ${agentId}:`, err)
+      );
+    }
+
+    const pulseStartTime = Date.now();
+
+    try {
+      // Determine pulse columns: routine override > agent config.yml
+      const pulseColumns = context.routinePulseColumns?.length
+        ? context.routinePulseColumns
+        : await this.loadAgentPulseColumns(agentId);
+
+      // Load instructions: routine instructions from DB > default prompt
+      const [persona, pulseInstructions] = await Promise.all([
+        this.personaLoader.loadPersonaForSession(agentId, {
+          sessionType: 'pulse',
+        }),
+        this.loadPulsePrompt(agentId, context),
+      ]);
+      const systemPrompt = `${persona.systemPrompt}\n\n---\n\n${pulseInstructions}`;
+      
+      // Build user prompt with current context
+      const userPrompt = this.buildPulseUserPrompt(agentId, context);
+      
+      // Model resolution: routine.planningModel → agent.planningModel → agent.model → fallback
+      const agent = this.agentRegistry.get(agentId);
+      const model = context.routinePlanningModel
+        || agent?.config?.planningModel
+        || agent?.config?.model
+        || 'openrouter/minimax/minimax-m2.5';
+
+      // Executor model resolution: routine.executorModel → agent.executorModel → agent.model → fallback
+      const executorModel = context.routineExecutorModel
+        || agent?.config?.executorModel
+        || agent?.config?.model
+        || 'openrouter/minimax/minimax-m2.5';
+
+      // Executor timeout: routine override → default 300s
+      const executorTimeoutSec = context.routineExecutorTimeoutSec || 300;
+
+      // Enforce planner timeout = 2x executor timeout. The planner blocks while
+      // spawn_executor polls, so it must outlive the executor plus have headroom
+      // for pre/post work (discovering tasks, opening PRs, transitioning tasks).
+      const timeout = executorTimeoutSec * 2 * 1000;
+
+      // Resolve project workspace for pulse session — mount the project's git
+      // repo so the agent can inspect in-progress task worktrees and code state.
+      let projectWorkspacePath: string | undefined;
+      let pulseProjectId: string | undefined;
+      if (context.assignedTasks && context.assignedTasks.length > 0) {
+        // Use the first assigned task's project to determine the workspace.
+        // The fetchAssignedTasks call already resolved project names; we need the ID.
+        // Look up via the agent's projects API.
+        try {
+          const apiUrl = process.env.DJINNBOT_API_URL || 'http://api:8000';
+          const projectsRes = await authFetch(`${apiUrl}/v1/agents/${agentId}/projects`);
+          if (projectsRes.ok) {
+            const rawProjects = await projectsRes.json() as any;
+            const projects: Array<{ project_id: string }> =
+              Array.isArray(rawProjects) ? rawProjects : (rawProjects.projects || []);
+            if (projects.length > 0) {
+              const workspacesDir = process.env.WORKSPACES_DIR || '/jfs/workspaces';
+              pulseProjectId = projects[0].project_id;
+              projectWorkspacePath = `${workspacesDir}/${pulseProjectId}`;
+              console.log(`[DjinnBot] Pulse session for ${label}: mounting project workspace ${projectWorkspacePath}`);
+            }
+          }
+        } catch (err) {
+          console.warn(`[DjinnBot] Failed to resolve pulse project workspace for ${agentId}:`, err);
+        }
+      }
+
+      // Run standalone session
+      const result = await this.sessionRunner.runSession({
+        agentId,
+        systemPrompt,
+        userPrompt,
+        model,
+        projectWorkspacePath,
+        projectId: pulseProjectId,
+        maxTurns: 999,
+        timeout,
+        source: 'pulse',
+        pulseColumns,
+        taskWorkTypes: context.routineTaskWorkTypes,
+        executorModel,
+        executorTimeoutSec,
+      });
+
+      console.log(`[DjinnBot] Pulse session for ${label} completed: ${result.success}`);
+
+      // Record pulse completed in the agent's activity timeline.
+      if (this.lifecycleTracker) {
+        const durationMs = Date.now() - pulseStartTime;
+        const summary = context.routineName
+          ? `Routine "${context.routineName}" completed`
+          : (result.actions?.length
+            ? result.actions.slice(0, 3).join('; ')
+            : result.output?.slice(0, 200) || 'Pulse complete');
+        this.lifecycleTracker.recordPulseComplete(agentId, summary, 1, durationMs).catch(err =>
+          console.warn(`[DjinnBot] Failed to record pulse_complete for ${agentId}:`, err)
+        );
+      }
+
+      return {
+        success: result.success,
+        actions: result.actions || [],
+        output: result.output,
+      };
+    } catch (err) {
+      console.error(`[DjinnBot] Pulse session failed for ${label}:`, err);
+
+      // Record pulse completed (failed) in the agent's activity timeline.
+      if (this.lifecycleTracker) {
+        const durationMs = Date.now() - pulseStartTime;
+        this.lifecycleTracker.recordPulseComplete(agentId, `Pulse failed: ${err}`, 0, durationMs).catch(e =>
+          console.warn(`[DjinnBot] Failed to record pulse_complete (failed) for ${agentId}:`, e)
+        );
+      }
+
+      return {
+        success: false,
+        actions: [],
+        output: `Pulse session error: ${err}`,
+      };
+    }
+  }
+
+  /**
+   * Load the pulse prompt for a session.
+   * 
+   * Uses the routine's DB-stored instructions when available,
+   * otherwise falls back to a hardcoded default prompt.
+   */
+  private async loadPulsePrompt(
+    agentId: string,
+    context?: import('./runtime/agent-pulse.js').PulseContext,
+  ): Promise<string> {
+    // Use routine instructions from DB if available
+    let template = context?.routineInstructions || this.getDefaultPulsePrompt();
+    
+    // Replace placeholders
+    const agent = this.agentRegistry.get(agentId);
+    template = template.replace(/\{\{AGENT_NAME\}\}/g, agent?.identity?.name || agentId);
+    template = template.replace(/\{\{AGENT_EMOJI\}\}/g, agent?.identity?.emoji || '🤖');
+    
+    return template;
+  }
+
+  /**
+   * Fetch pulse routines for an agent from the API server.
+   * Returns an empty array if the agent has no routines.
+   */
+  private async fetchAgentPulseRoutines(agentId: string): Promise<import('./runtime/pulse-types.js').PulseRoutine[]> {
+    const apiUrl = process.env.DJINNBOT_API_URL || 'http://api:8000';
+    try {
+      const res = await authFetch(`${apiUrl}/v1/agents/${agentId}/pulse-routines`);
+      if (!res.ok) return [];
+      const data = await res.json() as any;
+      const rawRoutines: any[] = data.routines || [];
+      return rawRoutines.map((r: any) => ({
+        id: r.id,
+        agentId: r.agentId,
+        name: r.name,
+        description: r.description,
+        instructions: r.instructions,
+        enabled: r.enabled,
+        intervalMinutes: r.intervalMinutes,
+        offsetMinutes: r.offsetMinutes,
+        blackouts: r.blackouts || [],
+        oneOffs: r.oneOffs || [],
+        timeoutMs: r.timeoutMs,
+        maxConcurrent: r.maxConcurrent ?? 1,
+        pulseColumns: r.pulseColumns,
+        planningModel: r.planningModel,
+        executorModel: r.executorModel,
+        executorTimeoutSec: r.executorTimeoutSec,
+        tools: r.tools,
+        stageAffinity: r.stageAffinity,
+        taskWorkTypes: r.taskWorkTypes,
+        sortOrder: r.sortOrder ?? 0,
+        color: r.color,
+        lastRunAt: r.lastRunAt,
+        totalRuns: r.totalRuns ?? 0,
+        createdAt: r.createdAt,
+        updatedAt: r.updatedAt,
+      }));
+    } catch (err) {
+      console.warn(`[DjinnBot] fetchAgentPulseRoutines failed for ${agentId}:`, err);
+      return [];
+    }
+  }
+
+  /**
+   * Update routine stats after a pulse run completes.
+   * Fires-and-forgets a PATCH to the API server.
+   */
+  private updateRoutineStats(routineId: string): void {
+    const apiUrl = process.env.DJINNBOT_API_URL || 'http://api:8000';
+    // We don't know the agentId here, so use a simple dedicated endpoint
+    // For now, fire-and-forget via direct DB or API call
+    authFetch(`${apiUrl}/v1/pulse-routines/${routineId}/record-run`, {
+      method: 'POST',
+    }).catch((err) => {
+      console.warn(`[DjinnBot] Failed to update routine stats for ${routineId}:`, err);
+    });
+  }
+
+  /** @deprecated Default instructions removed — all pulse sessions must use routine-provided instructions. */
+  private getDefaultPulsePrompt(): string {
+    return '';
+  }
+
+  private buildPulseUserPrompt(
+    agentId: string,
+    context: import('./runtime/agent-pulse.js').PulseContext
+  ): string {
+    const timestamp = new Date().toISOString();
+    
+    let inboxSection = '';
+    if (context.unreadCount > 0) {
+      inboxSection = `\n### Pre-loaded Inbox (${context.unreadCount} unread)\n`;
+      inboxSection += context.unreadMessages.slice(0, 5).map(msg => 
+        `- From **${msg.from}** [${msg.priority}]: "${msg.message.substring(0, 150)}..."`
+      ).join('\n');
+      if (context.unreadMessages.length > 5) {
+        inboxSection += `\n... and ${context.unreadMessages.length - 5} more messages`;
+      }
+    } else {
+      inboxSection = '\n### Inbox\nNo unread messages in your inbox.';
+    }
+
+    let tasksSection = '';
+    if (context.assignedTasks && context.assignedTasks.length > 0) {
+      tasksSection = `\n### Your Active Tasks\n`;
+      tasksSection += context.assignedTasks.map(t =>
+        `- [${t.status}] **${t.title}** (${t.id}) — project: ${t.project}`
+      ).join('\n');
+    } else {
+      tasksSection = '\n### Your Active Tasks\nNo tasks currently assigned to you.';
+    }
+
+    return `# Pulse Wake-Up - ${timestamp}
+
+${inboxSection}
+${tasksSection}
+
+## Your Workspace
+- **Home**: \`/home/agent/\`
+- **Run Workspace**: \`/home/agent/run-workspace/\` (your working directory)
+- **Memory**: \`/home/agent/clawvault/\` (use \`recall\` tool, don't access directly)
+
+${context.routineInstructions ? `## Routine: ${context.routineName || 'Custom'}\n\n${context.routineInstructions}` : '## No routine instructions configured\n\nThis pulse session has no instructions. Create a pulse routine with instructions for this agent.'}
+
+Start now.`;
+  }
+
+  /** Get memory system for a specific agent */
+  async getAgentMemory(agentId: string): Promise<AgentMemory | null> {
+    if (!this.agentMemoryManager) {
+      return null;
+    }
+    return this.agentMemoryManager.get(agentId);
+  }
+
+  /** Run a standalone session (for pulse, Slack full sessions, etc.) */
+  async runStandaloneSession(opts: StandaloneSessionOptions): Promise<StandaloneSessionResult> {
+    if (!this.sessionRunner) {
+      throw new Error('Session runner not initialized');
+    }
+    return this.sessionRunner.runSession(opts);
+  }
+
+  /** Send a DM to the user via Slack (for agents to escalate to the human) */
+  async sendSlackDmToUser(agentId: string, message: string, urgent: boolean = false): Promise<string> {
+    if (!this.slackBridge) {
+      throw new Error('Slack bridge not started');
+    }
+    return this.slackBridge.sendDmToUser(agentId, message, urgent);
+  }
+
+  /** Start the Slack bridge for agent notifications and interactions */
+  async startSlackBridge(
+    channelId: string | undefined,
+    onDecisionNeeded: (
+      agentId: string,
+      systemPrompt: string,
+      userPrompt: string,
+      model: string,
+    ) => Promise<string>,
+    onHumanGuidance?: (
+      agentId: string,
+      runId: string,
+      stepId: string,
+      guidance: string,
+    ) => Promise<void>,
+    defaultSlackDecisionModel?: string,
+    onMemorySearch?: (
+      agentId: string,
+      query: string,
+      limit?: number,
+    ) => Promise<Array<{ title: string; snippet: string; category: string }>>,
+    userSlackId?: string,
+  ): Promise<void> {
+    // Dynamic import to avoid circular dependency
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    // @ts-ignore - @djinnbot/slack is loaded dynamically to avoid circular dependency
+    const slackModule = await import('@djinnbot/slack');
+    const SlackBridge = slackModule.SlackBridge;
+    this.slackBridge = new SlackBridge({
+      eventBus: this.eventBus as any,
+      agentRegistry: this.agentRegistry as any,
+      defaultChannelId: channelId as any,
+      onDecisionNeeded,
+      onHumanGuidance,
+      onMemorySearch,
+      defaultSlackDecisionModel,
+      userSlackId,
+
+      // Wire up feedback → memory storage
+      onFeedback: async (agentId: string, feedback: 'positive' | 'negative', responseText: string, userName: string) => {
+        try {
+          const memory = await this.getAgentMemory(agentId);
+          if (!memory) return;
+          const truncatedResponse = responseText.length > 500
+            ? responseText.slice(0, 500) + '...'
+            : responseText;
+          if (feedback === 'positive') {
+            await memory.remember('lesson', `Positive feedback from ${userName}`, [
+              `${userName} gave a thumbs-up to this response:`,
+              '',
+              `> ${truncatedResponse.replace(/\n/g, '\n> ')}`,
+              '',
+              'This style/approach worked well — keep doing this.',
+            ].join('\n'), { source: 'slack_feedback', feedback: 'positive' });
+          } else {
+            await memory.remember('lesson', `Negative feedback from ${userName}`, [
+              `${userName} gave a thumbs-down to this response:`,
+              '',
+              `> ${truncatedResponse.replace(/\n/g, '\n> ')}`,
+              '',
+              'This response missed the mark. Review and adjust approach.',
+            ].join('\n'), { source: 'slack_feedback', feedback: 'negative' });
+          }
+          console.log(`[DjinnBot] Feedback memory stored for ${agentId}: ${feedback} from ${userName}`);
+        } catch (err) {
+          console.warn(`[DjinnBot] Failed to store feedback memory for ${agentId}:`, err);
+        }
+      },
+      
+      // Wire up persona loader for full agent context
+      onLoadPersona: async (
+        agentId: string,
+        sessionContext: { sessionType: 'slack' | 'pulse' | 'pipeline'; channelContext?: string; installedTools?: string[] }
+      ) => {
+        const persona = await this.personaLoader.loadPersonaForSession(agentId, sessionContext);
+        return persona;
+      },
+      
+      // Wire up full session runner
+      onRunFullSession: async (opts: {
+        agentId: string;
+        systemPrompt: string;
+        userPrompt: string;
+        model: string;
+        workspacePath?: string;
+        vaultPath?: string;
+        source?: 'slack_dm' | 'slack_channel' | 'api' | 'pulse' | 'wake';
+        sourceId?: string;
+      }) => {
+        if (!this.sessionRunner) {
+          return { output: 'Session runner not initialized', success: false };
+        }
+        
+        console.log(`[DjinnBot] Running full Slack session for ${opts.agentId}`);
+        
+        const result = await this.sessionRunner.runSession({
+          agentId: opts.agentId,
+          systemPrompt: opts.systemPrompt,
+          userPrompt: opts.userPrompt,
+          model: opts.model,
+          workspacePath: opts.workspacePath || join(this.config.dataDir, 'workspaces', opts.agentId),
+          vaultPath: opts.vaultPath || join(this.config.dataDir, 'vaults', opts.agentId),
+          maxTurns: 999,
+          timeout: 180000, // 3 minutes for complex Slack tasks
+          source: opts.source,
+          sourceId: opts.sourceId,
+        });
+        
+        return {
+          output: result.output,
+          success: result.success,
+        };
+      },
+    });
+
+    await this.slackBridge.start();
+  }
+
+  /** Pending CSM to inject into SignalBridge once it's ready. */
+  private _pendingSignalCsm: any = null;
+
+  /** Inject CSM into the signal bridge if both are ready. */
+  setSignalChatSessionManager(csm: any): void {
+    this._pendingSignalCsm = csm;
+    if (this.signalBridge) {
+      this.signalBridge.setChatSessionManager(csm);
+      console.log('[DjinnBot] SignalBridge wired to ChatSessionManager');
+    }
+  }
+
+  /** Start the Signal bridge for account linking and message routing */
+  async startSignalBridge(opts: {
+    signalDataDir: string;
+    signalCliPath?: string;
+    httpPort?: number;
+    defaultConversationModel?: string;
+  }): Promise<void> {
+    const redisUrl = this.config.redisUrl;
+    const apiUrl = this.config.apiUrl || 'http://api:8000';
+
+    // Dynamic import to avoid circular dependency
+    // @ts-ignore - @djinnbot/signal is loaded dynamically to avoid circular dependency
+    const signalModule = await import('@djinnbot/signal');
+    const SignalBridge = signalModule.SignalBridge;
+
+    this.signalBridge = new SignalBridge({
+      redisUrl,
+      apiUrl,
+      signalDataDir: opts.signalDataDir,
+      signalCliPath: opts.signalCliPath,
+      httpPort: opts.httpPort,
+      defaultConversationModel: opts.defaultConversationModel,
+      eventBus: this.eventBus as any,
+      agentRegistry: this.agentRegistry as any,
+    });
+
+    // If CSM was already created before the bridge started, inject it now.
+    if (this._pendingSignalCsm) {
+      this.signalBridge.setChatSessionManager(this._pendingSignalCsm);
+      console.log('[DjinnBot] SignalBridge wired to ChatSessionManager (deferred)');
+    }
+
+    await this.signalBridge.start();
+  }
+
+  private _pendingWhatsAppCsm: any = null;
+
+  /** Inject CSM into the WhatsApp bridge if both are ready. */
+  setWhatsAppChatSessionManager(csm: any): void {
+    this._pendingWhatsAppCsm = csm;
+    if (this.whatsappBridge) {
+      this.whatsappBridge.setChatSessionManager(csm);
+      console.log('[DjinnBot] WhatsAppBridge wired to ChatSessionManager');
+    }
+  }
+
+  /** Start the WhatsApp bridge for account linking and message routing */
+  async startWhatsAppBridge(opts: {
+    authDir: string;
+    defaultConversationModel?: string;
+  }): Promise<void> {
+    const redisUrl = this.config.redisUrl;
+    const apiUrl = this.config.apiUrl || 'http://api:8000';
+
+    // Dynamic import to avoid circular dependency
+    // @ts-ignore - @djinnbot/whatsapp is loaded dynamically to avoid circular dependency
+    const whatsappModule = await import('@djinnbot/whatsapp');
+    const WhatsAppBridge = whatsappModule.WhatsAppBridge;
+
+    this.whatsappBridge = new WhatsAppBridge({
+      redisUrl,
+      apiUrl,
+      authDir: opts.authDir,
+      defaultConversationModel: opts.defaultConversationModel,
+      eventBus: this.eventBus as any,
+      agentRegistry: this.agentRegistry as any,
+    });
+
+    // If CSM was already created before the bridge started, inject it now.
+    if (this._pendingWhatsAppCsm) {
+      this.whatsappBridge.setChatSessionManager(this._pendingWhatsAppCsm);
+      console.log('[DjinnBot] WhatsAppBridge wired to ChatSessionManager (deferred)');
+    }
+
+    await this.whatsappBridge.start();
+  }
+
+  /** Start the Discord bridge for agent notifications and interactions */
+  async startDiscordBridge(
+    onDecisionNeeded: (
+      agentId: string,
+      systemPrompt: string,
+      userPrompt: string,
+      model: string,
+    ) => Promise<string>,
+    onHumanGuidance?: (
+      agentId: string,
+      runId: string,
+      stepId: string,
+      guidance: string,
+    ) => Promise<void>,
+    defaultDiscordDecisionModel?: string,
+  ): Promise<void> {
+    // Dynamic import to avoid circular dependency
+    // @ts-ignore - @djinnbot/discord is loaded dynamically to avoid circular dependency
+    const discordModule = await import('@djinnbot/discord');
+    const DiscordBridge = discordModule.DiscordBridge;
+    this.discordBridge = new DiscordBridge({
+      eventBus: this.eventBus as any,
+      agentRegistry: this.agentRegistry as any,
+      redisUrl: this.config.redisUrl,
+      apiBaseUrl: process.env.DJINNBOT_API_URL || 'http://api:8000',
+      onDecisionNeeded,
+      onHumanGuidance,
+      defaultDiscordDecisionModel,
+
+      // Wire up feedback → memory storage
+      onFeedback: async (agentId: string, feedback: 'positive' | 'negative', responseText: string, userName: string) => {
+        try {
+          const memory = await this.getAgentMemory(agentId);
+          if (!memory) return;
+          const truncatedResponse = responseText.length > 500
+            ? responseText.slice(0, 500) + '...'
+            : responseText;
+          if (feedback === 'positive') {
+            await memory.remember('lesson', `Positive feedback from ${userName} (Discord)`, [
+              `${userName} gave a thumbs-up to this response:`,
+              '',
+              `> ${truncatedResponse.replace(/\n/g, '\n> ')}`,
+              '',
+              'This style/approach worked well — keep doing this.',
+            ].join('\n'), { source: 'discord_feedback', feedback: 'positive' });
+          } else {
+            await memory.remember('lesson', `Negative feedback from ${userName} (Discord)`, [
+              `${userName} gave a thumbs-down to this response:`,
+              '',
+              `> ${truncatedResponse.replace(/\n/g, '\n> ')}`,
+              '',
+              'This response missed the mark. Review and adjust approach.',
+            ].join('\n'), { source: 'discord_feedback', feedback: 'negative' });
+          }
+          console.log(`[DjinnBot] Discord feedback memory stored for ${agentId}: ${feedback} from ${userName}`);
+        } catch (err) {
+          console.warn(`[DjinnBot] Failed to store Discord feedback memory for ${agentId}:`, err);
+        }
+      },
+
+      // Wire up persona loader
+      onLoadPersona: async (
+        agentId: string,
+        sessionContext: { sessionType: 'discord' | 'pulse' | 'pipeline'; channelContext?: string; installedTools?: string[] }
+      ) => {
+        const persona = await this.personaLoader.loadPersonaForSession(agentId, sessionContext as any);
+        return persona;
+      },
+    });
+
+    await this.discordBridge.start();
+  }
+
+  /**
+   * Re-read a single pipeline from disk by scanning the pipelines directory
+   * for a YAML file whose parsed id matches. Returns the fresh config or null.
+   * Also updates the shared pipelines Map so AgentExecutor sees the change.
+   */
+  private reloadPipelineFromDisk(pipelineId: string): PipelineConfig | null {
+    try {
+      const entries = readdirSync(this.config.pipelinesDir, { withFileTypes: true });
+      for (const entry of entries) {
+        if (entry.isFile() && (entry.name.endsWith('.yaml') || entry.name.endsWith('.yml'))) {
+          const filePath = join(this.config.pipelinesDir, entry.name);
+          try {
+            const pipeline = parsePipeline(filePath);
+            if (pipeline.id === pipelineId) {
+              this.pipelines.set(pipeline.id, pipeline);
+              return pipeline;
+            }
+          } catch {
+            // Skip unparseable files
+          }
+        }
+      }
+    } catch (err) {
+      console.warn(`[DjinnBot] Failed to reload pipeline ${pipelineId} from disk:`, err);
+    }
+    return null;
+  }
+
+  // Load pipeline definitions from YAML files
+  async loadPipelines(): Promise<void> {
+    const entries = await readdir(this.config.pipelinesDir, { withFileTypes: true });
+    
+    for (const entry of entries) {
+      if (entry.isFile() && (entry.name.endsWith('.yaml') || entry.name.endsWith('.yml'))) {
+        const filePath = join(this.config.pipelinesDir, entry.name);
+        try {
+          const pipeline = parsePipeline(filePath);
+          this.pipelines.set(pipeline.id, pipeline);
+          this.engine.registerPipeline(pipeline);
+          console.log(`[DjinnBot] Loaded pipeline: ${pipeline.id} from ${entry.name}`);
+        } catch (err) {
+          console.error(`[DjinnBot] Failed to load pipeline from ${entry.name}:`, err);
+        }
+      }
+    }
+    
+    console.log(`[DjinnBot] Loaded ${this.pipelines.size} pipelines`);
+  }
+  
+  // Start a pipeline run (direct invocation, not via API)
+  async startRun(pipelineId: string, task: string, context?: string): Promise<string> {
+    const runId = await this.engine.startRun(pipelineId, task, context);
+    
+    // Subscribe the executor to this run
+    // Note: for direct startRun, the first STEP_QUEUED may have already been emitted.
+    // The executor uses xread from '$' so it will catch subsequent events.
+    // For the API flow, use resumeRun() which subscribes before emitting.
+    this.executor.subscribeToRun(runId, pipelineId);
+    
+    return runId;
+  }
+
+  // Resume an existing run (created by API) without creating a new one
+  async resumeRun(runId: string): Promise<void> {
+    const run = await this.store.getRun(runId);
+    if (!run) {
+      throw new Error(`Run ${runId} not found`);
+    }
+
+    // Subscribe executor BEFORE resuming so it catches the first STEP_QUEUED event.
+    // Capture the latest stream ID so we don't replay old events from a previous attempt.
+    const latestStreamId = await this.eventBus.getLatestStreamId(runChannel(runId));
+    this.executor.subscribeToRun(runId, run.pipelineId, latestStreamId);
+
+    // Subscribe Slack bridge if it's active
+    if (this.slackBridge) {
+      // Get assigned agents from the pipeline
+      const pipeline = this.pipelines.get(run.pipelineId);
+      const assignedAgentIds = pipeline?.agents.map(a => a.id) || [];
+
+      // Fetch project-level Slack settings (channel + recipient user)
+      let slackChannelId: string | undefined;
+      let slackNotifyUserId: string | undefined;
+      if (run.projectId && 'getProjectSlackSettings' in this.store) {
+        try {
+          const slackSettings = await (this.store as any).getProjectSlackSettings(run.projectId);
+          slackChannelId = slackSettings?.slack_channel_id || undefined;
+          slackNotifyUserId = slackSettings?.slack_notify_user_id || undefined;
+        } catch {
+          // Non-fatal — fall back to defaults
+        }
+      }
+
+      this.slackBridge.subscribeToRun(
+        runId,
+        run.pipelineId,
+        run.taskDescription,
+        assignedAgentIds,
+        slackChannelId,
+        slackNotifyUserId,
+      );
+    }
+
+    await this.engine.resumeRun(runId);
+  }
+  
+  /**
+   * Handle a spawn_executor run as a standalone session — NOT a pipeline run.
+   *
+   * 1. Fetches the run record to get projectId, taskBranch, taskDescription
+   * 2. Creates the git worktree directly via the workspace manager
+   * 3. Runs a standalone session with proper workspace mounts
+   * 4. Updates the run status when done
+   *
+   * This bypasses PipelineEngine entirely.
+   */
+  async handleSpawnExecutorRun(runId: string): Promise<void> {
+    const run = await this.store.getRun(runId);
+    if (!run) {
+      throw new Error(`Run ${runId} not found`);
+    }
+
+    // Parse spawn_executor metadata from human_context
+    let meta: any = {};
+    try {
+      meta = run.humanContext ? JSON.parse(run.humanContext) : {};
+    } catch {}
+
+    const agentId = meta.planner_agent_id || 'yukihiro';
+    const projectId = run.projectId || meta.project_id;
+    const taskBranch = run.taskBranch;
+    const timeoutMs = (meta.timeout_seconds || 300) * 1000;
+
+    console.log(`[DjinnBot] handleSpawnExecutorRun: ${runId} agent=${agentId} project=${projectId} branch=${taskBranch}`);
+
+    // Mark run as running
+    await this.store.updateRun(runId, { status: 'running', updatedAt: Date.now() });
+
+    // ── Step 1: Create workspace (git worktree) ──────────────────────────
+    const workspacesDir = process.env.WORKSPACES_DIR || '/jfs/workspaces';
+    const runsDir = process.env.SHARED_RUNS_DIR || '/jfs/runs';
+    let runWorkspacePath: string | undefined;
+    let projectWorkspacePath: string | undefined;
+
+    if (projectId) {
+      projectWorkspacePath = `${workspacesDir}/${projectId}`;
+
+      try {
+        // If a task branch is specified, check if a worktree for it already exists
+        // (e.g. created by claim_task in the agent's sandbox). Git doesn't allow
+        // two worktrees on the same branch, so we reuse the existing one.
+        if (taskBranch) {
+          const existingWorktree = this.workspaceManager.findWorktreeForBranch?.(projectId, taskBranch);
+          if (existingWorktree) {
+            runWorkspacePath = existingWorktree;
+            console.log(`[DjinnBot] Reusing existing worktree for branch ${taskBranch}: ${existingWorktree}`);
+          }
+        }
+
+        // Only create a new worktree if we couldn't reuse an existing one
+        if (!runWorkspacePath) {
+          // Look up repo URL for the project
+          const apiUrl = process.env.DJINNBOT_API_URL || 'http://api:8000';
+          let repoUrl: string | undefined;
+          try {
+            const projRes = await authFetch(`${apiUrl}/v1/projects/${projectId}`);
+            if (projRes.ok) {
+              const projData = await projRes.json() as any;
+              repoUrl = projData.repository_url || projData.repo_url;
+            }
+          } catch {}
+
+          const workspaceInfo = await this.workspaceManager.createRunWorkspaceAsync(
+            projectId, runId, { repoUrl, taskBranch }
+          );
+          runWorkspacePath = `${runsDir}/${runId}`;
+          console.log(`[DjinnBot] Executor workspace created: ${workspaceInfo.runPath} (branch: ${workspaceInfo.metadata?.branch})`);
+        }
+      } catch (wsErr) {
+        const errMsg = `Workspace setup failed: ${wsErr instanceof Error ? wsErr.message : String(wsErr)}`;
+        console.error(`[DjinnBot] ${errMsg}`);
+        await this.store.updateRun(runId, { status: 'failed', updatedAt: Date.now(), completedAt: Date.now() });
+        return;
+      }
+    }
+
+    // ── Step 2: Build system prompt ──────────────────────────────────────
+    const persona = await this.personaLoader.loadPersonaForSession(agentId, {
+      sessionType: 'executor',
+    });
+
+    // ── Step 3: Resolve model ────────────────────────────────────────────
+    const agent = this.agentRegistry.get(agentId);
+    const model = run.modelOverride
+      || agent?.config?.executorModel
+      || agent?.config?.model
+      || 'openrouter/minimax/minimax-m2.5';
+
+    // ── Step 4: Run standalone session ───────────────────────────────────
+    if (!this.sessionRunner) {
+      console.error(`[DjinnBot] handleSpawnExecutorRun: session runner not initialized`);
+      await this.store.updateRun(runId, { status: 'failed', updatedAt: Date.now(), completedAt: Date.now() });
+      return;
+    }
+
+    try {
+      const result = await this.sessionRunner.runSession({
+        agentId,
+        sessionId: runId,  // Use DB run ID as container RUN_ID so executor_complete can reference it
+        systemPrompt: persona.systemPrompt,
+        userPrompt: run.taskDescription,
+        model,
+        runWorkspacePath,
+        projectWorkspacePath,
+        projectId,
+        timeout: timeoutMs,
+        maxTurns: 999,
+        source: 'executor',
+        sourceId: runId,
+        userId: run.userId,
+      });
+
+      // Mark run complete — check if executor_complete already stored outputs
+      const status = result.success ? 'completed' : 'failed';
+      const existingRun = await this.store.getRun(runId);
+      const existingOutputs = existingRun?.outputs ? (typeof existingRun.outputs === 'string' ? JSON.parse(existingRun.outputs) : existingRun.outputs) : {};
+      const hasOutputs = Object.keys(existingOutputs).length > 0;
+
+      await this.store.updateRun(runId, {
+        status,
+        updatedAt: Date.now(),
+        completedAt: Date.now(),
+        // If executor_complete was never called, store raw output as fallback
+        ...(!hasOutputs && result.output ? {
+          outputs: { raw_output: result.output.slice(0, 5000) } as Record<string, string>,
+        } : {}),
+      });
+      console.log(`[DjinnBot] Executor run ${runId} ${status} (outputs=${hasOutputs ? 'structured' : 'raw'}): ${result.output?.slice(0, 200)}`);
+    } catch (err) {
+      console.error(`[DjinnBot] Executor run ${runId} failed:`, err);
+      await this.store.updateRun(runId, {
+        status: 'failed',
+        updatedAt: Date.now(),
+        completedAt: Date.now(),
+      });
+    }
+  }
+
+  // Get run status
+  async getRun(runId: string): Promise<PipelineRun | null> {
+    return await this.store.getRun(runId);
+  }
+  
+  // List all runs
+  listRuns(pipelineId?: string): PipelineRun[] {
+    return this.store.listRuns(pipelineId);
+  }
+  
+  // Get pipeline configuration
+  getPipeline(pipelineId: string): PipelineConfig | undefined {
+    return this.pipelines.get(pipelineId);
+  }
+  
+  // List all loaded pipelines
+  listPipelines(): PipelineConfig[] {
+    return Array.from(this.pipelines.values());
+  }
+  
+  // Get the store instance (for main.ts compatibility)
+  getStore(): Store {
+    return this.store;
+  }
+  
+  private _pendingTelegramCsm: any = null;
+
+  /** Inject CSM into the Telegram bridge manager if both are ready. */
+  setTelegramChatSessionManager(csm: any): void {
+    this._pendingTelegramCsm = csm;
+    if (this.telegramBridgeManager) {
+      this.telegramBridgeManager.setChatSessionManager(csm);
+      console.log('[DjinnBot] TelegramBridgeManager wired to ChatSessionManager');
+    }
+  }
+
+  /** Start the Telegram bridge manager for per-agent bot connections */
+  async startTelegramBridge(opts: {
+    defaultConversationModel?: string;
+  }): Promise<void> {
+    const redisUrl = this.config.redisUrl;
+    const apiUrl = this.config.apiUrl || 'http://api:8000';
+
+    // Dynamic import to avoid circular dependency
+    // @ts-ignore - @djinnbot/telegram is loaded dynamically to avoid circular dependency
+    const telegramModule = await import('@djinnbot/telegram');
+    const TelegramBridgeManager = telegramModule.TelegramBridgeManager;
+
+    this.telegramBridgeManager = new TelegramBridgeManager({
+      redisUrl,
+      apiUrl,
+      defaultConversationModel: opts.defaultConversationModel,
+      eventBus: this.eventBus as any,
+      agentRegistry: this.agentRegistry as any,
+    });
+
+    // If CSM was already created before the bridge started, inject it now.
+    if (this._pendingTelegramCsm) {
+      this.telegramBridgeManager.setChatSessionManager(this._pendingTelegramCsm);
+      console.log('[DjinnBot] TelegramBridgeManager wired to ChatSessionManager (deferred)');
+    }
+
+    await this.telegramBridgeManager.start();
+  }
+
+  // Shutdown
+  async shutdown(): Promise<void> {
+    this.agentPulse?.stop();
+    await this.agentWake?.stop();
+    await this.slackBridge?.shutdown();
+    await this.signalBridge?.shutdown();
+    await this.whatsappBridge?.shutdown();
+    await this.telegramBridgeManager?.shutdown();
+    await this.discordBridge?.shutdown();
+    await this.executor.shutdown();
+    await this.engine.shutdown();
+    await this.agentInbox.close();
+    await this.eventBus.close();
+    if (this.redis) {
+      await this.redis.quit();
+    }
+    this.store.close();
+    console.log('[DjinnBot] Shutdown complete');
+  }
+}

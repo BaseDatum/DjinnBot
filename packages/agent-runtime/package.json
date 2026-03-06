@@ -1,0 +1,29 @@
+{
+  "name": "@djinnbot/agent-runtime",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Sandboxed agent runtime for Docker containers",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "start": "node dist/entrypoint.js",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@djinnbot/core": "file:../core",
+    "@mariozechner/pi-agent-core": "^0.52.12",
+    "@mariozechner/pi-ai": "^0.52.12",
+    "@mariozechner/pi-coding-agent": "^0.52.12",
+    "@sinclair/typebox": "^0.34.48",
+    "chokidar": "^3.6.0",
+    "clawvault": "2.4.6",
+    "ioredis": "^5.4.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.4.0"
+  }
+}

@@ -1,0 +1,100 @@
+export { AgentExecutor, parseOutputKeyValues } from './agent-executor.js';
+
+export { parseModelString, inferModelForProvider, createOpenRouterModel, enrichNetworkError, CUSTOM_PROVIDER_API } from './model-resolver.js';
+export type { ResolvedModel } from './model-resolver.js';
+export type {
+  AgentExecutorConfig,
+  AgentRunner,
+  RunAgentOptions,
+  AgentRunResult,
+} from './agent-executor.js';
+
+export { PersonaLoader } from './persona-loader.js';
+export type { AgentPersona, StepContext, SessionContext } from './persona-loader.js';
+
+export { PiMonoRunner } from './pi-mono-runner.js';
+export type { PiMonoRunnerConfig } from './pi-mono-runner.js';
+export { MockRunner } from './mock-runner.js';
+
+export { createDjinnBotTools } from './djinnbot-tools.js';
+export type { DjinnBotToolCallbacks } from './djinnbot-tools.js';
+
+export { performResearch, performResearchWithMeta } from './research.js';
+export type { ResearchResult } from './research.js';
+
+export { focusedAnalysis } from './focused-analysis.js';
+export type { FocusedAnalysisOptions, FocusedAnalysisResult } from './focused-analysis.js';
+
+export { chatCompletion, resetOpenRouterClient } from './openrouter-client.js';
+export type { ChatCompletionOptions, ChatCompletionResult, ChatCompletionMessage } from './openrouter-client.js';
+
+export { createPulseTools } from './pulse-tools.js';
+
+export { createGitHubTools } from './github-tools.js';
+export type { GitHubToolCallbacks } from './github-tools.js';
+
+export { WorkspaceManager, GitWorktreeWorkspaceManager } from './workspace-manager.js';
+export type { WorkspaceManagerConfig } from './workspace-manager.js';
+export { PersistentDirectoryWorkspaceManager, SimpleWorkspaceManager } from './simple-workspace-manager.js';
+export { WorkspaceManagerFactory } from './workspace-manager-factory.js';
+export type {
+  IWorkspaceManager,
+  IVersionControlProvider,
+  ITaskWorkspaceProvider,
+  IBranchIntegrationProvider,
+  WorkspaceInfo,
+  FinalizeResult,
+  WorkspaceType,
+  ProjectWorkspaceConfig,
+  CreateRunWorkspaceOptions,
+} from './workspace-types.js';
+
+export { AgentLifecycleManager } from './agent-lifecycle.js';
+export type { AgentState, AgentLifecycle, QueueResult } from './agent-lifecycle.js';
+
+export { detectInstallations, formatToolName } from './install-detector.js';
+export type { DetectedInstall } from './install-detector.js';
+
+export { AgentPulse } from './agent-pulse.js';
+export type { PulseConfig, PulseDependencies, PulseResult, PulseContext, PulseSessionResult } from './agent-pulse.js';
+
+export { AgentWake } from './agent-wake.js';
+export type { AgentWakeConfig, AgentWakeDeps, WakeGuardrailConfig } from './agent-wake.js';
+export { DEFAULT_WAKE_GUARDRAILS } from './agent-wake.js';
+
+export { PulseScheduler } from './pulse-scheduler.js';
+export type { AgentScheduleEntry } from './pulse-scheduler.js';
+
+export type {
+  PulseScheduleConfig,
+  PulseBlackout,
+  PulseRoutine,
+  ScheduledPulse,
+  PulseConflict,
+  PulseTimelineResponse,
+  PulseScheduleUpdate,
+} from './pulse-types.js';
+export { DEFAULT_PULSE_SCHEDULE, CONFLICT_WINDOW_MS } from './pulse-types.js';
+
+export { StandaloneSessionRunner } from './standalone-session.js';
+export type { StandaloneSessionOptions, StandaloneSessionResult } from './standalone-session.js';
+
+export { SwarmSessionManager } from './swarm-session.js';
+export type { SwarmSessionDeps } from './swarm-session.js';
+export { swarmChannel, swarmStateKey } from './swarm-types.js';
+export type {
+  SwarmRequest,
+  SwarmTaskDef,
+  SwarmTaskState,
+  SwarmTaskStatus,
+  SwarmSessionState,
+  SwarmSessionStatus,
+  SwarmProgressEvent,
+  SwarmTaskStartedEvent,
+  SwarmTaskCompletedEvent,
+  SwarmTaskFailedEvent,
+  SwarmTaskSkippedEvent,
+  SwarmCompletedEvent,
+  SwarmFailedEvent,
+  SwarmSummary,
+} from './swarm-types.js';

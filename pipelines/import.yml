@@ -1,0 +1,329 @@
+# Import Pipeline — Onboard Existing Codebase
+# Analyzes repo, creates shared memories, generates task backlog
+
+id: import
+name: Project Import & Analysis
+version: 1.0.0
+description: |
+  Onboard an existing GitHub repository into DjinnBot.
+  Agents analyze the codebase, understand its purpose and state,
+  create shared ClawVault memories, and generate a prioritized task backlog.
+
+defaults:
+  model: openrouter/moonshotai/kimi-k2.5
+  tools:
+    - read
+    - write
+    - bash
+    - remember
+    - share_knowledge
+  maxRetries: 2
+  timeout: 7200
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Agent Definitions
+# ─────────────────────────────────────────────────────────────────────────────
+
+agents:
+  - id: yang
+    name: Yang (DevEx)
+    persona: docs/personas/yang.md
+    tools:
+      - read
+      - write
+      - bash
+      - grep
+      - find
+      - share_knowledge
+
+  - id: finn
+    name: Finn (Solutions Architect)
+    persona: docs/personas/finn.md
+    tools:
+      - read
+      - write
+      - bash
+      - web_search
+      - share_knowledge
+      - remember
+
+  - id: eric
+    name: Eric (Product Owner)
+    persona: docs/personas/eric.md
+    tools:
+      - read
+      - write
+      - web_search
+      - share_knowledge
+      - remember
+
+  - id: yukihiro
+    name: Yukihiro (Senior SWE)
+    persona: docs/personas/yukihiro.md
+    tools:
+      - read
+      - write
+      - bash
+      - grep
+      - find
+      - share_knowledge
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Pipeline Steps
+# ─────────────────────────────────────────────────────────────────────────────
+
+steps:
+  # ───────────────────────────────────────────────────────────────────────────
+  # 1. CLONE — Clone repo and create inventory
+  # ───────────────────────────────────────────────────────────────────────────
+  - id: CLONE
+    agent: yang
+    input: |
+      You are the DevEx Engineer. Clone and inventory this repository.
+      
+      GitHub Repo: {{github_repo}}
+      
+      Tasks:
+      1. Clone the repository to the project workspace
+      2. Create a comprehensive file inventory:
+         - Directory structure with file counts
+         - Lines of code per language (use cloc or wc)
+         - List all config files (package.json, Cargo.toml, pyproject.toml, etc.)
+      3. Detect the tech stack:
+         - Languages and their versions
+         - Frameworks (React, FastAPI, etc.)
+         - Dependencies (key packages)
+         - Build tools (npm, cargo, make, etc.)
+      4. Document CI/CD setup:
+         - GitHub Actions workflows
+         - Docker configuration
+         - Deployment scripts
+      5. List all documentation files (*.md, docs/*)
+      
+      **IMPORTANT:** Use share_knowledge to store key findings:
+      - share_knowledge("tech_stack", "Project uses: [stack details]", "high")
+      - share_knowledge("repo_structure", "Key directories: [structure]", "high")
+      
+      Write outputs to workspace:
+      - FILE_INVENTORY.md
+      - TECH_STACK.json
+      - CI_CONFIG.md
+    outputs:
+      - file_inventory
+      - tech_stack_json
+      - ci_config_summary
+    onComplete: ANALYZE_ARCHITECTURE
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # 2. ANALYZE_ARCHITECTURE — Deep code analysis
+  # ───────────────────────────────────────────────────────────────────────────
+  - id: ANALYZE_ARCHITECTURE
+    agent: finn
+    input: |
+      You are the Solutions Architect. Perform deep analysis of this codebase.
+      
+      File Inventory: {{file_inventory}}
+      Tech Stack: {{tech_stack_json}}
+      
+      Tasks:
+      1. Read and understand key entry points:
+         - Main files (index.ts, main.py, main.go, etc.)
+         - Package manifests
+         - README and ARCHITECTURE docs
+      
+      2. Map the architecture:
+         - Monolith vs microservices vs monorepo?
+         - Key components and their responsibilities
+         - Data flow (API → DB → UI)
+         - External integrations
+      
+      3. Assess current state:
+         - What features are COMPLETE and working?
+         - What features are PARTIAL or broken?
+         - What's PLANNED but not started?
+      
+      4. Find pain points:
+         - Search for TODO, FIXME, HACK, XXX comments
+         - Identify dead code or stale files
+         - Note any obvious tech debt
+      
+      **CRITICAL:** Create shared memories for future agents:
+      - share_knowledge("architecture", "This is a [type] architecture with [components]...", "critical")
+      - share_knowledge("project_purpose", "This project is designed to [purpose]...", "critical")
+      - share_knowledge("current_state", "Features complete: [...]. In progress: [...]. Planned: [...]", "high")
+      - share_knowledge("tech_debt", "Known issues: [...]", "medium")
+      
+      Write outputs:
+      - PROJECT_SUMMARY.md — What this project IS
+      - ARCHITECTURE.md — How it's built
+      - CURRENT_STATE.md — What's done vs not done
+      - PAIN_POINTS.json — Structured list of issues
+    outputs:
+      - project_summary
+      - architecture_analysis
+      - current_state_assessment
+      - pain_points_json
+    onComplete: CODE_QUALITY
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # 3. CODE_QUALITY — Assess code health
+  # ───────────────────────────────────────────────────────────────────────────
+  - id: CODE_QUALITY
+    agent: yukihiro
+    input: |
+      You are the Senior Software Engineer. Assess code quality and patterns.
+      
+      Project Summary: {{project_summary}}
+      Architecture: {{architecture_analysis}}
+      
+      Tasks:
+      1. Review code patterns:
+         - Consistency of style
+         - Error handling patterns
+         - Logging and observability
+         - Testing coverage (look for test files)
+      
+      2. Check for security issues:
+         - Hardcoded secrets
+         - SQL injection vectors
+         - Auth/authz patterns
+      
+      3. Evaluate developer experience:
+         - How easy is local setup?
+         - Are there good dev scripts?
+         - Documentation quality
+      
+      4. Identify refactoring opportunities:
+         - Large files that should be split
+         - Repeated code that needs abstraction
+         - Outdated dependencies
+      
+      **Store learnings in shared memory:**
+      - share_knowledge("code_patterns", "This codebase uses [patterns]...", "high")
+      - share_knowledge("testing_status", "Test coverage: [status]. Frameworks: [...]", "high")
+      - share_knowledge("security_notes", "Security considerations: [...]", "high")
+      
+      Write outputs:
+      - CODE_QUALITY_REPORT.md
+      - REFACTORING_OPPORTUNITIES.json
+      - SECURITY_NOTES.md
+    outputs:
+      - code_quality_report
+      - refactoring_opportunities_json
+      - security_notes
+    onComplete: MARKET_RESEARCH
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # 4. MARKET_RESEARCH — Understand market position
+  # ───────────────────────────────────────────────────────────────────────────
+  - id: MARKET_RESEARCH
+    agent: eric
+    input: |
+      You are the Product Owner. Research the market context for this project.
+      
+      Project Summary: {{project_summary}}
+      Current State: {{current_state_assessment}}
+      
+      Tasks:
+      1. Identify the problem this solves:
+         - Who are the target users?
+         - What pain point does this address?
+         - Why would someone use this vs alternatives?
+      
+      2. Research competitors:
+         - Direct competitors (same problem, same approach)
+         - Indirect competitors (same problem, different approach)
+         - What do they do well? Poorly?
+      
+      3. Assess market opportunity:
+         - Is this a growing market?
+         - What's the pricing model (if applicable)?
+         - What would make this a winner?
+      
+      4. Recommend direction:
+         - Given current state + market, where should this go?
+         - What's the MVP to validate market fit?
+         - What features would differentiate it?
+      
+      **Create strategic memories:**
+      - share_knowledge("target_users", "This project serves [users] who need [...]", "critical")
+      - share_knowledge("competitors", "Main competitors: [...]. Our advantages: [...]", "high")
+      - share_knowledge("product_direction", "Recommended strategy: [...]", "critical")
+      
+      Write outputs:
+      - MARKET_ANALYSIS.md
+      - COMPETITOR_BREAKDOWN.md
+      - RECOMMENDED_DIRECTION.md
+    outputs:
+      - market_analysis
+      - competitor_breakdown
+      - recommended_direction
+    onComplete: GENERATE_TASKS
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # 5. GENERATE_TASKS — Create prioritized backlog
+  # ───────────────────────────────────────────────────────────────────────────
+  - id: GENERATE_TASKS
+    agent: finn
+    input: |
+      You are the Solutions Architect. Generate a comprehensive task backlog.
+      
+      Inputs:
+      - Current State: {{current_state_assessment}}
+      - Pain Points: {{pain_points_json}}
+      - Refactoring Needs: {{refactoring_opportunities_json}}
+      - Market Direction: {{recommended_direction}}
+      - Code Quality: {{code_quality_report}}
+      
+      Generate tasks across these priorities:
+      
+      **P0 — Critical (blockers, security, broken features)**
+      - Bugs that prevent core functionality
+      - Security vulnerabilities
+      - CI/CD failures
+      
+      **P1 — High (core features for MVP/parity)**
+      - Features needed to match competitors
+      - Core user journeys that are incomplete
+      - Critical tech debt
+      
+      **P2 — Medium (differentiating features)**
+      - Features that would set this apart
+      - UX improvements
+      - Performance optimizations
+      
+      **P3 — Low (nice-to-haves)**
+      - Polish and refinement
+      - Advanced features
+      - Documentation improvements
+      
+      For EACH task, specify exactly this structure:
+      ```json
+      {
+        "title": "Short descriptive title",
+        "description": "Detailed description with acceptance criteria",
+        "priority": "P0|P1|P2|P3",
+        "tags": ["typescript", "testing", "bug", "feature", "refactor"],
+        "estimatedHours": 4,
+        "dependencies": ["Exact title of another task this depends on"]
+      }
+      ```
+
+      IMPORTANT: Output the task array as `validated_tasks_json` — this is the
+      key the server uses to auto-import tasks into the project kanban.
+      
+      ```json
+      {
+        "tasks": [ ... array of task objects ... ]
+      }
+      ```
+      
+      **Store task strategy in memory:**
+      - share_knowledge("task_roadmap", "Phase 1: [...]. Phase 2: [...]. Phase 3: [...]", "high")
+      
+      Write outputs:
+      - TASK_BACKLOG.json — Array of task objects (same content as validated_tasks_json)
+      - ROADMAP_SUMMARY.md — Human-readable roadmap
+    outputs:
+      - validated_tasks_json
+      - roadmap_summary
